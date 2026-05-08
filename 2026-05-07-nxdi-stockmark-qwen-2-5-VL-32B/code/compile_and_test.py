@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
-"""EXP-1037 (B): Stockmark-DocReasoner-Qwen2.5-VL-32B text-only NxD compile + cos + generate.
+"""Stockmark-DocReasoner-Qwen2.5-VL-32B text-only NxD compile + cos + generate.
 
-Fixes after verify_stockmark.py revealed padding handling bugs (cos=0.51 on
-real prompts, greedy diverges to <|endoftext|>):
-
-  1. NeuronConfig must set padding_side="left" so the CTE NEFF honors
-     attention_mask (the default "right" path drops padding info).
-  2. Inputs are left-padded (pad first, real tokens last) both for the
-     cos probe and for HuggingFaceGenerationAdapter.generate().
-  3. n_positions / max_length include room for max_new_tokens (TKG needs
-     the KV cache space).
-  4. Generation goes through HuggingFaceGenerationAdapter (CTE->TKG
-     switching + reset + prepare_inputs_for_generation handled for us).
+Canonical NxDI pattern (TIP-1039):
+  - NeuronConfig.padding_side = "right" (NxDI `pad_inputs()` is hardcoded to
+    right-pad regardless of this flag; the flag controls NEFF-internal
+    attention-mask behavior. Using "left" breaks Japanese generation.)
+  - Inputs are right-padded (real tokens first, pad tokens last).
+  - n_positions / max_length include room for max_new_tokens so the TKG
+    KV cache has space.
+  - Generation goes through HuggingFaceGenerationAdapter (CTE->TKG
+    switching + reset + prepare_inputs_for_generation handled for us).
 
 Flow:
-  1. Snapshot HF Qwen2.5-VL at NUM_LAYERS (1 or 64)
-  2. CPU reference: left-padded input + attention_mask, keep logits at
-     the last *real* position
-  3. Compile NeuronStockmarkTextForCausalLM with padding_side="left"
-  4. cos probe on the same left-padded input
-  5. Greedy generate through HuggingFaceGenerationAdapter, compare
-     against HF .generate() on CPU
+  1. Snapshot HF Qwen2.5-VL at NUM_LAYERS (1 or 64) into hf-ckpt-{N}l/.
+  2. CPU reference forward on right-padded input; logit at position raw_len-1.
+  3. Compile NeuronStockmarkTextForCausalLM (CTE + TKG NEFFs).
+  4. Probe cos between CPU[raw_len-1] and NxD[last-active].
+  5. Greedy generate through HuggingFaceGenerationAdapter and compare
+     token-by-token against HF .generate() on CPU.
 """
 import os
 import sys
@@ -167,7 +164,7 @@ print(f"[CPU] done {time.time()-t1:.1f}s shape={tuple(y_cpu.shape)}")
 
 
 # ---------------------------------------------------------------------------
-# Step 3: NxD InferenceConfig (padding_side="left", max_length includes TKG)
+# Step 3: NxD InferenceConfig (padding_side="right", max_length includes TKG)
 # ---------------------------------------------------------------------------
 print("[NxD] building StockmarkTextInferenceConfig...")
 neuron_config_kwargs = dict(
@@ -266,13 +263,13 @@ except Exception as e:
 
 
 # ---------------------------------------------------------------------------
-# Step 5: cos probe on the left-padded input
+# Step 5: cos probe on the right-padded input
 # ---------------------------------------------------------------------------
-print("[NxD] cos probe forward (left-pad, attention_mask respected) ...")
+print("[NxD] cos probe forward (right-pad, attention_mask respected) ...")
 
-# With padding_side="left", position_ids should be 0 over pads, then
-# ascending 0..raw_len-1 starting at the first real token. The cleanest
-# source is attention_mask.long().cumsum(-1) - 1, clamped.
+# With padding_side="right", position_ids ascend 0..raw_len-1 over real tokens
+# and stay at raw_len-1 (clamped) over padding. The cleanest source is
+# attention_mask.long().cumsum(-1) - 1, clamped.
 def build_position_ids(mask):
     pos = mask.long().cumsum(dim=-1) - 1
     return pos.clamp(min=0)
@@ -375,7 +372,7 @@ metrics = {
     "max_new_tokens": MAX_NEW_TOKENS,
     "seq_len": SEQ_LEN,
     "dtype": "bfloat16",
-    "padding_side": "left",
+    "padding_side": neuron_config.padding_side,
     "compile_time_sec": round(t_compile, 2),
     "probe_prompt": PROBE_PROMPT,
     "probe_cos": probe_cos,
