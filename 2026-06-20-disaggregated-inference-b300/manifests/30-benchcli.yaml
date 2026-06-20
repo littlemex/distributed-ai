@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: benchcli
+  namespace: akazawt-disagg
+  labels: { app: qwen3-bench, role: benchcli }
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  nodeSelector:
+    node.kubernetes.io/instance-type: p6-b300.48xlarge
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+    - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+    - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+    - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+  volumes:
+    - { name: results, emptyDir: {} }
+  containers:
+    - name: cli
+      image: 776010787911.dkr.ecr.us-west-2.amazonaws.com/vllm-uccl-ep:vllm0.21.0-uccl-0dc87eb-cu13-b300-fix1
+      imagePullPolicy: IfNotPresent
+      command: ["bash","-lc","mkdir -p /results && sleep infinity"]
+      env:
+        - { name: CUDA_VISIBLE_DEVICES, value: "" }
+        - { name: PYTHONUNBUFFERED, value: "1" }
+      volumeMounts:
+        - { name: results, mountPath: /results }
+      resources:
+        requests: { cpu: "8", memory: "32Gi" }
+        limits: { cpu: "16", memory: "64Gi" }

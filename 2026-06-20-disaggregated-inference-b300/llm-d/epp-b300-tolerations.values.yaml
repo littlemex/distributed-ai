@@ -1,0 +1,8 @@
+# EPP(envoy+epp, GPU 不要)を B300 node に載せるための toleration。
+# 既存 CPU node (m5.xlarge 4vCPU) は CPU 不足で載らないため、GPU node に同居させる。
+inferenceExtension:
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+    - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+    - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }

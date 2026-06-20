@@ -1,0 +1,60 @@
+# prefill を Qwen3-8B + B300/EFA 用に上書き (strategic merge)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prefill
+spec:
+  replicas: 1          # 1P (gpt-oss の 8 から簡約)
+  template:
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        node.kubernetes.io/instance-type: p6-b300.48xlarge
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+        - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+        - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+        - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+      volumes:
+        - { name: model-cache, hostPath: { path: /mnt/k8s-disks/0, type: DirectoryOrCreate } }
+        - { name: gdrdrv, hostPath: { path: /dev/gdrdrv, type: CharDevice } }
+      containers:
+        - name: modelserver
+          # gpt-oss の args を Qwen3-8B / TP8 / LIBFABRIC に置換
+          args:
+            - "Qwen/Qwen3-8B"
+            - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
+            - "--tensor-parallel-size=8"
+            - "--enforce-eager"
+            - "--gpu-memory-utilization=0.85"
+            - "--max-model-len=16384"
+            - "--kv-transfer-config"
+            - '{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_load_failure_policy":"fail","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
+            - "--host=0.0.0.0"
+            - "--port=8000"
+          securityContext:
+            privileged: true
+          env:
+            - name: HF_TOKEN
+              valueFrom: { secretKeyRef: { name: hf-token, key: HF_TOKEN, optional: true } }
+            - { name: HF_HOME, value: /mnt/k8s-disks/0/local_scratch/hf_cache }
+            - { name: VLLM_NIXL_SIDE_CHANNEL_PORT, value: "5600" }
+            - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - { name: NCCL_SOCKET_IFNAME, value: "^lo,docker,veth" }
+            - { name: FI_PROVIDER, value: "efa" }
+            - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
+            - { name: FI_EFA_FORK_SAFE, value: "1" }
+            - { name: TRITON_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/triton }
+            - { name: FLASHINFER_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/flashinfer }
+            - { name: VLLM_CACHE_ROOT, value: /mnt/k8s-disks/0/jit_cache/vllm }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+            - { name: NCCL_DEBUG, value: "WARN" }
+          resources:
+            limits: { cpu: "64", memory: 400Gi, nvidia.com/gpu: "8", vpc.amazonaws.com/efa: "16" }
+            requests: { cpu: "32", memory: 200Gi, nvidia.com/gpu: "8", vpc.amazonaws.com/efa: "16" }
+          volumeMounts:
+            - { name: model-cache, mountPath: /mnt/k8s-disks/0 }
+            - { name: gdrdrv, mountPath: /dev/gdrdrv }

@@ -1,0 +1,119 @@
+# Phase 2: Decode Deployment — dense Qwen3-8B 版 (1P+1D 土台確認)
+# prefill と対称。port 8200, node は DECODE_NODE_0。dense 化の変更点は prefill と同じ。
+#
+# envsubst < manifests/21-decode-qwen3.yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-decode-0
+  namespace: ${NAMESPACE}
+  labels: { app: qwen3-disagg, role: decode }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: qwen3-disagg, role: decode, instance: qwen3-decode-0 }
+  template:
+    metadata:
+      labels: { app: qwen3-disagg, role: decode, instance: qwen3-decode-0 }
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 120
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - { key: node.kubernetes.io/instance-type, operator: In, values: ["${INSTANCE_TYPE}"] }
+                  - { key: kubernetes.io/hostname, operator: In, values: ["${DECODE_NODE_0}"] }
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: { matchLabels: { app: qwen3-disagg } }
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+        - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+        - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+        - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+      volumes:
+        - name: dshm
+          emptyDir: { medium: Memory, sizeLimit: 120Gi }
+        - name: model-cache
+          hostPath: { path: /mnt/k8s-disks/0, type: DirectoryOrCreate }
+        - name: gdrdrv
+          hostPath: { path: /dev/gdrdrv, type: CharDevice }
+      containers:
+        - name: vllm
+          image: ${REGISTRY}${IMAGE}:${TAG}
+          imagePullPolicy: IfNotPresent
+          securityContext: { privileged: true }
+          env:
+            - { name: VLLM_ENGINE_READY_TIMEOUT_S, value: "14400" }
+            - name: HF_TOKEN
+              valueFrom: { secretKeyRef: { name: hf-token, key: HF_TOKEN, optional: true } }
+            - { name: HF_HOME, value: /mnt/k8s-disks/0/local_scratch/hf_cache }
+            - { name: VLLM_LOGGING_LEVEL, value: INFO }
+            - { name: VLLM_WORKER_MULTIPROC_METHOD, value: spawn }
+            - { name: TRITON_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/triton }
+            - { name: FLASHINFER_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/flashinfer }
+            - { name: VLLM_CACHE_ROOT, value: /mnt/k8s-disks/0/jit_cache/vllm }
+            - { name: FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED, value: "1" }
+            - { name: FLASH_ATTENTION_CUTE_DSL_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/cute }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+            - { name: NCCL_TIMEOUT, value: "7200000" }
+            - { name: TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, value: "7200" }
+            - { name: FI_PROVIDER, value: "efa" }
+            - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
+            - { name: FI_EFA_FORK_SAFE, value: "1" }
+            - { name: VLLM_NIXL_SIDE_CHANNEL_PORT, value: "5600" }
+            - { name: NCCL_DEBUG, value: "WARN" }
+          resources:
+            requests: { cpu: "64", memory: "400Gi", nvidia.com/gpu: "8", vpc.amazonaws.com/efa: "16" }
+            limits:   { cpu: "192", memory: "1000Gi", nvidia.com/gpu: "8", vpc.amazonaws.com/efa: "16" }
+          volumeMounts:
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: model-cache, mountPath: /mnt/k8s-disks/0 }
+            - { name: gdrdrv, mountPath: /dev/gdrdrv }
+          livenessProbe:
+            httpGet: { path: /health, port: 8200 }
+            initialDelaySeconds: 1800
+            periodSeconds: 60
+            failureThreshold: 5
+          readinessProbe:
+            httpGet: { path: /health, port: 8200 }
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "=== Qwen3-8B DECODE 0 (TP=${TENSOR_PARALLEL_SIZE}, dense, NixlConnector) ==="
+              MY_IP=$(hostname -I | awk '{print $1}')
+              echo "MY_IP: $MY_IP"
+              export NCCL_SOCKET_IFNAME=^lo,docker,veth
+              IFACE=$(ip -o -4 addr show | grep "$MY_IP" | awk '{print $2}' | head -1)
+              export GLOO_SOCKET_IFNAME=$IFACE
+              export VLLM_NIXL_SIDE_CHANNEL_HOST=$MY_IP
+
+              echo "=== EFA devices ==="; ls /dev/infiniband/ 2>/dev/null | wc -l || echo "no EFA"
+              fi_info -p efa 2>/dev/null | grep -c "provider: efa" | xargs echo "fi_info efa providers:"
+              nvidia-smi -L
+
+              mkdir -p /mnt/k8s-disks/0/local_scratch/hf_cache/hub
+              mkdir -p /mnt/k8s-disks/0/jit_cache/{triton,flashinfer,vllm,cute}
+
+              exec vllm serve "${MODEL}" \
+                --trust-remote-code \
+                --tensor-parallel-size ${TENSOR_PARALLEL_SIZE} \
+                --enforce-eager \
+                --enable-chunked-prefill \
+                --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION} \
+                --max-model-len ${MAX_MODEL_LEN} \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_load_failure_policy":"fail","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}' \
+                --host 0.0.0.0 \
+                --port 8200

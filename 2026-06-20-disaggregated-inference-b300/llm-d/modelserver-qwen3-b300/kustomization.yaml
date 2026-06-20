@@ -1,0 +1,28 @@
+# llm-d model server overlay: Qwen3-8B on B300 + EFA
+# llm-d の gpu/vllm/base overlay(gpt-oss-120b 用)を継承し、B300+EFA 固有設定を patch で追加。
+#
+# 継承: prefill 8replica(TP1) / decode 2replica(TP4) の構造 + routing-sidecar + NixlConnector
+# 変更:
+#   - image → 自前 vllm-uccl-ep:-fix1 (B300 sm_103, NIXL/LIBFABRIC, fastapi pin)
+#   - model → Qwen/Qwen3-8B, TP=8/replica=1 (1P+1D に簡約)
+#   - hostNetwork + EFA(16) + taint toleration + JIT cache env + LIBFABRIC backend
+#
+# apply: kubectl apply -n akazawt-disagg -k llm-d/modelserver-qwen3-b300
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# llm-d 公式 gpu/vllm/base overlay を絶対パスで取り込む(/tmp/llm-d に clone 済み)
+resources:
+  - /tmp/llm-d/guides/pd-disaggregation/modelserver/gpu/vllm/base
+
+# 自前 B300 image に差し替え(gpt-oss overlay の REPLACE_MODEL_SERVER_IMAGE 解決後の名前を上書き)
+images:
+  - name: docker.io/vllm/vllm-openai
+    newName: 776010787911.dkr.ecr.us-west-2.amazonaws.com/vllm-uccl-ep
+    newTag: vllm0.21.0-uccl-0dc87eb-cu13-b300-fix1
+
+patches:
+  - path: patch-prefill-b300.yaml
+    target: { kind: Deployment, name: prefill }
+  - path: patch-decode-b300.yaml
+    target: { kind: Deployment, name: decode }

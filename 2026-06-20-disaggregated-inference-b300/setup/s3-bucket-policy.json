@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowEksClusterReadWrite",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::159553542841:role/KarpenterNode-ml-clusters-shared-us-west-2",
+          "arn:aws:iam::159553542841:role/system-node-group-ml-clusters-shared-us-west-2"
+        ]
+      },
+      "Action": ["s3:PutObject","s3:GetObject","s3:ListBucket","s3:AbortMultipartUpload"],
+      "Resource": [
+        "arn:aws:s3:::akazawt-disagg-b300-776010787911",
+        "arn:aws:s3:::akazawt-disagg-b300-776010787911/*"
+      ]
+    }
+  ]
+}

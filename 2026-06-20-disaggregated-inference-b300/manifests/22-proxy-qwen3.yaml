@@ -1,0 +1,66 @@
+# Phase 2: NIXL routing proxy — Qwen3-8B 版 (1P+1D)
+# 先行 repo manifests/proxy.yaml 準拠。toy_proxy_server.py で
+# prefill (8100) と decode (8200) に振り分け。proxy は app=qwen3-disagg を持つので
+# prefill/decode の podAntiAffinity で自動的に 3 台目に乗る (PREFILL_NODE に pin しない)。
+#
+# envsubst < manifests/22-proxy-qwen3.yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-proxy
+  namespace: ${NAMESPACE}
+  labels: { app: qwen3-disagg, role: proxy }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: qwen3-disagg, role: proxy, instance: qwen3-proxy }
+  template:
+    metadata:
+      labels: { app: qwen3-disagg, role: proxy, instance: qwen3-proxy }
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        node.kubernetes.io/instance-type: ${INSTANCE_TYPE}
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+        - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+        - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+        - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: proxy
+          image: ${REGISTRY}${IMAGE}:${TAG}
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: PYTHONUNBUFFERED, value: "1" }
+          resources:
+            requests: { cpu: "4", memory: "8Gi" }
+            limits:   { cpu: "8", memory: "16Gi" }
+          livenessProbe:
+            tcpSocket: { port: 8000 }
+            initialDelaySeconds: 1800
+            periodSeconds: 30
+            failureThreshold: 5
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "=== Qwen3-8B PROXY ==="
+              echo "Prefill: ${PREFILL_IP}:8100   Decode: ${DECODE_0_IP}:8200"
+              for endpoint in "${PREFILL_IP}:8100" "${DECODE_0_IP}:8200"; do
+                echo "Waiting for $endpoint..."
+                until curl -sf "http://${endpoint}/health" >/dev/null 2>&1; do
+                  sleep 10; echo "  still waiting for $endpoint..."
+                done
+                echo "  $endpoint is ready!"
+              done
+              echo "All instances ready!"
+              exec python3 /opt/vllm/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py \
+                --host 0.0.0.0 --port 8000 \
+                --prefiller-hosts ${PREFILL_IP} --prefiller-ports 8100 \
+                --decoder-hosts ${DECODE_0_IP} --decoder-ports 8200

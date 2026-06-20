@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Phase 2: vLLM + NIXL 土台確認用 env_vars (軽量 dense モデル Qwen3-8B, 1P+1D)
+# 先行 repo setup/env_vars.example を dense / B300 / 自アカウント向けに改変。
+#
+#   source setup/env_vars.qwen3-8b
+
+# ----- AWS / ECR (自アカウント) -----
+export AWS_REGION="us-west-2"
+export ACCOUNT="776010787911"
+export REGISTRY="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/"
+export IMAGE="vllm-uccl-ep"
+export TAG="vllm0.21.0-uccl-0dc87eb-cu13-b300-fix1"
+export FULL_IMAGE="${REGISTRY}${IMAGE}:${TAG}"
+
+# ----- Cluster -----
+export NAMESPACE="akazawt-disagg"
+export INSTANCE_TYPE="p6-b300.48xlarge"
+export NUM_GPU_PER_NODE=8
+export NUM_EFA_PER_NODE=16
+
+# ----- Model (軽量 dense, public) -----
+export MODEL="Qwen/Qwen3-8B"
+
+# ----- Topology: 1 prefill + 1 decode (2 nodes) -----
+# 空き B300 node の先頭2台 (2026-06-20 時点)
+export PREFILL_NODE="ip-10-3-107-212.us-west-2.compute.internal"
+export PREFILL_IP="10.3.107.212"
+export DECODE_NODE_0="ip-10-3-109-107.us-west-2.compute.internal"
+export DECODE_0_IP="10.3.109.107"
+
+# ----- vLLM serve flags (dense, B300 8GPU/node, TP=8 対称) -----
+# MoE 専用 (--enable-expert-parallel, --all2all-backend deepep_*, DP>1) は dense では使わない。
+export TENSOR_PARALLEL_SIZE=8
+export GPU_MEMORY_UTILIZATION=0.85
+export MAX_MODEL_LEN=16384
+# dense Qwen3-8B は KV が軽いので num-gpu-blocks-override は付けない (vLLM 自動算出に任せる)
