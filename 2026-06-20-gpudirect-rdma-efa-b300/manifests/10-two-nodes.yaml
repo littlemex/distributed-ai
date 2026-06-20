@@ -1,0 +1,87 @@
+# GPU Direct RDMA 実験: 2ノード（server / client）
+# fi_pingpong と nccl-tests を 2 ノード間で回す。別ノードに分散させる。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rdma-server
+  namespace: akazawt-gpudirect-rdma
+  labels: { app: rdma-bench, role: server }
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  restartPolicy: Never
+  nodeSelector: { nvidia.com/gpu.product: NVIDIA-B300-SXM6-AC }
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector: { matchLabels: { app: rdma-bench } }
+          topologyKey: kubernetes.io/hostname
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+    - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+    - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+    - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+  containers:
+    - name: bench
+      image: public.ecr.aws/hpc-cloud/nccl-tests:latest
+      command: ["sleep", "7200"]
+      securityContext: { privileged: true }
+      env:
+        - { name: FI_PROVIDER, value: "efa" }
+        - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
+        - { name: FI_EFA_FORK_SAFE, value: "1" }
+        - { name: NCCL_SOCKET_IFNAME, value: "^lo,docker,veth" }
+        - { name: NCCL_DEBUG, value: "INFO" }
+      resources:
+        limits: { nvidia.com/gpu: "8", vpc.amazonaws.com/efa: "16", hugepages-2Mi: 8Gi, memory: 128Gi }
+        requests: { cpu: "16", memory: 128Gi, hugepages-2Mi: 8Gi }
+      volumeMounts:
+        - { name: gdrdrv, mountPath: /dev/gdrdrv }
+        - { name: shm, mountPath: /dev/shm }
+  volumes:
+    - { name: gdrdrv, hostPath: { path: /dev/gdrdrv, type: CharDevice } }
+    - { name: shm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rdma-client
+  namespace: akazawt-gpudirect-rdma
+  labels: { app: rdma-bench, role: client }
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  restartPolicy: Never
+  nodeSelector: { nvidia.com/gpu.product: NVIDIA-B300-SXM6-AC }
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector: { matchLabels: { app: rdma-bench } }
+          topologyKey: kubernetes.io/hostname
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+    - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+    - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+    - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+  containers:
+    - name: bench
+      image: public.ecr.aws/hpc-cloud/nccl-tests:latest
+      command: ["sleep", "7200"]
+      securityContext: { privileged: true }
+      env:
+        - { name: FI_PROVIDER, value: "efa" }
+        - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
+        - { name: FI_EFA_FORK_SAFE, value: "1" }
+        - { name: NCCL_SOCKET_IFNAME, value: "^lo,docker,veth" }
+        - { name: NCCL_DEBUG, value: "INFO" }
+      resources:
+        limits: { nvidia.com/gpu: "8", vpc.amazonaws.com/efa: "16", hugepages-2Mi: 8Gi, memory: 128Gi }
+        requests: { cpu: "16", memory: 128Gi, hugepages-2Mi: 8Gi }
+      volumeMounts:
+        - { name: gdrdrv, mountPath: /dev/gdrdrv }
+        - { name: shm, mountPath: /dev/shm }
+  volumes:
+    - { name: gdrdrv, hostPath: { path: /dev/gdrdrv, type: CharDevice } }
+    - { name: shm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
