@@ -1,0 +1,5 @@
+[36m(SGLangEngine pid=1850, ip=10.3.123.45)[0m [2026-06-20 18:53:13] INFO:     10.3.123.45:51698 - "POST /update_weights_from_tensor HTTP/1.1" 200 OK
+[36m(SGLangEngine pid=1850, ip=10.3.123.45)[0m [2026-06-20 18:53:13] INFO:     10.3.123.45:51706 - "POST /update_weights_from_tensor HTTP/1.1" 200 OK
+[36m(SGLangEngine pid=1850, ip=10.3.123.45)[0m [2026-06-20 18:53:13] INFO:     10.3.123.45:51714 - "POST /update_weights_from_tensor HTTP/1.1" 200 OK
+[36m(MegatronTrainRayActor pid=6795, ip=10.3.84.219)[0m [2026-06-20 18:53:13] timer.py:32 - Timer update_weights end (elapsed: 1.7s)
+[36m(SGLangEngine pid=1758, ip=10.3.84.219)[0m [2026-06-20 18:53:13] INFO:     10.3.84.219:55170 - "POST /update_weights_from_tensor HTTP/1.1" 200 OK[32m [repeated 29x across cluster][0m

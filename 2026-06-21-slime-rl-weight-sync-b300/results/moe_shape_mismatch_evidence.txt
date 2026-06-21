@@ -1,0 +1,17 @@
+# === root cause: SGLang 0.5.12 flashinfer_trtllm MoE backend の swizzled レイアウト ===
+#
+# SLIME 送出 (HF 標準, 完全に正しい): gate_proj loaded=(768, 2048)
+# SGLang param 大多数 (整合・成功): expert_data=(1536, 2048)  ← gate_up fused 2D
+# SGLang param swizzled (非互換, 400 の原因): expert_data=(32, 1536, 64)  ← flashinfer_trtllm 3D
+#
+# SGLang fused_moe_triton/layer.py の _load_w13 に shape ログを仕込んで実測:
+
+## 正常処理された shape の出現数:
+36844 expert_data=(1536, 2048)
+   6 expert_data=(32, 1536, 64)
+
+## 非互換 shape (32,1536,64) の実測行とエラー:
+[36m(SGLangEngine pid=65978, ip=10.3.123.45)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
+[36m(SGLangEngine pid=65979, ip=10.3.123.45)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
+[36m(SGLangEngine pid=65980, ip=10.3.123.45)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
+Failed to update parameter online: The size of tensor a (64) must match the size of tensor b (2048) at non-singleton dimension 2. The full weights of the ModelRunner are partially updated. Please discard the whole weights.
