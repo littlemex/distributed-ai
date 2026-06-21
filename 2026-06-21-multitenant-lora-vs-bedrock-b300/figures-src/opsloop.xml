@@ -1,0 +1,30 @@
+<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <!-- governance boundary -->
+    <mxCell id="gb" value="" style="rounded=1;arcSize=3;fillColor=#FAFAFB;strokeColor=#B6BFC8;strokeWidth=2;dashed=1;" vertex="1" parent="1"><mxGeometry x="50" y="120" width="560" height="520" as="geometry"/></mxCell>
+    <mxCell id="gbt" value="tenant boundary" style="text;html=1;align=left;fontSize=18;fontStyle=2;fontColor=#8A95A0;" vertex="1" parent="1"><mxGeometry x="74" y="134" width="400" height="26" as="geometry"/></mxCell>
+    <!-- 1 collect -->
+    <mxCell id="o1" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.simple_storage_service;fillColor=#5A6B7B;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="110" y="200" width="96" height="96" as="geometry"/></mxCell>
+    <mxCell id="o1t" value="1. data" style="text;html=1;align=center;fontSize=18;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="100" y="300" width="116" height="24" as="geometry"/></mxCell>
+    <!-- 2 FT -->
+    <mxCell id="oa1" value="" style="endArrow=classic;html=1;strokeColor=#5A6B7B;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="220" y="248" as="sourcePoint"/><mxPoint x="320" y="248" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="o2" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="320" y="200" width="96" height="96" as="geometry"/></mxCell>
+    <mxCell id="o2t" value="2. LoRA FT" style="text;html=1;align=center;fontSize=18;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="306" y="300" width="124" height="24" as="geometry"/></mxCell>
+    <mxCell id="o2sub" value="data becomes weights" style="text;html=1;align=left;fontSize=17;fontStyle=2;fontColor=#8A95A0;" vertex="1" parent="1"><mxGeometry x="110" y="430" width="440" height="26" as="geometry"/></mxCell>
+    <!-- pool -->
+    <mxCell id="pool" value="" style="rounded=1;arcSize=6;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="900" y="170" width="470" height="220" as="geometry"/></mxCell>
+    <mxCell id="poolt" value="shared GPU pool" style="text;html=1;align=left;fontSize=20;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="924" y="186" width="420" height="28" as="geometry"/></mxCell>
+    <mxCell id="pg1" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="930" y="240" width="80" height="80" as="geometry"/></mxCell>
+    <mxCell id="pg2" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="1040" y="240" width="80" height="80" as="geometry"/></mxCell>
+    <mxCell id="pg3" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="1150" y="240" width="80" height="80" as="geometry"/></mxCell>
+    <mxCell id="poolc" value="serve (Multi-LoRA)" style="text;html=1;align=left;fontSize=17;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="1250" y="270" width="120" height="40" as="geometry"/></mxCell>
+    <!-- adapter crosses (high, solid teal) -->
+    <mxCell id="cross" value="" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="420" y="230" as="sourcePoint"/><mxPoint x="900" y="250" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="crosst" value="adapter (no raw data)" style="text;html=1;align=center;fontSize=18;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="500" y="180" width="320" height="26" as="geometry"/></mxCell>
+    <!-- generated data loops back (low, dashed) -->
+    <mxCell id="loop" value="" style="endArrow=classic;html=1;strokeColor=#9AA7B2;strokeWidth=2;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1000" y="400" as="sourcePoint"/><mxPoint x="200" y="470" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="loopt" value="generated data -> next round" style="text;html=1;align=center;fontSize=18;fontStyle=2;fontColor=#8A95A0;" vertex="1" parent="1"><mxGeometry x="460" y="540" width="500" height="26" as="geometry"/></mxCell>
+  </root>
+</mxGraphModel>

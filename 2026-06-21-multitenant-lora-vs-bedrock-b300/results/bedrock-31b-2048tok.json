@@ -1,0 +1,86 @@
+{
+  "config": {
+    "base_url": "https://bedrock-mantle.us-west-2.api.aws/openai/v1",
+    "model": "google.gemma-4-31b",
+    "auth": "sigv4",
+    "region": "us-west-2",
+    "dataset": "data/bedrock_dataset_long_1000tenants.jsonl",
+    "adapters": 0,
+    "zipf": 0.0,
+    "concurrency": [
+      4,
+      8,
+      16
+    ],
+    "requests_per_stage": 32,
+    "max_tokens": 64,
+    "slo_ttft_ms": 2000.0,
+    "slo_tpot_ms": 80.0,
+    "timeout": 180.0,
+    "ignore_eos": false,
+    "routing": "roundrobin",
+    "out": "results/bedrock-31b-2048tok.json"
+  },
+  "stages": [
+    {
+      "concurrency": 4,
+      "n_requests": 32,
+      "duration_s": 45.69,
+      "n_ok": 32,
+      "n_error": 0,
+      "n_503": 0,
+      "err_types": {},
+      "ttft_p50": 510,
+      "ttft_p90": 34446,
+      "ttft_p99": 37520,
+      "tpot_p50": 4.8,
+      "tpot_p90": 17.4,
+      "tpot_p99": 21.4,
+      "out_tok_per_s": 32,
+      "n_good": 28,
+      "goodput_req_s": 0.61,
+      "goodput_pct": 87.5
+    },
+    {
+      "concurrency": 8,
+      "n_requests": 32,
+      "duration_s": 36.19,
+      "n_ok": 32,
+      "n_error": 0,
+      "n_503": 0,
+      "err_types": {},
+      "ttft_p50": 538,
+      "ttft_p90": 27033,
+      "ttft_p99": 30644,
+      "tpot_p50": 6.2,
+      "tpot_p90": 16.9,
+      "tpot_p99": 20.5,
+      "out_tok_per_s": 37,
+      "n_good": 24,
+      "goodput_req_s": 0.66,
+      "goodput_pct": 75.0
+    },
+    {
+      "concurrency": 16,
+      "n_requests": 32,
+      "duration_s": 187.62,
+      "n_ok": 29,
+      "n_error": 3,
+      "n_503": 0,
+      "err_types": {
+        "TimeoutError": 2,
+        "ClientPayloadError": 1
+      },
+      "ttft_p50": 1114,
+      "ttft_p90": 34485,
+      "ttft_p99": 35994,
+      "tpot_p50": 6.8,
+      "tpot_p90": 19.6,
+      "tpot_p99": 20.5,
+      "out_tok_per_s": 7,
+      "n_good": 16,
+      "goodput_req_s": 0.09,
+      "goodput_pct": 50.0
+    }
+  ]
+}

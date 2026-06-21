@@ -1,0 +1,62 @@
+# inference-perf: Approach B small model (Gemma 3 4B fp8 + per-tenant LoRA) 1000テナント。
+# 27B 版 (vllm-gemma3-27b-1000tenants.yaml) と同構成。model_name と base_url(port) のみ差し替え。
+# 4B はレイテンシ優位の論点用 (コストでは E2B が安すぎて勝てない, §11)。
+server:
+  type: vllm
+  model_name: google/gemma-3-4b-it
+  base_url: http://vllm-4b-svc.default.svc.cluster.local:8001
+  ignore_eos: true
+  api_key: ""
+
+api:
+  type: chat
+  streaming: true
+
+tokenizer:
+  pretrained_model_name_or_path: google/gemma-3-4b-it
+
+load:
+  type: concurrent
+  stages:
+    - num_requests: 3000
+      concurrency_level: 100
+    - num_requests: 3000
+      concurrency_level: 500
+    - num_requests: 3000
+      concurrency_level: 1000
+  lora_traffic_split:
+    # >>> scripts/gen_zipf_lora_split.py の lora_split_1000.yaml をここに展開 <<<
+    - name: adapter-0
+      split: 0.027824
+    - name: adapter-1
+      split: 0.013494
+    - name: adapter-2
+      split: 0.008965
+    # ... adapter-999 まで
+
+data:
+  type: synthetic
+  input_distribution:
+    min: 64
+    max: 2048
+    mean: 512
+    std_dev: 200
+  output_distribution:
+    min: 128
+    max: 256
+    mean: 192
+    std_dev: 30
+
+report:
+  request_lifecycle:
+    summary: true
+    per_stage: true
+    per_request: false
+    per_adapter: true
+    per_adapter_stage: false
+    percentiles: [50, 90, 95, 99]
+  goodput:
+    constraints:
+      ttft: 3.0
+      tpot: 0.15
+      request_latency: 60.0
