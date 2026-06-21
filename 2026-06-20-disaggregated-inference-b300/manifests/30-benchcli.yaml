@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: benchcli
-  namespace: akazawt-disagg
+  namespace: myuser-disagg
   labels: { app: qwen3-bench, role: benchcli }
 spec:
   restartPolicy: Never
@@ -20,7 +20,7 @@ spec:
     - { name: results, emptyDir: {} }
   containers:
     - name: cli
-      image: 776010787911.dkr.ecr.us-west-2.amazonaws.com/vllm-uccl-ep:vllm0.21.0-uccl-0dc87eb-cu13-b300-fix1
+      image: 012345678901.dkr.ecr.us-west-2.amazonaws.com/vllm-uccl-ep:vllm0.21.0-uccl-0dc87eb-cu13-b300-fix1
       imagePullPolicy: IfNotPresent
       command: ["bash","-lc","mkdir -p /results && sleep infinity"]
       env:

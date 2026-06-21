@@ -56,7 +56,7 @@ tolerations:
 実験用の namespace を切ります（借用クラスタなので他人と混ざらないよう自分専用に）。
 
 ```bash
-kubectl create namespace akazawt-disagg
+kubectl create namespace myuser-disagg
 ```
 
 ---
@@ -217,7 +217,7 @@ helm install pd-disaggregation \
   oci://registry.k8s.io/gateway-api-inference-extension/charts/standalone \
   -f guides/recipes/scheduler/base.values.yaml \
   -f guides/pd-disaggregation/scheduler/pd-disaggregation.values.yaml \
-  -n akazawt-disagg --version v1.5.0
+  -n myuser-disagg --version v1.5.0
 ```
 
 ### ハマりどころ 3-A: EPP が Pending になる（CPU 不足 + taint）
@@ -259,13 +259,13 @@ overlay の `resources` に公式 base を絶対パスで指定すると、kusto
 デプロイ:
 
 ```bash
-kubectl apply -n akazawt-disagg -k <overlay ディレクトリ>
+kubectl apply -n myuser-disagg -k <overlay ディレクトリ>
 ```
 
 llm-d では decode Pod に **routing-sidecar** が自動で挿入され、リクエストは「EPP → sidecar → prefill/decode」と流れます。EPP の ClusterIP に推論リクエストを投げて動作確認します。
 
 ```bash
-IP=$(kubectl get service pd-disaggregation-epp -n akazawt-disagg -o jsonpath='{.spec.clusterIP}')
+IP=$(kubectl get service pd-disaggregation-epp -n myuser-disagg -o jsonpath='{.spec.clusterIP}')
 curl -X POST http://$IP/v1/completions -H 'Content-Type: application/json' \
   -d '{"model":"<model>","prompt":"The capital of France is","max_tokens":24}'
 ```
@@ -312,8 +312,8 @@ GPU は貴重な共有資源なので、計測が終わったら速やかに解�
 
 ```bash
 # GPU を使う Deployment / Pod を削除
-kubectl -n akazawt-disagg delete deployment --all
-helm -n akazawt-disagg uninstall pd-disaggregation
+kubectl -n myuser-disagg delete deployment --all
+helm -n myuser-disagg uninstall pd-disaggregation
 
 # 自分が入れた CRD は撤収時に削除（クラスタ全体に残るため）
 kubectl delete -k "https://github.com/kubernetes-sigs/gateway-api-inference-extension/config/crd?ref=v1.5.0"

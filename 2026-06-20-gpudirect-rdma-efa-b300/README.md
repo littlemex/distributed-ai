@@ -72,7 +72,7 @@ kubectl get pods -A -o json | jq -r '.items[]|select(.status.phase=="Running")|s
 ### 1. namespace 作成
 
 ```bash
-kubectl create namespace akazawt-gpudirect-rdma
+kubectl create namespace myuser-gpudirect-rdma
 ```
 
 ### 2. 2 ノードに pod を立てる
@@ -80,7 +80,7 @@ kubectl create namespace akazawt-gpudirect-rdma
 ```bash
 kubectl apply -f manifests/10-two-nodes.yaml
 # 両方 Running になるまで待つ (初回は image pull 6.5GB で約2分)
-kubectl -n akazawt-gpudirect-rdma get pods -l app=rdma-bench -o wide -w
+kubectl -n myuser-gpudirect-rdma get pods -l app=rdma-bench -o wide -w
 ```
 
 `rdma-server` と `rdma-client` が**別ノード**で `Running` になれば OK
@@ -89,7 +89,7 @@ kubectl -n akazawt-gpudirect-rdma get pods -l app=rdma-bench -o wide -w
 ### 3. デモ1: fi_pingpong (RTT 実測)
 
 ```bash
-NAMESPACE=akazawt-gpudirect-rdma ./recipe/run-fi-pingpong.sh
+NAMESPACE=myuser-gpudirect-rdma ./recipe/run-fi-pingpong.sh
 ```
 
 → `fi_info -p efa` が provider を返し、`usec/xfer` 列に往復 RTT が出る。
@@ -97,7 +97,7 @@ NAMESPACE=akazawt-gpudirect-rdma ./recipe/run-fi-pingpong.sh
 ### 4. デモ2: nccl-tests all_reduce (GPUDirect RDMA over EFA)
 
 ```bash
-NAMESPACE=akazawt-gpudirect-rdma ./recipe/run-nccl-allreduce.sh
+NAMESPACE=myuser-gpudirect-rdma ./recipe/run-nccl-allreduce.sh
 ```
 
 → `Selected provider is efa` のログ + `busbw` テーブルが出れば成功。
@@ -105,7 +105,7 @@ NAMESPACE=akazawt-gpudirect-rdma ./recipe/run-nccl-allreduce.sh
 ### 5. 後片付け (借用クラスタなので必須)
 
 ```bash
-kubectl -n akazawt-gpudirect-rdma delete pod rdma-server rdma-client rdma-probe --ignore-not-found
+kubectl -n myuser-gpudirect-rdma delete pod rdma-server rdma-client rdma-probe --ignore-not-found
 # GPU 解放確認 (空ならゼロ行)
 kubectl get pods -A -o json | jq -r '.items[]|select(.status.phase=="Running")|select([.spec.containers[].resources.requests."nvidia.com/gpu"//"0"]|map(tonumber)|add>0)|.metadata.name'
 # namespace は再利用のため残してよい

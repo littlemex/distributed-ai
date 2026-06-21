@@ -4,7 +4,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: rdma-server
-  namespace: akazawt-gpudirect-rdma
+  namespace: myuser-gpudirect-rdma
   labels: { app: rdma-bench, role: server }
 spec:
   hostNetwork: true
@@ -47,7 +47,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: rdma-client
-  namespace: akazawt-gpudirect-rdma
+  namespace: myuser-gpudirect-rdma
   labels: { app: rdma-bench, role: client }
 spec:
   hostNetwork: true

@@ -4,14 +4,14 @@
 
 # ----- AWS / ECR (自アカウント, fastapi pin 入り -fix1 image) -----
 export AWS_REGION="us-west-2"
-export ACCOUNT="776010787911"
+export ACCOUNT="012345678901"
 export REGISTRY="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/"
 export IMAGE="vllm-uccl-ep"
 export TAG="vllm0.21.0-uccl-0dc87eb-cu13-b300-fix1"
 export FULL_IMAGE="${REGISTRY}${IMAGE}:${TAG}"
 
 # ----- Cluster -----
-export NAMESPACE="akazawt-disagg"
+export NAMESPACE="myuser-disagg"
 export INSTANCE_TYPE="p6-b300.48xlarge"
 export NUM_GPU_PER_NODE=8
 export NUM_EFA_PER_NODE=16
@@ -20,10 +20,10 @@ export NUM_EFA_PER_NODE=16
 export MODEL="deepseek-ai/DeepSeek-V3-0324"
 
 # ----- Topology: 1 prefill + 1 decode (2 nodes) + proxy -----
-export PREFILL_NODE="ip-10-3-107-212.us-west-2.compute.internal"
-export PREFILL_IP="10.3.107.212"
-export DECODE_NODE_0="ip-10-3-109-107.us-west-2.compute.internal"
-export DECODE_0_IP="10.3.109.107"
+export PREFILL_NODE="ip-10-0-0-11.us-west-2.compute.internal"
+export PREFILL_IP="10.0.0.11"
+export DECODE_NODE_0="ip-10-0-0-12.us-west-2.compute.internal"
+export DECODE_0_IP="10.0.0.12"
 
 # ----- vLLM serve flags (先行 repo 準拠: MoE EP=8, TP=4/DP=2) -----
 export TENSOR_PARALLEL_SIZE=8
