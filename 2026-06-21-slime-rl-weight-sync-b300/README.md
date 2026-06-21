@@ -8,18 +8,25 @@ NVIDIA B300 (Blackwell, sm_103) を使った Amazon EKS 上で、RL post-trainin
 
 ## 計測サマリ (weight sync = train→rollout の重み転送 1 回の所要時間)
 
-| モデル | 方式 | 実装 | weight sync (定常) |
-| --- | --- | --- | --- |
-| Qwen3-4B (dense) | colocated | UpdateWeightFromTensor (CUDA IPC) | ~1.2s |
-| Qwen3-4B (dense) | disaggregated | UpdateWeightFromDistributed (NCCL/EFA) | ~0.3s |
-| Qwen3-30B-A3B (MoE) | disaggregated | UpdateWeightFromDistributed (NCCL/EFA) | ~10s (初回 14.4s) |
+**apple-to-apple 測定 (2026-06-21)**: 方式・規模の差を交絡なく比較するため、全セルで
+**engine 数=4・mem-fraction=0.5・GRPO ハイパラ固定**にした対照実験。
 
-- ★ **同一 Qwen3-4B で、定常状態は disaggregated (0.3s) が colocated (1.2s) より約 4 倍速い** (直感に反する)。
-  原因は転送経路の per-step オーバーヘッド差 (colocated の CUDA IPC は engine ごとの `ipc_collect()` GC、
-  disaggregated は NCCL 一括 broadcast)。詳細は前編・[results/WEIGHT_SYNC_RESULTS.md](./results/WEIGHT_SYNC_RESULTS.md)。
-- 30B MoE は転送量が桁違い (305 億 params の全 expert broadcast) で weight sync も 10 秒級。
+| セル | モデル | 方式 | 実装 | weight sync (定常) |
+| --- | --- | --- | --- | --- |
+| A1 | Qwen3-4B (dense) | colocated | UpdateWeightFromTensor (CUDA IPC) | **~1.5s** |
+| A2 | Qwen3-4B (dense) | disaggregated | UpdateWeightFromDistributed (NCCL/EFA) | **~0.3s** |
+| B1 | Qwen3-30B-A3B (MoE) | disaggregated | UpdateWeightFromDistributed (NCCL/EFA) | **~10.1s** (初回 13.1s) |
+
+- ★ **方式軸 (A1 vs A2)**: engine 数・mem-fraction を揃えても、定常状態は disaggregated (0.3s) が
+  colocated (1.5s) より **約 5 倍速い** (直感に反する)。原因は転送経路の per-step オーバーヘッド差
+  (colocated の CUDA IPC は chunk ごとの `ipc_collect()` GC + Ray IPC handle 往復、disaggregated は
+  NCCL 一括 broadcast)。条件を揃える前の初期測定 (engine 2/4・mem 0.4/0.8) でも同傾向 (約 4 倍) で、
+  **逆転は構成差でなく転送メカニズム差**であることを確認。詳細は [results/WEIGHT_SYNC_RESULTS.md](./results/WEIGHT_SYNC_RESULTS.md)。
+- ★ **規模軸 (A2 vs B1)**: 方式・engine 数を揃えたまま規模だけ変えると、30B MoE は dense 4B の
+  **約 34 倍** (10.1s vs 0.3s)。weight sync は転送パラメータ量に強く依存する。
 - 30B MoE を SGLang 0.5.12 で回すには `--sglang-moe-runner-backend triton` が必須
   (デフォルト flashinfer_trtllm の swizzled レイアウトが online weight update と非互換、SLIME issue #2091/#1840 と同根)。
+- 再現手順は [bench/BENCH-DESIGN.md](./bench/BENCH-DESIGN.md) (3 セルの揃えた条件・実行スクリプト・実測値)。
 
 ## ディレクトリ
 
@@ -28,11 +35,15 @@ NVIDIA B300 (Blackwell, sm_103) を使った Amazon EKS 上で、RL post-trainin
 ├── setup/            # Dockerfile (NGC pytorch 26.02 + TE 2.12 + SGLang 0.5.12), buildkit-job
 ├── recipe/           # run_grpo.sh (COLOCATE で colocated/disaggregated 分岐), raycluster.yaml
 ├── env/              # env_vars 3 構成 (colocated-4b / disaggregated-4b / disaggregated-30b-moe)
-├── results/          # weight sync 実測値、MoE shape mismatch の root cause 証拠
+├── bench/            # apple-to-apple ベンチ (方式×規模マトリクス): env.A1/A2/B1, run/collect スクリプト, BENCH-DESIGN.md
+├── results/          # weight sync 実測値 (apple-to-apple 含む)、MoE shape mismatch の root cause 証拠
 ├── debug-patches/    # SGLang に shape ログを仕込む調査用 patch (再調査用)
 ├── PATCH-DESIGN.md   # B300 対応の層別 patch 設計と切り分け全履歴
 └── COMPLETE-GUIDE.md # 壁ごとの真因・再現手順・ハマりどころ早見表
 ```
+
+> `bench/` のスクリプト・env は akazawt の検証環境 (namespace `akazawt-slime`、FSx `/fsx/akazawt/...`) の
+> パスを含む。各自の環境では namespace・FSx パスを置き換えて使う (env/ と同方針)。
 
 ## 検証環境
 

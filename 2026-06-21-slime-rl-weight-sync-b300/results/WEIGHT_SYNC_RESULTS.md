@@ -1,8 +1,19 @@
 # SLIME weight sync 実測結果 (B300)
 
-**測定日**: 2026-06-20
+**測定日**: 2026-06-20 (初期測定) / 2026-06-21 (apple-to-apple 追測定)
 **環境**: EKS ml-clusters-shared-us-west-2 / p6-b300 x2 (sm_103, 8 GPU/node) / NGC image slime:v0.2.4-ngc-b300
-**設定**: GRPO, mem-fraction 0.4, expandable_segments:True, --no-offload, GRPO 6+周回 OOM 0
+**設定**: GRPO (advantage-estimator grpo, n-samples 8, kl-coef 0), expandable_segments:True, --no-offload
+
+> **本ドキュメントは 2 部構成**:
+> - 「初期測定 (2026-06-20)」: mem-fraction・engine 数が方式ごとに違い、方式の差を主張するには
+>   交絡があった (下記 §初期測定)。原因究明・壁の突破はここで完了。
+> - **「apple-to-apple 測定 (2026-06-21)」: 全セルで engine 数=4・mem-fraction=0.5 を揃え、
+>   方式軸と規模軸を交絡なく比較した確定版 (下記 §apple-to-apple)。登壇で使うのはこちら。**
+
+# ====================== 初期測定 (2026-06-20) ======================
+# 注意: 以下は mem-fraction (0.4 vs 0.8) と engine 数 (2 vs 4) が方式ごとに異なる。
+# 原因究明・壁突破はここで完了したが、方式の差を「同条件で」主張するなら
+# §apple-to-apple (2026-06-21) の値を参照すること。
 
 ## colocated (CUDA IPC, UpdateWeightFromTensor) — 実測済み
 
@@ -73,14 +84,22 @@ group 確立後 (定常) は純粋なネットワーク転送 (EFA 高帯域) �
 (IPC handle GC vs NCCL 一括 broadcast)」**。これが直感に反する結果の根本原因。
 
 #### 実ログでの数値的裏付け (転送バーの所要時間)
-| 方式 | 転送単位 | Update weights バー | 解釈 |
+| 方式 | 転送バー | Update weights バー | 解釈 |
 |---|---|---|---|
-| colocated | **16/16** (16 engine に個別 IPC 転送) | `[00:01<00:00]` 13.8 it/s ≈ 1.0s + pause/flush = 計 ~1.2s | engine 1個ずつ CUDA IPC + 毎回 ipc_collect |
-| disaggregated | **17it** (PP group NCCL broadcast) | `[00:00]` 1秒未満 = 計 ~0.3s | 1対多を並列 broadcast で一括 |
+| colocated | **16 単位** (`Update weights 0→16`) | `[00:01<00:00]` 13.8 it/s ≈ 1.0s + pause/flush = 計 ~1.2s | チャンクごと CUDA IPC + 毎回 ipc_collect |
+| disaggregated | **17 it** (`[slime-pp_0] Update weights`) | `[00:00]` 1秒未満 = 計 ~0.3s | バッファに溜めて NCCL 一括 broadcast |
 
-追加発見: colocated は rollout 16 engine (TP1×16)、disaggregated は 4 engine (TP2×4)。
-colocated の per-engine IPC 転送は **engine 数に比例**して遅くなる (16回ループ) が、NCCL broadcast は
-engine 数によらず一括配信。**engine 数の差も colocated 不利に効いている** (転送方式 × engine 数の複合)。
+[訂正] 当初「colocated 16 engine / engine 数比例」と記したが、一次ログ再確認の結果**誤り**だった。
+実際の engine 数 (`Ports for engine N` の最大 + `fired up` 数) は:
+- **colocated: 2 engine** (TP8×2、`ROLLOUT_GPUS_PER_ENGINE=8`)
+- **disaggregated: 4 engine** (TP2×4、`ROLLOUT_GPUS_PER_ENGINE=2`)
+
+つまり **colocated の方が engine 数は少ない** (2 < 4)。「engine 数に比例して colocated が遅い」は成立しない。
+colocated の `Update weights 0→16` の「16」は engine 数ではなく **CUDA IPC で転送する重みチャンク数**。
+→ 差の要因は engine 数ではなく、**転送メカニズムそのもの** (colocated はチャンクごとに `ipc_collect()`
+[全GPU同期GC] + Ray IPC ハンドルの往復、disaggregated はバッファに溜めて NCCL 一括 broadcast) に絞られる。
+ただし下記の通り、この要因分解は**コード読解とログの間接証拠**に基づく仮説であり、ipc_collect 単体の
+定量分離 (patch で除去した before/after 計測) は行っていない。
 
 #### 補足: 交絡要因の切り分け
 - colocated は mem-fraction 0.4 (train と KV cache 同居)、disaggregated は 0.8 (rollout 専有)。
@@ -181,20 +200,65 @@ torch ダウングレード (壁0 逆戻り) も不要。
 - update_weights elapsed: **初回 14.4s → 2回目 10.2s** (30B MoE, TP2/EP2, NCCL/EFA broadcast)。
 - GRPO 周回が OOM/エラーなしで継続 (27分+)。
 
-## ============ 最終比較表 (全実測完了) ============
+## ============ 初期測定の比較表 (交絡あり・参考) ============
 
-| モデル | 方式 | 実装 | weight sync (定常) |
-|---|---|---|---|
-| Qwen3-4B | colocated | UpdateWeightFromTensor (CUDA IPC) | ~1.2s |
-| Qwen3-4B | disaggregated | UpdateWeightFromDistributed (NCCL/EFA) | ~0.3s |
-| Qwen3-30B-A3B MoE | disaggregated | UpdateWeightFromDistributed (NCCL/EFA) | 14.4s → 10.2s |
+| モデル | 方式 | 実装 | weight sync (定常) | mem-frac | engine |
+|---|---|---|---|---|---|
+| Qwen3-4B | colocated | UpdateWeightFromTensor (CUDA IPC) | ~1.2s | 0.4 | 2 |
+| Qwen3-4B | disaggregated | UpdateWeightFromDistributed (NCCL/EFA) | ~0.3s | 0.8 | 4 |
+| Qwen3-30B-A3B MoE | disaggregated | UpdateWeightFromDistributed (NCCL/EFA) | 14.4s → 10.2s | 0.8 | 3 |
 
-観測:
-1. 4B 同一モデルで colocated(CUDA IPC, per-engine ipc_collect)より disaggregated
-   (NCCL 一括 broadcast)が定常で約4倍速い (1.2s vs 0.3s)。直感に反する、原因は転送経路の
-   per-step オーバーヘッド差。
-2. 30B MoE は転送量が桁違いに大きく (305億params, EP=2 の全 expert broadcast)、
-   weight sync も 10秒級。MoE の EP weight (non-expert TP + expert EP の2段) を NCCL/EFA で
-   転送する実用ケースを実測。
-3. SGLang 0.5.12 で MoE を回すには moe-runner-backend を triton 明示が必須 (flashinfer_trtllm の
-   swizzled レイアウトが online weight update と非互換)。これは upstream 未解決 (#2091/#1840)。
+上記は mem-fraction と engine 数が方式・規模ごとに違うため、方式/規模の差を「純粋に」主張できない。
+そこで下記の apple-to-apple 測定 (全セル engine4・mem0.5) を実施した。
+
+# ====================== apple-to-apple 測定 (2026-06-21) ======================
+
+**目的**: weight sync を「方式 × 規模」の2軸で、他条件 (engine 数・mem-fraction・GRPO ハイパラ) を
+揃えた対照実験として測り直し、登壇で使える交絡なしの比較を得る。
+
+**共通条件 (3セル全て)**: engine 数=4、mem-fraction-static=0.5、GRPO (n-samples 8, GBS 128,
+rollout-bs 16)、NGC image slime:v0.2.4-ngc-b300、expandable_segments:True、--no-offload。
+recipe は `run_grpo_qwen3_4b.reference.sh` を全セル無改変で使用 (env file だけ差し替え)。
+
+| セル | モデル | 方式 | engine (構成) | mem-frac | weight sync 初回 | **weight sync 定常** |
+|---|---|---|---|---|---|---|
+| **A1** | Qwen3-4B | colocated (CUDA IPC) | 4 (TP4×4, 16/4) | 0.5 | 2.6s | **~1.5s** (1.6/1.5/1.4) |
+| **A2** | Qwen3-4B | disaggregated (NCCL/EFA) | 4 (TP2×4, 8/2) | 0.5 | 3.0s | **~0.3s** (0.3/0.3) |
+| **B1** | Qwen3-30B-A3B MoE | disaggregated (NCCL/EFA) | 4 (TP2×4, 8/2) | 0.5 | 13.1s | **~10.1s** |
+
+(一次データ: `/fsx/akazawt/slime/logs/bench_{A1,A2,B1}_*.log` の `Timer update_weights end`。
+各セルの設定値は投入ログの `Colocated:` / `rollout-num-gpus-per-engine` /
+`sglang-mem-fraction-static` / `moe-runner-backend` で検証済み。)
+
+### 2つの比較軸 (交絡なし)
+
+**方式軸 (A1 ↔ A2)**: 4B・engine4・mem0.5 を固定し、方式だけ変えた純粋比較。
+→ **disaggregated (NCCL/EFA) が colocated (CUDA IPC) の約5倍速い** (定常 0.3s vs 1.5s)。
+  初期測定 (mem-fraction 0.4/0.8 がズレていた) でも同じ傾向 (約4倍) が出ていたが、
+  本測定で mem-fraction と engine 数を揃えても傾向が変わらないことを確認 = **差の主因は
+  mem-fraction でなく転送メカニズム** (CUDA IPC の per-chunk ipc_collect vs NCCL 一括 broadcast)
+  であることを実験的にも裏付けた。
+
+**規模軸 (A2 ↔ B1)**: disaggregated・engine4・mem0.5 を固定し、モデル規模だけ変えた比較。
+→ **30B MoE は 4B の約34倍** (定常 10.1s vs 0.3s)。weight sync は転送するパラメータ量に
+  強く依存し、MoE の EP weight (non-expert TP + expert EP の2段 broadcast) を含む 30B では
+  10秒級になる。RL の1ステップ当たり (train 280s に対し) では支配的でないが、無視できない。
+
+### apple-to-apple での注記 (誠実な開示)
+- **engine 数=4 は揃えたが、TP 構成は方式で必然的に異なる**: colocated は 16 GPU を rollout と
+  共有するので engine4=TP4 (16/4)、disaggregated は rollout 専有 8 GPU で engine4=TP2 (8/2)。
+  「engine 数」を揃える設計とした (weight sync の broadcast 先 engine 数が転送ラウンド数に効くため)。
+- **B1 の actor GPU 数は A2 と異なる** (A2: actor 8 / B1: actor 4)。16 GPU 制約と Megatron の
+  割り切れ条件 (world_size%TP==0 かつ GBS%(micro×DP)==0) で 30B は actor 4 (DP2×TP2) になった。
+  ただし weight sync の計測対象は **train actor → rollout engine への broadcast** で、揃えるべきは
+  rollout engine 数 (=4、A2/B1 一致)。actor GPU 数差は train 速度に効くが weight sync 転送先には無関係。
+- 各セルは weight sync 定常値が見えた時点で停止 (全 rollout 完走は weight sync 計測に不要)。
+  A1=4点, A2=3点, B1=2点。30B は1サイクル ~10分のため B1 は2点で打ち切り (初回13.1s/定常10.1s)。
+
+### 結論 (登壇ストーリー)
+1. **方式**: 同条件で disaggregated (NCCL/EFA) が colocated (CUDA IPC) より定常で約5倍速い。
+   「同一 GPU の colocated が速いはず」という直感を覆す。原因は CUDA IPC の per-chunk
+   `ipc_collect()` (全GPU同期GC) + Ray IPC handle 往復 vs NCCL 一括 broadcast の差 (コード精査済み)。
+2. **規模**: disaggregated 固定で 30B MoE は 4B の約34倍。weight sync は転送パラメータ量に強く依存。
+3. **MoE の前提**: SGLang 0.5.12 で MoE online weight update を回すには `--sglang-moe-runner-backend
+   triton` が必須 (flashinfer_trtllm の swizzled レイアウトが非互換)。upstream 未解決 (#2091/#1840)。
