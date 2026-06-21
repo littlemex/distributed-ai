@@ -26,7 +26,7 @@ spec:
               set -eux
               buildkitd &
               for i in $(seq 1 30); do buildctl debug workers >/dev/null 2>&1 && break; sleep 2; done
-              buildctl build                 --frontend dockerfile.v0                 --local context=/workspace                 --local dockerfile=/workspace                 --output type=image,name=776010787911.dkr.ecr.us-west-2.amazonaws.com/slime:v0.2.4-ngc-b300,push=true                 --progress=plain
+              buildctl build                 --frontend dockerfile.v0                 --local context=/workspace                 --local dockerfile=/workspace                 --output type=image,name=012345678901.dkr.ecr.us-west-2.amazonaws.com/slime:v0.2.4-ngc-b300,push=true                 --progress=plain
           env:
             - { name: DOCKER_CONFIG, value: /root/.docker }
           resources:

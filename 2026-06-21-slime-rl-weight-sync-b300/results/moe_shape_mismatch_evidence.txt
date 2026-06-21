@@ -11,7 +11,7 @@
    6 expert_data=(32, 1536, 64)
 
 ## 非互換 shape (32,1536,64) の実測行とエラー:
-[36m(SGLangEngine pid=65978, ip=10.3.123.45)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
-[36m(SGLangEngine pid=65979, ip=10.3.123.45)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
-[36m(SGLangEngine pid=65980, ip=10.3.123.45)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
+[36m(SGLangEngine pid=65978, ip=10.0.0.21)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
+[36m(SGLangEngine pid=65979, ip=10.0.0.21)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
+[36m(SGLangEngine pid=65980, ip=10.0.0.21)[0m AKZ_W13 expert_data=(32, 1536, 64) loaded=(768, 2048) shard_dim=0 shard_size=16 tp_rank=0
 Failed to update parameter online: The size of tensor a (64) must match the size of tensor b (2048) at non-singleton dimension 2. The full weights of the ModelRunner are partially updated. Please discard the whole weights.

@@ -27,7 +27,7 @@ spec:
         schedulerName: kai-scheduler
         containers:
           - name: ray-head
-            image: 776010787911.dkr.ecr.us-west-2.amazonaws.com/slime:v0.2.4-ngc-b300
+            image: 012345678901.dkr.ecr.us-west-2.amazonaws.com/slime:v0.2.4-ngc-b300
             imagePullPolicy: IfNotPresent
             ports: [{containerPort: 6379}, {containerPort: 8265}, {containerPort: 10001}]
             env:
@@ -76,7 +76,7 @@ spec:
             - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
           containers:
             - name: ray-worker
-              image: 776010787911.dkr.ecr.us-west-2.amazonaws.com/slime:v0.2.4-ngc-b300
+              image: 012345678901.dkr.ecr.us-west-2.amazonaws.com/slime:v0.2.4-ngc-b300
               imagePullPolicy: IfNotPresent
               securityContext: { privileged: true }
               env:
