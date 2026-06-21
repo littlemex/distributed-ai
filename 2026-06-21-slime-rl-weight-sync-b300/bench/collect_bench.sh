@@ -9,7 +9,7 @@
 #         ./collect_bench.sh <logpath> (単一ログ)
 # ============================================================================
 set -uo pipefail
-NS=akazawt-slime
+NS=myuser-slime
 HEAD=$(kubectl -n $NS get pod -l ray.io/node-type=head -o jsonpath='{.items[0].metadata.name}')
 
 collect_one() {

@@ -226,7 +226,7 @@ recipe は `run_grpo_qwen3_4b.reference.sh` を全セル無改変で使用 (env 
 | **A2** | Qwen3-4B | disaggregated (NCCL/EFA) | 4 (TP2×4, 8/2) | 0.5 | 3.0s | **~0.3s** (0.3/0.3) |
 | **B1** | Qwen3-30B-A3B MoE | disaggregated (NCCL/EFA) | 4 (TP2×4, 8/2) | 0.5 | 13.1s | **~10.1s** |
 
-(一次データ: `/fsx/akazawt/slime/logs/bench_{A1,A2,B1}_*.log` の `Timer update_weights end`。
+(一次データ: `/fsx/myuser/slime/logs/bench_{A1,A2,B1}_*.log` の `Timer update_weights end`。
 各セルの設定値は投入ログの `Colocated:` / `rollout-num-gpus-per-engine` /
 `sglang-mem-fraction-static` / `moe-runner-backend` で検証済み。)
 

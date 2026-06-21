@@ -15,7 +15,7 @@ awsome-distributed-ai の `slime.Dockerfile` (`nvcr.io/nvidia/pytorch:26.02-py3`
 
 ### run_grpo / env (recipe はリファレンス形を保ち、B300 delta は env に隔離)
 ```sh
-# env_vars.akazawt (FSx パス + B300 delta)
+# env_vars.myuser (FSx パス + B300 delta)
 export SGLANG_LOG_LEVEL="info"                                    # 壁2: uvicorn 有効値 (WARN→info)
 export SGLANG_EXTRA_ARGS="--sglang-cuda-graph-max-bs 8"           # 壁3: B300 大HBM の capture 範囲抑制
 export TRAIN_EXTRA_ARGS="--no-offload-train --no-offload-rollout" # 壁5: cu12 .so LD_PRELOAD 回避
@@ -93,34 +93,34 @@ update_weight_cls = UpdateWeightFromTensor if self.args.colocate else UpdateWeig
 ## 3. 再現手順 (クリーンな状態から)
 
 ```sh
-# --- 前提: investigations/slime-on-eks-b300/ に居る。kubectl が akazawt-slime ns に通る ---
+# --- 前提: investigations/slime-on-eks-b300/ に居る。kubectl が myuser-slime ns に通る ---
 
 # [1] image ビルド (numpy<2 pin 入り Dockerfile)
 cd reference-build
-kubectl -n akazawt-slime delete configmap slime-ngc-build-context 2>/dev/null
-kubectl -n akazawt-slime create configmap slime-ngc-build-context \
+kubectl -n myuser-slime delete configmap slime-ngc-build-context 2>/dev/null
+kubectl -n myuser-slime create configmap slime-ngc-build-context \
   --from-file=Dockerfile=./Dockerfile --from-file=requirements.txt=./requirements.txt
-kubectl -n akazawt-slime delete job slime-ngc-build 2>/dev/null
-kubectl -n akazawt-slime apply -f ./buildkit-job.yaml
+kubectl -n myuser-slime delete job slime-ngc-build 2>/dev/null
+kubectl -n myuser-slime apply -f ./buildkit-job.yaml
 # ECR secret は 12h で失効。失効していたら再発行:
-#   aws ecr get-login-password --region us-west-2 | ... で ecr-akazawt-own secret 再作成
+#   aws ecr get-login-password --region us-west-2 | ... で ecr-myuser-own secret 再作成
 # ビルド ~11分 (layer cache 効けば)。push 完了を build pod ログで確認。
 
 # [2] RayCluster 起動 (新 image を確実に pull するため初回は Always)
 cd ../reference-test
-kubectl -n akazawt-slime delete raycluster slime-ray 2>/dev/null
+kubectl -n myuser-slime delete raycluster slime-ray 2>/dev/null
 sed 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Always/g' raycluster-ngc.yaml | kubectl apply -f -
 # 全 3 pod Ready を待つ (head は B300 同居、GPU 無しノードに置かない=このクラスタの CPU node が貧弱なため)
 
 # [3] recipe + env を FSx に配置して投入
-HEAD=$(kubectl -n akazawt-slime get pod -l ray.io/node-type=head -o jsonpath='{.items[0].metadata.name}')
-kubectl -n akazawt-slime exec $HEAD -- mkdir -p /fsx/akazawt/slime/reference-test/recipe
-kubectl -n akazawt-slime cp run_grpo_qwen3_4b.reference.sh $HEAD:/fsx/akazawt/slime/reference-test/recipe/run_grpo_qwen3_4b.sh
-kubectl -n akazawt-slime cp env_vars.akazawt $HEAD:/fsx/akazawt/slime/reference-test/env_vars.akazawt
-kubectl -n akazawt-slime exec $HEAD -- bash -lc '
-  cd /fsx/akazawt/slime/reference-test
-  export ENV_FILE=/fsx/akazawt/slime/reference-test/env_vars.akazawt
-  nohup bash recipe/run_grpo_qwen3_4b.sh > /fsx/akazawt/slime/logs/smoke_$(date +%H%M%S).log 2>&1 &'
+HEAD=$(kubectl -n myuser-slime get pod -l ray.io/node-type=head -o jsonpath='{.items[0].metadata.name}')
+kubectl -n myuser-slime exec $HEAD -- mkdir -p /fsx/myuser/slime/reference-test/recipe
+kubectl -n myuser-slime cp run_grpo_qwen3_4b.reference.sh $HEAD:/fsx/myuser/slime/reference-test/recipe/run_grpo_qwen3_4b.sh
+kubectl -n myuser-slime cp env_vars.myuser $HEAD:/fsx/myuser/slime/reference-test/env_vars.myuser
+kubectl -n myuser-slime exec $HEAD -- bash -lc '
+  cd /fsx/myuser/slime/reference-test
+  export ENV_FILE=/fsx/myuser/slime/reference-test/env_vars.myuser
+  nohup bash recipe/run_grpo_qwen3_4b.sh > /fsx/myuser/slime/logs/smoke_$(date +%H%M%S).log 2>&1 &'
 
 # [4] 監視: fired up: 2 → RolloutManager ALIVE → MegatronTrainRayActor 起動 → Timer update_weights → Eval aime
 ```
@@ -143,7 +143,7 @@ kubectl -n akazawt-slime exec $HEAD -- bash -lc '
 ## 4. 関連ファイル (このディレクトリ)
 - `PATCH-DESIGN.md` — 層別 patch 設計と切り分け全履歴 (壁ごとの検証ログ)
 - `run_grpo_qwen3_4b.reference.sh` — recipe (リファレンス + literal 展開 + env フック)
-- `env_vars.akazawt` — FSx パス + B300 delta (log_level / cuda-graph-max-bs / no-offload)
+- `env_vars.myuser` — FSx パス + B300 delta (log_level / cuda-graph-max-bs / no-offload)
 - `raycluster-ngc.yaml` — RayCluster (NGC image, GLOO_SOCKET_IFNAME, B300 taint, head 同居)
 - `../reference-build/Dockerfile` — NGC リファレンス + numpy<2 pin
 - `../reference-build/buildkit-job.yaml` — BuildKit Job

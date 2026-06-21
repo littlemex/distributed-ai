@@ -6,7 +6,7 @@
 # 3 セル (A1/A2/B1) を順に GRPO 投入し、weight sync の Timer 値を集計する。
 #
 # 前提:
-#   - RayCluster slime-ray が Ready (akazawt-slime namespace)
+#   - RayCluster slime-ray が Ready (myuser-slime namespace)
 #   - FSx に Qwen3-4B / Qwen3-4B_torch_dist / Qwen3-30B-A3B / _torch_dist 配置済み
 #   - image slime:v0.2.4-ngc-b300 (TE2.12 + numpy<2 + mbridge)
 #   - このディレクトリ (bench/) と recipe/run_grpo_qwen3_4b.reference.sh が FSx に配置済み
@@ -22,9 +22,9 @@
 # ============================================================================
 set -uo pipefail
 
-NS=akazawt-slime
-FSX_BENCH=/fsx/akazawt/slime/reference-test/bench
-FSX_RECIPE=/fsx/akazawt/slime/reference-test/recipe/run_grpo_qwen3_4b.sh
+NS=myuser-slime
+FSX_BENCH=/fsx/myuser/slime/reference-test/bench
+FSX_RECIPE=/fsx/myuser/slime/reference-test/recipe/run_grpo_qwen3_4b.sh
 export BENCH_MEM_FRACTION="${BENCH_MEM_FRACTION:-0.5}"
 
 CELLS=("${@:-A1 A2 B1}")
@@ -49,7 +49,7 @@ done
 for cell in ${CELLS[@]}; do
   EF="$FSX_BENCH/${ENVFILE[$cell]}"
   TS=$(kubectl -n $NS exec "$HEAD" -- date +%H%M%S 2>/dev/null | tr -d '\r')
-  LOG="/fsx/akazawt/slime/logs/bench_${cell}_${TS}.log"
+  LOG="/fsx/myuser/slime/logs/bench_${cell}_${TS}.log"
   echo "==================================================================="
   echo "[INFO] セル $cell 投入: env=${ENVFILE[$cell]} mem-fraction=$BENCH_MEM_FRACTION log=$LOG"
   echo "==================================================================="
@@ -59,7 +59,7 @@ for cell in ${CELLS[@]}; do
   done
   # 投入 (run_grpo は COLOCATE/MODEL_SCRIPT/MOE_ARGS 等を env から読む)
   kubectl -n $NS exec "$HEAD" -- bash -lc "
-    cd /fsx/akazawt/slime/reference-test
+    cd /fsx/myuser/slime/reference-test
     export BENCH_MEM_FRACTION=$BENCH_MEM_FRACTION
     export ENV_FILE=$EF
     nohup bash $FSX_RECIPE > $LOG 2>&1 &

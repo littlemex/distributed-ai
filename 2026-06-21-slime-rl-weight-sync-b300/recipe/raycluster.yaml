@@ -8,12 +8,12 @@
 #   - EFA: 32 -> 16 (p5 -> p6-b300)
 #   - worker に B300 taint の toleration + nodeSelector (リファレンスは p5 専有前提で不要だった)
 #   - kai-scheduler を明示 (このクラスタの既定スケジューラ)
-#   - FSx claim = fsx-akazawt-slime
+#   - FSx claim = fsx-myuser-slime
 apiVersion: ray.io/v1
 kind: RayCluster
 metadata:
   name: slime-ray
-  namespace: akazawt-slime
+  namespace: myuser-slime
   labels: { app: slime-grpo }
 spec:
   rayVersion: "2.55.1"
@@ -45,7 +45,7 @@ spec:
               - { name: fsx, mountPath: /fsx }
               - { name: dshm, mountPath: /dev/shm }
         volumes:
-          - { name: fsx, persistentVolumeClaim: { claimName: fsx-akazawt-slime } }
+          - { name: fsx, persistentVolumeClaim: { claimName: fsx-myuser-slime } }
           - { name: dshm, emptyDir: { medium: Memory, sizeLimit: "64Gi" } }
         tolerations:
           - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
@@ -104,7 +104,7 @@ spec:
                 - { name: fsx, mountPath: /fsx }
                 - { name: dshm, mountPath: /dev/shm }
           volumes:
-            - { name: fsx, persistentVolumeClaim: { claimName: fsx-akazawt-slime } }
+            - { name: fsx, persistentVolumeClaim: { claimName: fsx-myuser-slime } }
             - { name: dshm, emptyDir: { medium: Memory, sizeLimit: "256Gi" } }
           restartPolicy: Never
           terminationGracePeriodSeconds: 300

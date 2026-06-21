@@ -4,7 +4,7 @@
 
 ## なぜ測り直すか (既存測定の問題)
 
-初期の3測定 (`env_vars.akazawt` / `env_vars.disagg-4b` / `env_vars.disagg-30b`) は、
+初期の3測定 (`env_vars.myuser` / `env_vars.disagg-4b` / `env_vars.disagg-30b`) は、
 方式やモデルを変えるときに **engine 数・mem-fraction も同時に動いていた**ため、
 「方式の差」を主張するには交絡が大きすぎた。
 
@@ -91,7 +91,7 @@ BENCH_MEM_FRACTION=<決めた値> ./run_bench.sh A1 A2 B1
 ## 実測結果 (2026-06-21 実施・確定)
 
 3 セルとも mem-fraction 0.5・engine 数 4 で完走 (OOM なし)。一次データは
-`/fsx/akazawt/slime/logs/bench_{A1,A2,B1}_*.log` の `Timer update_weights end`。
+`/fsx/myuser/slime/logs/bench_{A1,A2,B1}_*.log` の `Timer update_weights end`。
 
 | セル | モデル | 方式 | engine (構成) | mem-frac | 初回 | **定常** |
 | --- | --- | --- | --- | --- | --- | --- |

@@ -42,7 +42,7 @@ NVIDIA B300 (Blackwell, sm_103) を使った Amazon EKS 上で、RL post-trainin
 └── COMPLETE-GUIDE.md # 壁ごとの真因・再現手順・ハマりどころ早見表
 ```
 
-> `bench/` のスクリプト・env は akazawt の検証環境 (namespace `akazawt-slime`、FSx `/fsx/akazawt/...`) の
+> `bench/` のスクリプト・env は myuser の検証環境 (namespace `myuser-slime`、FSx `/fsx/myuser/...`) の
 > パスを含む。各自の環境では namespace・FSx パスを置き換えて使う (env/ と同方針)。
 
 ## 検証環境

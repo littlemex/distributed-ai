@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: slime-ngc-build
-  namespace: akazawt-slime
+  namespace: myuser-slime
 spec:
   ttlSecondsAfterFinished: 172800
   backoffLimit: 0
@@ -44,6 +44,6 @@ spec:
               - { key: requirements.txt, path: requirements.txt }
         - name: docker-config
           secret:
-            secretName: ecr-akazawt-own
+            secretName: ecr-myuser-own
             items:
               - { key: .dockerconfigjson, path: config.json }

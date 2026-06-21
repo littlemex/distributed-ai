@@ -121,7 +121,7 @@ TE 不在時に Megatron が要求するフラグ群:
 
 対象 image: `slime:v0.2.4-ngc-b300` (NGC base, **TE 2.12 同梱**)。recipe は
 `run_grpo_qwen3_4b.reference.sh` (アドホックフラグ 0、リファレンスとの差分は MODEL_ARGS
-の literal 展開 1 点のみ)。env_vars は `env_vars.akazawt` (FSx パスのみ調整)。
+の literal 展開 1 点のみ)。env_vars は `env_vars.myuser` (FSx パスのみ調整)。
 
 | 観測 | 結果 | 解釈 |
 |---|---|---|
@@ -199,7 +199,7 @@ log_level 修正で rollout が ALIVE 起動した後、**MegatronTrainRayActor 
 - 対処: **`--no-offload-train --no-offload-rollout`** で offload_train を切る → LD_PRELOAD 分岐
   自体がスキップされる。B300 192GB なら offload 不要なので設計判断としても妥当 (旧 L3-3 と一致)。
 
-### 確定した修正 (env_vars.akazawt に隔離、recipe はリファレンス形を保持)
+### 確定した修正 (env_vars.myuser に隔離、recipe はリファレンス形を保持)
 
 4 層すべてを env に隔離し、recipe 本体はリファレンス形 (フック `${SGLANG_EXTRA_ARGS}` /
 `${TRAIN_EXTRA_ARGS}` / `${SGLANG_LOG_LEVEL}` のみ追加) を保つ:
