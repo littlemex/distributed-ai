@@ -1,0 +1,30 @@
+# apple-to-apple weight sync 実測 (2026-06-21)
+# 全セル: engine 数=4, mem-fraction-static=0.5, GRPO (n-samples 8, GBS 128)
+# image: slime:v0.2.4-ngc-b300 / p6-b300 x2 / recipe は run_grpo.sh を無改変使用
+# 一次データ: ray job logs の "Timer update_weights end" 行
+
+## A1: Qwen3-4B colocated (CUDA IPC, UpdateWeightFromTensor)
+#   engine 4 (TP4x4, 16/4), mem-fraction 0.5
+Timer update_weights end (elapsed: 2.6s)   # 初回 (IPC handle 確立込み)
+Timer update_weights end (elapsed: 1.6s)   # 定常
+Timer update_weights end (elapsed: 1.5s)   # 定常
+Timer update_weights end (elapsed: 1.4s)   # 定常
+# -> 定常 ~1.5s
+
+## A2: Qwen3-4B disaggregated (NCCL/EFA, UpdateWeightFromDistributed)
+#   engine 4 (TP2x4, 8/2), mem-fraction 0.5, actor 8
+Timer update_weights end (elapsed: 3.0s)   # 初回 (NCCL group 確立込み)
+Timer update_weights end (elapsed: 0.3s)   # 定常
+Timer update_weights end (elapsed: 0.3s)   # 定常
+# -> 定常 ~0.3s
+
+## B1: Qwen3-30B-A3B MoE disaggregated (NCCL/EFA)
+#   engine 4 (TP2x4, 8/2), EP2, mem-fraction 0.5, actor 4 (DP2xTP2), driver 1
+#   MoE: --sglang-moe-runner-backend triton (flashinfer_trtllm swizzled 回避)
+Timer update_weights end (elapsed: 13.1s)  # 初回
+Timer update_weights end (elapsed: 10.1s)  # 定常
+# -> 定常 ~10.1s
+
+## 結論
+# 方式軸 (A1 vs A2): disaggregated が colocated の約5倍速い (0.3s vs 1.5s) ※engine数/mem-fraction 統一
+# 規模軸 (A2 vs B1): 30B MoE は 4B の約34倍 (10.1s vs 0.3s) ※方式/engine数/mem-fraction 統一

@@ -1,0 +1,117 @@
+# NGC リファレンス image (slime:v0.2.4-ngc-b300) 用 RayCluster
+# awsome-distributed-ai の kubernetes/raycluster.yaml をベースに、B300 クラスタ向けに
+# 最小調整したもの。リファレンス本来の「全部入り image (/opt/slime)」構成を維持し、
+# 前回の plain image + FSx init 方式 (アドホック) からリファレンス準拠に戻す。
+#
+# 調整点 (リファレンスからの最小 diff):
+#   - image: 自前 NGC build (TE 同梱)
+#   - EFA: 32 -> 16 (p5 -> p6-b300)
+#   - worker に B300 taint の toleration + nodeSelector (リファレンスは p5 専有前提で不要だった)
+#   - kai-scheduler を明示 (このクラスタの既定スケジューラ)
+#   - FSx claim = fsx-myuser-slime
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: slime-ray
+  namespace: myuser-slime
+  labels: { app: slime-grpo }
+spec:
+  rayVersion: "2.55.1"
+  enableInTreeAutoscaling: false
+  headGroupSpec:
+    rayStartParams: { dashboard-host: "0.0.0.0", num-gpus: "0" }
+    template:
+      metadata:
+        labels: { ray.io/node-type: head, app: slime-grpo }
+      spec:
+        schedulerName: kai-scheduler
+        containers:
+          - name: ray-head
+            image: 012345678901.dkr.ecr.us-west-2.amazonaws.com/slime:v0.2.4-ngc-b300
+            imagePullPolicy: IfNotPresent
+            ports: [{containerPort: 6379}, {containerPort: 8265}, {containerPort: 10001}]
+            env:
+              - { name: NVIDIA_VISIBLE_DEVICES, value: "void" }
+              - { name: RAY_memory_monitor_refresh_ms, value: "0" }
+              - { name: PYTHONPATH, value: "/opt/Megatron-LM" }
+              - name: HF_TOKEN
+                valueFrom: { secretKeyRef: { name: hf-token, key: HF_TOKEN } }
+              - { name: NCCL_DEBUG, value: "WARN" }
+              - { name: GLOO_SOCKET_IFNAME, value: "eth0" }
+            resources:
+              requests: { cpu: "2", memory: "8Gi" }
+              limits: { cpu: "4", memory: "16Gi" }
+            volumeMounts:
+              - { name: fsx, mountPath: /fsx }
+              - { name: dshm, mountPath: /dev/shm }
+        volumes:
+          - { name: fsx, persistentVolumeClaim: { claimName: fsx-myuser-slime } }
+          - { name: dshm, emptyDir: { medium: Memory, sizeLimit: "64Gi" } }
+        tolerations:
+          - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+          - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+          - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+          - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+          - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+        restartPolicy: Never
+        terminationGracePeriodSeconds: 120
+  workerGroupSpecs:
+    - groupName: gpu-workers
+      replicas: 2
+      minReplicas: 2
+      maxReplicas: 2
+      rayStartParams: { num-gpus: "8" }
+      template:
+        metadata:
+          labels: { ray.io/node-type: worker, app: slime-grpo }
+        spec:
+          schedulerName: kai-scheduler
+          nodeSelector:
+            nvidia.com/gpu.product: NVIDIA-B300-SXM6-AC
+          tolerations:
+            - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+            - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+            - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+            - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+            - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+          containers:
+            - name: ray-worker
+              image: 012345678901.dkr.ecr.us-west-2.amazonaws.com/slime:v0.2.4-ngc-b300
+              imagePullPolicy: IfNotPresent
+              securityContext: { privileged: true }
+              env:
+                - { name: RAY_memory_monitor_refresh_ms, value: "0" }
+                - { name: PYTHONPATH, value: "/opt/Megatron-LM" }
+                - name: HF_TOKEN
+                  valueFrom: { secretKeyRef: { name: hf-token, key: HF_TOKEN } }
+                - { name: FI_PROVIDER, value: "efa" }
+                - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
+                - { name: FI_EFA_FORK_SAFE, value: "1" }
+                - { name: NCCL_PROTO, value: "Simple" }
+                - { name: NCCL_DEBUG, value: "WARN" }
+                - { name: RDMAV_FORK_SAFE, value: "1" }
+                - { name: NCCL_SOCKET_IFNAME, value: "^lo,docker,veth" }
+                # SGLang の TP rank 間制御通信 (broadcast_pyobj) は gloo CPU group を使う。
+                # gloo は NCCL_SOCKET_IFNAME を見ず独自に NIC を選ぶため、複数 NIC (eth0 +
+                # EFA) 環境では誤った interface を掴み TP>1 で broadcast hang する。pod の
+                # 主 NIC eth0 を明示して TP=8 の制御 broadcast を成立させる。
+                - { name: GLOO_SOCKET_IFNAME, value: "eth0" }
+                - { name: TOKENIZERS_PARALLELISM, value: "false" }
+              resources:
+                requests: { cpu: "90", memory: "1800Gi", nvidia.com/gpu: "8", vpc.amazonaws.com/efa: "16" }
+                limits:   { cpu: "190", memory: "3900Gi", nvidia.com/gpu: "8", vpc.amazonaws.com/efa: "16" }
+              volumeMounts:
+                - { name: fsx, mountPath: /fsx }
+                - { name: dshm, mountPath: /dev/shm }
+          volumes:
+            - { name: fsx, persistentVolumeClaim: { claimName: fsx-myuser-slime } }
+            - { name: dshm, emptyDir: { medium: Memory, sizeLimit: "256Gi" } }
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 300
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                      - { key: ray.io/node-type, operator: In, values: ["worker"] }
+                  topologyKey: kubernetes.io/hostname

@@ -1,0 +1,5 @@
+# Qwen3-30B-A3B MoE disaggregated (NCCL/EFA, --sglang-moe-runner-backend triton)
+# update_weights elapsed (監視実測、400 error 0):
+elapsed: 14.4s   # 初回 (NCCL group 確立込み)
+elapsed: 10.2s   # 2回目 (定常)
+elapsed: 10.7s   # 3回目 (定常)
