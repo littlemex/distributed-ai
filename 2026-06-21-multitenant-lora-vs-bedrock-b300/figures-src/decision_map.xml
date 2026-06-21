@@ -1,0 +1,35 @@
+<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <!-- plot frame (clean; diagonal divides the regions) -->
+    <mxCell id="frame" value="" style="rounded=0;fillColor=#FBFCFD;strokeColor=#C7CFD6;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="300" y="130" width="900" height="500" as="geometry"/></mxCell>
+    <!-- corner accents (no full triangle): small tint badges behind each region label -->
+    <mxCell id="self_badge" value="" style="rounded=1;arcSize=20;fillColor=#E3EEEC;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="860" y="168" width="320" height="70" as="geometry"/></mxCell>
+    <mxCell id="bed_badge" value="" style="rounded=1;arcSize=20;fillColor=#F2F4F6;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="320" y="512" width="300" height="78" as="geometry"/></mxCell>
+
+    <!-- diagonal break-even line (top-left -> bottom-right separates self-host top-right from Bedrock bottom-left) -->
+    <mxCell id="diag" value="" style="endArrow=none;html=1;strokeColor=#2D6E6E;strokeWidth=3;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="330" y="150" as="sourcePoint"/><mxPoint x="1170" y="610" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="diag_lbl" value="break-even" style="text;html=1;align=center;fontSize=16;fontStyle=2;fontColor=#2D6E6E;rotation=28;" vertex="1" parent="1"><mxGeometry x="470" y="232" width="140" height="24" as="geometry"/></mxCell>
+
+    <!-- region labels -->
+    <mxCell id="self_lbl" value="Self-host GPU pool" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="860" y="178" width="280" height="34" as="geometry"/></mxCell>
+    <mxCell id="self_lbl2" value="cheaper + higher goodput" style="text;html=1;align=center;fontSize=16;fontColor=#5A8079;" vertex="1" parent="1"><mxGeometry x="860" y="210" width="320" height="22" as="geometry"/></mxCell>
+    <mxCell id="bed_lbl" value="Bedrock pay-per-token" style="text;html=1;align=center;fontSize=24;fontStyle=1;fontColor=#7A8794;" vertex="1" parent="1"><mxGeometry x="320" y="520" width="300" height="30" as="geometry"/></mxCell>
+    <mxCell id="bed_lbl2" value="no idle-GPU risk" style="text;html=1;align=center;fontSize=16;fontColor=#9AA7B2;" vertex="1" parent="1"><mxGeometry x="320" y="550" width="300" height="22" as="geometry"/></mxCell>
+
+    <!-- axes -->
+    <mxCell id="xaxis" value="" style="endArrow=classic;html=1;strokeColor=#1A2027;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="300" y="650" as="sourcePoint"/><mxPoint x="1210" y="650" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="yaxis" value="" style="endArrow=classic;html=1;strokeColor=#1A2027;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="290" y="650" as="sourcePoint"/><mxPoint x="290" y="120" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="xlbl" value="concurrency / utilization  -&gt;" style="text;html=1;align=center;fontSize=20;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="500" y="668" width="520" height="28" as="geometry"/></mxCell>
+    <mxCell id="ylbl" value="tenant-config size  -&gt;" style="text;html=1;align=center;fontSize=20;fontStyle=1;fontColor=#1A2027;rotation=-90;" vertex="1" parent="1"><mxGeometry x="120" y="270" width="280" height="28" as="geometry"/></mxCell>
+
+    <!-- measured points -->
+    <mxCell id="pt_bed" value="" style="ellipse;fillColor=#C0504D;strokeColor=#FFFFFF;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="372" y="560" width="26" height="26" as="geometry"/></mxCell>
+    <mxCell id="pt_bed_l" value="0.75 req/s (collapses by conc 32)" style="text;html=1;align=left;fontSize=14;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="406" y="600" width="280" height="40" as="geometry"/></mxCell>
+    <mxCell id="pt_b" value="" style="ellipse;fillColor=#5A6B7B;strokeColor=#FFFFFF;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="690" y="296" width="26" height="26" as="geometry"/></mxCell>
+    <mxCell id="pt_b_l" value="self-host LoRA 110 req/s" style="text;html=1;align=left;fontSize=15;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="724" y="294" width="240" height="24" as="geometry"/></mxCell>
+    <mxCell id="pt_b0" value="" style="ellipse;fillColor=#2D6E6E;strokeColor=#FFFFFF;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="1020" y="250" width="30" height="30" as="geometry"/></mxCell>
+    <mxCell id="pt_b0_l" value="self-host B0 398 req/s" style="text;html=1;align=left;fontSize=15;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="1056" y="250" width="240" height="24" as="geometry"/></mxCell>
+  </root>
+</mxGraphModel>

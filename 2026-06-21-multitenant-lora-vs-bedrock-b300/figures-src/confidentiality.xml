@@ -1,0 +1,42 @@
+<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <!-- lane labels -->
+    <mxCell id="ltL" value="LoRA" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="20" y="150" width="90" height="30" as="geometry"/></mxCell>
+    <mxCell id="ltB" value="System&#10;prompt" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#B0563A;" vertex="1" parent="1"><mxGeometry x="20" y="500" width="90" height="56" as="geometry"/></mxCell>
+    <!-- TOP lane: LoRA boundary -->
+    <mxCell id="bndL" value="" style="rounded=1;arcSize=3;fillColor=#FAFAFB;strokeColor=#2D6E6E;strokeWidth=2;dashed=1;" vertex="1" parent="1"><mxGeometry x="130" y="80" width="620" height="280" as="geometry"/></mxCell>
+    <mxCell id="bndLt" value="tenant boundary" style="text;html=1;align=left;fontSize=15;fontStyle=2;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="150" y="92" width="300" height="22" as="geometry"/></mxCell>
+    <mxCell id="dataL" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="170" y="155" width="90" height="90" as="geometry"/></mxCell>
+    <mxCell id="dataLt" value="raw data" style="text;html=1;align=center;fontSize=17;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="155" y="248" width="120" height="22" as="geometry"/></mxCell>
+    <mxCell id="ftL" value="LoRA FT" style="rounded=1;arcSize=12;fillColor=#2D6E6E;strokeColor=none;fontSize=19;fontColor=#FFFFFF;" vertex="1" parent="1"><mxGeometry x="320" y="178" width="150" height="50" as="geometry"/></mxCell>
+    <mxCell id="eL1" value="" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="250" y="200" as="sourcePoint"/><mxPoint x="320" y="203" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="adp" value="adapter" style="rounded=1;arcSize=16;fillColor=#1A2027;strokeColor=none;fontSize=19;fontColor=#FFFFFF;" vertex="1" parent="1"><mxGeometry x="560" y="178" width="140" height="50" as="geometry"/></mxCell>
+    <mxCell id="eL2" value="" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="470" y="203" as="sourcePoint"/><mxPoint x="560" y="203" as="targetPoint"/></mxGeometry></mxCell>
+    <!-- adapter crosses boundary to pool -->
+    <mxCell id="eL3" value="" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="700" y="203" as="sourcePoint"/><mxPoint x="950" y="203" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="eL3t" value="only weights cross — no raw data" style="text;html=1;align=center;fontSize=17;fontStyle=2;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="680" y="148" width="300" height="22" as="geometry"/></mxCell>
+    <mxCell id="poolL" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="960" y="155" width="90" height="90" as="geometry"/></mxCell>
+    <mxCell id="poolLt" value="shared pool" style="text;html=1;align=center;fontSize=17;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="950" y="248" width="120" height="22" as="geometry"/></mxCell>
+    <mxCell id="okL" value="confidential&#10;tenant safe" style="text;html=1;align=left;fontSize=20;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="1110" y="175" width="320" height="60" as="geometry"/></mxCell>
+
+    <!-- divider -->
+    <mxCell id="div" value="" style="endArrow=none;html=1;strokeColor=#E2E7EC;strokeWidth=2;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="40" y="410" as="sourcePoint"/><mxPoint x="1440" y="410" as="targetPoint"/></mxGeometry></mxCell>
+
+    <!-- BOTTOM lane: prompt boundary -->
+    <mxCell id="bndB" value="" style="rounded=1;arcSize=3;fillColor=#FAFAFB;strokeColor=#B0563A;strokeWidth=2;dashed=1;" vertex="1" parent="1"><mxGeometry x="130" y="450" width="620" height="260" as="geometry"/></mxCell>
+    <mxCell id="bndBt" value="tenant boundary" style="text;html=1;align=left;fontSize=15;fontStyle=2;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="150" y="462" width="300" height="22" as="geometry"/></mxCell>
+    <mxCell id="dbB" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;fillColor=#5A6B7B;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="170" y="515" width="90" height="90" as="geometry"/></mxCell>
+    <mxCell id="dbBt" value="tenant config" style="text;html=1;align=center;fontSize=17;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="150" y="608" width="130" height="22" as="geometry"/></mxCell>
+    <mxCell id="acl" value="access&#10;control" style="rounded=1;arcSize=12;fillColor=#F9F0EE;strokeColor=#B0563A;strokeWidth=2;fontSize=18;fontColor=#B0563A;" vertex="1" parent="1"><mxGeometry x="330" y="535" width="150" height="50" as="geometry"/></mxCell>
+    <mxCell id="eB1" value="" style="endArrow=classic;html=1;strokeColor=#1A2027;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="250" y="560" as="sourcePoint"/><mxPoint x="330" y="560" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="inj" value="inject prompt" style="rounded=1;arcSize=16;fillColor=#FDECEA;strokeColor=#B0563A;strokeWidth=1.5;fontSize=18;fontColor=#B0563A;" vertex="1" parent="1"><mxGeometry x="560" y="535" width="150" height="50" as="geometry"/></mxCell>
+    <mxCell id="eB2" value="" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="480" y="560" as="sourcePoint"/><mxPoint x="560" y="560" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="eB3" value="" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="710" y="560" as="sourcePoint"/><mxPoint x="960" y="560" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="eB3t" value="raw data crosses every request" style="text;html=1;align=center;fontSize=17;fontStyle=2;fontColor=#B0563A;" vertex="1" parent="1"><mxGeometry x="680" y="595" width="300" height="22" as="geometry"/></mxCell>
+    <mxCell id="poolB" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#5A6B7B;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="960" y="515" width="90" height="90" as="geometry"/></mxCell>
+    <mxCell id="poolBt" value="shared pool" style="text;html=1;align=center;fontSize=17;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="950" y="608" width="120" height="22" as="geometry"/></mxCell>
+    <mxCell id="ngB" value="access control&#10;mandatory" style="text;html=1;align=left;fontSize=20;fontStyle=1;fontColor=#B0563A;" vertex="1" parent="1"><mxGeometry x="1110" y="535" width="320" height="60" as="geometry"/></mxCell>
+  </root>
+</mxGraphModel>

@@ -1,0 +1,29 @@
+<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <!-- common entry -->
+    <mxCell id="u" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#5A6B7B;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="80" y="330" width="96" height="96" as="geometry"/></mxCell>
+    <mxCell id="ut" value="128 tenants" style="text;html=1;align=center;fontSize=17;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="60" y="430" width="136" height="24" as="geometry"/></mxCell>
+
+    <!-- branch arrows -->
+    <mxCell id="b1" value="" style="endArrow=classic;html=1;strokeColor=#9AA7B2;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="186" y="360" as="sourcePoint"/><mxPoint x="430" y="220" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="b2" value="" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="186" y="378" as="sourcePoint"/><mxPoint x="430" y="390" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="b3" value="" style="endArrow=classic;html=1;strokeColor=#9AA7B2;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="186" y="396" as="sourcePoint"/><mxPoint x="430" y="560" as="targetPoint"/></mxGeometry></mxCell>
+
+    <!-- A: Bedrock (long prompt) -->
+    <mxCell id="ai" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#5A6B7B;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="440" y="160" width="80" height="80" as="geometry"/></mxCell>
+    <mxCell id="aL" value="A  Bedrock" style="text;html=1;align=left;fontSize=22;fontStyle=1;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="540" y="170" width="320" height="30" as="geometry"/></mxCell>
+    <mxCell id="aL2" value="long system prompt  ·  pay per token" style="text;html=1;align=left;fontSize=17;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="540" y="204" width="500" height="24" as="geometry"/></mxCell>
+
+    <!-- B: self-host LoRA (highlighted) -->
+    <mxCell id="bi" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="440" y="350" width="80" height="80" as="geometry"/></mxCell>
+    <mxCell id="bL" value="B  self-host LoRA" style="text;html=1;align=left;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="540" y="360" width="400" height="30" as="geometry"/></mxCell>
+    <mxCell id="bL2" value="short query + adapter  ·  instance cost" style="text;html=1;align=left;fontSize=17;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="540" y="394" width="500" height="24" as="geometry"/></mxCell>
+
+    <!-- B0: self-host prompt -->
+    <mxCell id="ci" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#5A6B7B;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="440" y="540" width="80" height="80" as="geometry"/></mxCell>
+    <mxCell id="cL" value="B0  self-host prompt" style="text;html=1;align=left;fontSize=22;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="540" y="550" width="440" height="30" as="geometry"/></mxCell>
+    <mxCell id="cL2" value="same long prompt, same hardware  ·  isolates managed vs owned" style="text;html=1;align=left;fontSize=17;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="540" y="584" width="640" height="24" as="geometry"/></mxCell>
+  </root>
+</mxGraphModel>

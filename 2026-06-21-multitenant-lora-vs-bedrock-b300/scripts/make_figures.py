@@ -174,8 +174,150 @@ def fig6():
     plt.close(fig)
 
 
+# ---- fig7: tenant-count scale — affinity lowers TTFT (routing value grows with tenants) ----
+def fig7():
+    nts = [32, 64, 128]
+    rr_ttft = [load(f"scale-nt{n}-roundrobin")[0]["ttft_p50"] for n in nts]
+    aff_ttft = [load(f"scale-nt{n}-affinity")[0]["ttft_p50"] for n in nts]
+    fig, ax = plt.subplots(figsize=(11, 7))
+    x = range(len(nts))
+    ax.plot(x, rr_ttft, "s-", lw=3, ms=12, color="#ff7f0e", label="Round-robin")
+    ax.plot(x, aff_ttft, "o-", lw=3, ms=12, color="#1f77b4", label="Affinity (tenant->replica)")
+    ax.set_xticks(list(x)); ax.set_xticklabels([f"{n} tenants" for n in nts])
+    ax.set_ylabel("TTFT p50 (ms) @ conc 256")
+    ax.set_title("Affinity routing cuts cold-swap latency\n(gain largest at low tenant counts: -40% -> -21%)")
+    ax.legend(loc="upper left")
+    for xi, (r, a) in enumerate(zip(rr_ttft, aff_ttft)):
+        ax.annotate(f"-{round((1-a/r)*100)}%", xy=(xi, a), xytext=(xi+0.06, a+10),
+                    fontsize=16, color="#1f77b4", fontweight="bold")
+    ax.set_ylim(220, 520)
+    fig.savefig(os.path.join(OUT, "fig7_tenant_scale_routing.png"))
+    plt.close(fig)
+
+
+# ---- fig8: prompt-size — self-host goodput vs Bedrock (S=512 vs 2048) ----
+def fig8():
+    b0_512 = load("B0-sysprompt"); b0_2048 = load("B0-2048")
+    fig, ax = plt.subplots(figsize=(11, 7))
+    ax.plot(col(b0_512, "concurrency"), col(b0_512, "goodput_req_s"), "o-", lw=3, ms=10,
+            color="#1f77b4", label="self-host, 512-tok prompt")
+    ax.plot(col(b0_2048, "concurrency"), col(b0_2048, "goodput_req_s"), "s-", lw=3, ms=10,
+            color="#17becf", label="self-host, 2048-tok prompt")
+    # break-even lines (flat) for each prompt size
+    for S, c, lab in [(512, "#d62728", "Bedrock break-even S=512 (263)"),
+                      (2048, "#9467bd", "Bedrock break-even S=2048 (83)")]:
+        be = C_CB / (((S + 10) * P_IN + 64 * P_OUT) / 1e6 * 3600)
+        ax.axhline(be, ls="--", lw=2, color=c, label=lab)
+    ax.set_xscale("log", base=2)
+    ax.set_xlabel("Concurrency"); ax.set_ylabel("Goodput (req/s)")
+    ax.set_title("Longer tenant prompt -> self-host wins easier\n(break-even drops as Bedrock bills more input)")
+    ax.legend(loc="upper left", fontsize=14)
+    fig.savefig(os.path.join(OUT, "fig8_prompt_size.png"))
+    plt.close(fig)
+
+
+# ---- fig9: cost vs monthly tokens, by SaaS tier (replaces the cost_tier table) ----
+def fig9():
+    import numpy as np
+    import matplotlib.patches as mpatches
+    # Bedrock: pay-per-token straight line. Blended $/token for the S=512,64out mix.
+    S, U, O = 512, 10, 64
+    tok_per_req = S + U + O
+    bedrock_per_req = ((S + U) * P_IN + O * P_OUT) / 1e6          # $/request
+    bedrock_per_tok = bedrock_per_req / tok_per_req               # $/token
+    # self-host: fixed monthly cost of one p6-b300 node
+    node_month = C_CB * 730                                       # $/month
+    be_tok = node_month / bedrock_per_tok                         # break-even monthly tokens
+    cap_node = be_tok * 1.5                                       # one node serves ~1.5x break-even before saturating
+
+    # design palette
+    INK, SUB, GRID = "#1A2027", "#5A6B7B", "#D8DEE4"
+    TEAL, WARN, BG = "#2D6E6E", "#B0563A", "#FBFCFD"
+    BEDC = "#5A6B7B"
+
+    fig, ax = plt.subplots(figsize=(12.5, 7.2))
+    fig.patch.set_facecolor("white"); ax.set_facecolor(BG)
+
+    xmax = be_tok * 2.0
+    x = np.linspace(0, xmax, 400)
+
+    # tier band x-ranges (monthly tokens): Free/Pro small, Enterprise large, Confidential overlaps high
+    fp_cap = be_tok * 0.10          # Free/Pro credit cap (low)
+    ent_cap = be_tok * 0.85         # Enterprise Bedrock credit cap (strict)
+    ax.axvspan(0, fp_cap, color="#EAF1F1", alpha=0.5, zorder=0)
+    ax.axvspan(fp_cap, be_tok, color="#F2F4F6", alpha=0.6, zorder=0)
+    ax.axvspan(be_tok, xmax, color="#E3EEEC", alpha=0.6, zorder=0)
+
+    # Bedrock pay-per-token line
+    ax.plot(x, bedrock_per_tok * x, "-", lw=3.2, color=BEDC, label="Bedrock (pay-per-token)", zorder=5)
+    # self-host fixed cost (one node), only meaningful once you commit the node
+    ax.hlines(node_month, 0, xmax, ls="--", lw=3, color=TEAL,
+              label="Self-host GPU (fixed / node)", zorder=5)
+
+    # break-even marker
+    ax.plot([be_tok], [node_month], "o", ms=16, color=TEAL, zorder=7,
+            markeredgecolor="white", markeredgewidth=2)
+    ax.annotate("break-even\n~692M req/mo (263 req/s)",
+                xy=(be_tok, node_month), xytext=(be_tok * 1.02, node_month * 1.55),
+                fontsize=15, color=TEAL, fontweight="bold",
+                arrowprops=dict(arrowstyle="->", color=TEAL, lw=2))
+
+    ymax = node_month * 3.0
+    ax.set_ylim(0, ymax); ax.set_xlim(0, xmax)
+
+    # Free/Pro credit cap (horizontal hard limit on Bedrock spend, low)
+    fp_cap_cost = bedrock_per_tok * fp_cap
+    ax.plot([0, fp_cap], [fp_cap_cost, fp_cap_cost], ":", lw=2.4, color=WARN, zorder=6)
+    ax.plot([fp_cap, fp_cap], [0, fp_cap_cost], ":", lw=2.4, color=WARN, zorder=6)
+    ax.annotate("Free/Pro: low credit cap;\nspill to spare GPU when idle",
+                xy=(fp_cap, fp_cap_cost), xytext=(fp_cap * 0.6, ymax * 0.42),
+                fontsize=13, color=WARN, ha="left",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=WARN, lw=1, alpha=0.95),
+                arrowprops=dict(arrowstyle="->", color=WARN, lw=1.6))
+
+    # Enterprise credit cap (strict) + GPU fixed alternative — placed in open space, boxed
+    ent_cap_cost = bedrock_per_tok * ent_cap
+    ax.plot([ent_cap, ent_cap], [0, ent_cap_cost], ":", lw=2.4, color=WARN, zorder=6)
+    ax.annotate("Enterprise: Bedrock credit is strict\n-> run OSS on the fixed-cost GPU pool",
+                xy=(ent_cap, node_month), xytext=(fp_cap * 1.05, ymax * 0.74),
+                fontsize=13, color=INK, ha="left",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=SUB, lw=1, alpha=0.95),
+                arrowprops=dict(arrowstyle="->", color=SUB, lw=1.6))
+
+    # tier labels along the x axis (just above axis)
+    for xc, txt, col in [(fp_cap * 0.5, "Free / Pro", TEAL),
+                         ((fp_cap + be_tok) / 2, "Enterprise", INK),
+                         ((be_tok + xmax) / 2, "Confidential", WARN)]:
+        ax.text(xc, ymax * 0.035, txt, ha="center", va="bottom", fontsize=15,
+                fontweight="bold", color=col)
+    # Confidential note — darker, larger, boxed for contrast
+    ax.text((be_tok + xmax) / 2, ymax * 0.115,
+            "either path OK if access control\nis enforced (constraints vary)",
+            ha="center", va="bottom", fontsize=12.5, color=WARN,
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=WARN, lw=1, alpha=0.9))
+
+    # shade region where self-host is cheaper (above break-even tokens, below the bedrock line)
+    ax.fill_between(x, node_month, bedrock_per_tok * x,
+                    where=(x >= be_tok), color=TEAL, alpha=0.10, zorder=1)
+    ax.text(be_tok * 1.5, node_month * 1.62, "self-host cheaper",
+            ha="center", fontsize=14, color=TEAL, fontweight="bold")
+
+    ax.set_xlabel("Monthly tokens served  ->")
+    ax.set_ylabel("Monthly cost ($)")
+    ax.set_title("Cost vs token volume, by SaaS tier\n(Bedrock scales with usage; self-host GPU is a fixed cost)")
+    # format axes ticks compactly
+    ax.set_yticks([0, node_month, node_month * 2, node_month * 3])
+    ax.set_yticklabels(["0", "$68k\n(1 node)", "$137k", "$205k"])
+    ax.set_xticks([0, fp_cap, be_tok, xmax])
+    ax.set_xticklabels(["0", "low", "break-even", "high"])
+    ax.legend(loc="upper center", fontsize=14, framealpha=0.95)
+    ax.grid(True, alpha=0.25)
+    fig.savefig(os.path.join(OUT, "fig9_cost_tier.png"))
+    plt.close(fig)
+
+
 if __name__ == "__main__":
-    fig1(); fig2(); fig3(); fig4(); fig5(); fig6()
+    fig1(); fig2(); fig3(); fig4(); fig5(); fig6(); fig7(); fig8(); fig9()
     print("[OK] figures generated in", OUT)
     for f in sorted(os.listdir(OUT)):
         print("  ", f)

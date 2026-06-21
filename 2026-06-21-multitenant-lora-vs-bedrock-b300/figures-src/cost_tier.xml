@@ -1,0 +1,28 @@
+<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <!-- column headers -->
+    <mxCell id="hTier" value="Tier" style="rounded=0;fillColor=#E7ECEF;strokeColor=#C7CFD6;fontSize=18;fontStyle=1;fontColor=#1A2027;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="80" y="120" width="320" height="64" as="geometry"/></mxCell>
+    <mxCell id="hPPT" value="Pay-per-token (Bedrock)" style="rounded=0;fillColor=#2D6E6E;strokeColor=none;fontSize=18;fontStyle=1;fontColor=#FFFFFF;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="400" y="120" width="480" height="64" as="geometry"/></mxCell>
+    <mxCell id="hGPU" value="Fixed-cost GPU pool (self-host)" style="rounded=0;fillColor=#1A2027;strokeColor=none;fontSize=18;fontStyle=1;fontColor=#FFFFFF;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="880" y="120" width="520" height="64" as="geometry"/></mxCell>
+    <!-- rows -->
+    <!-- Free/Pro -->
+    <mxCell id="rFree" value="Free / Pro" style="rounded=0;fillColor=#F7F9FA;strokeColor=#C7CFD6;fontSize=18;fontStyle=1;fontColor=#1A2027;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="80" y="184" width="320" height="150" as="geometry"/></mxCell>
+    <mxCell id="rFreeS" value="bursty, low use" style="text;html=1;align=center;fontSize=14;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="80" y="290" width="320" height="20" as="geometry"/></mxCell>
+    <mxCell id="cFreePPT" value="BEST FIT&#10;low traffic, no idle GPU" style="rounded=0;fillColor=#2D6E6E;strokeColor=#FFFFFF;strokeWidth=2;fontSize=16;fontStyle=1;fontColor=#FFFFFF;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="400" y="184" width="480" height="150" as="geometry"/></mxCell>
+    <mxCell id="cFreeGPU" value="idle GPU wasted" style="rounded=0;fillColor=#FFFFFF;strokeColor=#E2E7EC;fontSize=15;fontColor=#9AA7B2;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="880" y="184" width="520" height="150" as="geometry"/></mxCell>
+    <!-- Enterprise -->
+    <mxCell id="rEnt" value="Enterprise" style="rounded=0;fillColor=#F7F9FA;strokeColor=#C7CFD6;fontSize=18;fontStyle=1;fontColor=#1A2027;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="80" y="334" width="320" height="150" as="geometry"/></mxCell>
+    <mxCell id="rEntS" value="high sustained load" style="text;html=1;align=center;fontSize=14;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="80" y="440" width="320" height="20" as="geometry"/></mxCell>
+    <mxCell id="cEntPPT" value="cost grows with traffic" style="rounded=0;fillColor=#FFFFFF;strokeColor=#E2E7EC;fontSize=15;fontColor=#9AA7B2;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="400" y="334" width="480" height="150" as="geometry"/></mxCell>
+    <mxCell id="cEntGPU" value="BEST FIT&#10;pooled, high utilization" style="rounded=0;fillColor=#1A2027;strokeColor=#FFFFFF;strokeWidth=2;fontSize=16;fontStyle=1;fontColor=#FFFFFF;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="880" y="334" width="520" height="150" as="geometry"/></mxCell>
+    <!-- Confidential -->
+    <mxCell id="rConf" value="Confidential" style="rounded=0;fillColor=#F9F0EE;strokeColor=#C7CFD6;fontSize=18;fontStyle=1;fontColor=#B0563A;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="80" y="484" width="320" height="150" as="geometry"/></mxCell>
+    <mxCell id="rConfS" value="regulated, zero-exfil" style="text;html=1;align=center;fontSize=14;fontColor=#B0563A;" vertex="1" parent="1"><mxGeometry x="80" y="590" width="320" height="20" as="geometry"/></mxCell>
+    <mxCell id="cConfPPT" value="raw data leaves per request" style="rounded=0;fillColor=#FFFFFF;strokeColor=#E2E7EC;fontSize=15;fontColor=#9AA7B2;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="400" y="484" width="480" height="150" as="geometry"/></mxCell>
+    <mxCell id="cConfGPU" value="BEST FIT&#10;on-prem LoRA, data stays in" style="rounded=0;fillColor=#1A2027;strokeColor=#FFFFFF;strokeWidth=2;fontSize=16;fontStyle=1;fontColor=#FFFFFF;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="880" y="484" width="520" height="150" as="geometry"/></mxCell>
+    <!-- break-even note -->
+    <mxCell id="be" value="break-even: high sustained utilization tips the choice to fixed-cost GPU" style="text;html=1;align=left;fontSize=16;fontStyle=2;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="80" y="650" width="1000" height="24" as="geometry"/></mxCell>
+  </root>
+</mxGraphModel>

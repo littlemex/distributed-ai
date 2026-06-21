@@ -1,0 +1,48 @@
+<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+
+    <!-- ===== left: three tenant requests in one batch ===== -->
+    <mxCell id="batchlbl" value="one batch, mixed tenants" style="text;html=1;align=center;fontSize=14;fontStyle=2;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="30" y="120" width="210" height="22" as="geometry"/></mxCell>
+    <mxCell id="q1" value="req · tenant A" style="rounded=1;arcSize=20;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=15;fontColor=#2D6E6E;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="40" y="156" width="180" height="48" as="geometry"/></mxCell>
+    <mxCell id="q2" value="req · tenant B" style="rounded=1;arcSize=20;fillColor=#F2EFEA;strokeColor=#B08A3A;strokeWidth=1.5;fontSize=15;fontColor=#8A6D2F;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="40" y="372" width="180" height="48" as="geometry"/></mxCell>
+    <mxCell id="q3" value="req · tenant C" style="rounded=1;arcSize=20;fillColor=#F4ECEA;strokeColor=#B0563A;strokeWidth=1.5;fontSize=15;fontColor=#B0563A;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="40" y="556" width="180" height="48" as="geometry"/></mxCell>
+
+    <!-- ===== top: per-tenant adapter bank ===== -->
+    <mxCell id="adlbl" value="per-tenant adapters (small, low-rank) — added unmerged" style="text;html=1;align=center;fontSize=15;fontStyle=2;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="420" y="120" width="560" height="22" as="geometry"/></mxCell>
+    <mxCell id="adA" value="A&#8320; : B&#8320;A&#8320;" style="rounded=1;arcSize=16;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=2;fontSize=16;fontStyle=1;fontColor=#2D6E6E;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="440" y="158" width="150" height="48" as="geometry"/></mxCell>
+    <mxCell id="adB" value="A&#8321; : B&#8321;A&#8321;" style="rounded=1;arcSize=16;fillColor=#F2EFEA;strokeColor=#B08A3A;strokeWidth=2;fontSize=16;fontStyle=1;fontColor=#8A6D2F;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="625" y="158" width="150" height="48" as="geometry"/></mxCell>
+    <mxCell id="adC" value="A&#8322; : B&#8322;A&#8322;" style="rounded=1;arcSize=16;fillColor=#F4ECEA;strokeColor=#B0563A;strokeWidth=2;fontSize=16;fontStyle=1;fontColor=#B0563A;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="810" y="158" width="150" height="48" as="geometry"/></mxCell>
+
+    <!-- ===== center: shared frozen base ===== -->
+    <mxCell id="base" value="" style="rounded=1;arcSize=8;fillColor=#1A2027;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="430" y="320" width="540" height="150" as="geometry"/></mxCell>
+    <mxCell id="baset" value="Frozen base   W&#8320;" style="text;html=1;align=center;fontSize=24;fontStyle=1;fontColor=#FFFFFF;" vertex="1" parent="1"><mxGeometry x="430" y="352" width="540" height="40" as="geometry"/></mxCell>
+    <mxCell id="baselock" value="one shared copy · weights never modified" style="text;html=1;align=center;fontSize=14;fontColor=#AEB9C2;" vertex="1" parent="1"><mxGeometry x="430" y="400" width="540" height="22" as="geometry"/></mxCell>
+
+    <!-- adapters add DOWN into base (three clear vertical arrows) -->
+    <mxCell id="aa" value="add" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;dashed=1;fontSize=13;fontStyle=1;fontColor=#1F5A5A;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="adA" target="base"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="ab" value="add" style="endArrow=classic;html=1;strokeColor=#8A6D2F;strokeWidth=2.5;dashed=1;fontSize=13;fontStyle=1;fontColor=#6E5526;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="adB" target="base"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="ac" value="add" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=2.5;dashed=1;fontSize=13;fontStyle=1;fontColor=#8E4530;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.8;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="adC" target="base"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+    <!-- requests fan IN to base (left) -->
+    <mxCell id="e1" value="" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.18;entryDx=0;entryDy=0;" edge="1" parent="1" source="q1" target="base"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="e2" value="" style="endArrow=classic;html=1;strokeColor=#8A6D2F;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="q2" target="base"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="e3" value="" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.82;entryDx=0;entryDy=0;" edge="1" parent="1" source="q3" target="base"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+    <!-- per-tenant outputs fan OUT (right) -->
+    <mxCell id="o1" value="out · A" style="rounded=1;arcSize=20;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=15;fontColor=#2D6E6E;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="1110" y="156" width="150" height="48" as="geometry"/></mxCell>
+    <mxCell id="o2" value="out · B" style="rounded=1;arcSize=20;fillColor=#F2EFEA;strokeColor=#B08A3A;strokeWidth=1.5;fontSize=15;fontColor=#8A6D2F;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="1110" y="372" width="150" height="48" as="geometry"/></mxCell>
+    <mxCell id="o3" value="out · C" style="rounded=1;arcSize=20;fillColor=#F4ECEA;strokeColor=#B0563A;strokeWidth=1.5;fontSize=15;fontColor=#B0563A;verticalAlign=middle;align=center;" vertex="1" parent="1"><mxGeometry x="1110" y="556" width="150" height="48" as="geometry"/></mxCell>
+    <mxCell id="oc1" value="" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.18;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="base" target="o1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="oc2" value="" style="endArrow=classic;html=1;strokeColor=#8A6D2F;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="base" target="o2"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="oc3" value="" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.82;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="base" target="o3"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+    <!-- ===== equation band (bottom) ===== -->
+    <mxCell id="eqbg" value="" style="rounded=1;arcSize=4;fillColor=#F7F9FA;strokeColor=#D8DEE4;strokeWidth=1.5;" vertex="1" parent="1"><mxGeometry x="50" y="640" width="1210" height="96" as="geometry"/></mxCell>
+    <mxCell id="eq1" value="h = W&#8320; x + &#916;W x = W&#8320; x + B&#7522;A&#7522; x" style="text;html=1;align=center;fontSize=26;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="70" y="654" width="600" height="40" as="geometry"/></mxCell>
+    <mxCell id="eq1n" value="unmerged: base output W&#8320;x is kept, the low-rank B&#7522;A&#7522;x for request i is added on top" style="text;html=1;align=center;fontSize=14;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="70" y="698" width="600" height="22" as="geometry"/></mxCell>
+    <mxCell id="eq2" value="B is d&#215;r,   A is r&#215;k,   with rank r &#8810; d, k" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="690" y="652" width="540" height="40" as="geometry"/></mxCell>
+    <mxCell id="eq2n" value="r is tiny, so each adapter B&#7522;A&#7522; is a few MB &#8212; thousands fit beside one W&#8320;" style="text;html=1;align=center;fontSize=14;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="690" y="698" width="540" height="22" as="geometry"/></mxCell>
+  </root>
+</mxGraphModel>
