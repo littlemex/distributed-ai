@@ -3,9 +3,9 @@
 # ノード間 SSH(鍵共有 + port 2222 sshd)をセットアップしてから mpirun で束ねる。
 #
 # 前提: manifests/10-two-nodes.yaml を apply 済み。
-# Usage: NAMESPACE=akazawt-gpudirect-rdma ./recipe/run-nccl-allreduce.sh
+# Usage: NAMESPACE=myuser-gpudirect-rdma ./recipe/run-nccl-allreduce.sh
 set -euo pipefail
-NS="${NAMESPACE:-akazawt-gpudirect-rdma}"
+NS="${NAMESPACE:-myuser-gpudirect-rdma}"
 PORT="${SSH_PORT:-2222}"
 
 SRV_IP="$(kubectl -n "$NS" get pod rdma-server -o jsonpath='{.status.podIP}')"

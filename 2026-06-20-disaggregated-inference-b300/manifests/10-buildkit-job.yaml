@@ -1,5 +1,5 @@
 # BuildKit Job: vLLM 0.21.0 + NIXL + UCCL-EP image を B300 node 上で build し
-# 自アカウント ECR (776010787911) に push する。
+# 自アカウント ECR (012345678901) に push する。
 #
 # 設計:
 #   - privileged buildkitd を 1 Pod で起動し buildctl で build → ECR push
@@ -7,7 +7,7 @@
 #   - Dockerfile は COPY/ADD なし (全部 git clone) なので context は Dockerfile 1枚
 #   - GPU は要求しない (build の smoke test は import チェックのみ)。CPU パワー目的で
 #     B300 node を 1 台一時占有する (192 vCPU で MAX_JOBS=32 が活きる)
-#   - ECR 認証は secret ecr-akazawt-own を ~/.docker/config.json に mount
+#   - ECR 認証は secret ecr-myuser-own を ~/.docker/config.json に mount
 #
 # 注意1: --mount=type=cache を使う Dockerfile なので BuildKit 必須 (Kaniko 不可)
 # 注意2: rootless buildkit だと EFA installer tarball 展開時に tar の chown が
@@ -18,7 +18,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: vllm-build
-  namespace: akazawt-disagg
+  namespace: myuser-disagg
 spec:
   ttlSecondsAfterFinished: 172800
   backoffLimit: 0
@@ -57,7 +57,7 @@ spec:
                 --frontend dockerfile.v0 \
                 --local context=/workspace \
                 --local dockerfile=/workspace \
-                --output type=image,name=776010787911.dkr.ecr.us-west-2.amazonaws.com/vllm-uccl-ep:vllm0.21.0-uccl-0dc87eb-cu13-b300,push=true \
+                --output type=image,name=012345678901.dkr.ecr.us-west-2.amazonaws.com/vllm-uccl-ep:vllm0.21.0-uccl-0dc87eb-cu13-b300,push=true \
                 --export-cache type=inline \
                 --progress=plain
           env:
@@ -83,6 +83,6 @@ spec:
               - { key: Dockerfile, path: Dockerfile }
         - name: docker-config
           secret:
-            secretName: ecr-akazawt-own
+            secretName: ecr-myuser-own
             items:
               - { key: .dockerconfigjson, path: config.json }

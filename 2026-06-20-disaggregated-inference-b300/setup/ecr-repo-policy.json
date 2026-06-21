@@ -6,8 +6,8 @@
       "Effect": "Allow",
       "Principal": {
         "AWS": [
-          "arn:aws:iam::159553542841:role/KarpenterNode-ml-clusters-shared-us-west-2",
-          "arn:aws:iam::159553542841:role/system-node-group-ml-clusters-shared-us-west-2"
+          "arn:aws:iam::012345678902:role/KarpenterNode-ml-clusters-shared-us-west-2",
+          "arn:aws:iam::012345678902:role/system-node-group-ml-clusters-shared-us-west-2"
         ]
       },
       "Action": [

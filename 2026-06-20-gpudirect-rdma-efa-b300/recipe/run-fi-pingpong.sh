@@ -4,9 +4,9 @@
 # 前提: manifests/10-two-nodes.yaml を apply 済みで rdma-server / rdma-client が
 #       別ノードで Running になっていること。
 #
-# Usage: NAMESPACE=akazawt-gpudirect-rdma ./recipe/run-fi-pingpong.sh
+# Usage: NAMESPACE=myuser-gpudirect-rdma ./recipe/run-fi-pingpong.sh
 set -euo pipefail
-NS="${NAMESPACE:-akazawt-gpudirect-rdma}"
+NS="${NAMESPACE:-myuser-gpudirect-rdma}"
 
 SRV_IP="$(kubectl -n "$NS" get pod rdma-server -o jsonpath='{.status.podIP}')"
 echo "[info] server IP = $SRV_IP (hostNetwork なので node IP)"

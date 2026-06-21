@@ -2,10 +2,10 @@
 
 **日付**: 2026-06-20
 **クラスタ**: ml-clusters-shared-us-west-2 (EKS 1.35)
-**namespace**: akazawt-gpudirect-rdma
+**namespace**: myuser-gpudirect-rdma
 **ノード**: p6-b300.48xlarge ×2（NVIDIA B300 SXM6, compute_cap 10.3 / sm_103, 8 GPU/node, EFA 16/node）
 **イメージ**: public.ecr.aws/hpc-cloud/nccl-tests:latest（EFA installer + libfabric 2.1.0amzn5 + nccl-tests + NCCL 2.27.7 同梱）
-**配置**: rdma-server → ip-10-3-67-21 (10.3.67.21) / rdma-client → ip-10-3-70-29 (10.3.70.29)（podAntiAffinity で別ノード）
+**配置**: rdma-server → ip-10-0-0-14 (10.0.0.14) / rdma-client → ip-10-0-0-13 (10.0.0.13)（podAntiAffinity で別ノード）
 
 ## ステップ0: EFA provider 確認（fi_info -p efa）
 
@@ -26,7 +26,7 @@ libfabric: 2.1.0amzn5.0
 
 ## デモ1: fi_pingpong（2ノード間 EFA RDMA の RTT）
 
-`fi_pingpong -p efa -e rdm -I 1000`（server 10.3.67.21 ← client 10.3.70.29）:
+`fi_pingpong -p efa -e rdm -I 1000`（server 10.0.0.14 ← client 10.0.0.13）:
 
 | bytes | usec/xfer（往復RTT） | MB/sec |
 |---|---|---|
@@ -77,7 +77,7 @@ busbw（2ノード16GPU、ノード間 EFA）:
 - B300/sm_103 という最新世代での実測（前編は p4d=A100 の話だった）
 
 ## 手順メモ（再現用）
-1. `kubectl create namespace akazawt-gpudirect-rdma`
+1. `kubectl create namespace myuser-gpudirect-rdma`
 2. `manifests/10-two-nodes.yaml` 適用（5 taint + nodeSelector + hostNetwork + privileged + gdrdrv + EFA + NCCL除外env）
 3. SSH 鍵を両 pod で共有、sshd を port 2222 で起動
 4. server pod から `mpirun -np 16 -N 8 -H srv:8,cli:8 --mca plm_rsh_args '-p 2222' ... all_reduce_perf`

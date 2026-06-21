@@ -4,8 +4,8 @@
 # 例:    ./recipe/save-pod-logs.sh app=qwen3-disagg qwen3-8b/logs
 set -euo pipefail
 SEL="${1:?label selector}"; S3_SUB="${2:?s3 subpath}"
-BUCKET="${BUCKET:-akazawt-disagg-b300-776010787911}"
-PROFILE="${AWS_PROFILE:-default}"; REGION="${REGION:-us-west-2}"; NS="${NAMESPACE:-akazawt-disagg}"
+BUCKET="${BUCKET:-myuser-disagg-b300-012345678901}"
+PROFILE="${AWS_PROFILE:-default}"; REGION="${REGION:-us-west-2}"; NS="${NAMESPACE:-myuser-disagg}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 for p in $(kubectl -n "$NS" get pods -l "$SEL" -o jsonpath='{.items[*].metadata.name}'); do
   echo "==> logs $p"
