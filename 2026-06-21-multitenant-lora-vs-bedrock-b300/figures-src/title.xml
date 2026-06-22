@@ -2,10 +2,10 @@
   <root>
     <mxCell id="0"/>
     <mxCell id="1" parent="0"/>
-    <mxCell id="t1" value="Multi-tenant LLM Serving" style="text;html=1;align=center;fontSize=46;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="140" y="200" width="1200" height="60" as="geometry"/></mxCell>
-    <mxCell id="t2" value="Bedrock pay-per-token  vs  a self-hosted GPU pool" style="text;html=1;align=center;fontSize=30;fontStyle=0;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="140" y="282" width="1200" height="44" as="geometry"/></mxCell>
-    <mxCell id="rule" value="" style="endArrow=none;html=1;strokeColor=#2D6E6E;strokeWidth=3;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="560" y="360" as="sourcePoint"/><mxPoint x="920" y="360" as="targetPoint"/></mxGeometry></mxCell>
-    <mxCell id="t3" value="Finding the break-even point on one p6-b300 node (NVIDIA B300 x 8)" style="text;html=1;align=center;fontSize=22;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="140" y="400" width="1200" height="34" as="geometry"/></mxCell>
-    <mxCell id="t4" value="Gemma 4 31B fp8   ·   128 tenants   ·   SLO: TTFT &lt;= 2s, TPOT &lt;= 80ms" style="text;html=1;align=center;fontSize=20;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="140" y="470" width="1200" height="30" as="geometry"/></mxCell>
+    <mxCell id="t1" value="Unlocking Multi-Tenant LLM Inference" style="text;html=1;align=center;fontSize=50;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="60" y="208" width="1360" height="66" as="geometry"/></mxCell>
+    <mxCell id="t2" value="An LLMOps Approach for SaaS" style="text;html=1;align=center;fontSize=32;fontStyle=0;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="60" y="296" width="1360" height="46" as="geometry"/></mxCell>
+    <mxCell id="rule" value="" style="endArrow=none;html=1;strokeColor=#2D6E6E;strokeWidth=3;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="396" as="sourcePoint"/><mxPoint x="880" y="396" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="sp1" value="Toshinobu Akazawa" style="text;html=1;align=center;fontSize=28;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="60" y="452" width="1360" height="38" as="geometry"/></mxCell>
+    <mxCell id="sp2" value="Sr. Solutions Architect, ISV / SaaS · AWS" style="text;html=1;align=center;fontSize=23;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="60" y="496" width="1360" height="30" as="geometry"/></mxCell>
   </root>
 </mxGraphModel>

@@ -1,53 +1,149 @@
-<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
-  <root>
-    <mxCell id="0"/>
-    <mxCell id="1" parent="0"/>
-
-    <!-- ===== left: three tiers of tenants ===== -->
-    <mxCell id="tierlbl" value="tenants by tier" style="text;html=1;align=center;fontSize=14;fontStyle=2;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="30" y="70" width="200" height="22" as="geometry"/></mxCell>
-
-    <mxCell id="tFP" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="60" y="120" width="74" height="74" as="geometry"/></mxCell>
-    <mxCell id="tFPt" value="Free / Pro" style="text;html=1;align=center;fontSize=16;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="20" y="196" width="160" height="22" as="geometry"/></mxCell>
-
-    <mxCell id="tEnt" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#1A2027;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="60" y="330" width="74" height="74" as="geometry"/></mxCell>
-    <mxCell id="tEntt" value="Enterprise" style="text;html=1;align=center;fontSize=16;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="20" y="406" width="160" height="22" as="geometry"/></mxCell>
-
-    <mxCell id="tConf" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#B0563A;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="60" y="540" width="74" height="74" as="geometry"/></mxCell>
-    <mxCell id="tConft" value="Confidential" style="text;html=1;align=center;fontSize=16;fontStyle=1;fontColor=#B0563A;" vertex="1" parent="1"><mxGeometry x="20" y="616" width="160" height="22" as="geometry"/></mxCell>
-
-    <!-- ===== center: policy router ===== -->
-    <mxCell id="router" value="Tier-aware router" style="rounded=1;arcSize=12;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=2;fontSize=17;fontStyle=1;fontColor=#2D6E6E;verticalAlign=top;align=center;spacingTop=14;" vertex="1" parent="1"><mxGeometry x="300" y="300" width="220" height="160" as="geometry"/></mxCell>
-    <mxCell id="routers" value="credits · priority&#10;access control" style="text;html=1;align=center;fontSize=13;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="306" y="362" width="208" height="50" as="geometry"/></mxCell>
-
-    <mxCell id="eFP" value="" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="tFP" target="router"><mxGeometry relative="1" as="geometry"/></mxCell>
-    <mxCell id="eEnt" value="" style="endArrow=classic;html=1;strokeColor=#1A2027;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="tEnt" target="router"><mxGeometry relative="1" as="geometry"/></mxCell>
-    <mxCell id="eConf" value="" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="tConf" target="router"><mxGeometry relative="1" as="geometry"/></mxCell>
-
-    <!-- ===== right: two backends ===== -->
-    <!-- Bedrock backend -->
-    <mxCell id="bed" value="" style="rounded=1;arcSize=6;fillColor=#F7F9FA;strokeColor=#5A6B7B;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="700" y="110" width="700" height="230" as="geometry"/></mxCell>
-    <mxCell id="bedh" value="Amazon Bedrock · pay-per-token" style="text;html=1;align=left;fontSize=17;fontStyle=1;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="742" y="124" width="600" height="24" as="geometry"/></mxCell>
-    <mxCell id="bedicon" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#5A6B7B;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="730" y="170" width="80" height="80" as="geometry"/></mxCell>
-    <mxCell id="bedm" value="high-quality managed models" style="text;html=1;align=left;fontSize=15;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="830" y="184" width="540" height="22" as="geometry"/></mxCell>
-    <mxCell id="bedm2" value="cost scales with usage; per-tier credit limits apply" style="text;html=1;align=left;fontSize=14;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="830" y="214" width="540" height="22" as="geometry"/></mxCell>
-    <mxCell id="bedfp" value="Free/Pro&#10;low credit cap" style="rounded=1;arcSize=14;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=12;fontColor=#2D6E6E;align=center;" vertex="1" parent="1"><mxGeometry x="740" y="272" width="200" height="46" as="geometry"/></mxCell>
-    <mxCell id="bedent" value="Enterprise&#10;strict credit" style="rounded=1;arcSize=14;fillColor=#F2F4F6;strokeColor=#1A2027;strokeWidth=1.5;fontSize=12;fontColor=#1A2027;align=center;" vertex="1" parent="1"><mxGeometry x="942" y="272" width="206" height="46" as="geometry"/></mxCell>
-    <mxCell id="bedconf" value="Confidential&#10;needs access ctrl" style="rounded=1;arcSize=14;fillColor=#F9F0EE;strokeColor=#B0563A;strokeWidth=1.5;fontSize=12;fontColor=#B0563A;align=center;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="1160" y="268" width="216" height="52" as="geometry"/></mxCell>
-
-    <!-- self-host GPU backend -->
-    <mxCell id="gpu" value="" style="rounded=1;arcSize=6;fillColor=#E3EEEC;strokeColor=#2D6E6E;strokeWidth=2.5;" vertex="1" parent="1"><mxGeometry x="700" y="420" width="700" height="230" as="geometry"/></mxCell>
-    <mxCell id="gpuh" value="Self-host GPU pool · OSS · fixed cost" style="text;html=1;align=left;fontSize=17;fontStyle=1;fontColor=#2D6E6E;" vertex="1" parent="1"><mxGeometry x="742" y="434" width="640" height="24" as="geometry"/></mxCell>
-    <mxCell id="gpuicon" value="" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="730" y="480" width="80" height="80" as="geometry"/></mxCell>
-    <mxCell id="gpum" value="multi-LoRA on a shared base, affinity routing" style="text;html=1;align=left;fontSize=15;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="830" y="494" width="540" height="22" as="geometry"/></mxCell>
-    <mxCell id="gpum2" value="cost controlled by fixed GPU spend, regardless of volume" style="text;html=1;align=left;fontSize=14;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="830" y="524" width="540" height="22" as="geometry"/></mxCell>
-    <mxCell id="gpufp" value="Free/Pro&#10;spill here (priority) when GPU idle" style="rounded=1;arcSize=14;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=12;fontColor=#2D6E6E;align=center;" vertex="1" parent="1"><mxGeometry x="740" y="582" width="200" height="46" as="geometry"/></mxCell>
-    <mxCell id="gpuent" value="Enterprise&#10;primary · fixed cost" style="rounded=1;arcSize=14;fillColor=#D7E8E4;strokeColor=#2D6E6E;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#1F5A5A;align=center;" vertex="1" parent="1"><mxGeometry x="942" y="582" width="206" height="46" as="geometry"/></mxCell>
-    <mxCell id="gpuconf" value="Confidential&#10;data stays in" style="rounded=1;arcSize=14;fillColor=#F9F0EE;strokeColor=#B0563A;strokeWidth=1.5;fontSize=12;fontColor=#B0563A;align=center;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="1160" y="578" width="216" height="52" as="geometry"/></mxCell>
-
-    <!-- router -> backends -->
-    <mxCell id="rb" value="high-quality / low volume" style="endArrow=classic;html=1;strokeColor=#5A6B7B;strokeWidth=2.5;edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=12;fontColor=#5A6B7B;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="router" target="bed"><mxGeometry relative="1" as="geometry"/></mxCell>
-    <mxCell id="rg" value="high volume / cost-controlled" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=12;fontStyle=1;fontColor=#2D6E6E;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="router" target="gpu"><mxGeometry relative="1" as="geometry"/></mxCell>
-
-    <!-- priority spill arrow between backends -->
-  </root>
-</mxGraphModel>
+<mxfile host="embed.diagrams.net">
+  <diagram id="5ajyvipo-5jam" name="Page-1">
+    <mxGraphModel dx="1755" dy="1058" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="780" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="tierlbl" parent="1" style="text;html=1;align=center;fontSize=20;fontStyle=3;fontColor=#5A6B7B;" value="&lt;font style=&quot;font-size: 26px;&quot;&gt;tenants by tier&lt;/font&gt;" vertex="1">
+          <mxGeometry height="26" width="220" x="20" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="tFP" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="80" width="80" x="70" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="tFPt" parent="1" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" value="Free / Pro" vertex="1">
+          <mxGeometry height="26" width="180" x="20" y="202" as="geometry" />
+        </mxCell>
+        <mxCell id="tEnt" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#1A2027;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="80" width="80" x="70" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="tEntt" parent="1" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#1A2027;" value="Enterprise" vertex="1">
+          <mxGeometry height="26" width="180" x="20" y="428" as="geometry" />
+        </mxCell>
+        <mxCell id="tConf" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#B0563A;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="80" width="80" x="70" y="580" as="geometry" />
+        </mxCell>
+        <mxCell id="tConft" parent="1" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#B0563A;" value="Confidential" vertex="1">
+          <mxGeometry height="26" width="180" x="20" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="router" parent="1" style="rounded=1;arcSize=6;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=3;" value="" vertex="1">
+          <mxGeometry height="540" width="380" x="300" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ricon" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_load_balancing;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="66" width="66" x="324" y="138" as="geometry" />
+        </mxCell>
+        <mxCell id="rh" parent="1" style="text;html=1;align=left;fontSize=28;fontStyle=1;fontColor=#2D6E6E;verticalAlign=middle;" value="Router" vertex="1">
+          <mxGeometry height="54" width="270" x="400" y="144" as="geometry" />
+        </mxCell>
+        <mxCell id="r1" parent="1" style="rounded=1;arcSize=14;fillColor=#FFFFFF;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=19;fontColor=#1A2027;align=center;" value="Admission control&#xa;(credits / quota)" vertex="1">
+          <mxGeometry height="60" width="332" x="324" y="226" as="geometry" />
+        </mxCell>
+        <mxCell id="r2" parent="1" style="rounded=1;arcSize=14;fillColor=#FFFFFF;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=19;fontColor=#1A2027;align=center;" value="Access control&#xa;(tenant isolation)" vertex="1">
+          <mxGeometry height="60" width="332" x="324" y="298" as="geometry" />
+        </mxCell>
+        <mxCell id="r3" parent="1" style="rounded=1;arcSize=14;fillColor=#FFFFFF;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=19;fontColor=#1A2027;align=center;" value="Observability&#xa;(usage · latency · cost)" vertex="1">
+          <mxGeometry height="60" width="332" x="324" y="370" as="geometry" />
+        </mxCell>
+        <mxCell id="r4" parent="1" style="rounded=1;arcSize=12;fillColor=#D7E8E4;strokeColor=#2D6E6E;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="194" width="332" x="324" y="442" as="geometry" />
+        </mxCell>
+        <mxCell id="r4h" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1F5A5A;" value="Routing" vertex="1">
+          <mxGeometry height="28" width="332" x="324" y="452" as="geometry" />
+        </mxCell>
+        <mxCell id="r4a" parent="1" style="text;html=1;align=center;fontSize=18;fontColor=#1A2027;" value="&lt;font style=&quot;font-size: 22px;&quot;&gt;tier priority&lt;/font&gt;" vertex="1">
+          <mxGeometry height="26" width="332" x="324" y="486" as="geometry" />
+        </mxCell>
+        <mxCell id="r4b" parent="1" style="text;html=1;align=center;fontSize=27;fontStyle=1;fontColor=#2D6E6E;" value="LoRA-aware" vertex="1">
+          <mxGeometry height="40" width="332" x="324" y="524" as="geometry" />
+        </mxCell>
+        <mxCell id="r4c" parent="1" style="text;html=1;align=center;fontSize=18;fontColor=#1A2027;" value="&lt;font style=&quot;font-size: 22px;&quot;&gt;semantic&lt;/font&gt;" vertex="1">
+          <mxGeometry height="26" width="332" x="324" y="566" as="geometry" />
+        </mxCell>
+        <mxCell id="r4d" parent="1" style="text;html=1;align=center;fontSize=15;fontStyle=2;fontColor=#5A6B7B;" value="(affinity to the replica holding the adapter)" vertex="1">
+          <mxGeometry height="24" width="332" x="324" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="eFP" edge="1" parent="1" source="tFP" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.16;entryDx=0;entryDy=0;" target="router" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eEnt" edge="1" parent="1" source="tEnt" style="endArrow=classic;html=1;strokeColor=#1A2027;strokeWidth=3;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="router" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eConf" edge="1" parent="1" source="tConf" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=3;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.84;entryDx=0;entryDy=0;" target="router" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bed" parent="1" style="rounded=1;arcSize=6;fillColor=#F7F9FA;strokeColor=#5A6B7B;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="250" width="499" x="959" y="129" as="geometry" />
+        </mxCell>
+        <mxCell id="bedicon" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="74" width="74" x="983" y="159" as="geometry" />
+        </mxCell>
+        <mxCell id="bedh" parent="1" style="text;html=1;align=left;fontSize=26;fontStyle=1;fontColor=#5A6B7B;" value="Amazon Bedrock" vertex="1">
+          <mxGeometry height="32" width="369" x="1067" y="165" as="geometry" />
+        </mxCell>
+        <mxCell id="bedm" parent="1" style="text;html=1;align=left;fontSize=19;fontColor=#1A2027;" value="high-quality managed models" vertex="1">
+          <mxGeometry height="26" width="308" x="1067" y="201" as="geometry" />
+        </mxCell>
+        <mxCell id="ppt_lbl" parent="1" style="text;html=1;align=left;fontSize=18;fontStyle=2;fontColor=#5A6B7B;" value="pay-per-token — cost rises with usage" vertex="1">
+          <mxGeometry height="24" width="430" x="983" y="248" as="geometry" />
+        </mxCell>
+        <mxCell id="b1" parent="1" style="rounded=0;fillColor=#9AA7B2;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="24" width="34" x="983" y="339" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" parent="1" style="rounded=0;fillColor=#8A98A4;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="42" width="34" x="1023" y="321" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" parent="1" style="rounded=0;fillColor=#7A8794;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="64" width="34" x="1063" y="299" as="geometry" />
+        </mxCell>
+        <mxCell id="b4" parent="1" style="rounded=0;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="34" x="1103" y="279" as="geometry" />
+        </mxCell>
+        <mxCell id="bup" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=3;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="983" y="365" as="sourcePoint" />
+            <mxPoint x="1140" y="282" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="bup_l" parent="1" style="text;html=1;align=left;fontSize=17;fontStyle=1;fontColor=#B0563A;" value="$ / request ↑" vertex="1">
+          <mxGeometry height="24" width="200" x="1141" y="281" as="geometry" />
+        </mxCell>
+        <mxCell id="gpu" parent="1" style="rounded=1;arcSize=6;fillColor=#E3EEEC;strokeColor=#2D6E6E;strokeWidth=2.5;" value="" vertex="1">
+          <mxGeometry height="250" width="497" x="959" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="gpuicon" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="74" width="74" x="983" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="gpuh" parent="1" style="text;html=1;align=left;fontSize=26;fontStyle=1;fontColor=#2D6E6E;" value="Self-host GPU pool" vertex="1">
+          <mxGeometry height="32" width="364" x="1067" y="436" as="geometry" />
+        </mxCell>
+        <mxCell id="gpum" parent="1" style="text;html=1;align=left;fontSize=19;fontColor=#1A2027;" value="OSS · multi-LoRA on a shared base" vertex="1">
+          <mxGeometry height="26" width="309" x="1067" y="472" as="geometry" />
+        </mxCell>
+        <mxCell id="fx_lbl" parent="1" style="text;html=1;align=left;fontSize=18;fontStyle=2;fontColor=#2D6E6E;" value="fixed cost — flat regardless of usage" vertex="1">
+          <mxGeometry height="24" width="460" x="983" y="524" as="geometry" />
+        </mxCell>
+        <mxCell id="fxbar" parent="1" style="rounded=1;arcSize=20;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="30" width="292" x="983" y="576" as="geometry" />
+        </mxCell>
+        <mxCell id="fxflat" edge="1" parent="1" style="endArrow=none;html=1;strokeColor=#1F5A5A;strokeWidth=3;dashed=1;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="983" y="626" as="sourcePoint" />
+            <mxPoint x="1273" y="626" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="fx_v" parent="1" style="text;html=1;align=left;fontSize=17;fontStyle=1;fontColor=#1F5A5A;" value="$ / hour = constant" vertex="1">
+          <mxGeometry height="24" width="166" x="1279" y="579" as="geometry" />
+        </mxCell>
+        <mxCell id="rb" edge="1" parent="1" source="router" style="endArrow=classic;html=1;strokeColor=#5A6B7B;strokeWidth=3;edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=17;fontColor=#5A6B7B;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="bed" value="bursty / managed">
+          <mxGeometry relative="1" x="0.0036" y="20" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rg" edge="1" parent="1" source="router" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=4;edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=17;fontStyle=1;fontColor=#2D6E6E;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="gpu" value="sustained / cost-controlled">
+          <mxGeometry relative="1" x="-0.0108" y="22" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,25 +1,24 @@
 # figures-src — 構成図の draw.io ソース
 
-登壇スライド / ブログで使う構成図の **draw.io XML ソース** です。これらが図の一次ソース (single source of truth) です。各 `.xml` は draw.io (diagrams.net) でそのまま開いて編集・エクスポートできます。
+登壇スライド / ブログで使う構成図の **draw.io XML ソース** です。これらが図の一次ソース (single source of truth) です。各 `.xml` は draw.io (diagrams.net) でそのまま開いて編集・エクスポートできます。`.drawio` にリネームしても中身は同一です。
 
-## ファイル一覧
+## スライド構成図 (talk の物語順)
 
-| XML | 図の内容 |
+| XML | スライドでの役割 |
 | --- | --- |
-| `problem.xml` | マルチテナントの緊張関係 (per-tenant behavior vs low cost) |
-| `lifecycle.xml` | per-tenant LLMOps ライフサイクル (collect → mask → LoRA → deploy → serve) |
-| `confidentiality.xml` | LoRA vs system prompt のデータ境界 (どこで生データが越えるか) |
-| `cost_tier.xml` | コストモデル × SaaS Tier (表形式。グラフ版は scripts の fig9) |
-| `tier_arch.xml` | Tier-aware サービングアーキテクチャ (router が Bedrock / 自前 GPU へ振り分け) |
-| `silo_vs_pool.xml` | サイロ (~8% util) vs プール (~90% util) |
-| `approach.xml` | テナント識別子の運び方 A (system prompt) / B (LoRA) |
-| `lora_explained.xml` | Multi-LoRA の仕組み (frozen base + unmerged 加算) と数式 |
-| `setup.xml` | 3 アーム実験 (A Bedrock / B self-host LoRA / B0 self-host prompt) |
-| `topology.xml` | 自前 GPU プール (31B fp8 × TP=1 × 8 replica) |
-| `llmd_routing.xml` | llm-d affinity routing + vLLM キャッシュ階層 (hot-set / CPU pool / disk) |
-| `decision_map.xml` | 自前ホスティングが勝る条件 (2 軸マップ) |
-| `conclusion.xml` | 結論 (Bedrock vs self-host の使い分け + LLMOps 成長フレーム) |
-| `title.xml` | 表紙 |
+| `title.xml` | 表紙 (Unlocking Multi-Tenant LLM Inference — An LLMOps Approach for SaaS) |
+| `problem.xml` | 課題: per-tenant behavior/data vs cost の緊張、tier ごとのコスト統制 |
+| `lifecycle.xml` | LLMOps の per-tenant data flywheel (今日の focus = serve 側) |
+| `confidentiality.xml` | per-tenant データの注入2方式 (LoRA / system prompt) とテナント境界の守り方 |
+| `tier_arch.xml` | Tier-aware serving architecture (router → Bedrock / 自前 GPU プール) |
+| `silo_vs_pool.xml` | GPU を分割するほど TTFT/TPOT/Goodput/cost が悪化 → pool 一択 |
+| `approach.xml` | How LoRA serves many tenants (frozen base + per-tenant adapter + cache 階層) |
+| `llmd_routing.xml` | LoRA-aware Router (hot-set 常駐を保ち swap を避ける) |
+| `setup.xml` | 実験アーキテクチャ (Bedrock arm A / EKS 上の自前 arm B,B0 / 8x vLLM TP=1) |
+| `measured.xml` | 測定条件まとめ (3 arms × 2 routings, sweep, Goodput SLO, Oregon 料金) |
+| `perf_summary.xml` | 性能の統制論 (Bedrock pooled/siloed vs self-host のトレードオフ) |
+| `decision_map.xml` | 自前が勝つ条件 (concurrency × context length, break-even は quota と独立) |
+| `conclusion.xml` | Takeaways + LLMOps flywheel (collect→eval→tune→deploy→観測ループ) |
 
 ## 実測グラフについて
 
@@ -31,9 +30,9 @@ cd ..
 python scripts/make_figures.py   # -> figures/ に fig1..fig9 を生成
 ```
 
-`fig9_cost_tier.png` は cost_tier.xml (表) のグラフ版 (コスト対トークン量・Tier 別) です。
+`fig9_cost_tier.png` は cost-vs-token-volume を Tier 別に示すグラフ (旧 cost_tier 表のグラフ版)。
 
 ## 補足
 
-`gen_arch_figs.py` は初期の 3 図 (approach / opsloop / topology) を生成した際のスクリプトで、
-参考として残しています。現在の図は上記 XML が一次ソースであり、このスクリプトの出力ではありません。
+`gen_arch_figs.py` は初期の 3 図を生成した際のスクリプトで参考として残しています。現在の図は上記 XML が一次ソースです。
+pptx 本体は容量が大きいためこのリポジトリには含めていません (XML から再構成可能)。
