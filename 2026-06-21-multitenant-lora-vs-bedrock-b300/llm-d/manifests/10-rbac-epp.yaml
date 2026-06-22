@@ -1,0 +1,60 @@
+# EPP (EndpointPicker) 用の ServiceAccount + RBAC。
+# 既存 pd-disaggregation-epp の Role/RoleBinding 構成を踏襲:
+#   - sa role  : Pod を watch/list (endpoint 解決のため)
+#   - non-sa   : InferencePool / inferenceobjectives を watch/list (CRD 読み取り)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mt-lora-epp
+  namespace: mt-serving
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mt-lora-epp-sa
+  namespace: mt-serving
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mt-lora-epp-non-sa
+  namespace: mt-serving
+rules:
+- apiGroups: ["inference.networking.x-k8s.io"]
+  resources: ["inferenceobjectives", "inferencemodelrewrites"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["inference.networking.k8s.io"]
+  resources: ["inferencepools"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mt-lora-epp-sa
+  namespace: mt-serving
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mt-lora-epp-sa
+subjects:
+- kind: ServiceAccount
+  name: mt-lora-epp
+  namespace: mt-serving
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mt-lora-epp-non-sa
+  namespace: mt-serving
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mt-lora-epp-non-sa
+subjects:
+- kind: ServiceAccount
+  name: mt-lora-epp
+  namespace: mt-serving

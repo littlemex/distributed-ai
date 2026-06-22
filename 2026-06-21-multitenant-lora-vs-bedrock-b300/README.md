@@ -14,6 +14,7 @@ NVIDIA B300 (Blackwell, sm_103) を使った Amazon EKS 上で、マルチテナ
 ├── configs/      # inference-perf 設定 (参考)
 ├── manifests/    # p6-b300 上の vLLM k8s manifest (smoke / 8 replica)
 ├── figures-src/  # 構成図の draw.io 元 XML (silo/approach/opsloop/topology)
+├── llm-d/        # 本物の llm-d/GIE EndpointPicker による LoRA-aware routing 実験 (Phase 2)
 └── docs/         # RUNLOG (実行コマンド+結果) / 設計 / PD 検証
 ```
 
@@ -38,6 +39,11 @@ SLO: TTFT ≤ 2000ms かつ TPOT ≤ 80ms。Goodput = SLO 内 req/s。
 - **コスト損益分岐 ≈ 263 req/s** (S=512, Capacity Block $93.60/hr)。自前 B0 飽和 398 req/s で**純コストでも安い**。system prompt が長い (S≥2048) ほど自前有利
 - **反直感**: 自前では LoRA より system prompt が ~3.6倍速い (Multi-LoRA の SGMV per-token オーバーヘッド、TPOT 53 vs 18ms)。LoRA を選ぶ理由は性能でなくデータ分離・ガバナンス
 - **賢いルーティング (llm-d affinity)** は飽和近傍で +24% (低負荷では差なし)。アダプタ swap 自体は安い (~1.2ms)
+- **本物の llm-d/GIE EndpointPicker でも実証 (Phase 2, `llm-d/`)**: 8 Pod + EPP で scheduling profile だけ
+  差し替えて 5 条件を公平比較。**lora-affinity 単独は高負荷 (concurrency 512) で goodput 72 req/s に崩壊** (人気テナントの
+  過集中で負荷分散が効かない) が、**queue+kv-cache+prefix と合成した full profile は 124 req/s で全条件中最良・SLO 100%**。
+  「LoRA-aware routing は負荷分散と組み合わせて初めて効く」を実データで裏付け。構成を 1Pod8proc→8Pod に変えても
+  前回の TTFT/TPOT/Goodput と一致 (整合性検証 `llm-d/compare_integrity.py`) するため、上記サマリの数値はそのまま有効。
 - **long-context**: 30K トークン入力を TTFT 2.6秒・SLO 100% で捌く。decode 天井 ~29,200 tok/s
 - **PD-disaggregation は Gemma 4 では不可** — heterogeneous attention が NIXL の同一サイズ KV 要求に非互換
 

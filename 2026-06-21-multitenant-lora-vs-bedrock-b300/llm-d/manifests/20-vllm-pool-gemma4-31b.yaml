@@ -1,0 +1,108 @@
+# Phase2 llm-d: Gemma 4 31B fp8 を 8 個の独立 Pod (各 1 GPU, port 8000) で起動。
+# InferencePool が Pod ラベル app=mt-lora-pool で 8 endpoint として束ねる。
+# 前回の 1Pod8プロセス構成と違い、InferencePool が Pod 単位で routing できる形にする。
+#
+# - hostNetwork は使わない (Pod IP:8000 を InferencePool が個別に叩くので port 衝突しない)
+# - 8 Pod を同一ノードに集約 (podAffinity)。1 node = 8 GPU なのでちょうど収まる。
+#   adapter は hostPath /mnt/k8s-disks/0/adapters/gemma4-31b を全 Pod 共有 (生成 1 回)。
+# - kai-scheduler 指定。GLOO_SOCKET_IFNAME は設定しない (hostNetwork でないため eth0 問題なし)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mt-lora-pool
+  namespace: mt-serving
+  labels: { app: mt-lora-pool }
+spec:
+  replicas: 8
+  selector:
+    matchLabels: { app: mt-lora-pool }
+  template:
+    metadata:
+      labels:
+        app: mt-lora-pool          # InferencePool selector
+    spec:
+      schedulerName: kai-scheduler
+      priorityClassName: train      # over-quota を許す preemptible workload (kai default-queue quota=0)
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-B300-SXM6-AC
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+        - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+        - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+        - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+      # 8 replica を同一ノードに集約 (hostPath adapter 共有のため)
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels: { app: mt-lora-pool }
+                topologyKey: kubernetes.io/hostname
+      imagePullSecrets:
+        - { name: ecr-pull-secret }
+      containers:
+        - name: vllm
+          image: <ACCOUNT_ID>.dkr.ecr.us-west-2.amazonaws.com/vllm-uccl-ep:vllm0.21.0-uccl-0dc87eb-cu13-b300-fix1
+          imagePullPolicy: IfNotPresent
+          command: ["bash","-lc"]
+          args:
+            - |
+              set -e
+              vllm serve google/gemma-4-31B-it \
+                --tensor-parallel-size 1 \
+                --quantization fp8 \
+                --kv-cache-dtype fp8_e4m3 \
+                --enable-lora \
+                --max-loras 32 \
+                --max-lora-rank 16 \
+                --lora-dtype bfloat16 \
+                --max-cpu-loras 1000 \
+                --gpu-memory-utilization 0.95 \
+                --max-model-len 4096 \
+                --max-num-seqs 1024 \
+                --max-num-batched-tokens 16384 \
+                --host 0.0.0.0 --port 8000
+          env:
+            - { name: HF_HOME, value: /mnt/k8s-disks/0/local_scratch/hf_cache }
+            - { name: TRITON_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/triton }
+            - { name: FLASHINFER_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/flashinfer }
+            - { name: VLLM_CACHE_ROOT, value: /mnt/k8s-disks/0/jit_cache/vllm }
+            - { name: VLLM_ALLOW_RUNTIME_LORA_UPDATING, value: "true" }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+            - name: HF_TOKEN
+              valueFrom: { secretKeyRef: { name: hf-token, key: HF_TOKEN } }
+          ports:
+            - { containerPort: 8000, name: http }
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 60
+          # privileged は付けない: privileged だと device plugin の GPU 分離が無効化され
+          # 8 Pod 全てが cuda:0 を取り合って OOM クラッシュする (確認済み)。
+          # 通常コンテナなら device plugin が各 Pod に別 GPU を割り当てる。
+          resources:
+            requests: { cpu: "18", memory: "240Gi", nvidia.com/gpu: "1" }
+            limits: { nvidia.com/gpu: "1" }
+          volumeMounts:
+            - { name: model-cache, mountPath: /mnt/k8s-disks/0 }
+            - { name: dshm, mountPath: /dev/shm }
+      volumes:
+        - { name: model-cache, hostPath: { path: /mnt/k8s-disks/0, type: DirectoryOrCreate } }
+        - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 64Gi } }
+---
+# InferencePool が束ねる先の Service (ClusterIP, port 8000)。
+# EPP は InferencePool の selector で個別 Pod IP を拾うが、デバッグ/直接叩き用にも用意。
+apiVersion: v1
+kind: Service
+metadata:
+  name: mt-lora-pool
+  namespace: mt-serving
+  labels: { app: mt-lora-pool }
+spec:
+  clusterIP: None          # headless: 各 Pod IP を返す (直接叩き/確認用)
+  selector: { app: mt-lora-pool }
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }

@@ -35,6 +35,14 @@ def load(name):
     return json.load(open(os.path.join(R, f"{name}.json")))["stages"]
 
 
+# llm-d (GIE EPP) 実験の結果は llm-d/results/ にある
+LLMD = os.path.join(os.path.dirname(__file__), "..", "llm-d", "results")
+
+
+def load_llmd(name):
+    return json.load(open(os.path.join(LLMD, f"{name}.json")))["stages"]
+
+
 def col(stages, key):
     return [s.get(key) for s in stages]
 
@@ -316,8 +324,44 @@ def fig9():
     plt.close(fig)
 
 
+# ---- fig10: 実 llm-d (GIE EPP) の routing 戦略比較 ----
+def fig10_llmd():
+    """同一 8 Pod・同一 EPP 経路で scheduling profile だけ替えた 3 条件 + 整合性 baseline。
+    主張: lora-affinity 単独は高負荷で破綻、full (affinity+queue+kv+prefix) が最良。"""
+    drr = load_llmd("llmd-direct-rr")
+    epr = load_llmd("llmd-epp-rr")
+    epa = load_llmd("llmd-epp-affinity")
+    epf = load_llmd("llmd-epp-full")
+    fig, ax = plt.subplots(figsize=(11, 7))
+    ax.plot(col(drr, "concurrency"), col(drr, "goodput_req_s"), "d--", lw=2.5, ms=9,
+            label="direct RR (no EPP, baseline)", color="#999999")
+    ax.plot(col(epr, "concurrency"), col(epr, "goodput_req_s"), "s-", lw=3, ms=10,
+            label="EPP: random (RR)", color="#ff7f0e")
+    ax.plot(col(epa, "concurrency"), col(epa, "goodput_req_s"), "v-", lw=3, ms=10,
+            label="EPP: lora-affinity only", color="#d62728")
+    ax.plot(col(epf, "concurrency"), col(epf, "goodput_req_s"), "o-", lw=3, ms=11,
+            label="EPP: full (affinity+queue+kv+prefix)", color="#2ca02c")
+    ax.set_xlabel("Concurrency")
+    ax.set_ylabel("Goodput (req/s)")
+    ax.set_title("Real llm-d (GIE EndpointPicker) routing on 8 Pods\n"
+                 "affinity-only collapses at load; full profile wins (128 tenants, zipf 1.1)")
+    ax.set_xscale("log", base=2)
+    ax.legend(loc="upper left")
+    # affinity-only の崩壊点を注記
+    ax.annotate("affinity-only\ncollapses\n(over-concentration)", xy=(512, 72.35),
+                xytext=(150, 80), fontsize=15, color="#d62728",
+                arrowprops=dict(arrowstyle="->", lw=2, color="#d62728"))
+    ax.annotate("full: best\n123.9 req/s", xy=(512, 123.93),
+                xytext=(70, 100), fontsize=15, color="#2ca02c",
+                arrowprops=dict(arrowstyle="->", lw=2, color="#2ca02c"))
+    ax.set_ylim(0, 140)
+    fig.savefig(os.path.join(OUT, "fig10_llmd_routing.png"))
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     fig1(); fig2(); fig3(); fig4(); fig5(); fig6(); fig7(); fig8(); fig9()
+    fig10_llmd()
     print("[OK] figures generated in", OUT)
     for f in sorted(os.listdir(OUT)):
         print("  ", f)
