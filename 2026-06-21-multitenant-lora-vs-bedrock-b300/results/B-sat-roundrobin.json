@@ -1,0 +1,83 @@
+{
+  "config": {
+    "base_url": "http://localhost:8000/v1,http://localhost:8001/v1,http://localhost:8002/v1,http://localhost:8003/v1,http://localhost:8004/v1,http://localhost:8005/v1,http://localhost:8006/v1,http://localhost:8007/v1",
+    "model": "google/gemma-4-31B-it",
+    "auth": "none",
+    "region": "us-west-2",
+    "dataset": null,
+    "adapters": 128,
+    "zipf": 1.1,
+    "concurrency": [
+      512,
+      768,
+      1024
+    ],
+    "requests_per_stage": 768,
+    "max_tokens": 64,
+    "slo_ttft_ms": 2000.0,
+    "slo_tpot_ms": 80.0,
+    "timeout": 120.0,
+    "ignore_eos": true,
+    "routing": "roundrobin",
+    "out": "/mnt/k8s-disks/0/results/B-sat-roundrobin.json"
+  },
+  "stages": [
+    {
+      "concurrency": 512,
+      "n_requests": 768,
+      "duration_s": 6.94,
+      "n_ok": 768,
+      "n_error": 0,
+      "n_503": 0,
+      "err_types": {},
+      "ttft_p50": 1010,
+      "ttft_p90": 1128,
+      "ttft_p99": 1260,
+      "tpot_p50": 51.2,
+      "tpot_p90": 65.3,
+      "tpot_p99": 78.7,
+      "out_tok_per_s": 7086,
+      "n_good": 757,
+      "goodput_req_s": 109.13,
+      "goodput_pct": 98.6
+    },
+    {
+      "concurrency": 768,
+      "n_requests": 768,
+      "duration_s": 6.18,
+      "n_ok": 768,
+      "n_error": 0,
+      "n_503": 0,
+      "err_types": {},
+      "ttft_p50": 856,
+      "ttft_p90": 967,
+      "ttft_p99": 4477,
+      "tpot_p50": 69.4,
+      "tpot_p90": 75.3,
+      "tpot_p99": 83.2,
+      "out_tok_per_s": 7955,
+      "n_good": 677,
+      "goodput_req_s": 109.57,
+      "goodput_pct": 88.2
+    },
+    {
+      "concurrency": 1024,
+      "n_requests": 768,
+      "duration_s": 6.44,
+      "n_ok": 768,
+      "n_error": 0,
+      "n_503": 0,
+      "err_types": {},
+      "ttft_p50": 1077,
+      "ttft_p90": 1243,
+      "ttft_p99": 4736,
+      "tpot_p50": 69.0,
+      "tpot_p90": 75.2,
+      "tpot_p99": 83.9,
+      "out_tok_per_s": 7628,
+      "n_good": 676,
+      "goodput_req_s": 104.91,
+      "goodput_pct": 88.0
+    }
+  ]
+}

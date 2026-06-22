@@ -1,0 +1,68 @@
+# inference-perf: Approach B (自前 vLLM + per-tenant ダミー LoRA) 1000テナント計測
+# 対象: Gemma 3 27B fp8, 8 replica の前段 LB (round-robin or affinity proxy:9000)。
+#
+# lora_traffic_split は scripts/gen_zipf_lora_split.py が出力する lora_split_1000.yaml の
+# 中身をここにマージする (1000 エントリ, Zipf(s=1.1), sum=1.0)。下記は先頭3行の例。
+#
+# user-prompt / output サイズ sweep は data.input_distribution / output_distribution を
+# 変えた別 YAML を用意して切り替える (128/512/2048 x 128/256)。
+# concurrency は load.stages で 100/500/1000 をスイープ。
+server:
+  type: vllm                # OpenAI 互換クライアント
+  model_name: google/gemma-3-27b-it
+  base_url: http://vllm-svc.default.svc.cluster.local:8000  # or affinity proxy :9000
+  ignore_eos: true          # ダミーアダプタの出力品質に依存せず固定長計測
+  api_key: ""
+
+api:
+  type: chat
+  streaming: true
+
+tokenizer:
+  pretrained_model_name_or_path: google/gemma-3-27b-it
+
+load:
+  type: concurrent
+  stages:
+    - num_requests: 3000
+      concurrency_level: 100
+    - num_requests: 3000
+      concurrency_level: 500
+    - num_requests: 3000
+      concurrency_level: 1000
+  lora_traffic_split:
+    # >>> scripts/gen_zipf_lora_split.py の lora_split_1000.yaml をここに展開 <<<
+    - name: adapter-0
+      split: 0.027824       # Zipf(s=1.1) rank-1 normalized weight
+    - name: adapter-1
+      split: 0.013494
+    - name: adapter-2
+      split: 0.008965
+    # ... adapter-999 まで合計 1000 エントリ, sum=1.0
+
+data:
+  type: synthetic
+  input_distribution:
+    min: 64
+    max: 2048               # user-prompt sweep: 128 / 512 / 2048 (別 YAML で切替)
+    mean: 512
+    std_dev: 200
+  output_distribution:
+    min: 128
+    max: 256                # output sweep: 128 / 256 (別 YAML で切替)
+    mean: 192
+    std_dev: 30
+
+report:
+  request_lifecycle:
+    summary: true
+    per_stage: true
+    per_request: false
+    per_adapter: true         # テナント (アダプタ) ごとの TTFT/TPOT 分布
+    per_adapter_stage: false
+    percentiles: [50, 90, 95, 99]
+  goodput:
+    constraints:
+      ttft: 3.0               # 3s TTFT SLO (swap overhead を考慮した緩めの初期値)
+      tpot: 0.15              # 150ms TPOT SLO
+      request_latency: 60.0

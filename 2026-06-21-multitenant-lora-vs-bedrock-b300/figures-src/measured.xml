@@ -1,0 +1,112 @@
+<mxfile host="embed.diagrams.net">
+  <diagram id="npik5saj-b9ii" name="Page-1">
+    <mxGraphModel dx="1755" dy="1058" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="820" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="b1" parent="1" style="rounded=1;arcSize=6;fillColor=#FBFCFD;strokeColor=#D8DEE4;strokeWidth=1.5;" value="" vertex="1">
+          <mxGeometry height="500" width="700" x="40" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="b1h" parent="1" style="text;html=1;align=left;fontSize=30;fontStyle=1;fontColor=#2D6E6E;" value="conditions swept" vertex="1">
+          <mxGeometry height="40" width="600" x="66" y="56" as="geometry" />
+        </mxCell>
+        <mxCell id="ax1" parent="1" style="text;html=1;align=left;fontSize=26;fontStyle=1;fontColor=#1A2027;" value="3 arms" vertex="1">
+          <mxGeometry height="34" width="220" x="66" y="118" as="geometry" />
+        </mxCell>
+        <mxCell id="ar1" parent="1" style="rounded=1;arcSize=30;fillColor=#F2F4F6;strokeColor=#5A6B7B;strokeWidth=1.5;fontSize=20;fontColor=#5A6B7B;" value="A Bedrock" vertex="1">
+          <mxGeometry height="46" width="138" x="300" y="112" as="geometry" />
+        </mxCell>
+        <mxCell id="ar2" parent="1" style="rounded=1;arcSize=30;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=20;fontStyle=1;fontColor=#2D6E6E;" value="B LoRA" vertex="1">
+          <mxGeometry height="46" width="130" x="452" y="112" as="geometry" />
+        </mxCell>
+        <mxCell id="ar3" parent="1" style="rounded=1;arcSize=30;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=20;fontColor=#2D6E6E;" value="B0 prompt" vertex="1">
+          <mxGeometry height="46" width="130" x="596" y="112" as="geometry" />
+        </mxCell>
+        <mxCell id="ax2" parent="1" style="text;html=1;align=left;fontSize=26;fontStyle=1;fontColor=#1A2027;" value="2 routings" vertex="1">
+          <mxGeometry height="34" width="240" x="66" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="rt1" parent="1" style="rounded=1;arcSize=30;fillColor=#F2F4F6;strokeColor=#9AA7B2;strokeWidth=1.5;fontSize=20;fontColor=#1A2027;" value="round-robin" vertex="1">
+          <mxGeometry height="46" width="180" x="300" y="184" as="geometry" />
+        </mxCell>
+        <mxCell id="rt2" parent="1" style="rounded=1;arcSize=30;fillColor=#D7E8E4;strokeColor=#2D6E6E;strokeWidth=2;fontSize=20;fontStyle=1;fontColor=#1F5A5A;" value="LoRA affinity" vertex="1">
+          <mxGeometry height="46" width="190" x="496" y="184" as="geometry" />
+        </mxCell>
+        <mxCell id="ax3" parent="1" style="text;html=1;align=left;fontSize=26;fontStyle=1;fontColor=#1A2027;" value="concurrency" vertex="1">
+          <mxGeometry height="34" width="240" x="66" y="262" as="geometry" />
+        </mxCell>
+        <mxCell id="cc" parent="1" style="text;html=1;align=left;fontSize=24;fontColor=#5A6B7B;" value="1  →  1024" vertex="1">
+          <mxGeometry height="34" width="400" x="300" y="262" as="geometry" />
+        </mxCell>
+        <mxCell id="ax4" parent="1" style="text;html=1;align=left;fontSize=26;fontStyle=1;fontColor=#1A2027;" value="prompt size" vertex="1">
+          <mxGeometry height="34" width="240" x="66" y="334" as="geometry" />
+        </mxCell>
+        <mxCell id="ps" parent="1" style="text;html=1;align=left;fontSize=24;fontColor=#5A6B7B;" value="512 / 2048 / 30K" vertex="1">
+          <mxGeometry height="34" width="420" x="300" y="334" as="geometry" />
+        </mxCell>
+        <mxCell id="ax5" parent="1" style="text;html=1;align=left;fontSize=26;fontStyle=1;fontColor=#1A2027;" value="tenants" vertex="1">
+          <mxGeometry height="34" width="240" x="66" y="406" as="geometry" />
+        </mxCell>
+        <mxCell id="tn" parent="1" style="text;html=1;align=left;fontSize=24;fontColor=#5A6B7B;" value="32 / 64 / 128" vertex="1">
+          <mxGeometry height="34" width="400" x="300" y="406" as="geometry" />
+        </mxCell>
+        <mxCell id="tool" parent="1" style="text;html=1;align=left;fontSize=20;fontStyle=2;fontColor=#5A6B7B;" value="one load generator — TTFT · TPOT · Goodput" vertex="1">
+          <mxGeometry height="34" width="660" x="66" y="476" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" parent="1" style="rounded=1;arcSize=6;fillColor=#E3EEEC;strokeColor=#2D6E6E;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="220" width="670" x="770" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="b2h" parent="1" style="text;html=1;align=left;fontSize=30;fontStyle=1;fontColor=#2D6E6E;" value="Goodput SLO" vertex="1">
+          <mxGeometry height="40" width="500" x="796" y="56" as="geometry" />
+        </mxCell>
+        <mxCell id="slo1" parent="1" style="rounded=1;arcSize=14;fillColor=#FFFFFF;strokeColor=#2D6E6E;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#1A2027;align=center;" value="TTFT ≤ 2 s" vertex="1">
+          <mxGeometry height="72" width="230" x="796" y="116" as="geometry" />
+        </mxCell>
+        <mxCell id="sloand" parent="1" style="text;html=1;align=center;fontSize=24;fontStyle=1;fontColor=#5A6B7B;" value="AND" vertex="1">
+          <mxGeometry height="32" width="90" x="1038" y="138" as="geometry" />
+        </mxCell>
+        <mxCell id="slo2" parent="1" style="rounded=1;arcSize=14;fillColor=#FFFFFF;strokeColor=#2D6E6E;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#1A2027;align=center;" value="TPOT ≤ 80 ms" vertex="1">
+          <mxGeometry height="72" width="270" x="1140" y="116" as="geometry" />
+        </mxCell>
+        <mxCell id="slonote" parent="1" style="text;html=1;align=left;fontSize=20;fontStyle=2;fontColor=#1F5A5A;" value="counts toward Goodput only if both are met (no error)" vertex="1">
+          <mxGeometry height="34" width="630" x="796" y="206" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" parent="1" style="rounded=1;arcSize=6;fillColor=#FBFCFD;strokeColor=#D8DEE4;strokeWidth=1.5;" value="" vertex="1">
+          <mxGeometry height="320" width="670" x="770" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="b3h" parent="1" style="text;html=1;align=left;fontSize=30;fontStyle=1;fontColor=#2D6E6E;" value="Pricing — Oregon" vertex="1">
+          <mxGeometry height="40" width="600" x="796" y="306" as="geometry" />
+        </mxCell>
+        <mxCell id="pbi" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="64" width="64" x="796" y="362" as="geometry" />
+        </mxCell>
+        <mxCell id="pbt" parent="1" style="text;html=1;align=left;fontSize=23;fontStyle=1;fontColor=#1A2027;" value="Bedrock · Gemma 4 31B" vertex="1">
+          <mxGeometry height="30" width="540" x="872" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="pbv" parent="1" style="text;html=1;align=left;fontSize=24;fontColor=#5A6B7B;" value="$0.14 / 1M in   ·   $0.40 / 1M out" vertex="1">
+          <mxGeometry height="32" width="540" x="872" y="392" as="geometry" />
+        </mxCell>
+        <mxCell id="psep" edge="1" parent="1" style="endArrow=none;html=1;strokeColor=#E2E7EC;strokeWidth=1.5;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="796" y="448" as="sourcePoint" />
+            <mxPoint x="1414" y="448" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="pgi" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="64" width="64" x="796" y="472" as="geometry" />
+        </mxCell>
+        <mxCell id="pgt" parent="1" style="text;html=1;align=left;fontSize=23;fontStyle=1;fontColor=#1A2027;" value="p6-b300.48xlarge · 8x B300" vertex="1">
+          <mxGeometry height="30" width="540" x="872" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="pgv" parent="1" style="text;html=1;align=left;fontSize=24;fontColor=#5A6B7B;" value="$93.60 / hr   ($11.70 x 8 accel.)" vertex="1">
+          <mxGeometry height="32" width="540" x="872" y="502" as="geometry" />
+        </mxCell>
+        <mxCell id="pgn" parent="1" style="text;html=1;align=left;fontSize=18;fontStyle=2;fontColor=#9AA7B2;" value="Capacity Block for ML — effective hourly rate" vertex="1">
+          <mxGeometry height="26" width="540" x="872" y="536" as="geometry" />
+        </mxCell>
+        <mxCell id="be" parent="1" style="text;html=1;align=left;fontSize=20;fontStyle=2;fontColor=#2D6E6E;" value="compared on the same SLO-met workload — $ per request" vertex="1">
+          <mxGeometry height="30" width="640" x="796" y="572" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

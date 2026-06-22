@@ -1,0 +1,127 @@
+<mxfile host="embed.diagrams.net">
+  <diagram id="xohfnva6-ms8r" name="Page-1">
+    <mxGraphModel dx="1755" dy="1058" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="hds" parent="1" style="text;html=1;align=left;fontSize=21;fontStyle=2;fontColor=#5A6B7B;" value="not either/or — orthogonal options; both must protect the tenant boundary" vertex="1">
+          <mxGeometry height="28" width="1000" x="62" y="72" as="geometry" />
+        </mxCell>
+        <mxCell id="tenL" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="74" width="74" x="40" y="180" as="geometry" />
+        </mxCell>
+        <mxCell id="ltL" parent="1" style="text;html=1;align=center;fontSize=28;fontStyle=1;fontColor=#2D6E6E;" value="LoRA" vertex="1">
+          <mxGeometry height="34" width="110" x="22" y="256" as="geometry" />
+        </mxCell>
+        <mxCell id="bndL" parent="1" style="rounded=1;arcSize=3;fillColor=#FAFAFB;strokeColor=#2D6E6E;strokeWidth=2;dashed=1;" value="" vertex="1">
+          <mxGeometry height="270" width="640" x="150" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="bndLt" parent="1" style="text;html=1;align=left;fontSize=20;fontStyle=3;fontColor=#5A6B7B;" value="tenant boundary" vertex="1">
+          <mxGeometry height="26" width="340" x="168" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="dataL" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="92" width="92" x="180" y="212" as="geometry" />
+        </mxCell>
+        <mxCell id="dataLt" parent="1" style="text;html=1;align=center;fontSize=21;fontColor=#5A6B7B;" value="tenant data" vertex="1">
+          <mxGeometry height="26" width="120" x="165" y="304" as="geometry" />
+        </mxCell>
+        <mxCell id="ftL" parent="1" style="rounded=1;arcSize=12;fillColor=#2D6E6E;strokeColor=none;fontSize=24;fontColor=#FFFFFF;" value="LoRA FT" vertex="1">
+          <mxGeometry height="56" width="170" x="340" y="232" as="geometry" />
+        </mxCell>
+        <mxCell id="eL1" edge="1" parent="1" source="dataL" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;exitX=0.978;exitY=0.522;exitDx=0;exitDy=0;exitPerimeter=0;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="272" y="258" as="sourcePoint" />
+            <mxPoint x="340" y="260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="adp" parent="1" style="rounded=1;arcSize=16;fillColor=#1A2027;strokeColor=none;fontSize=24;fontColor=#FFFFFF;" value="adapter" vertex="1">
+          <mxGeometry height="56" width="160" x="590" y="232" as="geometry" />
+        </mxCell>
+        <mxCell id="eL2" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="510" y="260" as="sourcePoint" />
+            <mxPoint x="590" y="260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eL3" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="750" y="260" as="sourcePoint" />
+            <mxPoint x="1010" y="260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eL3t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=2;fontColor=#2D6E6E;" value="only weights cross — no raw data" vertex="1">
+          <mxGeometry height="26" width="340" x="788" y="178" as="geometry" />
+        </mxCell>
+        <mxCell id="poolL" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="92" width="92" x="1020" y="214" as="geometry" />
+        </mxCell>
+        <mxCell id="poolLt" parent="1" style="text;html=1;align=center;fontSize=21;fontColor=#5A6B7B;" value="shared pool" vertex="1">
+          <mxGeometry height="26" width="120" x="1005" y="308" as="geometry" />
+        </mxCell>
+        <mxCell id="okL" parent="1" style="text;html=1;align=left;fontSize=24;fontStyle=1;fontColor=#2D6E6E;verticalAlign=middle;" value="confidential tenant safe" vertex="1">
+          <mxGeometry height="56" width="280" x="1160" y="232" as="geometry" />
+        </mxCell>
+        <mxCell id="div" edge="1" parent="1" style="endArrow=none;html=1;strokeColor=#E2E7EC;strokeWidth=2;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="40" y="430" as="sourcePoint" />
+            <mxPoint x="1450" y="430" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tenB" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#B0563A;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="74" width="74" x="40" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="ltB" parent="1" style="text;html=1;align=center;fontSize=28;fontStyle=1;fontColor=#B0563A;" value="System&#xa;prompt" vertex="1">
+          <mxGeometry height="66" width="120" x="14" y="576" as="geometry" />
+        </mxCell>
+        <mxCell id="bndB" parent="1" style="rounded=1;arcSize=3;fillColor=#FAFAFB;strokeColor=#B0563A;strokeWidth=2;dashed=1;" value="" vertex="1">
+          <mxGeometry height="250" width="640" x="150" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="bndBt" parent="1" style="text;html=1;align=left;fontSize=20;fontStyle=3;fontColor=#5A6B7B;" value="tenant boundary" vertex="1">
+          <mxGeometry height="26" width="340" x="168" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="dbB" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="92" width="92" x="180" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="dbBt" parent="1" style="text;html=1;align=center;fontSize=21;fontColor=#5A6B7B;" value="tenant data" vertex="1">
+          <mxGeometry height="26" width="130" x="165" y="634" as="geometry" />
+        </mxCell>
+        <mxCell id="acl" parent="1" style="rounded=1;arcSize=12;fillColor=#F9F0EE;strokeColor=#B0563A;strokeWidth=2;fontSize=22;fontColor=#B0563A;" value="access control" vertex="1">
+          <mxGeometry height="56" width="170" x="340" y="558" as="geometry" />
+        </mxCell>
+        <mxCell id="eB1" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#1A2027;strokeWidth=2.5;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="272" y="586" as="sourcePoint" />
+            <mxPoint x="340" y="586" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="inj" parent="1" style="rounded=1;arcSize=16;fillColor=#FDECEA;strokeColor=#B0563A;strokeWidth=1.5;fontSize=22;fontColor=#B0563A;" value="inject prompt" vertex="1">
+          <mxGeometry height="56" width="160" x="590" y="558" as="geometry" />
+        </mxCell>
+        <mxCell id="eB2" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=2.5;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="510" y="586" as="sourcePoint" />
+            <mxPoint x="590" y="586" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eB3" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=3;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="750" y="586" as="sourcePoint" />
+            <mxPoint x="1010" y="586" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eB3t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=2;fontColor=#B0563A;" value="raw data crosses every request" vertex="1">
+          <mxGeometry height="26" width="340" x="781" y="506" as="geometry" />
+        </mxCell>
+        <mxCell id="poolB" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="92" width="92" x="1020" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="poolBt" parent="1" style="text;html=1;align=center;fontSize=21;fontColor=#5A6B7B;" value="shared pool" vertex="1">
+          <mxGeometry height="26" width="120" x="1005" y="634" as="geometry" />
+        </mxCell>
+        <mxCell id="ngB" parent="1" style="text;html=1;align=left;fontSize=24;fontStyle=1;fontColor=#B0563A;verticalAlign=middle;" value="access control mandatory" vertex="1">
+          <mxGeometry height="56" width="280" x="1160" y="558" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

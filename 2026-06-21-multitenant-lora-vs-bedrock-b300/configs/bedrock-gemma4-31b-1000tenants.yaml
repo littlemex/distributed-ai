@@ -1,0 +1,58 @@
+# inference-perf: Approach A (Bedrock Gemma 4 31B + per-tenant distinct system prompt)。
+# data.path は scripts/gen_bedrock_dataset.py の出力 (system-prompt サイズ別)。
+# system-prompt サイズ sweep は path を *_short/medium/long/xlarge_* に切り替えて行う。
+#
+# 注意 (§7, §11 open Q):
+#   - Gemma 4 は bedrock-mantle 専用、OpenAI 互換 /openai/v1。server.type: vllm は
+#     "OpenAI 互換クライアント" の意。
+#   - api_key は Authorization: Bearer として送られる。bedrock-mantle が Bearer を
+#     受けるか SigV4 が要るかは未確認 → 要らない/動かない場合は scripts/bedrock_load_driver.py
+#     を代替に使う。
+#   - prompt caching は Gemma 非対応 (F1) → 毎回フル input price。
+#   - TPM quota 非公開、503 throttle あり → ramp-up 前提 (§7)。
+server:
+  type: vllm
+  model_name: google.gemma-4-31b
+  base_url: https://bedrock-mantle.us-west-2.api.aws/openai/v1
+  api_key: "${BEDROCK_API_KEY}"
+  ignore_eos: false           # Bedrock は ignore_eos 非対応 → 自然停止
+
+api:
+  type: chat
+  streaming: true
+
+tokenizer:
+  pretrained_model_name_or_path: google/gemma-3-27b-it   # tokenizer 近似用
+
+load:
+  type: concurrent
+  stages:
+    - num_requests: 2000
+      concurrency_level: 100
+    - num_requests: 2000
+      concurrency_level: 500
+    - num_requests: 2000
+      concurrency_level: 1000
+  # lora_traffic_split: なし (Bedrock は model_name 固定)
+
+data:
+  type: shareGPT
+  # system-prompt sweep: scripts/gen_bedrock_dataset.py の出力に切り替える
+  #   bedrock_dataset_short_1000tenants.jsonl   (128 tok)
+  #   bedrock_dataset_medium_1000tenants.jsonl  (512 tok)
+  #   bedrock_dataset_long_1000tenants.jsonl    (2048 tok)
+  #   bedrock_dataset_xlarge_1000tenants.jsonl  (8192 tok)
+  path: /data/bedrock_dataset_medium_1000tenants.jsonl
+
+report:
+  request_lifecycle:
+    summary: true
+    per_stage: true
+    per_request: false
+    per_adapter: false        # Bedrock 側にアダプタ概念なし
+    percentiles: [50, 90, 95, 99]
+  goodput:
+    constraints:
+      ttft: 3.0
+      tpot: 0.15
+      request_latency: 60.0

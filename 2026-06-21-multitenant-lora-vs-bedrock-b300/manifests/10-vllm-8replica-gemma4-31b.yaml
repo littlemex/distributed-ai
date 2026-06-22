@@ -1,0 +1,52 @@
+# 本計測: Gemma 4 31B fp8, 8x TP=1 独立レプリカ (1 node 8 GPU 専有)。
+# DESIGN-v2-topology.md §5/§6 の確定フラグ。1 pod で 8 GPU を取り、内部で 8 vLLM プロセス
+# (port 8000-8007, 各 CUDA_VISIBLE_DEVICES=0..7) + affinity proxy(:9000) を起動。
+# adapter は node NVMe /mnt/k8s-disks/0/adapters に事前生成 (synth_dummy_lora.py)。
+#
+# 起動は手動制御したいので command は sleep infinity。中の起動は scripts/launch_8replica.sh で。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-8replica
+  namespace: mt-serving
+  labels: { app: mt-bench, role: vllm-8replica }
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  nodeSelector:
+    nvidia.com/gpu.product: NVIDIA-B300-SXM6-AC
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+    - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+    - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+    - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+  imagePullSecrets:
+    - { name: ecr-pull-secret }
+  containers:
+    - name: vllm
+      image: <ACCOUNT_ID>.dkr.ecr.us-west-2.amazonaws.com/vllm-uccl-ep:vllm0.21.0-uccl-0dc87eb-cu13-b300-fix1
+      imagePullPolicy: IfNotPresent
+      command: ["bash","-lc","mkdir -p /results && sleep infinity"]
+      env:
+        - { name: HF_HOME, value: /mnt/k8s-disks/0/local_scratch/hf_cache }
+        - { name: TRITON_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/triton }
+        - { name: FLASHINFER_CACHE_DIR, value: /mnt/k8s-disks/0/jit_cache/flashinfer }
+        - { name: VLLM_CACHE_ROOT, value: /mnt/k8s-disks/0/jit_cache/vllm }
+        - { name: VLLM_ALLOW_RUNTIME_LORA_UPDATING, value: "true" }
+        - { name: VLLM_LORA_ENABLE_DUAL_STREAM, value: "1" }
+        - { name: GLOO_SOCKET_IFNAME, value: "eth0" }
+        - { name: PYTHONUNBUFFERED, value: "1" }
+        - name: HF_TOKEN
+          valueFrom: { secretKeyRef: { name: hf-token, key: HF_TOKEN } }
+      securityContext: { privileged: true }
+      resources:
+        requests: { cpu: "160", memory: "2000Gi", nvidia.com/gpu: "8" }
+        limits: { nvidia.com/gpu: "8" }
+      volumeMounts:
+        - { name: model-cache, mountPath: /mnt/k8s-disks/0 }
+        - { name: dshm, mountPath: /dev/shm }
+  volumes:
+    - { name: model-cache, hostPath: { path: /mnt/k8s-disks/0, type: DirectoryOrCreate } }
+    - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 200Gi } }

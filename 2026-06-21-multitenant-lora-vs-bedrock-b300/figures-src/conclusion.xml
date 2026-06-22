@@ -1,0 +1,90 @@
+<mxfile host="embed.diagrams.net">
+  <diagram id="duulwedh-3a0d" name="Page-1">
+    <mxGraphModel dx="1499" dy="1058" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="820" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="b1d" parent="1" style="ellipse;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="18" width="18" x="60" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="b1" parent="1" style="text;html=1;align=left;fontSize=22;fontColor=#1A2027;" value="no single right answer — balance cost, governance, accuracy and performance together" vertex="1">
+          <mxGeometry height="34" width="1340" x="90" y="46" as="geometry" />
+        </mxCell>
+        <mxCell id="b2d" parent="1" style="ellipse;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="18" width="18" x="60" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" parent="1" style="text;html=1;align=left;fontSize=22;fontColor=#1A2027;" value="start small — a little data and a few evals are enough to begin" vertex="1">
+          <mxGeometry height="34" width="1340" x="90" y="94" as="geometry" />
+        </mxCell>
+        <mxCell id="b3d" parent="1" style="ellipse;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="18" width="18" x="60" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" parent="1" style="text;html=1;align=left;fontSize=22;fontColor=#1A2027;" value="keep turning — observe in prod, feed it back, tune again; data compounds each round" vertex="1">
+          <mxGeometry height="34" width="1340" x="90" y="142" as="geometry" />
+        </mxCell>
+        <mxCell id="b4d" parent="1" style="ellipse;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="18" width="18" x="60" y="198" as="geometry" />
+        </mxCell>
+        <mxCell id="b4" parent="1" style="text;html=1;align=left;fontSize=22;fontColor=#1A2027;" value="Bedrock and self-host are both choices on this loop — pick per workload, revisit as you grow" vertex="1">
+          <mxGeometry height="34" width="1340" x="90" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="growth" parent="1" style="rounded=1;arcSize=3;fillColor=#FBFCFD;strokeColor=#2D6E6E;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="466" width="1380" x="50" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="growthh" parent="1" style="text;html=1;align=left;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" value="The LLMOps flywheel — start small, keep turning" vertex="1">
+          <mxGeometry height="30" width="1000" x="76" y="262" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.kinesis_data_streams;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="320" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="s1t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1A2027;" value="1. Collect &amp; EDA" vertex="1">
+          <mxGeometry height="28" width="226" x="250" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="1040" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="s2t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1A2027;" value="2. Evaluate" vertex="1">
+          <mxGeometry height="28" width="226" x="970" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="1040" y="582" as="geometry" />
+        </mxCell>
+        <mxCell id="s3t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1A2027;" value="3. Tune" vertex="1">
+          <mxGeometry height="28" width="226" x="970" y="668" as="geometry" />
+        </mxCell>
+        <mxCell id="s4" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="320" y="582" as="geometry" />
+        </mxCell>
+        <mxCell id="s4t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1A2027;" value="4. Deploy &amp; observe" vertex="1">
+          <mxGeometry height="28" width="226" x="250" y="668" as="geometry" />
+        </mxCell>
+        <mxCell id="f12" edge="1" parent="1" source="s1" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" target="s2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f23" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" target="s3" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1082" y="454" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f34" edge="1" parent="1" source="s3" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" target="s4" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f41" edge="1" parent="1" source="s4" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=3;dashed=1;entryX=0.39;entryY=0.583;entryDx=0;entryDy=0;entryPerimeter=0;" target="f41l" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f41l" parent="1" style="text;html=1;align=center;fontSize=17;fontStyle=2;fontColor=#B0563A;labelBackgroundColor=#FBFCFD;" value="observations become the next round&#39;s data" vertex="1">
+          <mxGeometry height="48" width="200" x="284" y="451" as="geometry" />
+        </mxCell>
+        <mxCell id="loopc" parent="1" style="text;html=1;align=center;fontSize=19;fontStyle=2;fontColor=#2D6E6E;" value="&lt;b&gt;&lt;font style=&quot;font-size: 24px;&quot;&gt;keep turning — data compounds, quality climbs&lt;/font&gt;&lt;/b&gt;" vertex="1">
+          <mxGeometry height="28" width="420" x="524" y="486" as="geometry" />
+        </mxCell>
+        <mxCell id="band" parent="1" style="rounded=1;arcSize=8;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="62" width="1380" x="50" y="732" as="geometry" />
+        </mxCell>
+        <mxCell id="bandt" parent="1" style="text;html=1;align=center;fontSize=24;fontStyle=1;fontColor=#FFFFFF;verticalAlign=middle;" value="Multi-tenant LLM serving is not one decision — it&#39;s a flywheel across many lenses" vertex="1">
+          <mxGeometry height="62" width="1340" x="70" y="732" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,44 @@
+{
+  "config": {
+    "base_url": "http://localhost:8000/v1,http://localhost:8001/v1,http://localhost:8002/v1,http://localhost:8003/v1,http://localhost:8004/v1,http://localhost:8005/v1,http://localhost:8006/v1,http://localhost:8007/v1",
+    "model": "google/gemma-4-31B-it",
+    "auth": "none",
+    "region": "us-west-2",
+    "dataset": null,
+    "adapters": 0,
+    "zipf": 0.0,
+    "concurrency": [
+      64
+    ],
+    "requests_per_stage": 128,
+    "max_tokens": 128,
+    "slo_ttft_ms": 5000.0,
+    "slo_tpot_ms": 100.0,
+    "timeout": 300.0,
+    "ignore_eos": true,
+    "routing": "roundrobin",
+    "input_tokens": 16384,
+    "out": "/mnt/k8s-disks/0/results/lc-in16384.json"
+  },
+  "stages": [
+    {
+      "concurrency": 64,
+      "n_requests": 128,
+      "duration_s": 5.16,
+      "n_ok": 128,
+      "n_error": 0,
+      "n_503": 0,
+      "err_types": {},
+      "ttft_p50": 1207,
+      "ttft_p90": 1291,
+      "ttft_p99": 1337,
+      "tpot_p50": 13.8,
+      "tpot_p90": 14.1,
+      "tpot_p99": 14.4,
+      "out_tok_per_s": 3174,
+      "n_good": 128,
+      "goodput_req_s": 24.8,
+      "goodput_pct": 100.0
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+<mxfile host="embed.diagrams.net">
+  <diagram id="9wxazwzg-c9ls" name="Page-1">
+    <mxGraphModel dx="1755" dy="1058" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="manylbl" parent="1" style="text;html=1;align=left;fontSize=26;fontStyle=2;fontColor=#5A6B7B;" value="many tenants — each its own behavior, each on a service tier" vertex="1">
+          <mxGeometry height="34" width="860" x="60" y="46" as="geometry" />
+        </mxCell>
+        <mxCell id="tA" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="60" y="108" as="geometry" />
+        </mxCell>
+        <mxCell id="gA" parent="1" style="rounded=1;arcSize=20;fillColor=#FFFFFF;strokeColor=#2D6E6E;strokeWidth=1.5;fontSize=23;fontColor=#1A2027;" value="Finance policy" vertex="1">
+          <mxGeometry height="42" width="220" x="162" y="112" as="geometry" />
+        </mxCell>
+        <mxCell id="bA" parent="1" style="rounded=1;arcSize=40;fillColor=#1A2027;strokeColor=none;fontSize=18;fontColor=#FFFFFF;" value="Enterprise" vertex="1">
+          <mxGeometry height="34" width="140" x="162" y="158" as="geometry" />
+        </mxCell>
+        <mxCell id="tB" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#B0563A;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="60" y="248" as="geometry" />
+        </mxCell>
+        <mxCell id="gB" parent="1" style="rounded=1;arcSize=20;fillColor=#FFFFFF;strokeColor=#B0563A;strokeWidth=1.5;fontSize=23;fontColor=#1A2027;" value="Legal tone" vertex="1">
+          <mxGeometry height="42" width="220" x="162" y="252" as="geometry" />
+        </mxCell>
+        <mxCell id="bB" parent="1" style="rounded=1;arcSize=40;fillColor=#B0563A;strokeColor=none;fontSize=18;fontColor=#FFFFFF;" value="Confidential" vertex="1">
+          <mxGeometry height="34" width="140" x="162" y="298" as="geometry" />
+        </mxCell>
+        <mxCell id="tC" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="60" y="388" as="geometry" />
+        </mxCell>
+        <mxCell id="gC" parent="1" style="rounded=1;arcSize=20;fillColor=#FFFFFF;strokeColor=#5A6B7B;strokeWidth=1.5;fontSize=23;fontColor=#1A2027;" value="Support EN" vertex="1">
+          <mxGeometry height="42" width="220" x="162" y="392" as="geometry" />
+        </mxCell>
+        <mxCell id="bC" parent="1" style="rounded=1;arcSize=40;fillColor=#5A6B7B;strokeColor=none;fontSize=18;fontColor=#FFFFFF;" value="Free / Pro" vertex="1">
+          <mxGeometry height="34" width="140" x="162" y="438" as="geometry" />
+        </mxCell>
+        <mxCell id="tD" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="60" y="528" as="geometry" />
+        </mxCell>
+        <mxCell id="gD" parent="1" style="rounded=1;arcSize=20;fillColor=#FFFFFF;strokeColor=#5A6B7B;strokeWidth=1.5;fontSize=23;fontColor=#1A2027;" value="Retail JP" vertex="1">
+          <mxGeometry height="42" width="220" x="162" y="532" as="geometry" />
+        </mxCell>
+        <mxCell id="bD" parent="1" style="rounded=1;arcSize=40;fillColor=#5A6B7B;strokeColor=none;fontSize=18;fontColor=#FFFFFF;" value="Free / Pro" vertex="1">
+          <mxGeometry height="34" width="140" x="162" y="578" as="geometry" />
+        </mxCell>
+        <mxCell id="qbox" parent="1" style="rounded=1;arcSize=8;fillColor=#FBFCFD;strokeColor=#D8DEE4;strokeWidth=2;fontSize=110;fontStyle=1;fontColor=#2D6E6E;verticalAlign=middle;align=center;" value="?" vertex="1">
+          <mxGeometry height="220" width="240" x="610" y="248" as="geometry" />
+        </mxCell>
+        <mxCell id="qlbl" parent="1" style="text;html=1;align=center;fontSize=25;fontStyle=1;fontColor=#5A6B7B;" value="one multi-tenant LLM service" vertex="1">
+          <mxGeometry height="30" width="380" x="540" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="qlbl2" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=2;fontColor=#9AA7B2;" value="every tenant calls the same LLM" vertex="1">
+          <mxGeometry height="26" width="380" x="540" y="512" as="geometry" />
+        </mxCell>
+        <mxCell id="aA" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#B0B8C0;strokeWidth=2;edgeStyle=orthogonalEdgeStyle;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="qbox" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="390" y="150" as="sourcePoint" />
+            <mxPoint x="610" y="300" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="aB" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#B0B8C0;strokeWidth=2;edgeStyle=orthogonalEdgeStyle;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="qbox" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="390" y="290" as="sourcePoint" />
+            <mxPoint x="610" y="340" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="aC" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#B0B8C0;strokeWidth=2;edgeStyle=orthogonalEdgeStyle;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="qbox" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="390" y="430" as="sourcePoint" />
+            <mxPoint x="610" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="aD" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#B0B8C0;strokeWidth=2;edgeStyle=orthogonalEdgeStyle;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="qbox" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="390" y="570" as="sourcePoint" />
+            <mxPoint x="610" y="420" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="pTop" parent="1" style="rounded=1;arcSize=8;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="150" width="420" x="1000" y="132" as="geometry" />
+        </mxCell>
+        <mxCell id="pTopT" parent="1" style="text;html=1;align=center;fontSize=30;fontStyle=1;fontColor=#2D6E6E;verticalAlign=middle;" value="per-tenant behavior &amp; data" vertex="1">
+          <mxGeometry height="130" width="400" x="1010" y="142" as="geometry" />
+        </mxCell>
+        <mxCell id="pBot" parent="1" style="rounded=1;arcSize=8;fillColor=#F2F4F6;strokeColor=#5A6B7B;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="180" width="420" x="1000" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="pBotT" parent="1" style="text;html=1;align=center;fontSize=30;fontStyle=1;fontColor=#5A6B7B;verticalAlign=top;spacingTop=18;" value="cost under control" vertex="1">
+          <mxGeometry height="42" width="400" x="1010" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="pBotS" parent="1" style="text;html=1;align=center;fontSize=21;fontColor=#5A6B7B;verticalAlign=middle;" value="governed per service tier&#xa;(Free/Pro · Enterprise · Confidential)" vertex="1">
+          <mxGeometry height="100" width="400" x="1010" y="488" as="geometry" />
+        </mxCell>
+        <mxCell id="aReq1" edge="1" parent="1" source="qbox" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=2.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="850" y="320" as="sourcePoint" />
+            <mxPoint x="1000" y="207" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="aReq2" edge="1" parent="1" source="qbox" style="endArrow=classic;html=1;strokeColor=#5A6B7B;strokeWidth=2.5;exitX=0.988;exitY=0.532;exitDx=0;exitDy=0;exitPerimeter=0;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="850" y="400" as="sourcePoint" />
+            <mxPoint x="1000" y="510" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tension" edge="1" parent="1" style="endArrow=classic;startArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=2.5;dashed=1;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1210" y="282" as="sourcePoint" />
+            <mxPoint x="1210" y="420" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tlbl" parent="1" style="text;html=1;align=left;fontSize=24;fontStyle=2;fontColor=#B0563A;" value="tension" vertex="1">
+          <mxGeometry height="28" width="130" x="1242" y="338" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
