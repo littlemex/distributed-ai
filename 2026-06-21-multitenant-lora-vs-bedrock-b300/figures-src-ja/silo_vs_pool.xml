@@ -1,0 +1,103 @@
+<mxfile host="embed.diagrams.net">
+  <diagram id="rkglsmyd-5mol" name="Page-1">
+    <mxGraphModel dx="1764" dy="1042" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="820" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="hdr" parent="1" style="text;html=1;align=left;fontSize=28;fontStyle=1;fontColor=#1A2027;" value="GPU を埋められるかが自前サービングのコスパを決める" vertex="1">
+          <mxGeometry height="40" width="1300" x="60" y="34" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lg_run" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="32" width="32" x="900" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="lg_runt" parent="1" style="text;html=1;align=left;fontSize=15;fontColor=#1A2027;verticalAlign=middle;" value="稼働" vertex="1">
+          <mxGeometry height="32" width="70" x="936" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="lg_idle" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#CDD4DA;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="32" width="32" x="1010" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="lg_idlet" parent="1" style="text;html=1;align=left;fontSize=15;fontColor=#9AA7B2;verticalAlign=middle;" value="遊休 (idle)" vertex="1">
+          <mxGeometry height="32" width="100" x="1046" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="lg_req" parent="1" style="rounded=1;arcSize=40;fillColor=#5A6B7B;strokeColor=none;fontColor=#FFFFFF;fontSize=12;" value="req" vertex="1">
+          <mxGeometry height="22" width="56" x="1150" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="lg_reqt" parent="1" style="text;html=1;align=left;fontSize=15;fontColor=#5A6B7B;verticalAlign=middle;" value="横幅 = リクエスト長" vertex="1">
+          <mxGeometry height="32" width="180" x="1212" y="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lq" parent="1" style="rounded=1;arcSize=10;fillColor=#F7F9FA;strokeColor=#9AA7B2;strokeWidth=2;align=center;verticalAlign=top;fontSize=24;fontStyle=1;fontColor=#5A6B7B;spacingTop=16;" value="リクエストが少ない" vertex="1">
+          <mxGeometry height="430" width="660" x="60" y="108" as="geometry" />
+        </mxCell>
+        <mxCell id="lq_sub" parent="1" style="text;html=1;align=center;fontSize=16;fontStyle=2;fontColor=#9AA7B2;" value="1 テナント分のトラフィック" vertex="1">
+          <mxGeometry height="22" width="660" x="60" y="146" as="geometry" />
+        </mxCell>
+        <mxCell id="lreq1" parent="1" style="rounded=1;arcSize=40;fillColor=#5A6B7B;strokeColor=none;fontColor=#FFFFFF;fontSize=13;" value="Tenant A req" vertex="1">
+          <mxGeometry height="28" width="150" x="86" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="lreq2" parent="1" style="rounded=1;arcSize=40;fillColor=#5A6B7B;strokeColor=none;fontColor=#FFFFFF;fontSize=13;" value="Tenant A req" vertex="1">
+          <mxGeometry height="28" width="96" x="86" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="larr" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#5A6B7B;strokeWidth=2.5;" value="">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="250" y="294" as="sourcePoint" /><mxPoint x="300" y="294" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="lg1" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="100" width="100" x="340" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="lg2" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#CDD4DA;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="100" width="100" x="470" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="lg3" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#CDD4DA;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="100" width="100" x="340" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="lg4" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#CDD4DA;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="100" width="100" x="470" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="lq_res" parent="1" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#B0563A;" value="GPU の多くが遊休 → Cost/req が高い" vertex="1">
+          <mxGeometry height="30" width="620" x="80" y="484" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mq" parent="1" style="rounded=1;arcSize=10;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=2.5;align=center;verticalAlign=top;fontSize=24;fontStyle=1;fontColor=#2D6E6E;spacingTop=16;" value="リクエストが多い" vertex="1">
+          <mxGeometry height="430" width="660" x="760" y="108" as="geometry" />
+        </mxCell>
+        <mxCell id="mq_sub" parent="1" style="text;html=1;align=center;fontSize=16;fontStyle=2;fontColor=#3C7A78;" value="複数テナントのトラフィックが集まる" vertex="1">
+          <mxGeometry height="22" width="660" x="760" y="146" as="geometry" />
+        </mxCell>
+        <mxCell id="mr1" parent="1" style="rounded=1;arcSize=40;fillColor=#2D6E6E;strokeColor=none;fontColor=#FFFFFF;fontSize=12;" value="Tenant A req" vertex="1"><mxGeometry height="24" width="170" x="786" y="186" as="geometry" /></mxCell>
+        <mxCell id="mr2" parent="1" style="rounded=1;arcSize=40;fillColor=#5A6B7B;strokeColor=none;fontColor=#FFFFFF;fontSize=12;" value="Tenant B req" vertex="1"><mxGeometry height="24" width="110" x="786" y="216" as="geometry" /></mxCell>
+        <mxCell id="mr3" parent="1" style="rounded=1;arcSize=40;fillColor=#B0563A;strokeColor=none;fontColor=#FFFFFF;fontSize=12;" value="Tenant C req" vertex="1"><mxGeometry height="24" width="150" x="786" y="246" as="geometry" /></mxCell>
+        <mxCell id="mr4" parent="1" style="rounded=1;arcSize=40;fillColor=#5A6B7B;strokeColor=none;fontColor=#FFFFFF;fontSize=12;" value="Tenant A req" vertex="1"><mxGeometry height="24" width="96" x="786" y="276" as="geometry" /></mxCell>
+        <mxCell id="mr5" parent="1" style="rounded=1;arcSize=40;fillColor=#2D6E6E;strokeColor=none;fontColor=#FFFFFF;fontSize=12;" value="Tenant D req" vertex="1"><mxGeometry height="24" width="190" x="786" y="306" as="geometry" /></mxCell>
+        <mxCell id="mr6" parent="1" style="rounded=1;arcSize=40;fillColor=#B0563A;strokeColor=none;fontColor=#FFFFFF;fontSize=12;" value="Tenant B req" vertex="1"><mxGeometry height="24" width="130" x="786" y="336" as="geometry" /></mxCell>
+        <mxCell id="mrmore" parent="1" style="text;html=1;align=left;fontSize=20;fontColor=#9AA7B2;" value="..." vertex="1"><mxGeometry height="22" width="64" x="786" y="364" as="geometry" /></mxCell>
+        <mxCell id="marr" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" value="">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="986" y="294" as="sourcePoint" /><mxPoint x="1036" y="294" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="mg1" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="100" width="100" x="1080" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="mg2" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="100" width="100" x="1210" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="mg3" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="100" width="100" x="1080" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="mg4" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="100" width="100" x="1210" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="mq_res" parent="1" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" value="GPU がフル稼働 → 効率的" vertex="1">
+          <mxGeometry height="30" width="620" x="780" y="484" as="geometry" />
+        </mxCell>
+
+        <mxCell id="concl" parent="1" style="rounded=1;arcSize=8;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="68" width="1360" x="60" y="592" as="geometry" />
+        </mxCell>
+        <mxCell id="conclT" parent="1" style="text;html=1;align=center;fontSize=24;fontStyle=1;fontColor=#FFFFFF;verticalAlign=middle;" value="テナントをまたいで GPU を共有 (pool) すれば、長短さまざまなリクエストが集まり GPU を埋めて効率よく処理できる。" vertex="1">
+          <mxGeometry height="68" width="1320" x="80" y="592" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

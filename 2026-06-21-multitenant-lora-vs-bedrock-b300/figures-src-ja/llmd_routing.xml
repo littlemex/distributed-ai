@@ -1,0 +1,99 @@
+<mxfile host="embed.diagrams.net">
+  <diagram id="7ps7hfkf-aib0" name="Page-1">
+    <mxGraphModel dx="1755" dy="1058" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="800" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="hds" parent="1" style="text;html=1;align=left;fontSize=22;fontStyle=2;fontColor=#5A6B7B;" value="全 adapter をレプリカ群で常駐させ、swap が起きないようにルーティングする" vertex="1">
+          <mxGeometry height="30" width="1200" x="52" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="ideal" parent="1" style="rounded=1;arcSize=8;fillColor=#E3EEEC;strokeColor=#2D6E6E;strokeWidth=2;fontSize=20;fontStyle=1;fontColor=#1F5A5A;verticalAlign=middle;align=center;" value="理想: adapter が GPU hot-set に常駐し続ける — リクエスト経路で CPU swap が起きない" vertex="1">
+          <mxGeometry height="48" width="1370" x="50" y="124" as="geometry" />
+        </mxCell>
+        <mxCell id="u" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="84" width="84" x="50" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="ut" parent="1" style="text;html=1;align=center;fontSize=17;fontColor=#5A6B7B;" value="テナントのリクエスト (A..H)" vertex="1">
+          <mxGeometry height="24" width="180" x="5" y="466" as="geometry" />
+        </mxCell>
+        <mxCell id="epp" parent="1" style="rounded=1;arcSize=14;fillColor=#EAF1F1;strokeColor=#2D6E6E;strokeWidth=2.5;fontSize=22;fontStyle=1;fontColor=#2D6E6E;verticalAlign=top;align=center;spacingTop=20;" value="LoRA-aware&#xa;Router" vertex="1">
+          <mxGeometry height="170" width="230" x="220" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="epps" parent="1" style="text;html=1;align=center;fontSize=15;fontColor=#5A6B7B;" value="どのレプリカが各 adapter を&#xa;既に持っているかを読む" vertex="1">
+          <mxGeometry height="60" width="218" x="226" y="442" as="geometry" />
+        </mxCell>
+        <mxCell id="eu" edge="1" parent="1" style="endArrow=classic;html=1;strokeColor=#5A6B7B;strokeWidth=2.5;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="138" y="422" as="sourcePoint" />
+            <mxPoint x="220" y="422" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rep1" parent="1" style="rounded=1;arcSize=8;fillColor=#FBFCFD;strokeColor=#2D6E6E;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="116" width="500" x="560" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="rep1t" parent="1" style="text;html=1;align=left;fontSize=17;fontStyle=1;fontColor=#2D6E6E;" value="vLLM replica 1 — GPU hot-set" vertex="1">
+          <mxGeometry height="24" width="470" x="578" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="r1a" parent="1" style="rounded=1;arcSize=20;fillColor=#2D6E6E;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;" value="A" vertex="1">
+          <mxGeometry height="54" width="58" x="578" y="252" as="geometry" />
+        </mxCell>
+        <mxCell id="r1b" parent="1" style="rounded=1;arcSize=20;fillColor=#5E9C9C;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;" value="B" vertex="1">
+          <mxGeometry height="54" width="58" x="646" y="252" as="geometry" />
+        </mxCell>
+        <mxCell id="r1c" parent="1" style="rounded=1;arcSize=20;fillColor=#5E9C9C;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;" value="C" vertex="1">
+          <mxGeometry height="54" width="58" x="714" y="252" as="geometry" />
+        </mxCell>
+        <mxCell id="rep2" parent="1" style="rounded=1;arcSize=8;fillColor=#FBFCFD;strokeColor=#2D6E6E;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="116" width="500" x="560" y="362" as="geometry" />
+        </mxCell>
+        <mxCell id="rep2t" parent="1" style="text;html=1;align=left;fontSize=17;fontStyle=1;fontColor=#2D6E6E;" value="vLLM replica 2 — GPU hot-set" vertex="1">
+          <mxGeometry height="24" width="470" x="578" y="372" as="geometry" />
+        </mxCell>
+        <mxCell id="r2d" parent="1" style="rounded=1;arcSize=20;fillColor=#2D6E6E;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;" value="D" vertex="1">
+          <mxGeometry height="54" width="58" x="578" y="404" as="geometry" />
+        </mxCell>
+        <mxCell id="r2e" parent="1" style="rounded=1;arcSize=20;fillColor=#5E9C9C;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;" value="E" vertex="1">
+          <mxGeometry height="54" width="58" x="646" y="404" as="geometry" />
+        </mxCell>
+        <mxCell id="r2f" parent="1" style="rounded=1;arcSize=20;fillColor=#5E9C9C;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;" value="F" vertex="1">
+          <mxGeometry height="54" width="58" x="714" y="404" as="geometry" />
+        </mxCell>
+        <mxCell id="rep3" parent="1" style="rounded=1;arcSize=8;fillColor=#FBFCFD;strokeColor=#2D6E6E;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="116" width="500" x="560" y="514" as="geometry" />
+        </mxCell>
+        <mxCell id="rep3t" parent="1" style="text;html=1;align=left;fontSize=17;fontStyle=1;fontColor=#2D6E6E;" value="vLLM replica 3 — GPU hot-set" vertex="1">
+          <mxGeometry height="24" width="470" x="578" y="524" as="geometry" />
+        </mxCell>
+        <mxCell id="r3g" parent="1" style="rounded=1;arcSize=20;fillColor=#2D6E6E;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;" value="G" vertex="1">
+          <mxGeometry height="54" width="58" x="578" y="556" as="geometry" />
+        </mxCell>
+        <mxCell id="r3h" parent="1" style="rounded=1;arcSize=20;fillColor=#5E9C9C;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;" value="H" vertex="1">
+          <mxGeometry height="54" width="58" x="646" y="556" as="geometry" />
+        </mxCell>
+        <mxCell id="r3dots" parent="1" style="text;html=1;align=left;fontSize=30;fontColor=#9AA7B2;" value="…" vertex="1">
+          <mxGeometry height="54" width="40" x="714" y="556" as="geometry" />
+        </mxCell>
+        <mxCell id="coverlbl" parent="1" style="text;html=1;align=left;fontSize=16;fontStyle=2;fontColor=#5A6B7B;" value="レプリカ群で全 adapter を GPU メモリに保持" vertex="1">
+          <mxGeometry height="60" width="290" x="790" y="266" as="geometry" />
+        </mxCell>
+        <mxCell id="rr1" edge="1" parent="1" source="epp" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=4;edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=15;fontStyle=1;fontColor=#2D6E6E;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="rep1" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;req A → replica 1 (hit, swap なし)&lt;/font&gt;">
+          <mxGeometry relative="1" x="-1" y="113" as="geometry">
+            <mxPoint x="-75" y="29" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rr2" edge="1" parent="1" source="epp" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="rep2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rr3" edge="1" parent="1" source="epp" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="rep3" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bad" parent="1" style="text;html=1;align=left;fontSize=19;fontColor=#B0563A;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;[NG] naive routing: adapter を持たないレプリカに届く → CPU swap-in → TTFT 悪化&lt;/font&gt;" vertex="1">
+          <mxGeometry height="28" width="1370" x="50" y="666" as="geometry" />
+        </mxCell>
+        <mxCell id="good" parent="1" style="text;html=1;align=left;fontSize=24;fontStyle=1;fontColor=#2D6E6E;" value="[OK] LoRA-aware routing: 既に持っているレプリカへ送る → GPU から即応答、swap なし" vertex="1">
+          <mxGeometry height="28" width="1370" x="50" y="702" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

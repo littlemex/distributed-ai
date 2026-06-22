@@ -1,0 +1,10 @@
+<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="760" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <mxCell id="t1" value="マルチテナント LLM アプリケーションの最適化" style="text;html=1;align=center;fontSize=48;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="40" y="300" width="1400" height="68" as="geometry"/></mxCell>
+    <mxCell id="rule" value="" style="endArrow=none;html=1;strokeColor=#2D6E6E;strokeWidth=3;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="402" as="sourcePoint"/><mxPoint x="880" y="402" as="targetPoint"/></mxGeometry></mxCell>
+    <mxCell id="sp1" value="赤澤 智信" style="text;html=1;align=center;fontSize=28;fontStyle=1;fontColor=#1A2027;" vertex="1" parent="1"><mxGeometry x="60" y="450" width="1360" height="38" as="geometry"/></mxCell>
+    <mxCell id="sp2" value="シニア ソリューションアーキテクト, ISV / SaaS · AWS" style="text;html=1;align=center;fontSize=23;fontColor=#5A6B7B;" vertex="1" parent="1"><mxGeometry x="60" y="494" width="1360" height="30" as="geometry"/></mxCell>
+  </root>
+</mxGraphModel>

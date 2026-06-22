@@ -1,0 +1,90 @@
+<mxfile host="embed.diagrams.net">
+  <diagram id="duulwedh-3a0d" name="Page-1">
+    <mxGraphModel dx="1680" dy="992" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1480" pageHeight="820" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="b1d" parent="1" style="ellipse;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="16" width="16" x="60" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="b1" parent="1" style="text;html=1;align=left;fontSize=21;fontColor=#1A2027;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;&lt;b style=&quot;&quot;&gt;&lt;u&gt;性能・コスト・ガバナンス・精度&lt;/u&gt;&lt;/b&gt; は LLMOps でどれも重要 — どれか一つではない&lt;/font&gt;" vertex="1">
+          <mxGeometry height="32" width="1360" x="86" y="38" as="geometry" />
+        </mxCell>
+        <mxCell id="b2d" parent="1" style="ellipse;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="16" width="16" x="60" y="99" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" parent="1" style="text;html=1;align=left;fontSize=21;fontColor=#1A2027;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;&lt;b style=&quot;&quot;&gt;&lt;u&gt;これらは密接に連動&lt;/u&gt;&lt;/b&gt; — 良質なデータを少しずつ溜め、評価・チューニングと prompt 改善で&lt;br&gt;推論コストを下げつつ精度を上げる → 体験が向上 → さらにデータが貯まる、という&lt;b style=&quot;&quot;&gt;好循環が理想&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="56" width="1360" x="86" y="88" as="geometry" />
+        </mxCell>
+        <mxCell id="b3d" parent="1" style="ellipse;fillColor=#5A6B7B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="16" width="16" x="60" y="178" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" parent="1" style="text;html=1;align=left;fontSize=21;fontColor=#1A2027;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;&lt;b style=&quot;&quot;&gt;&lt;u&gt;今回は推論にフォーカス&lt;/u&gt;&lt;/b&gt; — Self-hosted と Bedrock を性能・コスト面から実測で評価、これらは 2 way-door かつ直交する&lt;/font&gt;" vertex="1">
+          <mxGeometry height="32" width="1360" x="86" y="165" as="geometry" />
+        </mxCell>
+        <mxCell id="growth" parent="1" style="rounded=1;arcSize=3;fillColor=#FBFCFD;strokeColor=#2D6E6E;strokeWidth=2;" value="" vertex="1">
+          <mxGeometry height="494" width="1380" x="50" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="growthh" parent="1" style="text;html=1;align=left;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" value="LLMOps flywheel — 回すほど品質が上がり、コストが下がり、体験が良くなる好循環" vertex="1">
+          <mxGeometry height="30" width="1300" x="76" y="234" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.kinesis_data_streams;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="80" width="80" x="332" y="312" as="geometry" />
+        </mxCell>
+        <mxCell id="s1t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1A2027;" value="1. データを溜める &amp; EDA" vertex="1">
+          <mxGeometry height="28" width="300" x="222" y="398" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="80" width="80" x="1068" y="312" as="geometry" />
+        </mxCell>
+        <mxCell id="s2t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1A2027;" value="2. 評価" vertex="1">
+          <mxGeometry height="28" width="226" x="995" y="398" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="80" width="80" x="1068" y="556" as="geometry" />
+        </mxCell>
+        <mxCell id="s3t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1A2027;" value="3. チューニング / prompt 改善" vertex="1">
+          <mxGeometry height="28" width="340" x="938" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="s4box" parent="1" style="rounded=1;arcSize=18;fillColor=#E3EEEC;strokeColor=#2D6E6E;strokeWidth=2.5;dashed=1;" value="" vertex="1">
+          <mxGeometry height="150" width="300" x="222" y="528" as="geometry" />
+        </mxCell>
+        <mxCell id="s4" parent="1" style="sketch=0;html=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="80" width="80" x="332" y="556" as="geometry" />
+        </mxCell>
+        <mxCell id="s4t" parent="1" style="text;html=1;align=center;fontSize=21;fontStyle=1;fontColor=#1A2027;" value="4. デプロイ &amp; 観測" vertex="1">
+          <mxGeometry height="28" width="260" x="242" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="f12" edge="1" parent="1" source="s1" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" target="s2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f23" edge="1" parent="1" source="s2" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" target="s3" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f23l" parent="1" style="text;html=1;align=left;fontSize=17;fontStyle=3;fontColor=#5A6B7B;labelBackgroundColor=#FBFCFD;" value="&lt;font style=&quot;font-size: 21px;&quot;&gt;精度↑ / コスト↓&lt;/font&gt;" vertex="1">
+          <mxGeometry height="24" width="180" x="1118" y="456" as="geometry" />
+        </mxCell>
+        <mxCell id="f34" edge="1" parent="1" source="s3" style="endArrow=classic;html=1;strokeColor=#2D6E6E;strokeWidth=3;" target="s4" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f41" edge="1" parent="1" source="s4" style="endArrow=classic;html=1;strokeColor=#B0563A;strokeWidth=3;dashed=1;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="372" y="438" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f41l" parent="1" style="text;html=1;align=center;fontSize=17;fontStyle=2;fontColor=#B0563A;labelBackgroundColor=#FBFCFD;" value="&lt;b&gt;&lt;font style=&quot;font-size: 24px;&quot;&gt;体験↑ → 利用増 → データが貯まる&lt;/font&gt;&lt;/b&gt;" vertex="1">
+          <mxGeometry height="24" width="300" x="153" y="468" as="geometry" />
+        </mxCell>
+        <mxCell id="loopc" parent="1" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#2D6E6E;" value="精度↑ · コスト↓ · 体験↑ · データ↑&#xa;が互いを押し上げる" vertex="1">
+          <mxGeometry height="60" width="420" x="556" y="445" as="geometry" />
+        </mxCell>
+        <mxCell id="band" parent="1" style="rounded=1;arcSize=8;fillColor=#2D6E6E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="60" width="1380" x="50" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="bandt" parent="1" style="text;html=1;align=center;fontSize=24;fontStyle=1;fontColor=#FFFFFF;verticalAlign=middle;" value="マルチテナント LLM サービングは「一度の決定」ではない — 多くの視点をまたいで回し続ける flywheel" vertex="1">
+          <mxGeometry height="60" width="1340" x="70" y="730" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
