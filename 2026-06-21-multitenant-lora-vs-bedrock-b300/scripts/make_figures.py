@@ -359,9 +359,35 @@ def fig10_llmd():
     plt.close(fig)
 
 
+# ---- fig11: 整合性検証 (構成変更が結果を変えないことの可視化) ----
+def fig11_integrity():
+    """前回 1Pod8proc (B-roundrobin/B-affinity) と 新 8Pod (direct-rr/direct-affinity) を重ね描き。
+    主張: 構成を変えても goodput-vs-concurrency が一致 → 既存スライドの数値はそのまま有効。"""
+    old_rr = load("B-roundrobin"); old_af = load("B-affinity")
+    new_rr = load_llmd("llmd-direct-rr"); new_af = load_llmd("llmd-direct-affinity")
+    fig, ax = plt.subplots(figsize=(11, 7))
+    # 旧 = 実線+丸、新 = 破線+×。同色で「重なる」ことを見せる。
+    ax.plot(col(old_rr, "concurrency"), col(old_rr, "goodput_req_s"), "o-", lw=3, ms=10,
+            label="RR  old (1Pod x 8proc)", color="#ff7f0e")
+    ax.plot(col(new_rr, "concurrency"), col(new_rr, "goodput_req_s"), "x--", lw=2.5, ms=12, mew=3,
+            label="RR  new (8 Pods)", color="#ff7f0e")
+    ax.plot(col(old_af, "concurrency"), col(old_af, "goodput_req_s"), "o-", lw=3, ms=10,
+            label="affinity  old (1Pod x 8proc)", color="#1f77b4")
+    ax.plot(col(new_af, "concurrency"), col(new_af, "goodput_req_s"), "x--", lw=2.5, ms=12, mew=3,
+            label="affinity  new (8 Pods)", color="#1f77b4")
+    ax.set_xlabel("Concurrency")
+    ax.set_ylabel("Goodput (req/s)")
+    ax.set_title("Integrity check: 1Pod×8proc -> 8Pod construction\n"
+                 "same goodput-vs-concurrency (prior slide numbers still valid)")
+    ax.set_xscale("log", base=2)
+    ax.legend(loc="upper left", fontsize=15)
+    fig.savefig(os.path.join(OUT, "fig11_integrity.png"))
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     fig1(); fig2(); fig3(); fig4(); fig5(); fig6(); fig7(); fig8(); fig9()
-    fig10_llmd()
+    fig10_llmd(); fig11_integrity()
     print("[OK] figures generated in", OUT)
     for f in sorted(os.listdir(OUT)):
         print("  ", f)
