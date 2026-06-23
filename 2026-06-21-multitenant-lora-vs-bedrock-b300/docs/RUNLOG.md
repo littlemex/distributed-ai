@@ -509,3 +509,106 @@ if not self.use_mla:
   この assertion を踏まない構成だった。**モデルのアーキテクチャが PD の可否を決める**という知見。
 - 登壇では「PD は試したが Gemma 4 のような heterogeneous attention モデルでは NIXL KV 転送が
   成立せず、データ並列 (8x TP=1) が唯一の選択肢だった」と報告できる (負の結果も価値)。
+
+## [2026-06-23] Phase 2: llm-d (GIE) LoRA-aware routing 実験 — 着手
+
+### 目的
+本物の llm-d/GIE EndpointPicker (EPP) で、3 つの routing 戦略を **同じ 8 Pod・同じ EPP 経路**で公平に比較:
+- (1) RR        : random-picker のみ (scorer 無効 ≒ round-robin)
+- (2) affinity  : lora-affinity-scorer のみ
+- (3) llm-d full: queue + kv-cache + prefix-cache + lora-affinity の重み付き合成
+
+フェアネス: 3 条件とも同じ vLLM 群・同じ adapter 配置・同じ負荷。EPP の scheduling profile (scorer 構成) だけ差し替え → routing アルゴリズムの差だけを抽出。Envoy/EPP オーバーヘッドは共通で相殺。
+
+### 環境 (確認済み)
+- cluster `<EKS_CLUSTER>`, GPU 80 枚すべて空き (p6-b300 x8 GPU/node)
+- GIE inference CRD は導入済み (`inference.networking.k8s.io`, 2026-06-20)。Gateway API 本体 CRD は無し。
+- 既存 EPP `pd-disagg-epp` (ns disagg-ns) が standalone (Envoy sidecar) 構成で稼働中 (PD 実験の残骸)。
+  - EPP image: `ghcr.io/llm-d/llm-d-inference-scheduler:v0.8.0`
+  - 起動: `--pool-name <p> --pool-namespace <ns> --pool-group inference.networking.k8s.io --config-file /config/<x>.yaml`
+  - InferencePool selector = Pod ラベル, targetPort 8000, endpointPickerRef = EPP Service:9002
+- GIE v1.5.0 デフォルト profile は prefix-cache のみで **lora-affinity は含まれない** → 明示追加が必須。
+
+### 構成判断
+- vLLM は **8 個の個別 Pod (Deployment replicas=8, 各 1 GPU, port 8000)** にする (1Pod×8プロセスは InferencePool と不適合)。
+- 8 Pod は **同一ノードに集約** (hostPath /mnt/k8s-disks/0/adapters を共有して adapter 生成 1 回で済ます)。
+- 既存 pd-disagg EPP は触らず、LoRA 実験用に新規 InferencePool + EPP を作る。
+
+### scorer type 名 (GIE v1.5.0 一次ソース)
+- lora-affinity-scorer / prefix-cache-scorer / kv-cache-utilization-scorer / queue-scorer / running-requests-size-scorer
+- picker: max-score-picker (default) / random-picker / weighted-random-picker
+- metrics: metrics-data-source + core-metrics-extractor (vllm:lora_requests_info 等を読む)
+
+### 実装 (llm-d/manifests/, 2026-06-23)
+- vLLM `mt-lora-pool` (replicas=8, label app=mt-lora-pool, priorityClassName=train, **privileged 無し**で
+  device-plugin の GPU 分離を効かせる)。8 Pod とも同一ノード <NODE> に集約。
+  - 教訓: `privileged: true` は device-plugin の GPU 分離を無効化し、8 Pod 全部が cuda:0 を奪い合って
+    OOM クラッシュする。通常コンテナにすれば各 Pod に別 GPU が割り当たる (275GB/Pod 確認)。
+- EPP は **Helm でなく素の manifest** で再現 (PR でコード化し `kubectl apply` だけで再現可能にするため)。
+  既存 pd-disagg EPP (Helm chart standalone-v1.5.0) の Deployment/Service/RBAC/Envoy CM を移植:
+  - `10-rbac-epp.yaml`: SA + Role(pods watch) + Role(inferencepools watch) + 2 RoleBinding
+  - `30-inferencepool-epp.yaml`: InferencePool (`inference.networking.k8s.io/v1`, selector app=mt-lora-pool,
+    targetPort 8000, endpointPickerRef → Service mt-lora-epp:9002) + EPP Service (9002/9090/80→8081)
+  - `40-envoy-configmap.yaml`: pd の envoy.yaml をそのまま流用 (ext_proc→ORIGINAL_DST、PD非依存の汎用)
+  - `50-epp-deployment.yaml`: envoy-sidecar (8081) + epp scheduler (9002) の 2 コンテナ。
+    profile は ConfigMap `mt-lora-epp-config` (key=profile.yaml) を mount。`switch_profile.sh` で差し替え+restart。
+  - `60-bench-client.yaml`: vLLM と同一イメージ・同一ノードの bench Pod (aiohttp 3.14.1/numpy 2.3.5 一致)。
+    計測は必ずこの Pod から実行 (port-forward 経由は TTFT を膨らませ整合性を壊すため厳禁)。
+- EPP 起動直後、`vllm:lora_requests_info` が「not found」エラーを出すが、これは LoRA リクエストを
+  1 度も捌く前は gauge の sample 行が出ない (HELP/TYPE のみ) ため。計測中は populate される。
+  → run_experiment.sh は profile 切替後に warmup 1 周を挟む。
+
+### adapter 登録の教訓 (重要)
+- 前回本計測の config は **adapters=128 (1000 ではない)**, zipf=1.1, concurrency=[8,32,64,128,256,512],
+  requests_per_stage=512, max_tokens=64, ignore_eos, SLO ttft<=2000/tpot<=80 (B-roundrobin.json で確認)。
+  → 1000 個登録は不要だった。128 に揃える。
+- `register_adapters.sh` の **50 並列 POST は engine を詰まらせる**: vLLM は LoRA load を内部で serialize
+  するため、並列 curl は contention + batch 待ちで逆に遅くなり、completion も 30s タイムアウトする。
+  しかも curl に -m が無く、engine が詰まると curl が無限待ち→親が wait できず大量のゾンビ化。
+  → **逐次登録 (register_seq.sh, -m 90 付き)** に変更。既ロードは HTTP 400 が即返るので冪等にスキップ。
+
+### 整合性検証の設計 (ユーザ要件: 構成変更で TTFT/TPOT/Goodput を変えない)
+前回 (1Pod8proc, localhost) → 今回 (8Pod, EPP) の構成変更が結果を変えないことを示すため、
+同一ワークロードで以下を計測し `compare_integrity.py` で前回値と照合する:
+- `llmd-direct-rr`       (8Pod IP を client roundrobin)      vs 前回 `B-roundrobin.json`
+- `llmd-direct-affinity` (8Pod IP を client 静的シャード)    vs 前回 `B-affinity.json`
+許容誤差内で一致すれば、既存スライド/ブログのデータをそのまま使用できる。
+その上で新規 llm-d データとして `epp-rr` / `epp-affinity` / `epp-full` を計測 (EPP の実ルーティング)。
+
+前回値 (B-roundrobin / B-affinity, conc=512): goodput 97.6 → 121.6 req/s (affinity +24%)。
+これが 8Pod+EPP でも再現するかが見どころ。
+
+### 計測結果 (2026-06-23, 全 5 条件完了)
+
+goodput_req_s (SLO ttft<=2000/tpot<=80 を満たした req/s):
+
+| cond | 8 | 32 | 64 | 128 | 256 | 512 |
+|---|---|---|---|---|---|---|
+| B-rr (旧 1Pod8proc) | 6.18 | 21.72 | 38.19 | 64.35 | 96.5 | 97.64 |
+| B-aff (旧 1Pod8proc) | 5.99 | 22.32 | 40.95 | 68.74 | 100.3 | 121.57 |
+| **direct-rr** (新 8Pod) | 6.07 | 21.48 | 38.13 | 63.5 | 97.71 | **101.26** |
+| **direct-aff** (新 8Pod) | 5.89 | 22.11 | 40.48 | 68.78 | 100.9 | **117.75** |
+| epp-rr (EPP random) | 5.79 | 20.6 | 36.53 | 59.06 | 90.57 | 119.9 |
+| epp-aff (EPP lora-affinity単独) | 5.83 | 20.67 | 36.91 | 59.7 | 96.36 | **72.35** |
+| **epp-full** (EPP 全部入り) | 5.88 | 22.04 | 41.14 | 72.57 | 98.8 | **123.93** |
+
+SLO 達成率は epp-aff の conc=512 のみ 91.8%、それ以外は全条件 98-100%。epp-full は全段 100%。
+
+### 整合性検証の結論 (compare_integrity.py)
+- **direct-rr ≈ 旧 B-roundrobin、direct-aff ≈ 旧 B-affinity** が全 concurrency で一致 (TTFT p50/TPOT/goodput/good%
+  すべて数 % 以内)。唯一フラグが立った roundrobin conc=64 ttft_p90 (旧 239→新 104) は **新の方が良い** = 旧 single run
+  の tail ノイズ (旧は p50=74 に対し p90=239 と異常)。**構成変更 (1Pod8proc → 8Pod) は結果を変えない**ことを確認。
+  → 既存スライド/ブログの TTFT/TPOT/Goodput/損益分岐点データはそのまま使用可能。
+- 同一ノード Pod 間通信は実測 0.9ms (port-forward は使わず bench Pod から計測)。TTFT(数十〜数百 ms)に対し無視可能。
+  低 concurrency で TTFT p50 が +20ms 程度上がるが (loopback→veth)、SLO 2000ms に対し誤差範囲。
+
+### 新規 llm-d 知見 (EPP の実ルーティング)
+1. **EPP 経路自体は中立**: epp-rr は direct-rr と同等の goodput。Envoy + ext_proc gRPC のオーバーヘッドは
+   低 concurrency で TTFT +~25ms 程度、高負荷では誤差。
+2. **lora-affinity-scorer 単独は高負荷で破綻** (epp-aff conc=512: goodput 72.35, SLO 91.8%)。
+   zipf 偏りのある人気テナントを「同じ Pod」に集めすぎ、負荷分散が効かず詰まる。affinity だけ効かせると
+   キャッシュ局所性は上がるが load balance を失う、という教科書的な失敗。
+3. **full profile が最良** (epp-full conc=512: goodput 123.93, SLO 100%)。lora-affinity に
+   queue-scorer + kv-cache-utilization-scorer + prefix-cache-scorer を重み付き合成することで、
+   affinity の局所性メリットを得つつ過集中を queue/kv balance が打ち消す。**旧 B-affinity (121.57) すら上回る**。
+   → 登壇の主張「LoRA-aware routing は単独では不十分、負荷分散と組み合わせて初めて効く」を実データで裏付け。

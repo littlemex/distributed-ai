@@ -35,6 +35,14 @@ def load(name):
     return json.load(open(os.path.join(R, f"{name}.json")))["stages"]
 
 
+# llm-d (GIE EPP) 実験の結果は llm-d/results/ にある
+LLMD = os.path.join(os.path.dirname(__file__), "..", "llm-d", "results")
+
+
+def load_llmd(name):
+    return json.load(open(os.path.join(LLMD, f"{name}.json")))["stages"]
+
+
 def col(stages, key):
     return [s.get(key) for s in stages]
 
@@ -316,8 +324,70 @@ def fig9():
     plt.close(fig)
 
 
+# ---- fig10: 実 llm-d (GIE EPP) の routing 戦略比較 ----
+def fig10_llmd():
+    """同一 8 Pod・同一 EPP 経路で scheduling profile だけ替えた 3 条件 + 整合性 baseline。
+    主張: lora-affinity 単独は高負荷で破綻、full (affinity+queue+kv+prefix) が最良。"""
+    drr = load_llmd("llmd-direct-rr")
+    epr = load_llmd("llmd-epp-rr")
+    epa = load_llmd("llmd-epp-affinity")
+    epf = load_llmd("llmd-epp-full")
+    fig, ax = plt.subplots(figsize=(11, 7))
+    ax.plot(col(drr, "concurrency"), col(drr, "goodput_req_s"), "d--", lw=2.5, ms=9,
+            label="direct RR (no EPP, baseline)", color="#999999")
+    ax.plot(col(epr, "concurrency"), col(epr, "goodput_req_s"), "s-", lw=3, ms=10,
+            label="EPP: random (RR)", color="#ff7f0e")
+    ax.plot(col(epa, "concurrency"), col(epa, "goodput_req_s"), "v-", lw=3, ms=10,
+            label="EPP: lora-affinity only", color="#d62728")
+    ax.plot(col(epf, "concurrency"), col(epf, "goodput_req_s"), "o-", lw=3, ms=11,
+            label="EPP: full (affinity+queue+kv+prefix)", color="#2ca02c")
+    ax.set_xlabel("Concurrency")
+    ax.set_ylabel("Goodput (req/s)")
+    ax.set_title("Real llm-d (GIE EndpointPicker) routing on 8 Pods\n"
+                 "affinity-only collapses at load; full profile wins (128 tenants, zipf 1.1)")
+    ax.set_xscale("log", base=2)
+    ax.legend(loc="upper left")
+    # affinity-only の崩壊点を注記
+    ax.annotate("affinity-only\ncollapses\n(over-concentration)", xy=(512, 72.35),
+                xytext=(150, 80), fontsize=15, color="#d62728",
+                arrowprops=dict(arrowstyle="->", lw=2, color="#d62728"))
+    ax.annotate("full: best\n123.9 req/s", xy=(512, 123.93),
+                xytext=(70, 100), fontsize=15, color="#2ca02c",
+                arrowprops=dict(arrowstyle="->", lw=2, color="#2ca02c"))
+    ax.set_ylim(0, 140)
+    fig.savefig(os.path.join(OUT, "fig10_llmd_routing.png"))
+    plt.close(fig)
+
+
+# ---- fig11: 整合性検証 (構成変更が結果を変えないことの可視化) ----
+def fig11_integrity():
+    """前回 1Pod8proc (B-roundrobin/B-affinity) と 新 8Pod (direct-rr/direct-affinity) を重ね描き。
+    主張: 構成を変えても goodput-vs-concurrency が一致 → 既存スライドの数値はそのまま有効。"""
+    old_rr = load("B-roundrobin"); old_af = load("B-affinity")
+    new_rr = load_llmd("llmd-direct-rr"); new_af = load_llmd("llmd-direct-affinity")
+    fig, ax = plt.subplots(figsize=(11, 7))
+    # 旧 = 実線+丸、新 = 破線+×。同色で「重なる」ことを見せる。
+    ax.plot(col(old_rr, "concurrency"), col(old_rr, "goodput_req_s"), "o-", lw=3, ms=10,
+            label="RR  old (1Pod x 8proc)", color="#ff7f0e")
+    ax.plot(col(new_rr, "concurrency"), col(new_rr, "goodput_req_s"), "x--", lw=2.5, ms=12, mew=3,
+            label="RR  new (8 Pods)", color="#ff7f0e")
+    ax.plot(col(old_af, "concurrency"), col(old_af, "goodput_req_s"), "o-", lw=3, ms=10,
+            label="affinity  old (1Pod x 8proc)", color="#1f77b4")
+    ax.plot(col(new_af, "concurrency"), col(new_af, "goodput_req_s"), "x--", lw=2.5, ms=12, mew=3,
+            label="affinity  new (8 Pods)", color="#1f77b4")
+    ax.set_xlabel("Concurrency")
+    ax.set_ylabel("Goodput (req/s)")
+    ax.set_title("Integrity check: 1Pod×8proc -> 8Pod construction\n"
+                 "same goodput-vs-concurrency (prior slide numbers still valid)")
+    ax.set_xscale("log", base=2)
+    ax.legend(loc="upper left", fontsize=15)
+    fig.savefig(os.path.join(OUT, "fig11_integrity.png"))
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     fig1(); fig2(); fig3(); fig4(); fig5(); fig6(); fig7(); fig8(); fig9()
+    fig10_llmd(); fig11_integrity()
     print("[OK] figures generated in", OUT)
     for f in sorted(os.listdir(OUT)):
         print("  ", f)

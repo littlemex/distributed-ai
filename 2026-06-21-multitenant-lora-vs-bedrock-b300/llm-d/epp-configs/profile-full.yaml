@@ -1,0 +1,29 @@
+# EPP profile (3) full: queue + kv-cache + prefix-cache + lora-affinity の重み付き合成。
+# llm-d の代表的なマルチ scorer 構成。weight は既存 pd-disaggregation EPP の
+# default-plugins.yaml (queue:2, kv-cache:2, prefix-cache:3) を踏襲し、lora-affinity を加える。
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: metrics-data-source
+  parameters:
+    scheme: "http"
+    path: "/metrics"
+    insecureSkipVerify: true
+- type: core-metrics-extractor
+- type: queue-scorer
+- type: kv-cache-utilization-scorer
+- type: prefix-cache-scorer
+- type: lora-affinity-scorer
+- type: max-score-picker
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: queue-scorer
+    weight: 2
+  - pluginRef: kv-cache-utilization-scorer
+    weight: 2
+  - pluginRef: prefix-cache-scorer
+    weight: 3
+  - pluginRef: lora-affinity-scorer
+    weight: 3
+  - pluginRef: max-score-picker

@@ -1,0 +1,16 @@
+# EPP profile (1) RR: scorer 無効、random-picker のみ ≒ round-robin baseline。
+# 同じ EPP 経路・同じ 8 Pod で、scorer を一切効かせず無作為に endpoint を選ぶ。
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: metrics-data-source
+  parameters:
+    scheme: "http"
+    path: "/metrics"
+    insecureSkipVerify: true
+- type: core-metrics-extractor
+- type: random-picker
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: random-picker

@@ -1,0 +1,114 @@
+# EPP Deployment (2 コンテナ: envoy-sidecar + epp scheduler)。
+# pd-disaggregation-epp と同一構成。差し替えるのは scheduling profile (ConfigMap
+# mt-lora-epp-config) のみ。profile を replace して EPP を rollout restart すれば
+# RR / affinity / full の 3 条件を「同じ 8 Pod・同じ EPP 経路」で切り替えられる。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mt-lora-epp
+  namespace: mt-serving
+  labels:
+    inference.networking.k8s.io/igw-mode: inferencepool
+    app: mt-lora-epp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      inferencepool: mt-lora-epp
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        inference.networking.k8s.io/igw-mode: inferencepool
+        inferencepool: mt-lora-epp
+    spec:
+      serviceAccountName: mt-lora-epp
+      terminationGracePeriodSeconds: 130
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        - { key: workload, operator: Equal, value: bench, effect: NoSchedule }
+        - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+        - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+      containers:
+        # --- Envoy sidecar: client (OpenAI API) の入口。8081 で受けて ext_proc に流す ---
+        - name: envoy-sidecar
+          image: docker.io/envoyproxy/envoy:distroless-v1.33.2
+          imagePullPolicy: IfNotPresent
+          command: ["envoy"]
+          args:
+            - --service-node
+            - envoy-sidecar
+            - --log-level
+            - warn
+            - --concurrency
+            - "8"
+            - --drain-strategy
+            - immediate
+            - --drain-time-s
+            - "60"
+            - -c
+            - /etc/envoy/envoy.yaml
+          env:
+            - { name: NS_NAME,  valueFrom: { fieldRef: { fieldPath: metadata.namespace } } }
+            - { name: POD_NAME, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+          ports:
+            - { containerPort: 8081,  name: http-8081 }
+            - { containerPort: 19001, name: metrics-19001 }
+          readinessProbe:
+            httpGet: { path: /ready, port: 19001 }
+            periodSeconds: 5
+            failureThreshold: 1
+          resources:
+            requests: { cpu: "4", memory: 8Gi }
+            limits: { memory: 16Gi }
+          volumeMounts:
+            - { name: envoy-config, mountPath: /etc/envoy, readOnly: true }
+        # --- EPP scheduler: InferencePool の endpoint から profile に従い 1 つ選ぶ ---
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.8.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --pool-name
+            - mt-lora-pool
+            - --pool-namespace
+            - mt-serving
+            - --pool-group
+            - inference.networking.k8s.io
+            - --zap-encoder
+            - json
+            - --config-file
+            - /config/profile.yaml
+            - --v
+            - "2"
+            - --tracing=false
+          env:
+            - { name: NAMESPACE, valueFrom: { fieldRef: { fieldPath: metadata.namespace } } }
+            - { name: POD_NAME,  valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+          ports:
+            - { containerPort: 9002, name: grpc }
+            - { containerPort: 9003, name: grpc-health }
+            - { containerPort: 9090, name: metrics }
+          livenessProbe:
+            grpc: { port: 9003, service: inference-extension }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            grpc: { port: 9003, service: inference-extension }
+            periodSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "4", memory: 8Gi }
+            limits: { memory: 16Gi }
+          volumeMounts:
+            - { name: epp-config, mountPath: /config }
+      volumes:
+        - name: envoy-config
+          configMap:
+            name: mt-lora-envoy
+            items: [{ key: envoy.yaml, path: envoy.yaml }]
+        - name: epp-config
+          configMap:
+            name: mt-lora-epp-config        # profile-{rr,affinity,full}.yaml を profile.yaml として mount
+            items: [{ key: profile.yaml, path: profile.yaml }]
