@@ -1,0 +1,6 @@
+{"kind": "embedding_accuracy", "instance": "c8g.8xlarge", "model": "ruri-v3-30m", "quant": "model_int8.onnx", "task": "ja_retrieval_mini", "n_queries": 10, "corpus_size": 40, "ndcg@10": 1.0, "recall@10": 1.0}
+{"kind": "embedding_accuracy", "instance": "c8g.8xlarge", "model": "ruri-v3-70m", "quant": "model_int8.onnx", "task": "ja_retrieval_mini", "n_queries": 10, "corpus_size": 40, "ndcg@10": 1.0, "recall@10": 1.0}
+{"kind": "embedding_accuracy", "instance": "c8g.8xlarge", "model": "ruri-v3-130m", "quant": "model_int8.onnx", "task": "ja_retrieval_mini", "n_queries": 10, "corpus_size": 40, "ndcg@10": 1.0, "recall@10": 1.0}
+{"kind": "embedding_accuracy", "instance": "c8g.8xlarge", "model": "ruri-v3-310m", "quant": "model_int8.onnx", "task": "ja_retrieval_mini", "n_queries": 10, "corpus_size": 40, "ndcg@10": 0.9631, "recall@10": 1.0}
+{"kind": "embedding_accuracy", "instance": "c8g.8xlarge", "model": "me5-small", "quant": "model.onnx", "task": "ja_retrieval_mini", "n_queries": 10, "corpus_size": 40, "ndcg@10": 1.0, "recall@10": 1.0}
+{"kind": "embedding_accuracy", "instance": "c8g.8xlarge", "model": "embeddinggemma-300m", "quant": "model_quantized.onnx", "task": "ja_retrieval_mini", "n_queries": 10, "corpus_size": 40, "ndcg@10": 1.0, "recall@10": 1.0}

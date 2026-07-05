@@ -1,0 +1,4 @@
+model,thinking_disabled,ja2en_chrf,en2ja_chrf,n_pairs
+qwen3-14b,True,71.14,49.11,5
+qwen3-30b-a3b,True,78.14,54.9,5
+gptoss20b,False,90.65,58.21,5

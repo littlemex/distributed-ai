@@ -1,0 +1,4 @@
+model,coverage,faithfulness,fluency,conciseness,overall_1to5
+gptoss20b,5,5,5,5,5.0
+qwen3-14b,5,5,5,5,5.0
+qwen3-30b-a3b,5,5,5,5,5.0

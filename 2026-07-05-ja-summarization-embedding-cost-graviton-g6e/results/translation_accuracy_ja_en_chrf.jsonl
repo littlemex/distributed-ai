@@ -1,0 +1,3 @@
+{"kind": "translation_accuracy", "model": "Qwen/Qwen3-14B", "tag": "qwen3-14b", "n_pairs": 5, "no_think": true, "ja2en_chrf": 71.14, "en2ja_chrf": 49.11, "metric": "chrF (sacrebleu, reference-grade sanity, NOT full WMT)"}
+{"kind": "translation_accuracy", "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8", "tag": "qwen3-30b-a3b", "n_pairs": 5, "no_think": true, "ja2en_chrf": 78.14, "en2ja_chrf": 54.9, "metric": "chrF (sacrebleu, reference-grade sanity, NOT full WMT)"}
+{"kind": "translation_accuracy", "model": "openai/gpt-oss-20b", "tag": "gptoss20b", "n_pairs": 5, "no_think": false, "ja2en_chrf": 90.65, "en2ja_chrf": 58.21, "metric": "chrF (sacrebleu, reference-grade sanity, NOT full WMT)"}
