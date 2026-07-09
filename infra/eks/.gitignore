@@ -1,0 +1,14 @@
+# Terraform working files (never commit)
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Local variable files may contain account IDs / reservation IDs
+terraform.tfvars
+terraform.tfvars.local
+*.auto.tfvars
+plan.tfplan
+*.tfplan

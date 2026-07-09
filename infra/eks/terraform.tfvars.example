@@ -1,0 +1,66 @@
+# Copy this file to terraform.tfvars and fill in the values.
+# Do NOT commit terraform.tfvars — it may contain sensitive or environment-specific values.
+
+# AWS region. Must match the AZ of your Capacity Block offering.
+region = "us-east-2"
+
+# Single AZ that matches the Capacity Block placement.
+azs = ["us-east-2a"]
+
+# EKS cluster name.
+cluster_name = "distai-eks"
+
+# Kubernetes version. Verified available on EKS as of 2026-07.
+kubernetes_version = "1.35"
+
+# GPU instance type. p5en.48xlarge = H200 x8, EFA x16.
+# Alternatives: p5.48xlarge (EFA x32, H100 x8).
+instance_type = "p5en.48xlarge"
+
+# Capacity Block reservation ID returned by purchase-capacity-block.
+# Leave empty to skip CB NodePool creation.
+cb_reservation_id = "cr-REPLACE_ME"
+
+# Expiry of the Capacity Block in RFC3339. Used to derive Karpenter expireAfter.
+cb_end_date = "2024-12-31T23:59:59Z"
+
+# Your AWS account ID.
+aws_account_id = "REPLACE_WITH_ACCOUNT_ID"
+
+# Named AWS profile for Terraform provider authentication.
+aws_profile = "default"
+
+# VPC CIDR (/21 = 2048 addresses). Adjust if it conflicts with existing VPCs.
+vpc_cidr = "10.0.0.0/21"
+
+# Private subnets (one per AZ). Node workloads run here.
+private_subnet_cidrs = ["10.0.0.0/24"]
+
+# Public subnets (one per AZ). NAT gateway and public load balancers.
+public_subnet_cidrs = ["10.0.1.0/24"]
+
+# Deployment environment label (used in resource tags).
+environment = "dev"
+
+# Whether the NVIDIA GPU Operator should install the GPU driver.
+# false = AMI ships with the driver (typical for Capacity Block GPU AMIs).
+gpu_operator_install_driver = false
+
+# FSx for Lustre configuration (PERSISTENT_2 SSD).
+# Storage capacity must be a multiple of 2400 GiB.
+fsx_per_unit_storage_throughput = 250
+fsx_storage_capacity_gib        = 4800
+
+# IRSA role ARN for the aws-fsx-csi-driver addon.
+# Leave empty to use EKS Pod Identity / instance profile instead.
+fsx_csi_driver_role_arn = ""
+
+# Email addresses to notify 1 hour before Capacity Block expiry.
+# Leave empty to skip SNS subscriptions.
+cb_alert_email_addresses = []
+
+# Common resource tags.
+tags = {
+  Project   = "distributed-ai"
+  ManagedBy = "terraform"
+}

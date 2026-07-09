@@ -1,0 +1,47 @@
+# mpi-operator-v0.6.0.yaml
+#
+# PLACEHOLDER — Do not apply this file directly.
+#
+# The mpi-operator v0.6.0 CRDs and controller span ~3,000 lines and are
+# maintained upstream.  Installing from the official URL is the correct approach;
+# vendoring the full manifest here would drift from upstream without adding value.
+#
+# Installation
+# ─────────────
+# Apply the official v0.6.0 manifest from the kubeflow/mpi-operator repository:
+#
+#   kubectl apply -f \
+#     https://raw.githubusercontent.com/kubeflow/mpi-operator/v0.6.0/deploy/v2beta1/mpi-operator.yaml
+#
+# This installs into the `mpi-operator` namespace by default and registers the
+# MPIJob CRD (apiVersion: kubeflow.org/v2beta1).
+#
+# Verify installation:
+#   kubectl -n mpi-operator get pods
+#   kubectl get crd mpijobs.kubeflow.org
+#
+# Evidence that v0.6.0 is the correct version
+# ────────────────────────────────────────────
+# The shared cluster (ml-clusters-shared-us-west-2) has mpi-operator 0.6.0 installed.
+# This was confirmed by read-only inspection (kubectl get deployment -n mpi-operator -o yaml).
+# Ref: provenance.md — "mpi-operator 0.6.0 + KubeRay (ray.io CRD)".
+#
+# The same cluster uses MPIJob to run nccl-tests benchmarks (ADT pattern):
+#   nccl-test namespace / MPIJob nccl-tests-cb-b300-1 / worker slots=8 × 2 nodes.
+# Ref: provenance.md "動かぬ証拠: ADT の nccl-tests をそのまま使っている".
+#
+# Cleanup (borrow cluster etiquette)
+# ────────────────────────────────────
+# The MPIJob CRD is cluster-scoped and persists after the namespace is deleted.
+# Remove it when your experiment is complete:
+#
+#   kubectl delete -f \
+#     https://raw.githubusercontent.com/kubeflow/mpi-operator/v0.6.0/deploy/v2beta1/mpi-operator.yaml
+#
+# OR, if the cluster already has mpi-operator installed (as the shared cluster does),
+# skip installation entirely — MPIJob CRD is already present.
+# Check first:
+#
+#   kubectl get crd mpijobs.kubeflow.org 2>/dev/null && echo "already installed"
+#
+# Ref: CLUSTER-GUIDE.md §7 (cleanup: delete CRDs you added, GPU pod cleanup).
