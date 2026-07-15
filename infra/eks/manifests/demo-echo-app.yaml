@@ -1,0 +1,64 @@
+# NOTE: This file is intentionally incomplete.
+#
+# The Namespace, Deployment, and Service are managed here via kubectl_manifest
+# in cloudfront.tf (Terraform). The Ingress is also Terraform-managed so that
+# the X-Origin-Verify secret (random_password.origin_verify) can be injected
+# without hardcoding it in a file that may be committed to Git.
+#
+# To deploy the demo application:
+#   Phase 1:  terraform apply                          (enable_cloudfront=false)
+#   Phase 2:  terraform apply -var enable_cloudfront=true
+#
+# See README.md for full deployment instructions.
+#
+# The YAML below is kept as a reference only and is NOT applied directly.
+# Do NOT run: kubectl apply -f manifests/demo-echo-app.yaml
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# Reference: Namespace
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: demo
+#
+# Reference: Deployment (image pinned via var.demo_app_image)
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: echo
+#   namespace: demo
+# spec:
+#   replicas: 2
+#   selector:
+#     matchLabels:
+#       app: echo
+#   template:
+#     metadata:
+#       labels:
+#         app: echo
+#     spec:
+#       nodeSelector:
+#         node-role: cpu
+#       containers:
+#         - name: echo
+#           image: ealen/echo-server:0.9.2   # pinned; override via var.demo_app_image
+#           ports: [{containerPort: 80}]
+#
+# Reference: Service
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: echo
+#   namespace: demo
+# spec:
+#   type: ClusterIP
+#   selector:
+#     app: echo
+#   ports: [{port: 80, targetPort: 80}]
+#
+# Reference: Ingress (managed by cloudfront.tf — DO NOT apply manually)
+# The Ingress is rendered by Terraform so the X-Origin-Verify header value
+# (random_password.origin_verify) is injected at apply time and never
+# committed to this file. The annotations include:
+#   alb.ingress.kubernetes.io/conditions.echo — header check (Phase 2 only)
+#   alb.ingress.kubernetes.io/security-groups — CloudFront-only SG (Phase 2 only)

@@ -26,5 +26,9 @@ terraform {
       source  = "hashicorp/http"
       version = "~> 3.4" # required by data.http in gpu-addons.tf (mpi-operator manifest fetch)
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }

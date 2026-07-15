@@ -1,132 +1,107 @@
 # gpu-addons.tf
-# GPU-related Kubernetes add-ons:
-#   1. NVIDIA GPU Operator v25.10.1
-#   2. AWS EFA k8s Device Plugin v0.5.29
-#   3. MPI Operator v0.6.0
+# GPU-related Kubernetes add-ons. Each activates based on the accelerator pools present:
+#   1. NVIDIA GPU Operator      (var.gpu_operator_chart_version) — only if a GPU pool exists
+#   2. AWS EFA k8s Device Plugin (var.efa_device_plugin_chart_version) — if any pool uses EFA
+#      (shared by GPU and Neuron pools; trn2/p5/p5en/g6e all surface EFA via this plugin)
+#   3. Kubeflow MPI Operator     (var.mpi_operator_version) — always (multi-node launcher)
+# The Neuron device plugin is a separate add-on (neuron-addons.tf).
 #
 # Verified facts:
-#   - gpu-operator chart v25.10.1 from helm.ngc.nvidia.com/nvidia
-#     Top-level values keys (confirmed via `helm show values`):
-#       driver.rdma.enabled       (bool, default: false)
-#       driver.rdma.useHostMofed  (bool, default: false)
-#       gdrcopy.enabled           (bool, default: false)
-#   - aws-efa-k8s-device-plugin chart v0.5.29 (appVersion v0.5.20) from aws.github.io/eks-charts
-#     p5en.48xlarge is in the default supportedInstanceLabels list.
-#   - mpi-operator v0.6.0 official manifest:
-#     https://raw.githubusercontent.com/kubeflow/mpi-operator/v0.6.0/deploy/v2beta1/mpi-operator.yaml
-#     (HTTP 200 confirmed, tag v0.6.0 published 2024-10-16)
+#   - gpu-operator chart from helm.ngc.nvidia.com/nvidia. Top-level values keys confirmed
+#     via `helm show values`: driver.enabled, driver.rdma.enabled, driver.rdma.useHostMofed,
+#     gdrcopy.enabled, operator.tolerations.
+#   - aws-efa-k8s-device-plugin chart from aws.github.io/eks-charts. The chart version
+#     differs from the app/image version; p5en.48xlarge/p5.48xlarge are in the default
+#     supportedInstanceLabels list. (g6e.12xlarge is NOT — see the EFA gotcha in the
+#     README/blog; on g6e the plugin still advertises EFA once an efa-only ENI exists.)
+#   - mpi-operator v2beta1 single-file manifest is published per release tag on GitHub.
+
+locals {
+  # GPU Operator Helm values, assembled once so the release stays declarative and diffs
+  # are readable (vs. many indexed `set {}` blocks).
+  #
+  # driver.enabled defaults to false because the EKS AL2023 GPU AMI already ships the
+  # NVIDIA driver. driver.rdma.* only takes effect when the operator manages the driver,
+  # so it is included ONLY when var.gpu_operator_install_driver is true. useHostMofed is
+  # false: AWS EFA uses libfabric + the `efa` kernel module, not Mellanox OFED, so there
+  # is no host MOFED to reuse — forcing useHostMofed=true would make the driver search for
+  # a MOFED stack that does not exist on EFA nodes.
+  gpu_operator_values = merge(
+    {
+      operator = {
+        tolerations = [
+          { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+          { key = "vpc.amazonaws.com/efa", operator = "Exists", effect = "NoSchedule" },
+        ]
+      }
+      driver = merge(
+        { enabled = var.gpu_operator_install_driver },
+        var.gpu_operator_install_driver ? {
+          rdma = { enabled = true, useHostMofed = false }
+        } : {}
+      )
+      # gdrcopy requires the gdrdrv kernel module; when it is absent the operator's
+      # gdrcopy-validation blocks forever and the device plugin never advertises GPUs.
+      # Off by default; gdrcopy is a GPUDirect latency optimization, not required for NCCL.
+      gdrcopy = { enabled = var.gpu_operator_enable_gdrcopy }
+    }
+  )
+
+  # EFA device plugin tolerations. The capacity-reservation taint value varies per CB, so
+  # use operator: Exists.
+  efa_device_plugin_values = {
+    tolerations = [
+      { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
+      { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+    ]
+  }
+}
 
 # ---------------------------------------------------------------------------
-# 1. NVIDIA GPU Operator
+# 1. NVIDIA GPU Operator — only when a GPU (nvidia) accelerator pool exists.
 # ---------------------------------------------------------------------------
 resource "helm_release" "gpu_operator" {
+  count = local.has_gpu_pool ? 1 : 0
+
   name             = "gpu-operator"
   repository       = "https://helm.ngc.nvidia.com/nvidia"
   chart            = "gpu-operator"
-  version          = "v25.10.1"
+  version          = var.gpu_operator_chart_version
   namespace        = "gpu-operator"
   create_namespace = true
 
-  # Enable RDMA support in the driver component.
-  # Values key confirmed: driver.rdma.enabled (helm show values gpu-operator v25.10.1)
-  set {
-    name  = "driver.rdma.enabled"
-    value = "true"
-  }
-
-  # Use host MOFED when InfiniBand/EFA MOFED is pre-installed on the node.
-  # On AWS EFA nodes the host EFA stack is used; set useHostMofed = true so the
-  # driver component does not attempt to install its own MOFED.
-  set {
-    name  = "driver.rdma.useHostMofed"
-    value = "true"
-  }
-
-  # Enable gdrcopy kernel module deployment.
-  # Values key confirmed: gdrcopy.enabled (helm show values gpu-operator v25.10.1)
-  set {
-    name  = "gdrcopy.enabled"
-    value = "true"
-  }
-
-  # Do not install the driver on nodes that already have a pre-installed driver
-  # (e.g. Capacity Block AL2023 GPU AMIs ship with the NVIDIA driver).
-  set {
-    name  = "driver.enabled"
-    value = tostring(var.gpu_operator_install_driver)
-  }
-
-  # Tolerate the standard GPU/EFA taints so operator pods land on GPU nodes.
-  set {
-    name  = "operator.tolerations[0].key"
-    value = "nvidia.com/gpu"
-  }
-  set {
-    name  = "operator.tolerations[0].operator"
-    value = "Exists"
-  }
-  set {
-    name  = "operator.tolerations[0].effect"
-    value = "NoSchedule"
-  }
-  set {
-    name  = "operator.tolerations[1].key"
-    value = "vpc.amazonaws.com/efa"
-  }
-  set {
-    name  = "operator.tolerations[1].operator"
-    value = "Exists"
-  }
-  set {
-    name  = "operator.tolerations[1].effect"
-    value = "NoSchedule"
-  }
+  values = [yamlencode(local.gpu_operator_values)]
 
   depends_on = [helm_release.karpenter]
 }
 
 # ---------------------------------------------------------------------------
-# 2. AWS EFA k8s Device Plugin
+# 2. AWS EFA k8s Device Plugin — when any pool requests EFA (GPU or Neuron).
+#    trn2/p5/p5en/g6e all surface EFA through this same plugin, so it is shared.
 # ---------------------------------------------------------------------------
 resource "helm_release" "aws_efa_k8s_device_plugin" {
+  count = local.has_efa_pool ? 1 : 0
+
   name             = "aws-efa-k8s-device-plugin"
   repository       = "https://aws.github.io/eks-charts"
   chart            = "aws-efa-k8s-device-plugin"
-  version          = "v0.5.29" # appVersion v0.5.20; chart version confirmed via helm search
+  version          = var.efa_device_plugin_chart_version
   namespace        = "kube-system"
   create_namespace = false
 
-  # The default supportedInstanceLabels already includes p5en.48xlarge and p5.48xlarge.
-  # No overrides needed for standard GPU instances.
+  values = [yamlencode(local.efa_device_plugin_values)]
 
-  # Tolerate the capacity-reservation taint (value varies per CB; use Exists).
-  set {
-    name  = "tolerations[0].key"
-    value = "capacity-reservation"
-  }
-  set {
-    name  = "tolerations[0].operator"
-    value = "Exists"
-  }
-  set {
-    name  = "tolerations[0].effect"
-    value = "NoSchedule"
-  }
-
-  depends_on = [helm_release.gpu_operator]
+  depends_on = [helm_release.karpenter]
 }
 
 # ---------------------------------------------------------------------------
-# 3. MPI Operator v0.6.0
-#    Deployed via kubectl_manifest from the official upstream single-file YAML.
-#    URL confirmed: HTTP 200 for
-#    https://raw.githubusercontent.com/kubeflow/mpi-operator/v0.6.0/deploy/v2beta1/mpi-operator.yaml
-#
-#    The gavinbunney/kubectl provider's kubectl_file_documents data source splits
-#    a multi-document YAML into individual documents, filtering out empty entries.
+# 3. Kubeflow MPI Operator
+#    Deployed via kubectl_manifest from the official upstream single-file YAML at the
+#    release tag var.mpi_operator_version. The gavinbunney/kubectl provider's
+#    kubectl_file_documents data source splits the multi-doc YAML into individual docs.
 # ---------------------------------------------------------------------------
 data "http" "mpi_operator_manifest" {
-  url = "https://raw.githubusercontent.com/kubeflow/mpi-operator/v0.6.0/deploy/v2beta1/mpi-operator.yaml"
+  url = "https://raw.githubusercontent.com/kubeflow/mpi-operator/${var.mpi_operator_version}/deploy/v2beta1/mpi-operator.yaml"
 }
 
 data "kubectl_file_documents" "mpi_operator" {
@@ -137,8 +112,21 @@ resource "kubectl_manifest" "mpi_operator" {
   for_each  = data.kubectl_file_documents.mpi_operator.manifests
   yaml_body = each.value
 
+  # The MPIJob CRD is large; a client-side apply stores the whole schema in the
+  # last-applied-configuration annotation and exceeds the 262144-byte limit.
+  # Server-side apply avoids that annotation entirely.
+  server_side_apply = true
+
+  # The aggregated ClusterRoles (kubeflow-mpijobs-admin/edit/view) have their
+  # .rules populated by the cluster's clusterrole-aggregation-controller, which
+  # then owns that field. Server-side apply conflicts with it; force ownership
+  # back to this manifest (the aggregation controller re-reconciles harmlessly).
+  force_conflicts = true
+
   # Ignore updates to fields managed by the operator's own controllers.
   ignore_fields = ["metadata.annotations"]
 
-  depends_on = [helm_release.gpu_operator]
+  # The MPI Operator runs on system nodes and does not depend on the GPU stack; it only
+  # needs the cluster API to be reachable (the kubectl provider already targets module.eks).
+  depends_on = [module.eks]
 }

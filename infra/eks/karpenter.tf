@@ -37,8 +37,11 @@ resource "helm_release" "karpenter" {
   name             = "karpenter"
   repository       = "oci://public.ecr.aws/karpenter"
   chart            = "karpenter"
-  version          = "1.13.0"
-  wait             = false
+  version          = var.karpenter_chart_version
+  # wait=false: the controller's readiness is not gated here. Ordering is guaranteed by
+  # depends_on below (module.eks, module.karpenter) and by each kubectl_manifest depending
+  # on this release, so CRDs register before NodePool/EC2NodeClass are applied.
+  wait = false
 
   # ECR public OCI registries require credentials even for public images
   repository_username = data.aws_ecrpublic_authorization_token.karpenter.user_name

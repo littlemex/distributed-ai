@@ -35,10 +35,9 @@ resource "aws_fsx_lustre_file_system" "training" {
     Project     = "distributed-ai"
   }
 
-  lifecycle {
-    # Protect training data and checkpoints from accidental destroy.
-    prevent_destroy = true
-  }
+  # NOTE: prevent_destroy intentionally omitted. This is a reproducible sample environment
+  # that is torn down and recreated; the filesystem holds no irreplaceable data (NEFF/HF
+  # caches are regenerable). For a long-lived training cluster, set prevent_destroy = true.
 }
 
 # ---------------------------------------------------------------------------

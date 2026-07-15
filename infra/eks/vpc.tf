@@ -1,6 +1,9 @@
 # terraform-aws-modules/vpc/aws
 # Verified module variable names: cidr, azs, private_subnets, public_subnets, tags, name.
-# Single-AZ deployment to match Capacity Block placement constraints.
+#
+# The VPC spans var.azs (>= 2 AZs) because the EKS control plane requires subnets in at
+# least two AZs. GPU nodes are still pinned to a single AZ (var.gpu_zone) by the Karpenter
+# NodePool, which satisfies the single-AZ placement constraint of Capacity Block for ML.
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"

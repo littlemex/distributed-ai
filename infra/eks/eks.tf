@@ -38,9 +38,20 @@ module "eks" {
     vpc-cni = {
       before_compute = true
     }
-    kube-proxy         = {}
-    coredns            = {}
-    aws-ebs-csi-driver = {}
+    kube-proxy = {}
+    coredns    = {}
+    # Pod Identity agent must exist before controllers that authenticate via Pod Identity.
+    eks-pod-identity-agent = {
+      before_compute = true
+    }
+    aws-ebs-csi-driver = {
+      # Grant the driver EC2 permissions via Pod Identity, otherwise the controller
+      # crashes ("no EC2 IMDS role found") and the addon hangs in CREATING, blocking apply.
+      pod_identity_association = [{
+        role_arn        = aws_iam_role.ebs_csi.arn
+        service_account = "ebs-csi-controller-sa"
+      }]
+    }
   }
 
   ################################################################################
@@ -50,12 +61,12 @@ module "eks" {
   ################################################################################
   eks_managed_node_groups = {
     system = {
-      ami_type       = "AL2023_x86_64_STANDARD"
-      instance_types = ["m5.xlarge"]
+      ami_type       = var.system_node_ami_type
+      instance_types = var.system_node_instance_types
 
-      min_size     = 2
-      max_size     = 2
-      desired_size = 2
+      min_size     = var.system_node_desired_size
+      max_size     = var.system_node_desired_size
+      desired_size = var.system_node_desired_size
 
       labels = {
         "karpenter.sh/controller" = "true"
