@@ -78,3 +78,15 @@ output "efa_security_group_id" {
   description = "Security group ID that allows all inter-node EFA traffic."
   value       = aws_security_group.efa_node.id
 }
+
+# ── Accelerator pools ─────────────────────────────────────────────────────────
+
+output "accelerator_pool_efa_schedulable" {
+  description = <<-EOT
+    Map of pool name → number of EFA interfaces a Pod on that pool may request via
+    `vpc.amazonaws.com/efa`. For the multi-card layout this is (interfaces - 1) because
+    network card 0 carries the node IP and is not advertised as EFA (e.g. p5en resolves to
+    15, not 16). Request no more than this value or the Pod will never schedule.
+  EOT
+  value       = local.pool_efa_schedulable
+}

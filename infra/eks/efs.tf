@@ -146,9 +146,9 @@ resource "aws_eks_addon" "efs_csi_driver" {
 resource "kubectl_manifest" "efs_storage_class" {
   count = var.efs_enabled ? 1 : 0
   yaml_body = yamlencode({
-    apiVersion = "storage.k8s.io/v1"
-    kind       = "StorageClass"
-    metadata   = { name = "efs-shared" }
+    apiVersion  = "storage.k8s.io/v1"
+    kind        = "StorageClass"
+    metadata    = { name = "efs-shared" }
     provisioner = "efs.csi.aws.com"
     parameters = {
       provisioningMode = "efs-ap"
@@ -172,7 +172,10 @@ resource "kubectl_manifest" "efs_neuron_workspace_pv" {
       volumeMode                    = "Filesystem"
       accessModes                   = ["ReadWriteMany"]
       persistentVolumeReclaimPolicy = "Retain"
-      storageClassName              = "efs-shared"
+      # Empty storageClassName marks this a statically-provisioned PV: a PVC must bind by
+      # volumeName, and the dynamic "efs-shared" StorageClass provisioner never acts on it.
+      # (Reusing "efs-shared" here would let the dynamic provisioner race this static PV.)
+      storageClassName = ""
       csi = {
         driver       = "efs.csi.aws.com"
         volumeHandle = "${aws_efs_file_system.shared[0].id}::${aws_efs_access_point.neuron_workspace[0].id}"

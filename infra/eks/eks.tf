@@ -7,7 +7,7 @@
 #   - Output names: cluster_name, cluster_endpoint, cluster_certificate_authority_data,
 #     cluster_oidc_issuer_url, oidc_provider_arn, node_security_group_id
 #   - Kubernetes 1.35 is confirmed available in us-east-2
-#   - aws-fsx-csi-driver addon version v1.9.0-eksbuild.1 (VERIFIED_FACTS.md)
+#   - aws-fsx-csi-driver addon version v1.9.0-eksbuild.1
 #   - fsx.tf manages aws-fsx-csi-driver as a standalone aws_eks_addon resource;
 #     do NOT declare it here to avoid duplicate-addon conflict
 ################################################################################

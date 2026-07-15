@@ -2,7 +2,7 @@
 # Accelerated Karpenter NodePools + EC2NodeClasses, rendered uniformly from
 # var.accelerator_pools (GPU and Neuron/Trainium), plus an optional CPU-only pool.
 #
-# Verified facts (VERIFIED_FACTS.md):
+# Verified facts:
 #   - Karpenter provider-aws v1.13.0: capacity-type label = karpenter.sh/capacity-type, value = "reserved"
 #   - EC2NodeClass v1: spec.capacityReservationSelectorTerms: [{id: cr-xxx}]
 #   - expireAfter uses a Go duration string ("24h") or "Never", not ISO 8601
@@ -32,18 +32,20 @@ locals {
   #     then one "efa-only" interface per network card. The primary already occupies card 0,
   #     so the efa-only interfaces occupy cards 1 .. efa_interface_count-1 (device 0 each),
   #     for efa_interface_count total EFA-capable cards. This never exceeds the card count.
+  # EFA topology comes from local.pool_efa (derived from the instance type unless the pool
+  # overrides it — see locals.tf), so these numbers are never hand-entered per pool.
   pool_network_interfaces = {
     for k, p in var.accelerator_pools : k => (
-      p.efa_interface_count <= 0 ? [] : concat(
+      local.pool_efa[k].count <= 0 ? [] : concat(
         [{ networkCardIndex = 0, deviceIndex = 0, interfaceType = "interface" }],
-        p.efa_multi_card ? [
-          for i in range(p.efa_interface_count - 1) : {
+        local.pool_efa[k].multi_card ? [
+          for i in range(local.pool_efa[k].count - 1) : {
             networkCardIndex = i + 1
             deviceIndex      = 0
             interfaceType    = "efa-only"
           }
           ] : [
-          for i in range(p.efa_interface_count) : {
+          for i in range(local.pool_efa[k].count) : {
             networkCardIndex = 0
             deviceIndex      = i + 1
             interfaceType    = "efa-only"
@@ -53,13 +55,25 @@ locals {
     )
   }
 
+  # Per-pool consolidation default (overridable via pool.consolidate_after). Reserved
+  # (Capacity Block) nodes are kept for the reservation window; on-demand/spot empty nodes
+  # consolidate after a short idle to limit cost. "Never" disables idle consolidation.
+  pool_consolidate_after = {
+    for k, p in var.accelerator_pools : k => (
+      p.consolidate_after != "" ? p.consolidate_after :
+      (p.capacity_type == "reserved" ? "Never" : "5m")
+    )
+  }
+
   # Per-pool amiSelectorTerms: a pinned SSM-resolved id when ami_ssm_parameter is set,
   # otherwise the family alias (al2023@latest resolves to the Neuron AMI for Neuron
   # instances and the GPU AMI for GPU instances).
   pool_ami_selector_terms = {
     for k, p in var.accelerator_pools : k => (
       p.ami_ssm_parameter != ""
-      ? [{ id = data.aws_ssm_parameter.pool_ami[k].value }]
+      # nonsensitive(): an AMI id is not a secret, and marking it sensitive would redact the
+      # entire EC2NodeClass body from `terraform plan` (it flows through yamlencode).
+      ? [{ id = nonsensitive(data.aws_ssm_parameter.pool_ami[k].value) }]
       : [{ alias = p.ami_alias }]
     )
   }
@@ -133,15 +147,31 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
     )
   })
 
-  # Guard against the common multi-card EFA misconfiguration: p5/p5en/trn2 expose many EFA
-  # interfaces across multiple network cards, so a single-card layout degrades or fails.
   lifecycle {
+    # Guard 1: every instance type in the pool must share one EFA topology, because a single
+    # networkInterfaces layout is rendered for the whole pool. Types absent from the lookup
+    # table default to {cards=0, multi_card=false}; mixing (e.g. g6e + p5en) is rejected here.
     precondition {
-      condition = !(
-        can(regex("^(p5|trn2|trn1|inf2)", each.value.instance_type)) &&
-        (each.value.efa_interface_count <= 1 || !each.value.efa_multi_card)
+      condition = length(distinct([
+        for t in each.value.instance_types :
+        format("%d/%t", try(local.efa_capability[t].cards, 0), try(local.efa_capability[t].multi_card, false))
+      ])) == 1
+      error_message = "Pool ${each.key} mixes instance types with different EFA topologies (${join(", ", each.value.instance_types)}). All instance_types in a pool must share the same EFA card count and multi-card layout."
+    }
+    # Guard 2: a known multi-card EFA instance must not resolve to a single-card layout.
+    # Checks the RESOLVED topology (local.pool_efa) using the representative type, so it fires
+    # only on a genuine override mistake — not on single-NIC/non-EFA types (trn1.2xlarge, inf2).
+    # count == 0 is exempt: that is an explicit "disable EFA on this pool" override, not a
+    # misconfiguration.
+    precondition {
+      condition = (
+        local.pool_efa[each.key].count == 0 ||
+        !(
+          try(local.efa_capability[local.pool_rep_instance_type[each.key]].multi_card, false) &&
+          (local.pool_efa[each.key].count <= 1 || !local.pool_efa[each.key].multi_card)
+        )
       )
-      error_message = "Pool ${each.key} (${each.value.instance_type}) is a multi-card EFA instance: set efa_interface_count (16 for p5en/trn2, 32 for p5) and efa_multi_card = true."
+      error_message = "Pool ${each.key} (${local.pool_rep_instance_type[each.key]}) is a multi-card EFA instance but resolved to a single-card layout. Leave efa_interface_count/efa_multi_card unset to auto-derive, set efa_multi_card = true with the correct count, or set efa_interface_count = 0 to disable EFA."
     }
   }
 
@@ -185,18 +215,18 @@ resource "kubectl_manifest" "accelerator_nodepool" {
             {
               key      = "node.kubernetes.io/instance-type"
               operator = "In"
-              values   = [each.value.instance_type]
+              values   = each.value.instance_types
             },
             {
-              # Zone selection depends on capacity_type:
-              #   reserved (Capacity Block): pin to the single CB AZ — CB is allocated in one AZ.
-              #   on-demand / spot: allow ALL cluster AZs so Karpenter falls back to another AZ
-              #     when one is capacity-exhausted (g6e/p-series InsufficientInstanceCapacity is
-              #     common and AZ-specific). This is the resilience EKS is supposed to provide.
-              # each.value.zone is still validated to be one of var.azs and documents intent.
+              # Pin every pool to its single AZ. EFA/RDMA traffic is not routable across
+              # subnets, so all ranks of a multi-node collective must share one AZ; Capacity
+              # Block is single-AZ regardless. We deliberately do NOT spread on-demand/spot
+              # pools across AZs — cross-AZ placement would silently break multi-node EFA
+              # (NCCL falls back to TCP or fails) and cross-AZ FSx/traffic. If an AZ is
+              # capacity-exhausted, prefer changing `zone` or using a Capacity Block.
               key      = "topology.kubernetes.io/zone"
               operator = "In"
-              values   = each.value.capacity_type == "reserved" ? [each.value.zone] : var.azs
+              values   = [each.value.zone]
             },
             {
               key      = "kubernetes.io/arch"
@@ -216,10 +246,11 @@ resource "kubectl_manifest" "accelerator_nodepool" {
         }
       }
       disruption = {
-        # Only consolidate truly empty nodes; never consolidate after idle to preserve
-        # accelerator nodes (Capacity Block especially).
+        # Consolidate only empty nodes. consolidateAfter is per-pool (local.pool_consolidate_after):
+        # reserved pools keep nodes ("Never") for the reservation window; on-demand/spot empty
+        # nodes scale down after a short idle so an idle GPU pool does not bill indefinitely.
         consolidationPolicy = "WhenEmpty"
-        consolidateAfter    = "Never"
+        consolidateAfter    = local.pool_consolidate_after[each.key]
       }
       limits = {
         cpu    = each.value.cpu_limit

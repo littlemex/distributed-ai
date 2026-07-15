@@ -26,13 +26,23 @@ locals {
   # false: AWS EFA uses libfabric + the `efa` kernel module, not Mellanox OFED, so there
   # is no host MOFED to reuse — forcing useHostMofed=true would make the driver search for
   # a MOFED stack that does not exist on EFA nodes.
+  # Tolerations applied to BOTH the operator controller and its per-node operands
+  # (device plugin, feature discovery, validator). The operands run on the GPU nodes, so
+  # they must tolerate the accelerator taints; the controller is scheduled by the same set
+  # harmlessly. capacity-reservation (value varies per CB) uses operator: Exists.
+  gpu_operator_tolerations = [
+    { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+    { key = "vpc.amazonaws.com/efa", operator = "Exists", effect = "NoSchedule" },
+    { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
+  ]
+
   gpu_operator_values = merge(
     {
       operator = {
-        tolerations = [
-          { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
-          { key = "vpc.amazonaws.com/efa", operator = "Exists", effect = "NoSchedule" },
-        ]
+        tolerations = local.gpu_operator_tolerations
+      }
+      daemonsets = {
+        tolerations = local.gpu_operator_tolerations
       }
       driver = merge(
         { enabled = var.gpu_operator_install_driver },
@@ -47,12 +57,15 @@ locals {
     }
   )
 
-  # EFA device plugin tolerations. The capacity-reservation taint value varies per CB, so
-  # use operator: Exists.
+  # EFA device plugin tolerations. EFA is used by BOTH GPU and Neuron pools, so the DaemonSet
+  # must tolerate the nvidia AND neuron accelerator taints, plus the per-CB capacity-reservation
+  # taint (value varies per reservation → operator: Exists). Missing the neuron toleration would
+  # keep the plugin off trn2 nodes, so vpc.amazonaws.com/efa is never advertised there.
   efa_device_plugin_values = {
     tolerations = [
       { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
       { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+      { key = "aws.amazon.com/neuron", operator = "Exists", effect = "NoSchedule" },
     ]
   }
 }
@@ -95,21 +108,20 @@ resource "helm_release" "aws_efa_k8s_device_plugin" {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Kubeflow MPI Operator
-#    Deployed via kubectl_manifest from the official upstream single-file YAML at the
-#    release tag var.mpi_operator_version. The gavinbunney/kubectl provider's
-#    kubectl_file_documents data source splits the multi-doc YAML into individual docs.
+# 3. Kubeflow MPI Operator (optional; multi-node MPIJob launcher)
+#    Applied from a VENDORED manifest committed at manifests/mpi-operator-<version>.yaml
+#    (not fetched at plan time — an upstream tag is mutable and a plan-time HTTP dependency
+#    is fragile). Refresh it by re-downloading the release YAML when bumping the version.
+#    Gated by var.mpi_operator_enabled. The gavinbunney/kubectl provider's
+#    kubectl_file_documents splits the multi-doc YAML into individual docs.
 # ---------------------------------------------------------------------------
-data "http" "mpi_operator_manifest" {
-  url = "https://raw.githubusercontent.com/kubeflow/mpi-operator/${var.mpi_operator_version}/deploy/v2beta1/mpi-operator.yaml"
-}
-
 data "kubectl_file_documents" "mpi_operator" {
-  content = data.http.mpi_operator_manifest.response_body
+  count   = var.mpi_operator_enabled ? 1 : 0
+  content = file("${path.module}/manifests/mpi-operator-${var.mpi_operator_version}.yaml")
 }
 
 resource "kubectl_manifest" "mpi_operator" {
-  for_each  = data.kubectl_file_documents.mpi_operator.manifests
+  for_each  = var.mpi_operator_enabled ? data.kubectl_file_documents.mpi_operator[0].manifests : {}
   yaml_body = each.value
 
   # The MPIJob CRD is large; a client-side apply stores the whole schema in the

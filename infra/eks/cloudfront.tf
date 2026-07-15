@@ -100,13 +100,13 @@ resource "aws_security_group" "alb_cloudfront_only" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "alb_from_cloudfront" {
-  count                    = local.cf_enabled
-  security_group_id        = aws_security_group.alb_cloudfront_only[0].id
-  description              = "HTTP from CloudFront origin-facing prefix list only"
-  from_port                = 80
-  to_port                  = 80
-  ip_protocol              = "tcp"
-  prefix_list_id           = data.aws_ec2_managed_prefix_list.cloudfront_origin[0].id
+  count             = local.cf_enabled
+  security_group_id = aws_security_group.alb_cloudfront_only[0].id
+  description       = "HTTP from CloudFront origin-facing prefix list only"
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin[0].id
 }
 
 resource "aws_vpc_security_group_egress_rule" "alb_cloudfront_egress" {
@@ -226,11 +226,11 @@ resource "kubectl_manifest" "demo_ingress" {
       annotations = merge(
         {
           # ingressClassName is the current standard (kubernetes.io/ingress.class is deprecated)
-          "alb.ingress.kubernetes.io/scheme"             = "internet-facing"
-          "alb.ingress.kubernetes.io/target-type"        = "ip"
-          "alb.ingress.kubernetes.io/healthcheck-path"   = "/"
+          "alb.ingress.kubernetes.io/scheme"               = "internet-facing"
+          "alb.ingress.kubernetes.io/target-type"          = "ip"
+          "alb.ingress.kubernetes.io/healthcheck-path"     = "/"
           "alb.ingress.kubernetes.io/healthcheck-protocol" = "HTTP"
-          "alb.ingress.kubernetes.io/listen-ports"       = jsonencode([{ HTTP = 80 }])
+          "alb.ingress.kubernetes.io/listen-ports"         = jsonencode([{ HTTP = 80 }])
           # Tag ALB so data.aws_lb can find it. cluster-name prevents multi-cluster ambiguity.
           "alb.ingress.kubernetes.io/tags" = join(",", [
             "Project=distributed-ai",
@@ -242,7 +242,7 @@ resource "kubectl_manifest" "demo_ingress" {
         # Phase 2 only: attach CloudFront-only SG + X-Origin-Verify header condition
         var.enable_cloudfront ? {
           # Restrict ALB inbound to CloudFront prefix list IPs (Layer 1 defence)
-          "alb.ingress.kubernetes.io/security-groups"           = aws_security_group.alb_cloudfront_only[0].id
+          "alb.ingress.kubernetes.io/security-groups"                     = aws_security_group.alb_cloudfront_only[0].id
           "alb.ingress.kubernetes.io/manage-backend-security-group-rules" = "true"
           # Require X-Origin-Verify header set by CloudFront (Layer 2 defence)
           # Direct requests without the correct header receive 404 (ALB default rule)
@@ -304,9 +304,9 @@ resource "aws_cloudfront_distribution" "demo_echo" {
     origin_id   = "alb-demo-echo"
 
     custom_origin_config {
-      http_port                = 80
-      https_port               = 443
-      origin_protocol_policy   = "http-only"   # ALB listener is HTTP/80
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only" # ALB listener is HTTP/80
       # PRODUCTION: change to "https-only" after attaching ACM cert to ALB
       origin_ssl_protocols     = ["TLSv1.2"]
       origin_keepalive_timeout = 60

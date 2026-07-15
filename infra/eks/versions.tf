@@ -24,7 +24,7 @@ terraform {
     }
     http = {
       source  = "hashicorp/http"
-      version = "~> 3.4" # required by data.http in gpu-addons.tf (mpi-operator manifest fetch)
+      version = "~> 3.4" # data.http in alb-controller.tf (fetches the AWS LB Controller IAM policy)
     }
     random = {
       source  = "hashicorp/random"

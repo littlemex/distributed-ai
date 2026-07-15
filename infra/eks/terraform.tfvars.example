@@ -16,61 +16,54 @@ kubernetes_version = "1.35"
 # --- Accelerator pools -------------------------------------------------------
 # One map entry per accelerated NodePool. GPU (device_plugin="nvidia") and Trainium/
 # Inferentia (device_plugin="neuron") are described uniformly; the matching device-plugin
-# add-on and EFA layout are derived automatically. Each pool is pinned to a single AZ.
+# add-on is installed automatically, and the EFA layout is DERIVED from the instance type
+# (leave efa_interface_count/efa_multi_card unset unless you must override).
 #
-# capacity_type is per-pool, so on-demand / spot / reserved (Capacity Block) can be MIXED
-# in one cluster — e.g. an on-demand GPU dev pool, a spot GPU experiment pool, and a
-# reserved (CB) Trainium serving pool all at once. Karpenter provisions each independently.
+# Every pool pins to a single AZ (`zone`): EFA/RDMA is intra-AZ only, and Capacity Block is
+# single-AZ. capacity_type is per-pool, so on-demand / spot / reserved can be MIXED in one
+# cluster. The map key becomes Kubernetes resource names (must be RFC1123: [a-z0-9-]).
 accelerator_pools = {
-  # GPU on-demand pool: g6e.12xlarge (L40S x4, single-card EFA). Steady dev/verification.
+  # GPU on-demand pool: g6e.12xlarge (L40S x4, single-card EFA derived). Steady dev/verify.
   gpu-training = {
-    instance_type       = "g6e.12xlarge"
-    device_plugin       = "nvidia"
-    capacity_type       = "on-demand"
-    zone                = "us-east-2b"
-    efa_interface_count = 1
-    efa_multi_card      = false
+    instance_types = ["g6e.12xlarge"]
+    device_plugin = "nvidia"
+    capacity_type = "on-demand"
+    zone          = "us-east-2a"
+    # efa_interface_count / efa_multi_card omitted → derived (g6e = 1, single-card).
   }
 
-  # GPU spot pool: cheapest, interruptible. Same shape as above but capacity_type = "spot".
-  # Karpenter reclaims/replaces on spot interruption; good for stateless experiments.
+  # GPU spot pool: cheapest, interruptible. Same shape, capacity_type = "spot".
   # gpu-spot = {
-  #   instance_type       = "g6e.12xlarge"
-  #   device_plugin       = "nvidia"
-  #   capacity_type       = "spot"
-  #   zone                = "us-east-2b"
-  #   efa_interface_count = 1
-  #   efa_multi_card      = false
+  #   instance_types = ["g6e.12xlarge"]
+  #   device_plugin = "nvidia"
+  #   capacity_type = "spot"
+  #   zone          = "us-east-2a"
   # }
 
-  # GPU Capacity Block pool: p5en.48xlarge (H200 x8, EFA x16, multi-card).
+  # GPU Capacity Block pool: p5en.48xlarge (H200 x8, EFA x16 multi-card, derived).
+  # A Pod may request at most 15 EFA (card 0 carries the node IP) — see
+  # `terraform output accelerator_pool_efa_schedulable`.
   # gpu-p5en = {
-  #   instance_type       = "p5en.48xlarge"
-  #   device_plugin       = "nvidia"
-  #   capacity_type       = "reserved"
-  #   zone                = "us-east-2a"
-  #   efa_interface_count = 16
-  #   efa_multi_card      = true
-  #   cb_reservation_id   = "cr-REPLACE_ME"
-  #   volume_size         = "500Gi"
+  #   instance_types    = ["p5en.48xlarge"]
+  #   device_plugin     = "nvidia"
+  #   capacity_type     = "reserved"
+  #   zone              = "us-east-2a"
+  #   cb_reservation_id = "cr-REPLACE_ME"
+  #   cb_end_date       = "2026-01-01T12:00:00Z"  # optional: pre-expiry SNS alert for this pool
+  #   volume_size       = "500Gi"
   # }
 
-  # Trainium2 serving pool: trn2.48xlarge (16 Trainium2, EFA x16, multi-card).
+  # Trainium2 serving pool: trn2.48xlarge (16 Trainium2, EFA x16 multi-card, derived).
   # trn2-serving = {
-  #   instance_type       = "trn2.48xlarge"
-  #   device_plugin       = "neuron"
-  #   capacity_type       = "reserved"
-  #   zone                = "us-east-2b"
-  #   efa_interface_count = 16
-  #   efa_multi_card      = true
-  #   cb_reservation_id   = "cr-REPLACE_ME"
-  #   ami_ssm_parameter   = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
-  #   volume_size         = "500Gi"
+  #   instance_types    = ["trn2.48xlarge"]
+  #   device_plugin     = "neuron"
+  #   capacity_type     = "reserved"
+  #   zone              = "us-east-2b"
+  #   cb_reservation_id = "cr-REPLACE_ME"
+  #   ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
+  #   volume_size       = "500Gi"
   # }
 }
-
-# Capacity Block expiry (RFC3339), used only for the pre-expiry SNS alert.
-cb_end_date = "2024-12-31T23:59:59Z"
 
 # Named AWS profile for Terraform provider authentication. The account ID is derived
 # from these credentials automatically (no aws_account_id input needed).
@@ -78,7 +71,7 @@ aws_profile = "default"
 
 # VPC CIDR. Use a /16 — accelerated ML nodes consume IPs heavily (VPC CNI secondary IPs +
 # one IP per EFA-only ENI; trn2/p5en = 16 ENIs, p5 = 32). A /21 or /24 exhausts fast and the
-# EKS control plane goes IMPAIRED (InsufficientFreeAddresses). Matches awsome-distributed-ai.
+# EKS control plane goes IMPAIRED (InsufficientFreeAddresses). Matches awslabs/awsome-distributed-ai.
 vpc_cidr = "10.0.0.0/16"
 
 # Private subnets (one per AZ). Node workloads run here — make them huge (/18 = 16,384 IPs
@@ -108,14 +101,19 @@ gpu_operator_enable_gdrcopy = false
 cpu_nodepool_enabled    = true
 cpu_instance_categories = ["c", "m", "r"]
 
-# --- FSx for Lustre (PERSISTENT_2 SSD) ---------------------------------------
-# Storage capacity must be a multiple of 2400 GiB.
+# --- Shared storage ----------------------------------------------------------
+# EFS: multi-AZ ReadWriteMany cache (NEFF/HF). On by default (cheap, elastic).
+efs_enabled = true
+# FSx for Lustre: single-AZ high-throughput scratch. OFF by default (bills continuously).
+fsx_enabled = false
+# FSx sizing (only used when fsx_enabled = true). Capacity must be a multiple of 2400 GiB.
 fsx_per_unit_storage_throughput = 250
 fsx_storage_capacity_gib        = 4800
 # IRSA role ARN for aws-fsx-csi-driver; empty = use EKS Pod Identity / instance profile.
 fsx_csi_driver_role_arn = ""
 
-# Email addresses notified 1 hour before Capacity Block expiry. Empty = skip SNS.
+# Email addresses notified 1 hour before a Capacity Block expires (per-pool cb_end_date).
+# Empty = skip SNS subscriptions.
 cb_alert_email_addresses = []
 
 # --- Component versions (override to upgrade) --------------------------------

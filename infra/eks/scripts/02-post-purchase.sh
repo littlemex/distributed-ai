@@ -1,28 +1,31 @@
 #!/usr/bin/env bash
 # 02-post-purchase.sh
-# Write the purchased Capacity Block's CR-ID and end-date into
-# infra/eks/terraform.tfvars.local so that Terraform picks them up.
+# Print the Terraform snippet to add a purchased Capacity Block to a reserved accelerator
+# pool. Capacity Block id and expiry are per-pool fields on accelerator_pools (there is no
+# top-level cb_reservation_id anymore), so this script cannot know which pool key you want —
+# it emits a ready-to-paste block for you to add to terraform.tfvars.
 #
 # Usage:
-#   ./02-post-purchase.sh --cr-id cr-0123456789abcdef0 --end-date 2026-07-11T12:00:00Z
+#   ./02-post-purchase.sh --cr-id cr-0123456789abcdef0 --end-date 2026-07-11T12:00:00Z \
+#       [--instance-type p5en.48xlarge] [--zone us-east-2a] [--pool gpu-p5en]
 #
 # The CR-ID and end-date are printed by 01-purchase-cb.sh.
-# terraform.tfvars.local is .gitignored; it holds environment-specific overrides.
 
 set -euo pipefail
 
 CR_ID=""
 END_DATE=""
-
-# Resolve script dir so paths are correct regardless of cwd
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INFRA_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-TFVARS_LOCAL="$INFRA_DIR/terraform.tfvars.local"
+INSTANCE_TYPE="p5en.48xlarge"
+ZONE="us-east-2a"
+POOL="gpu-cb"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cr-id)    CR_ID="$2";    shift 2 ;;
-    --end-date) END_DATE="$2"; shift 2 ;;
+    --cr-id)         CR_ID="$2";         shift 2 ;;
+    --end-date)      END_DATE="$2";      shift 2 ;;
+    --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
+    --zone)          ZONE="$2";          shift 2 ;;
+    --pool)          POOL="$2";          shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -33,32 +36,38 @@ if [[ -z "$CR_ID" ]] || [[ -z "$END_DATE" ]]; then
   exit 1
 fi
 
-# Validate CR-ID format
 if [[ ! "$CR_ID" =~ ^cr-[0-9a-f]+$ ]]; then
   echo "Warning: CR-ID '$CR_ID' does not match expected pattern cr-<hex>." >&2
 fi
 
-# ── Write / update terraform.tfvars.local ─────────────────────────────────────
-# If the file already exists, remove stale cb_reservation_id / cb_end_date lines before appending.
-if [[ -f "$TFVARS_LOCAL" ]]; then
-  TMP=$(mktemp)
-  grep -v '^cb_reservation_id\|^cb_end_date' "$TFVARS_LOCAL" > "$TMP" || true
-  mv "$TMP" "$TFVARS_LOCAL"
-fi
+# Pick device_plugin from the instance family (trn/inf → neuron, else nvidia).
+DEVICE_PLUGIN="nvidia"
+case "$INSTANCE_TYPE" in
+  trn*|inf*) DEVICE_PLUGIN="neuron" ;;
+esac
 
-cat >> "$TFVARS_LOCAL" <<EOF
+cat <<EOF
 
-# Written by 02-post-purchase.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)
-cb_reservation_id = "$CR_ID"
-cb_end_date        = "$END_DATE"
+Add this reserved pool to accelerator_pools in terraform.tfvars, then apply:
+
+  ${POOL} = {
+    instance_types    = ["${INSTANCE_TYPE}"]
+    device_plugin     = "${DEVICE_PLUGIN}"
+    capacity_type     = "reserved"
+    zone              = "${ZONE}"
+    cb_reservation_id = "${CR_ID}"
+    cb_end_date       = "${END_DATE}"   # optional: schedules a pre-expiry SNS alert
+    volume_size       = "500Gi"
 EOF
+if [[ "$DEVICE_PLUGIN" == "neuron" ]]; then
+  cat <<EOF
+    ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
+EOF
+fi
+cat <<EOF
+  }
 
-echo "Written to: $TFVARS_LOCAL"
-echo ""
-echo "  cb_reservation_id = \"$CR_ID\""
-echo "  cb_end_date        = \"$END_DATE\""
-echo ""
-echo "Next steps:"
-echo "  1. Review the values above."
-echo "  2. cd $INFRA_DIR && terraform plan -var-file=terraform.tfvars.local"
-echo "  3. terraform apply -var-file=terraform.tfvars.local"
+Then:
+  terraform apply
+  kubectl get nodes -l karpenter.sh/capacity-type=reserved
+EOF

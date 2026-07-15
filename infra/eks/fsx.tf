@@ -1,8 +1,11 @@
 # fsx.tf
-# FSx for Lustre file system for shared training data / checkpoints.
-# prevent_destroy = true to guard against accidental deletion of training data.
+# FSx for Lustre — optional single-AZ, high-throughput scratch/checkpoint filesystem.
+# Gated by var.fsx_enabled (off by default: PERSISTENT_2 provisions TBs of SSD that bill
+# continuously). prevent_destroy is intentionally NOT set so the environment stays
+# destroyable; teardown deletes the filesystem and its data (regenerable caches). Set
+# prevent_destroy = true for a long-lived cluster holding irreplaceable data.
 #
-# Verified facts (VERIFIED_FACTS.md):
+# Notes:
 #   - aws-fsx-csi-driver EKS addon: v1.9.0-eksbuild.1
 #   - region and account are taken from the configured AWS provider
 
@@ -10,15 +13,16 @@
 # FSx for Lustre file system
 # ---------------------------------------------------------------------------
 resource "aws_fsx_lustre_file_system" "training" {
+  count = var.fsx_enabled ? 1 : 0
   # Single-AZ placement aligned with the Capacity Block AZ (first private subnet).
   subnet_ids = [module.vpc.private_subnets[0]]
 
-  security_group_ids = [aws_security_group.fsx.id]
+  security_group_ids = [aws_security_group.fsx[0].id]
 
   # PERSISTENT_2 supports SSD storage and is required for data repository associations.
   deployment_type = "PERSISTENT_2"
 
-  # 1.2 GiB/s/TiB is the minimum for PERSISTENT_2 with SSD.
+  # PERSISTENT_2 SSD supports 125/250/500/1000 MB/s/TiB (125 is the minimum).
   per_unit_storage_throughput = var.fsx_per_unit_storage_throughput
 
   # Storage capacity must be a multiple of 2400 GiB for PERSISTENT_2 SSD.
@@ -44,6 +48,7 @@ resource "aws_fsx_lustre_file_system" "training" {
 # Security group for FSx — allow Lustre (988) from the EKS node CIDR
 # ---------------------------------------------------------------------------
 resource "aws_security_group" "fsx" {
+  count       = var.fsx_enabled ? 1 : 0
   name        = "${var.cluster_name}-fsx-sg"
   description = "Allow Lustre traffic from EKS nodes to FSx for Lustre"
   vpc_id      = module.vpc.vpc_id
@@ -79,10 +84,13 @@ resource "aws_security_group" "fsx" {
 
 # ---------------------------------------------------------------------------
 # aws-fsx-csi-driver EKS addon
-# Version v1.9.0-eksbuild.1 confirmed (VERIFIED_FACTS.md).
+# Version v1.9.0-eksbuild.1 confirmed.
 # ---------------------------------------------------------------------------
 resource "aws_eks_addon" "fsx_csi_driver" {
-  cluster_name  = var.cluster_name
+  count = var.fsx_enabled ? 1 : 0
+  # Reference module.eks output (not var.cluster_name) so the addon implicitly depends on the
+  # cluster and never races its creation.
+  cluster_name  = module.eks.cluster_name
   addon_name    = "aws-fsx-csi-driver"
   addon_version = "v1.9.0-eksbuild.1"
   # Omit IRSA binding when empty (use EKS Pod Identity or instance profile instead).
@@ -101,6 +109,7 @@ resource "aws_eks_addon" "fsx_csi_driver" {
 # StorageClass for dynamic FSx PVC provisioning via CSI driver
 # ---------------------------------------------------------------------------
 resource "kubectl_manifest" "fsx_storage_class" {
+  count = var.fsx_enabled ? 1 : 0
   yaml_body = yamlencode({
     apiVersion = "storage.k8s.io/v1"
     kind       = "StorageClass"
@@ -109,13 +118,16 @@ resource "kubectl_manifest" "fsx_storage_class" {
     }
     provisioner   = "fsx.csi.aws.com"
     reclaimPolicy = "Retain"
+    # Dynamic-provisioning parameters. This module creates ONE FSx filesystem in Terraform;
+    # for that filesystem, bind a PVC statically via a PV (volumeHandle = its FS id). To let
+    # the CSI driver create NEW filesystems per-PVC instead, drop fileSystemId below and keep
+    # subnetId/securityGroupIds/deploymentType. The two models are mutually exclusive — this SC
+    # references the Terraform-managed filesystem, so use it with a static PV.
     parameters = {
       subnetId         = module.vpc.private_subnets[0]
-      securityGroupIds = aws_security_group.fsx.id
+      securityGroupIds = aws_security_group.fsx[0].id
       deploymentType   = "PERSISTENT_2"
-      # Reference the static file system created above for static provisioning,
-      # or remove fileSystemId to allow dynamic provisioning.
-      fileSystemId = aws_fsx_lustre_file_system.training.id
+      fileSystemId     = aws_fsx_lustre_file_system.training[0].id
     }
   })
 

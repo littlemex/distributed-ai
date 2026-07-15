@@ -9,7 +9,7 @@
 #   Auth method     : Pod Identity (created by module.karpenter in iam.tf)
 #                     — no IRSA serviceAccount annotation needed
 #
-#   featureGates (Chart values.yaml at v1.13.0 commit + VERIFIED_FACTS.md):
+#   featureGates (Chart values.yaml at v1.13.0 commit):
 #     reservedCapacity         = true   BETA default — no override needed
 #     nodeRepair               = false  ALPHA default
 #     nodeOverlay              = false  ALPHA default
@@ -31,6 +31,31 @@ data "aws_ecrpublic_authorization_token" "karpenter" {
   provider = aws.us_east_1
 }
 
+# Karpenter CRDs, installed as a SEPARATE chart. Helm never upgrades CRDs bundled in a
+# chart's crds/ directory, so bumping var.karpenter_chart_version would otherwise leave the
+# EC2NodeClass/NodePool/NodeClaim CRDs at their first-installed schema. Installing the
+# dedicated karpenter-crd chart (same version) lets `helm upgrade` roll the CRD schema too.
+resource "helm_release" "karpenter_crd" {
+  namespace        = local.karpenter_namespace
+  create_namespace = true
+  name             = "karpenter-crd"
+  repository       = "oci://public.ecr.aws/karpenter"
+  chart            = "karpenter-crd"
+  version          = var.karpenter_chart_version
+
+  repository_username = data.aws_ecrpublic_authorization_token.karpenter.user_name
+  repository_password = data.aws_ecrpublic_authorization_token.karpenter.password
+
+  # The karpenter-crd chart can optionally run a conversion webhook; it is not needed here
+  # (the controller chart runs its own), so disable it to avoid a second webhook Deployment.
+  set {
+    name  = "webhook.enabled"
+    value = "false"
+  }
+
+  depends_on = [module.eks]
+}
+
 resource "helm_release" "karpenter" {
   namespace        = local.karpenter_namespace
   create_namespace = true
@@ -38,9 +63,14 @@ resource "helm_release" "karpenter" {
   repository       = "oci://public.ecr.aws/karpenter"
   chart            = "karpenter"
   version          = var.karpenter_chart_version
-  # wait=false: the controller's readiness is not gated here. Ordering is guaranteed by
-  # depends_on below (module.eks, module.karpenter) and by each kubectl_manifest depending
-  # on this release, so CRDs register before NodePool/EC2NodeClass are applied.
+  # CRDs are managed by helm_release.karpenter_crd above, so the controller chart must not
+  # also ship them.
+  skip_crds = true
+  # wait=false: controller readiness is not gated here. CRD REGISTRATION is guaranteed by
+  # the explicit dependency on helm_release.karpenter_crd; the NodePool/EC2NodeClass
+  # kubectl_manifest resources additionally depend on this release. Note: this orders
+  # creation but does not itself wait for the CRDs to reach Established — a first apply can
+  # occasionally need a re-apply if the API is momentarily slow to serve the new types.
   wait = false
 
   # ECR public OCI registries require credentials even for public images
@@ -68,12 +98,13 @@ resource "helm_release" "karpenter" {
     # featureGates: all v1.13.0 defaults are correct
     #   reservedCapacity=true (BETA, enabled by default — ReservedCapacity CB support)
     #   nodeRepair=false, nodeOverlay=false, spotToSpotConsolidation=false, staticCapacity=false
-    # Explicitly setting featureGates here is unnecessary and suppressed per VERIFIED_FACTS.md.
+    # Explicitly setting featureGates here is unnecessary.
     EOT
   ]
 
   depends_on = [
     module.eks,
     module.karpenter,
+    helm_release.karpenter_crd,
   ]
 }

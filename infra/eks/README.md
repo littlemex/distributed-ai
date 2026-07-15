@@ -1,353 +1,374 @@
-# EKS + Capacity Block — Distributed Training Infrastructure
+# EKS for Distributed AI — Accelerator Pools, Capacity Blocks, and EFA
 
-Production-grade EKS cluster with Karpenter-managed Capacity Block nodes
-for multi-node GPU training on p5en/p5 (H200/H100) instances with EFA.
+Terraform IaC for an Amazon EKS cluster that runs distributed AI workloads on
+NVIDIA GPU and AWS Trainium/Inferentia (Neuron) accelerators. A single
+`accelerator_pools` variable describes every accelerated node group; Karpenter
+provisions them on On-Demand, Spot, or Capacity Block capacity, with EFA
+(Elastic Fabric Adapter) for high-bandwidth multi-node collectives.
+
+The design goal is one reusable module that covers the common accelerated-EKS
+shapes — GPU training, GPU/Trainium inference, and Capacity Block campaigns —
+without editing resource blocks. You add a workload by adding a map entry.
+
+> **This is a reference module, not an official AWS project.** It creates
+> billable resources (EKS control plane, NAT gateways, system nodes, and — when
+> enabled — accelerators and FSx) that cost money **while they exist, even when
+> idle**. Run `terraform destroy` when you are done. See [Cost](#cost) and
+> [Known limitations](#known-limitations).
 
 ---
 
-## Overview
+## Features
 
-This module provisions:
-
-- An EKS 1.35 cluster (us-east-2) with a small system node group (m5-series).
-- Karpenter v1.13.0 to schedule workloads onto Capacity Block reservations.
-- AWS EFA device plugin (v0.5.29) so each p5en node exposes 16 EFA slots.
-- Optional FSx for Lustre CSI driver for shared model checkpoints.
-- Helm-based addon lifecycle (EFA plugin, FSx CSI, Karpenter) managed by Terraform.
-
-The cluster is purpose-built for batch distributed training runs tied to a
-Capacity Block reservation. It is not intended as a general-purpose long-lived
-cluster; tear it down after each training campaign.
+- **`accelerator_pools` — one map, one source of truth.** Each entry renders a
+  Karpenter `NodePool` + `EC2NodeClass` via `for_each`. GPU (`nvidia`) and
+  Neuron (`neuron`) pools are described uniformly.
+- **Mixable capacity types.** `reserved` (Capacity Block), `on-demand`, and
+  `spot` can coexist in one cluster — e.g. an On-Demand GPU dev pool, a Spot
+  experiment pool, and a reserved Trainium serving pool, all at once.
+- **Add-ons follow the pools.** The NVIDIA GPU Operator, the Neuron device
+  plugin, and the EFA device plugin each install only if a pool needs them, so a
+  GPU-only cluster installs no Neuron components and vice-versa.
+- **EFA topology is derived, not hand-entered.** The interface count and
+  multi-card layout come from an instance-type lookup table; the module also
+  outputs the *schedulable* EFA count a Pod may request (see the p5en gotcha).
+- **Single-AZ accelerator placement.** Every accelerator pool pins to one AZ so
+  EFA/RDMA collectives stay intra-AZ (they are not routable across subnets).
+- **Optional shared storage.** EFS (multi-AZ, ReadWriteMany — a NEFF / Hugging
+  Face cache that survives Pod reschedule) and FSx for Lustre (single-AZ,
+  high-throughput scratch). FSx is off by default because it bills continuously.
+- **Public ingress sample.** AWS Load Balancer Controller + a
+  CloudFront → ALB → EKS reference path (opt-in, two-phase).
+- **Capacity Block lifecycle.** Helper scripts for offerings/purchase and a
+  one-shot EventBridge alarm per reserved pool before its reservation expires.
 
 ---
 
 ## Architecture
 
 ```
-┌─ VPC (us-east-2) ──────────────────────────────────────────────────────┐
-│                                                                         │
-│  ┌── EKS Control Plane ──────────────────────────────────────────────┐ │
-│  │  kubernetes 1.35                                                  │ │
-│  │  IRSA / Pod Identity  ·  aws-auth ConfigMap                       │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  ┌── System node group (m5.xlarge × 2) ─────────────────────────────┐ │
-│  │  kube-system workloads, Karpenter controller                      │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  ┌── Capacity Block nodes (p5en.48xlarge, single AZ) ───────────────┐ │
-│  │  8 × H200 GPU  ·  16 × EFA NIC  ·  hostNetwork pods             │ │
-│  │  Provisioned by Karpenter NodePool  capacity-type=reserved        │ │
-│  │  Bound to EC2NodeClass.spec.capacityReservationSelectorTerms      │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  EFA fabric (intra-AZ, GPUDirect RDMA)  ←→  ~514 GB/s busbw          │
-│  FSx for Lustre (optional)              ←→  shared checkpoints         │
-└─────────────────────────────────────────────────────────────────────────┘
+VPC (/16 — sized large: GPU/Neuron nodes + EFA-only ENIs consume many IPs)
+│
+├─ EKS control plane .......... Kubernetes 1.35, IRSA + Pod Identity
+│
+├─ System managed node group .. m5-class x2: kube-system, Karpenter controller, operators
+│
+├─ Karpenter NodePools ........ one per accelerator_pools entry, each pinned to a single AZ
+│    ├─ gpu / on-demand|spot ... nvidia.com/gpu, EFA (e.g. g6e)
+│    ├─ gpu / reserved (CB) ..... nvidia.com/gpu, EFA multi-card (e.g. p5en = H200 x8)
+│    └─ neuron / reserved (CB) .. aws.amazon.com/neuron, EFA multi-card (e.g. trn2)
+│
+├─ Add-ons (conditional) ...... GPU Operator · Neuron plugin · EFA plugin
+└─ Storage (optional) ......... EFS (RWX, multi-AZ) · FSx for Lustre (single-AZ scratch)
 ```
-
-### Why EKS + Capacity Block + EFA
-
-| Concern | Choice | Rationale |
-|---|---|---|
-| **Guaranteed capacity** | Capacity Block (CB) | H200/H100 nodes are not available on-demand; CB reserves capacity for a fixed window at a fixed price. |
-| **Node lifecycle** | Karpenter NodePool | Karpenter binds the NodePool to the CB reservation and applies the `reserved` capacity-type so nodes start as soon as the reservation is active. |
-| **Interconnect** | EFA (Elastic Fabric Adapter) | EFA delivers ~514 GB/s all-reduce busbw across nodes via GPUDirect RDMA — required for efficient multi-node training at this scale. |
-| **Orchestration** | EKS | Portable manifest format; reuses ADT nccl-tests/MPIJob recipes verbatim; no proprietary control plane lock-in. |
 
 ---
 
-## Why Terraform (not CDK / eksctl)
+## The `accelerator_pools` variable
 
-Karpenter v1.13.0 changed several Helm values and CRD fields in ways that
-break CDK constructs and eksctl add-on shims:
+This is the core abstraction. One map entry == one accelerated node group.
+`karpenter-resources.tf` renders an `EC2NodeClass` and a `NodePool` per entry
+with `for_each`; the add-on modules key off `device_plugin` and the derived EFA
+topology.
 
-1. **Helm values generation gap** — CDK's `@aws-cdk/aws-eks` constructs
-   generate Karpenter Helm values using cached field names from an older chart
-   version. The `v1.13` chart moved `featureGates` nesting and dropped the
-   top-level `settings.aws` block. Deploying via CDK silently ignores the new
-   keys, leaving `ReservedCapacity` unconfigured (it is enabled by default in
-   v1.13, but the mismatch causes confusion and drift).
+| Field | Meaning |
+|---|---|
+| `instance_types` | List of EC2 types Karpenter may launch, e.g. `["g6e.12xlarge"]` or `["g6e.12xlarge","g6e.24xlarge"]`. All types in a pool must share one EFA topology (validated). The first entry drives EFA derivation. |
+| `device_plugin` | `nvidia` or `neuron`. Selects the device-plugin add-on and the resource pods request (`nvidia.com/gpu` vs `aws.amazon.com/neuron`). |
+| `capacity_type` | `reserved` (Capacity Block), `on-demand`, or `spot`. |
+| `zone` | Single AZ (one of `var.azs`). All pools pin here — EFA is intra-AZ only and Capacity Block is single-AZ. There is no cross-AZ fallback. |
+| `efa_interface_count` | `-1` (default) derives from the instance type; set to override; `0` disables EFA. |
+| `efa_multi_card` | `null` (default) derives; `true` = one EFA per card (p5/p5en/trn2); `false` = single card (g6e). |
+| `cb_reservation_id` | `cr-…` — required when `capacity_type = "reserved"`. |
+| `cb_end_date` | Optional RFC3339 expiry → schedules a per-pool pre-expiry SNS alert. |
+| `ami_alias` / `ami_ssm_parameter` | AMI selection. `ami_ssm_parameter` (e.g. the Neuron AL2023 AMI SSM path) overrides `ami_alias`. |
+| `volume_size`, `expire_after`, `consolidate_after`, `cpu_limit`, `memory_limit` | Root EBS size, node lifetime, empty-node consolidation delay (defaults per capacity type), and NodePool limits. |
 
-2. **capacity-type label** — eksctl's `managed-nodegroup` and some CDK
-   patterns stamp Karpenter nodes with `capacity-type=capacity-block`.
-   Karpenter provider-aws v1.13.0 expects `karpenter.sh/capacity-type=reserved`
-   (confirmed by `kubectl get nodeclaim -o yaml`). Using the wrong value means
-   the NodePool requirement selector never matches and no node is provisioned.
+Validations enforce: RFC1123 pool keys, non-empty `instance_types`,
+`device_plugin ∈ {nvidia, neuron}`, `capacity_type ∈ {reserved, on-demand, spot}`,
+`zone ∈ var.azs`, and `reserved ⇒ cb_reservation_id`. A precondition additionally
+rejects a pool whose `instance_types` mix EFA topologies.
 
-3. **kubectl provider for CRDs** — EC2NodeClass and NodePool are applied as
-   Kubernetes CRDs after the Helm chart installs. Terraform's
-   `gavinbunney/kubectl` provider handles this cleanly with `wait = true`
-   dependencies. CDK requires a custom resource Lambda with a race condition on
-   CRD readiness; eksctl cannot apply arbitrary CRDs at all.
+### Schedulable EFA (important)
 
-4. **Explicit dependency graph** — `terraform apply` serialises
-   `module.eks → helm_release.karpenter → kubectl_manifest.nodeclass →
-   kubectl_manifest.nodepool`, ensuring Karpenter is ready before CRDs are
-   applied. CDK achieves this only with manual `node.addDependency` chains
-   that are easy to miss.
+With the multi-card layout, network card 0 carries the node IP and is **not**
+advertised as EFA, so a p5en.48xlarge (16 cards) advertises **15**
+`vpc.amazonaws.com/efa`, not 16. Requesting 16 leaves the Pod unschedulable.
+The module computes this for you:
 
-Terraform gives a single, auditable plan for every change, and the
-`terraform-aws-eks` module (v21.24.0) generates correct aws-auth and IRSA
-bindings out of the box.
+```bash
+terraform output accelerator_pool_efa_schedulable
+# { "gpu-p5en" = 15, "gpu-dev" = 1 }
+```
+
+### Example: three pools in one cluster
+
+```hcl
+accelerator_pools = {
+  # On-Demand GPU dev pool — always-available L40S for iteration.
+  gpu-dev = {
+    instance_types = ["g6e.12xlarge"]
+    device_plugin  = "nvidia"
+    capacity_type  = "on-demand"
+    zone           = "us-east-2a"
+    # EFA derived: 1 interface, single-card.
+  }
+
+  # Capacity Block GPU pool — H200 for a scheduled multi-node campaign.
+  gpu-p5en = {
+    instance_types    = ["p5en.48xlarge"]
+    device_plugin     = "nvidia"
+    capacity_type     = "reserved"
+    zone              = "us-east-2a"
+    cb_reservation_id = "cr-REPLACE_ME"
+    cb_end_date       = "2026-01-01T12:00:00Z" # optional pre-expiry alert
+    volume_size       = "500Gi"
+    # EFA derived: 16 interfaces, multi-card (15 schedulable).
+  }
+
+  # Capacity Block Trainium pool — Neuron serving.
+  trn2-serving = {
+    instance_types    = ["trn2.48xlarge"]
+    device_plugin     = "neuron"
+    capacity_type     = "reserved"
+    zone              = "us-east-2b"
+    cb_reservation_id = "cr-REPLACE_ME"
+    ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
+    volume_size       = "500Gi"
+  }
+}
+```
+
+### Conditional add-ons
+
+The add-on stack is derived from the pools (see `locals.tf`):
+
+| Local | True when | Installs |
+|---|---|---|
+| `has_gpu_pool` | any pool `device_plugin = "nvidia"` | NVIDIA GPU Operator |
+| `has_neuron_pool` | any pool `device_plugin = "neuron"` | neuron-helm-chart (device plugin) |
+| `has_efa_pool` | any pool with EFA | aws-efa-k8s-device-plugin |
+
+---
+
+## Reference results
+
+Smoke-scale runs performed on this module to validate the environment
+(2026-07, us-east-2, single 2-AZ VPC). Not benchmarks — the point is that each
+path works end to end.
+
+| Workload | Where | Result |
+|---|---|---|
+| PyTorch DDP (gloo) | CPU pool, 2 nodes | Completed; loss decreased; checkpoint written to shared storage. |
+| FSDP, Llama-3.2-1B | 1× p5en.48xlarge (8× H200) | Completed; ~99 TFLOPS/GPU, ~114k tokens/s; EFA transport confirmed in NCCL logs (`aws-ofi-nccl` / libfabric). |
+| vLLM inference (Cosmos-Reason1-7B) | 1× H200 | Server healthy; OpenAI-compatible inference responses. |
+| slime (Megatron + SGLang GRPO) | p5en | Images built + pushed, KubeRay + manifests prepared. The GRPO run itself needs ≥2 nodes and was left for a multi-node Capacity Block. |
 
 ---
 
 ## Prerequisites
 
-| Tool | Minimum version |
+| Tool | Minimum |
 |---|---|
 | Terraform | 1.9+ |
 | AWS CLI | 2.15+ |
 | kubectl | 1.29+ |
 | helm | 3.14+ |
-| python3 | 3.10+ (scripts use it for JSON parsing) |
+| python3 | 3.10+ (helper scripts) |
 
-AWS credentials:
+Terraform provider constraints live in `versions.tf`; the `terraform-aws-eks`
+module version and component chart versions (Karpenter 1.13.0, GPU Operator,
+EFA plugin, etc.) are pinned as defaults in `variables.tf`. IAM: permissions to
+create EKS, EC2/VPC, IAM roles, and (for Capacity Block)
+`ec2:*CapacityReservation*` / `ec2:*CapacityBlock*`.
 
 ```bash
-# Verify identity before running anything
-aws sts get-caller-identity   # confirm your account/region
-# Expected: your AWS account, region us-east-2
+aws sts get-caller-identity   # confirm the intended account and region first
 ```
 
-Sufficient IAM permissions: `AmazonEKSClusterPolicy`, `AmazonEC2FullAccess`
-(for CB operations), `IAMFullAccess` (for IRSA roles).
+Generate an inputs/outputs reference with
+[`terraform-docs`](https://terraform-docs.io): `terraform-docs markdown .`
 
 ---
 
-## Step-by-step
+## Quick start (no Capacity Block, no FSx)
 
-### 1. Bootstrap cluster
+`accelerator_pools` defaults to empty and FSx is off, so the base cluster is
+Region-agnostic and cheap to stand up. Supply one On-Demand GPU pool in
+`terraform.tfvars`:
 
 ```bash
 cd infra/eks
-cp terraform.tfvars.example terraform.tfvars.local   # fill in your values
+cp terraform.tfvars.example terraform.tfvars   # edit region, azs, and one pool
 terraform init
-terraform plan  -var-file=terraform.tfvars.local
-terraform apply -var-file=terraform.tfvars.local     # ~15 min
+terraform apply                                # ~15 min
+
+aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" --region <region>
+kubectl get nodes
 ```
 
-Update kubeconfig:
+Karpenter provisions a GPU node when the first pod requesting `nvidia.com/gpu`
+is scheduled.
+
+---
+
+## Capacity Block workflow
 
 ```bash
-aws eks update-kubeconfig \
-  --name <cluster-name> \
-  --region us-east-2 \
-  --profile "$AWS_PROFILE"
-kubectl get nodes   # system nodes visible
-```
-
-### 2. Install addons
-
-```bash
-# EFA device plugin and FSx CSI are applied via Terraform helm_release blocks.
-# Verify after apply:
-kubectl -n kube-system get pods -l app=aws-efa-k8s-device-plugin
-kubectl -n kube-system get pods -l app=fsx-csi-node
-```
-
-### 3. Gate — confirm no GPU workloads running
-
-```bash
-kubectl get pods -A -o json \
-  | python3 -c "
-import sys, json
-pods = json.load(sys.stdin)['items']
-gpu = [p['metadata']['namespace']+'/'+p['metadata']['name']
-       for p in pods
-       if p.get('status',{}).get('phase')=='Running'
-       and any(int(c.get('resources',{}).get('requests',{}).get('nvidia.com/gpu',0))>0
-               for c in p.get('spec',{}).get('containers',[]))]
-print('GPU pods:', gpu or 'none')
-"
-```
-
-### 4. Check Capacity Block offerings
-
-```bash
+# 1. Find an offering for your instance type / duration / AZ.
 ./scripts/00-check-cb-offerings.sh
-# Adjust --duration-hours to match your training window.
-# Note the CapacityBlockOfferingId and AvailabilityZone.
+
+# 2. Purchase (prints the price; confirms before buying). Requires budget approval.
+./scripts/01-purchase-cb.sh --offering-id <id> --instance-type p5en.48xlarge --instance-count 2
+
+# 3. Add a reserved pool to accelerator_pools with cb_reservation_id = "cr-…"
+#    (and optionally cb_end_date), then apply. 02-post-purchase.sh prints a ready-to-paste
+#    pool block from the purchased reservation:
+./scripts/02-post-purchase.sh --cr-id cr-… --end-date <RFC3339> --instance-type p5en.48xlarge --zone <az>
+terraform apply
+kubectl get nodes -l karpenter.sh/capacity-type=reserved
+
+# 4. Verify NCCL / EFA before the real run.
+./scripts/03-verify-nccl.sh --nodes 2 --gpus-per-node 8
+#    Expect a high busbw and "NET/OFI Selected provider is efa" in the logs.
+
+# 5. Teardown (NodePool only, or full destroy).
+./scripts/04-teardown.sh
+./scripts/04-teardown.sh --destroy
 ```
 
-### 5. Purchase Capacity Block (requires explicit budget approval)
-
-```bash
-# Review the price shown, then confirm at the prompt.
-./scripts/01-purchase-cb.sh \
-  --offering-id <CapacityBlockOfferingId> \
-  --instance-type p5en.48xlarge \
-  --instance-count 2
-```
-
-The script prints the `CapacityReservationId` (`cr-…`) and `EndDate`.
-
-### 6. Write CR-ID to tfvars and apply NodePool
-
-```bash
-./scripts/02-post-purchase.sh \
-  --cr-id cr-0123456789abcdef0 \
-  --end-date 2026-07-11T12:00:00Z
-
-terraform apply -var-file=terraform.tfvars.local
-# NodePool and EC2NodeClass are created; Karpenter provisions CB nodes.
-kubectl get nodes -l karpenter.sh/capacity-type=reserved   # nodes appear
-```
-
-### 7. Verify NCCL / EFA
-
-```bash
-./scripts/03-verify-nccl.sh \
-  --namespace my-ns \
-  --image <ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/nccl-tests:latest \
-  --nodes 2 \
-  --gpus-per-node 8
-# Expect busbw ≥ 400 GB/s at 1 GB message size.
-# Confirm log line: "NET/OFI Selected provider is efa"
-```
-
-### 8. Run training workload
-
-Submit your MPIJob or torchrun manifest. See `manifests/` for reference
-templates. Key requirements:
-
-- `hostNetwork: true` + `dnsPolicy: ClusterFirstWithHostNet`
-- `tolerations` for `capacity-reservation` with `operator: Exists`
-- `NCCL_SOCKET_IFNAME=^lo,docker,veth` (exclusion pattern — do not use a positive list)
-- `FI_PROVIDER=efa`, `FI_EFA_USE_DEVICE_RDMA=1`, `FI_EFA_FORK_SAFE=1`
-
-### 9. Teardown
-
-```bash
-# Remove workloads and NodePool only (cluster stays):
-./scripts/04-teardown.sh --namespace my-ns
-
-# Full destroy (removes EKS cluster):
-./scripts/04-teardown.sh --namespace my-ns --destroy
-```
+Each reserved pool that sets `cb_end_date` gets a one-shot EventBridge alarm to
+an SNS topic one hour before its reservation ends
+(`eventbridge-cb-alarm.tf`).
 
 ---
 
-## CloudFront → ALB → EKS demo endpoint
+## Neuron (Trainium / Inferentia)
 
-`alb-controller.tf` and `cloudfront.tf` provision a sample public ingress path
-for EKS workloads.  Architecture:
+Set `device_plugin = "neuron"` on a pool and point `ami_ssm_parameter` at the
+Neuron AL2023 EKS AMI (the driver ships in that AMI; only the device plugin is
+installed). Pods request whole devices via `aws.amazon.com/neuron: "<n>"`.
+For tensor-parallel serving across many chips, set
+`neuron_enable_scheduler = true` so the Neuron scheduler extension allocates
+contiguous device IDs. See `manifests/neuron-serving-vllm.yaml.tpl`.
 
-```
-Client (HTTPS) → CloudFront (*.cloudfront.net)
-              → ALB (HTTP/80, internet-facing, public subnets)
-              → EKS Pod (demo echo server, cpu NodePool)
-```
-
-### Security (defence in depth)
-
-| Layer | Mechanism | Effect |
-|---|---|---|
-| **SG restriction** | ALB Security Group allows port 80 only from CloudFront managed prefix list `com.amazonaws.global.cloudfront.origin-facing` | Non-CloudFront IPs are silently dropped at the network layer |
-| **Header guard** | `X-Origin-Verify` custom header set by CloudFront origin config; ALB Ingress validates via `conditions.echo` annotation | Requests reaching ALB without the correct header receive 404 (ALB default rule) |
-
-**Secret management**: The header value is generated by `random_password.origin_verify` in
-Terraform and injected into the Ingress at apply time via `kubectl_manifest`.
-It is **never written to any YAML file** and therefore never committed to Git.
-The value lives only in Terraform state — encrypt state with S3 + KMS for production.
-
-### Two-phase deployment
-
-The `data.aws_lb` data source requires the ALB to exist at `plan` time.
-Use `var.enable_cloudfront` (default `false`) to split into two phases:
-
-**Phase 1 — create ALB (default, no CloudFront):**
-
-```bash
-cd infra/eks
-terraform apply                          # enable_cloudfront=false (default)
-
-# Wait for ALB to become active
-kubectl get ingress -n demo              # watch ADDRESS field appear
-aws elbv2 describe-load-balancers \
-  --query "LoadBalancers[?contains(LoadBalancerName,'k8s-demo')].State"
-
-# Smoke-test ALB directly (accessible without header in Phase 1)
-curl http://<alb-dns>/
-```
-
-**Phase 2 — create CloudFront + apply header guard:**
-
-```bash
-terraform apply -var enable_cloudfront=true
-# Or add to terraform.tfvars: enable_cloudfront = true
-
-# Verify E2E path
-terraform output cloudfront_domain_name
-curl https://<cloudfront-domain>/       # expect 200 + {"hostname":...}
-
-# Verify ALB is now blocked from the public internet
-curl --connect-timeout 5 http://<alb-dns>/   # expect connection timeout (SG block)
-```
-
-### Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `enable_cloudfront` | `false` | Phase 2 gate. Set `true` after ALB is active. |
-| `alb_controller_chart_version` | `"3.4.1"` | Helm chart version for AWS LB Controller. |
-| `demo_namespace` | `"demo"` | Kubernetes namespace for the echo server. |
-| `demo_app_image` | `"ealen/echo-server:0.9.2"` | Container image (version-pinned). |
-| `cloudfront_web_acl_id` | `""` | Optional WAFv2 WebACL ARN (GLOBAL scope, us-east-1). |
-
-### Production hardening checklist (TODO)
-
-- [ ] **HTTPS on ALB**: Attach an ACM certificate to the ALB listener and set
-  `origin_protocol_policy = "https-only"` in CloudFront.
-  This is required before the `X-Origin-Verify` header can be treated as
-  secret — currently CloudFront → ALB traffic is HTTP (plaintext).
-- [ ] **CloudFront VPC Origins** (alternative to header-based guard):
-  Use [CloudFront VPC Origins](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html)
-  to make the ALB internal, eliminating the need for the custom header entirely.
-  Available since 2024; requires VPC Origin resource + distribution update.
-- [ ] **WAF**: Set `cloudfront_web_acl_id` to attach an AWS WAFv2 WebACL
-  (rate limiting, geo blocking, managed rule sets).
-- [ ] **Header rotation**: `random_password.origin_verify` has no rotation
-  mechanism.  For zero-downtime rotation: add a second value to `conditions.echo`
-  (ALB supports multiple values as OR), update CloudFront custom header, then
-  remove the old value.  AWS publishes a Lambda-based rotation solution.
-- [ ] **State encryption**: Enable S3 backend + KMS for Terraform state.
-  The `origin_verify_secret` value is stored in state (sensitive = true in output).
-- [ ] **Access logging**: Add `alb.ingress.kubernetes.io/load-balancer-attributes:
-  access_logs.s3.enabled=true,access_logs.s3.bucket=<bucket>` for audit trails.
+> Multi-node Neuron over EFA is wired (the EFA device plugin tolerates the
+> Neuron taint) but has not been hardware-verified in this module — see
+> [Known limitations](#known-limitations).
 
 ---
 
-## Cost note
+## CloudFront → ALB → EKS demo endpoint (opt-in)
 
-| Item | Approximate cost |
-|---|---|
-| p5en.48xlarge × 2, 24 h Capacity Block | ~$2,636 USD |
-| p5.48xlarge × 2, 24 h Capacity Block | ~$1,758 USD (H100) |
-| EKS control plane | $0.10/h → ~$2.40/24 h |
-| m5.xlarge system nodes × 2 | ~$0.38/24 h |
+`alb-controller.tf` and `cloudfront.tf` provision a sample public path:
+`Client (HTTPS) → CloudFront → ALB (internet-facing) → EKS Pod`. The ALB
+security group only allows the CloudFront managed prefix list, and CloudFront
+adds an `X-Origin-Verify` header the ALB checks (the value is generated by
+`random_password`, never written to a YAML file). Because the `aws_lb` data
+source needs the ALB at plan time, it is a two-phase apply:
 
-Capacity Block charges are upfront at purchase time.
-The cluster EC2/EKS costs accrue while the cluster is running.
-Destroy the cluster after the training campaign to stop ongoing charges.
+```bash
+terraform apply                              # phase 1: creates the ALB (enable_cloudfront=false)
+terraform apply -var enable_cloudfront=true  # phase 2: CloudFront + SG lock-down
+```
+
+This is a demo. Before production use, add HTTPS on the ALB (ACM), consider
+CloudFront VPC Origins to keep the ALB internal, and attach a WAFv2 WebACL via
+`cloudfront_web_acl_id`.
 
 ---
 
-## Gotcha table
+## Gotchas
 
-Confirmed through direct measurement and cluster inspection.
+Discovered by direct measurement and cluster inspection.
+
+### Capacity Block & Karpenter
 
 | Symptom | Root cause | Fix |
 |---|---|---|
-| Karpenter never provisions nodes | `capacity-type=capacity-block` in NodePool requirements | Use `karpenter.sh/capacity-type In [reserved]` (v1.13 label value) |
-| CB nodes not matched by NodePool | `EC2NodeClass.spec.capacityReservationSelectorTerms` missing or wrong | Set `[{id: cr-<hex>}]` exactly as returned by purchase API |
-| `featureGates.reservedCapacity` rejected by Helm | Field not exposed in v1.13 chart values | Remove it — `ReservedCapacity=true` is the compiled default; explicit setting causes unknown-key error |
-| NCCL falls back to TCP, 28× slower | Positive `NCCL_SOCKET_IFNAME` hides EFA interfaces | Use exclusion pattern: `NCCL_SOCKET_IFNAME=^lo,docker,veth` |
-| `fi_info -p efa` returns empty | Pod missing `vpc.amazonaws.com/efa` resource request | Add `limits: {vpc.amazonaws.com/efa: "16"}` and the EFA toleration |
-| sshd/torchrun dies (exit 143) in `kubectl exec` | Background process killed on exec session close (SIGTERM) | Run sshd or torchrun as `command:` in the pod spec (PID 1 subtree) |
-| EFA device plugin chart version confusion | Chart `v0.5.29` ships app version `v0.5.20`; do not mix them | Use chart version `v0.5.29` — do not substitute app version |
-| `expireAfter` rejected by NodePool | ISO 8601 duration not supported | Use Go duration string, e.g. `"24h"` |
-| Observation pod gets `UnexpectedAdmissionError` | Requested `vpc.amazonaws.com/efa` but training pod holds all 16 | Observation pods read EFA counters via netlink — request no EFA resource |
-| `terraform apply` fails: CRD not ready | NodePool/EC2NodeClass applied before Karpenter webhook is up | Add `depends_on = [helm_release.karpenter]` in kubectl provider resources |
-| CDK Karpenter deploy silently misconfigured | CDK generates v0.x-era Helm values; v1.13 chart ignores unknown keys | Use Terraform with explicit `values = [yamlencode({...})]` |
+| Karpenter never provisions CB nodes | NodePool used `capacity-type=capacity-block` | Use `karpenter.sh/capacity-type In [reserved]` (Karpenter v1 value). |
+| CB nodes not matched | `EC2NodeClass.capacityReservationSelectorTerms` missing/wrong | Set `[{id: "cr-…"}]` exactly as returned by the purchase API. |
+| `reserved` pool still "filtered out all instance types" | The reservation slot is not yet free | Wait until the previously-running instance fully terminates; the slot frees, then Karpenter launches. |
+| `featureGates.reservedCapacity` rejected by Helm | Not a value key in the v1.13 chart | Remove it — `ReservedCapacity` is the compiled default. |
+| `expireAfter` rejected | ISO-8601 duration not accepted | Use a Go duration string, e.g. `"24h"`. |
+| Karpenter CRDs/NodeClaims vanish on a shared cluster | An unrelated Helm chart removed Karpenter's CRDs, cascading to every NodeClaim | `terraform taint` + apply the Karpenter releases and NodePool/EC2NodeClass. If a NodeClass is stuck `Terminating` on a finalizer, remove the stuck NodeClaim's finalizer first. This module installs the `karpenter-crd` chart separately so CRDs upgrade with the version. |
+| hugepages request blocks provisioning | A Pod requesting `hugepages-*` finds no matching instance type | Remove the hugepages request unless the node is configured for it. |
+
+### EFA & NCCL
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| p5en Pod never schedules requesting `efa: 16` | Card 0 = `interface`, so the node advertises **15** EFA | Request ≤ `terraform output accelerator_pool_efa_schedulable`. |
+| NCCL falls back to TCP (much slower) | Positive `NCCL_SOCKET_IFNAME` hides EFA interfaces | Use an exclusion pattern: `NCCL_SOCKET_IFNAME=^lo,docker,veth`. |
+| `fi_info -p efa` empty in a Pod | Pod missing the EFA resource request | Add `limits: {vpc.amazonaws.com/efa: "<n>"}` and the EFA toleration. |
+| EFA device-plugin chart/app version confusion | Chart version ≠ app/image version | Pin the chart version; do not substitute the app version. |
+
+### Data & Hugging Face
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| Hugging Face `429` even with a valid token | HF rate-limits by egress IP; `/api/` (dataset tree, xet) throttles under many concurrent ranks | Set `HF_HUB_DISABLE_XET=1`; pre-stage the tokenizer + a few dataset shards to shared storage (file `resolve` still works) and load the dataset from a local dir. |
+
+### Operational
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| `kubectl` acts on the wrong cluster | Multi-cluster account; context silently switched | Always check `kubectl config current-context` before operating. |
+| Large accelerator image build fails: "no space left" | A small local VM disk cannot hold NGC-based images | Build on a GPU node (large NVMe) with a privileged buildkit pod, pushing straight to ECR. |
+| sshd/torchrun dies (exit 143) under `kubectl exec` | Background process killed when the exec session closes | Run it as the Pod's `command:` (PID 1 subtree), not inside `exec`. |
+| CPU nodes never join | Discovery tag on public subnets → Karpenter picks a no-egress subnet | Scope `karpenter.sh/discovery` to private subnets only (this module does). |
+| `terraform apply`: CRD not ready | NodePool applied before the Karpenter webhook is up | `depends_on` on the CRD resources (this module does). A first apply can occasionally need a re-apply if the API is momentarily slow to serve the new types. |
+
+---
+
+## Cost
+
+Rough guidance — check current pricing for your Region:
+
+- **Always-on while the cluster exists:** EKS control plane (~$0.10/h), NAT
+  gateway(s), and the system managed node group.
+- **FSx for Lustre** (when `fsx_enabled = true`): PERSISTENT_2 SSD bills for the
+  full provisioned capacity continuously — this is why it is off by default.
+- **Accelerators:** On-Demand GPU/Neuron nodes bill per hour while running;
+  on-demand/spot pools consolidate empty nodes after a short idle by default.
+  **Capacity Block** is billed upfront at purchase for the whole reserved window.
+
+Run `terraform destroy` after a campaign to stop ongoing charges. Teardown
+deletes FSx/EFS and their contents (regenerable caches) — see below.
+
+---
+
+## Known limitations
+
+- **Multi-node Neuron over EFA is untested** on this module (single-node Neuron
+  and multi-node GPU are verified).
+- **Kubernetes-provider first-apply flake:** NodePool/EC2NodeClass occasionally
+  need a second `apply` if the Karpenter CRDs are not yet Established.
+- **CRD upgrades:** the `karpenter-crd` chart is installed separately so CRDs
+  track the chart version; still review CRD changes when bumping versions.
+- **Terraform state contains secrets** (the CloudFront `X-Origin-Verify` value,
+  transient ECR tokens). Use an encrypted remote backend (S3 + KMS) for anything
+  beyond local experimentation.
+- **Teardown deletes data:** FSx/EFS have no `prevent_destroy` (so the
+  environment is disposable). Set it, or back up, before storing anything you
+  cannot regenerate.
+- The `data.http` fetch for the ALB Controller IAM policy is a plan-time network
+  dependency; the MPI operator manifest is vendored (committed) to avoid one.
+
+---
+
+## Shared-cluster safety
+
+On a shared or borrowed account, treat this cluster as one of several. Before
+any change: confirm `kubectl config current-context`, avoid installing Helm
+charts that own cluster-scoped CRDs you do not manage (they can delete another
+tool's CRDs), and never force-push infra changes without checking who else
+operates the environment.
+
+---
+
+## License
+
+Sample/reference code provided as-is under the repository's license. Not an
+official AWS project; no support or SLA is implied. Review and harden before any
+production use.

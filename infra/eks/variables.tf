@@ -6,9 +6,9 @@ variable "region" {
 
 variable "azs" {
   description = <<-EOT
-    Availability zones for the VPC and EKS control plane. EKS requires subnets in
-    at least two AZs. GPU nodes are pinned to a single AZ via var.gpu_zone (which
-    must be one of these) so that Capacity Block placement (single-AZ) is honored
+    Availability zones for the VPC and EKS control plane. EKS requires subnets in at least
+    two AZs. Each accelerator pool pins to a single AZ (its `zone`, one of these) so that
+    EFA/RDMA collectives stay intra-AZ and Capacity Block placement (single-AZ) is honored,
     while the control plane still spans multiple AZs.
   EOT
   type        = list(string)
@@ -35,17 +35,25 @@ variable "kubernetes_version" {
 # entry — no new resource blocks required.
 #
 # Field reference:
-#   instance_type        EC2 instance type (e.g. "g6e.12xlarge", "trn2.48xlarge", "p5en.48xlarge").
+#   instance_types       List of EC2 types Karpenter may launch (e.g. ["g6e.12xlarge"] or
+#                        ["g6e.12xlarge","g6e.24xlarge"]). All must share the same EFA topology
+#                        (validated). The first entry drives EFA derivation.
 #   device_plugin        "nvidia" | "neuron" — selects which device-plugin add-on advertises
 #                        the accelerator and which resource name pods request
 #                        (nvidia.com/gpu vs aws.amazon.com/neuron).
 #   capacity_type        "reserved" (Capacity Block) | "on-demand" | "spot".
-#   zone                 Single AZ to pin the pool to (must be one of var.azs). Capacity Block
-#                        is single-AZ; this also pins on-demand/spot pools for locality.
-#   efa_interface_count  Max EFA interfaces for the instance (g6e=1, p5en=16, p5=32, trn2=16).
-#                        0 disables EFA.
-#   efa_multi_card       false = all EFA interfaces on network card 0 (single-card, e.g. g6e).
-#                        true  = one EFA interface per network card (multi-card: p5/p5en/trn2).
+#   zone                 Single AZ for the pool (must be one of var.azs). ALL pools pin to
+#                        this AZ: EFA/RDMA traffic is not routable across subnets, so every
+#                        rank of a multi-node collective must share one AZ; Capacity Block is
+#                        single-AZ anyway. (There is no cross-AZ fallback — that would break
+#                        multi-node EFA. Use var.azs[0] if you have no preference.)
+#   efa_interface_count  EFA interfaces for the instance. Default -1 = derive from the
+#                        instance type (locals.efa_capability). Set explicitly to override;
+#                        0 disables EFA. NOTE: with the multi-card layout the SCHEDULABLE EFA
+#                        a pod may request is (count - 1) — card 0 carries the node IP. The
+#                        module surfaces the schedulable number in `terraform output`.
+#   efa_multi_card       null (default) = derive from the instance type. true = one EFA per
+#                        network card (p5/p5en/trn2); false = all EFA on card 0 (g6e).
 #   ami_alias            Karpenter amiSelectorTerms alias, e.g. "al2023@latest". Used when
 #                        ami_ssm_parameter is empty. For Neuron instances the AL2023 alias
 #                        resolves to the Neuron AMI variant.
@@ -53,36 +61,56 @@ variable "kubernetes_version" {
 #                        overrides ami_alias (use for deterministic Neuron/GPU AMI selection).
 #   cb_reservation_id    Capacity Block reservation id (cr-...) for capacity_type "reserved".
 #                        Empty otherwise; the selector term is omitted for on-demand/spot.
+#   cb_end_date          Optional RFC3339 CB expiry; schedules a per-pool pre-expiry SNS alert.
 #   volume_size          Root EBS volume size (e.g. "200Gi").
 #   expire_after         Karpenter NodePool expireAfter ("Never" or a Go duration).
+#   consolidate_after    Karpenter empty-node consolidation delay ("5m", "Never", or "" to use
+#                        the per-capacity_type default: on-demand/spot consolidate to limit idle
+#                        cost, reserved keeps nodes for the reservation window).
 #   cpu_limit / memory_limit  Karpenter NodePool spec.limits caps.
 variable "accelerator_pools" {
   description = "Map of accelerated Karpenter NodePools (GPU and/or Neuron). See the field reference above."
   type = map(object({
-    instance_type       = string
-    device_plugin       = string           # "nvidia" | "neuron"
-    capacity_type       = string           # "reserved" | "on-demand" | "spot"
-    zone                = string
-    efa_interface_count = number
-    efa_multi_card      = bool
-    ami_alias           = optional(string, "al2023@latest")
-    ami_ssm_parameter   = optional(string, "")
-    cb_reservation_id   = optional(string, "")
-    volume_size         = optional(string, "200Gi")
-    expire_after        = optional(string, "Never")
-    cpu_limit           = optional(string, "10000")
-    memory_limit        = optional(string, "100000Gi")
+    # One or more EC2 types Karpenter may launch for this pool. All types in a pool must
+    # share the same EFA topology (validated) so the network-interface layout is correct;
+    # list several compatible sizes (e.g. ["g6e.12xlarge","g6e.24xlarge"]) to give Karpenter
+    # capacity flexibility. The first entry is the representative used for EFA derivation.
+    instance_types = list(string)
+    device_plugin  = string # "nvidia" | "neuron"
+    capacity_type  = string # "reserved" | "on-demand" | "spot"
+    zone           = string
+    # EFA topology is derived from the instance type (locals.efa_capability) unless
+    # set explicitly. Leave efa_interface_count = -1 (default) and efa_multi_card = null
+    # to auto-derive; set a value to override. 0 disables EFA.
+    efa_interface_count = optional(number, -1)
+    efa_multi_card      = optional(bool, null)
+    # Capacity Block: cb_reservation_id (cr-...) is required for capacity_type "reserved".
+    # cb_end_date (RFC3339) optionally schedules a pre-expiry alert for THIS pool.
+    cb_reservation_id = optional(string, "")
+    cb_end_date       = optional(string, "")
+    ami_alias         = optional(string, "al2023@latest")
+    ami_ssm_parameter = optional(string, "")
+    volume_size       = optional(string, "200Gi")
+    # expire_after: Go duration ("24h") or "Never". Node lifetime.
+    expire_after = optional(string, "Never")
+    # consolidate_after: Go duration ("5m") or "Never". Karpenter scales an empty node
+    # down after this idle period. Defaults per capacity_type in locals (on-demand/spot
+    # consolidate to control idle cost; reserved keeps nodes for the reservation window).
+    consolidate_after = optional(string, "")
+    cpu_limit         = optional(string, "10000")
+    memory_limit      = optional(string, "100000Gi")
   }))
-  default = {
-    # GPU smoke-test pool: g6e.12xlarge (L40S x4, single-card EFA x1). Verified.
-    gpu-training = {
-      instance_type       = "g6e.12xlarge"
-      device_plugin       = "nvidia"
-      capacity_type       = "on-demand"
-      zone                = "us-east-2b"
-      efa_interface_count = 1
-      efa_multi_card      = false
-    }
+  # Default is empty: the module deploys a control plane + system nodes with no accelerator
+  # pools, so it is Region-agnostic (no hardcoded AZ). The quick start supplies one pool via
+  # terraform.tfvars. See terraform.tfvars.example for ready-to-use pool definitions.
+  default = {}
+  validation {
+    condition     = alltrue([for k, p in var.accelerator_pools : can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", k))])
+    error_message = "Each accelerator pool key becomes a Kubernetes resource name and must be RFC1123: lowercase alphanumeric and '-', starting/ending alphanumeric."
+  }
+  validation {
+    condition     = alltrue([for k, p in var.accelerator_pools : length(p.instance_types) > 0])
+    error_message = "Each accelerator pool must list at least one instance type in instance_types."
   }
   validation {
     condition     = alltrue([for k, p in var.accelerator_pools : contains(["nvidia", "neuron"], p.device_plugin)])
@@ -114,22 +142,9 @@ variable "cpu_instance_categories" {
   default     = ["c", "m", "r"]
 }
 
-variable "cb_reservation_id" {
-  description = "Capacity Block reservation ID (cr-xxx) obtained from purchase-capacity-block. Empty string disables CB NodePool."
-  type        = string
-  default     = ""
-}
-
-variable "cb_end_date" {
-  description = <<-EOT
-    Expiry datetime of the Capacity Block in RFC3339 format (e.g. 2024-12-31T23:59:59Z).
-    Used by eventbridge-cb-alarm.tf to schedule a one-shot SNS alert 1 hour before the
-    reservation ends. (Node lifetime is controlled per pool by accelerator_pools[*].expire_after.)
-    Leave empty when no Capacity Block is purchased.
-  EOT
-  type        = string
-  default     = ""
-}
+# Capacity Block reservation id and expiry are now per-pool fields on accelerator_pools
+# (cb_reservation_id / cb_end_date). The old top-level cb_reservation_id / cb_end_date
+# variables were removed; a cluster can hold several Capacity Blocks, one per reserved pool.
 
 variable "aws_profile" {
   description = "AWS CLI/Terraform provider profile name."
@@ -144,7 +159,7 @@ variable "vpc_cidr" {
     (trn2.48xlarge = 16 EFA-only ENIs, p5en = 16, p5 = 32) each consume an IP per ENI. A /21
     or /24 exhausts almost immediately and leaves the EKS control plane unable to place its
     management ENIs (cluster goes IMPAIRED / InsufficientFreeAddresses). AWS's own
-    awsome-distributed-ai HyperPod-EKS reference sizes private subnets at /16 each.
+    awslabs/awsome-distributed-ai HyperPod-EKS reference sizes private subnets at /16 each.
   EOT
   type        = string
   default     = "10.0.0.0/16"
@@ -153,11 +168,13 @@ variable "vpc_cidr" {
 variable "private_subnet_cidrs" {
   description = <<-EOT
     CIDR blocks for private subnets (one per AZ). Node workloads run here, so these are made
-    as large as the VPC allows: /17 = 32,768 addresses per subnet. This mirrors AWS's
-    awsome-distributed-ai HyperPod-EKS reference, which sizes private subnets at /16 each
-    (its VPC is 10.192.0.0/16 with tiny /24 public subnets) — the design principle is
-    "public small, private huge" because every GPU/Neuron node holds dozens of Pod ENIs
-    plus EFA-only ENIs. Do NOT use /24 — a single trn2/p5 node's ENIs can exhaust it.
+    large: the default /18 = 16,384 addresses per subnet. Two /18s plus the small /24 public
+    subnets fit inside the /16 VPC without overlap and leave 10.0.128.0/17 free for growth.
+    This follows AWS's awslabs/awsome-distributed-ai HyperPod-EKS reference principle of
+    "public small, private huge" (its VPC is 10.192.0.0/16 with tiny /24 public subnets),
+    because every GPU/Neuron node holds dozens of Pod ENIs plus EFA-only ENIs. Do NOT use /24
+    — a single trn2/p5 node's ENIs can exhaust it. Do NOT use two /17s either: they consume
+    the entire /16 and collide with the public /24s (InvalidSubnet.Conflict at apply).
   EOT
   type        = list(string)
   default     = ["10.0.0.0/18", "10.0.64.0/18"]
@@ -166,7 +183,7 @@ variable "private_subnet_cidrs" {
 variable "public_subnet_cidrs" {
   description = <<-EOT
     CIDR blocks for public subnets (one per AZ). NAT gateways and load balancers only, so
-    these are kept small (/24 = 251 usable), matching the awsome-distributed-ai reference
+    these are kept small (/24 = 251 usable), matching the awslabs/awsome-distributed-ai reference
     (10.192.10.0/24, 10.192.11.0/24). Carved from the top of the VPC so they do not eat into
     the large private ranges.
   EOT
@@ -219,8 +236,14 @@ variable "efa_device_plugin_chart_version" {
   default     = "v0.5.29"
 }
 
+variable "mpi_operator_enabled" {
+  description = "Install the Kubeflow MPI Operator (multi-node MPIJob launcher). Disable for inference-only clusters that do not run MPIJobs."
+  type        = bool
+  default     = true
+}
+
 variable "mpi_operator_version" {
-  description = "Kubeflow MPI Operator release tag. The v2beta1 manifest is fetched from GitHub at this tag."
+  description = "Kubeflow MPI Operator release tag. Used only for the vendored manifest filename (manifests/mpi-operator-<version>.yaml); the manifest is committed to the repo, not fetched at plan time."
   type        = string
   default     = "v0.6.0"
 }
@@ -276,6 +299,18 @@ variable "cpu_nodepool_cpu_limit" {
   description = "Karpenter CPU NodePool spec.limits.cpu."
   type        = string
   default     = "256"
+}
+
+variable "fsx_enabled" {
+  description = <<-EOT
+    Create the FSx for Lustre file system, CSI driver, and StorageClass. Off by default:
+    FSx PERSISTENT_2 provisions terabytes of SSD that bill continuously while the cluster
+    exists, which the quick start should not incur. Enable for training runs that need a
+    high-throughput single-AZ scratch/checkpoint filesystem. (EFS, gated separately by
+    var.efs_enabled, is the multi-AZ RWX cache option.)
+  EOT
+  type        = bool
+  default     = false
 }
 
 variable "fsx_per_unit_storage_throughput" {
@@ -361,11 +396,11 @@ variable "demo_namespace" {
 }
 
 variable "demo_app_image" {
-  description = "Container image for the demo echo server. Pin to a digest or version tag for reproducibility."
+  description = "Container image for the demo echo server. For production, pin to an immutable digest (image@sha256:...) rather than a mutable tag."
   type        = string
-  # ealen/echo-server 0.9.2 — pinned digest as of 2025-06-01.
-  # Update by running: docker inspect ealen/echo-server:0.9.2 --format '{{index .RepoDigests 0}}'
-  default     = "ealen/echo-server:0.9.2"
+  # Version tag (mutable). Replace with a digest for reproducibility, e.g.:
+  #   ealen/echo-server@sha256:<digest>  (docker inspect ealen/echo-server:0.9.2 --format '{{index .RepoDigests 0}}')
+  default = "ealen/echo-server:0.9.2"
 }
 
 variable "cloudfront_web_acl_id" {
