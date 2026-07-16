@@ -10,6 +10,10 @@ The design goal is one reusable module that covers the common accelerated-EKS
 shapes — GPU training, GPU/Trainium inference, and Capacity Block campaigns —
 without editing resource blocks. You add a workload by adding a map entry.
 
+> New here? Start with the task-oriented **[Usage Guide](./USAGE.md)** (setup,
+> running a GPU job, Capacity Blocks, teardown, troubleshooting). This README is
+> the reference.
+
 > **This is a reference module, not an official AWS project.** It creates
 > billable resources (EKS control plane, NAT gateways, system nodes, and — when
 > enabled — accelerators and FSx) that cost money **while they exist, even when
