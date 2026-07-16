@@ -19,6 +19,16 @@ provider "aws" {
   profile = var.aws_profile
 }
 
+locals {
+  # aws eks get-token args, common to the helm and kubectl providers. --profile is
+  # only appended when var.aws_profile is set, so users on env-var/instance-role/SSO
+  # credentials (no named profile) authenticate the same way the AWS provider does.
+  eks_get_token_args = concat(
+    ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.region],
+    var.aws_profile != null ? ["--profile", var.aws_profile] : []
+  )
+}
+
 provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
@@ -27,12 +37,7 @@ provider "helm" {
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
-      args = [
-        "eks", "get-token",
-        "--cluster-name", module.eks.cluster_name,
-        "--region", var.region,
-        "--profile", var.aws_profile,
-      ]
+      args        = local.eks_get_token_args
     }
   }
 }
@@ -45,11 +50,6 @@ provider "kubectl" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args = [
-      "eks", "get-token",
-      "--cluster-name", module.eks.cluster_name,
-      "--region", var.region,
-      "--profile", var.aws_profile,
-    ]
+    args        = local.eks_get_token_args
   }
 }

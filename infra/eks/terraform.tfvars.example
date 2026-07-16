@@ -24,7 +24,7 @@ kubernetes_version = "1.35"
 # cluster. The map key becomes Kubernetes resource names (must be RFC1123: [a-z0-9-]).
 accelerator_pools = {
   # GPU on-demand pool: g6e.12xlarge (L40S x4, single-card EFA derived). Steady dev/verify.
-  gpu-training = {
+  gpu-dev = {
     instance_types = ["g6e.12xlarge"]
     device_plugin = "nvidia"
     capacity_type = "on-demand"
@@ -66,8 +66,11 @@ accelerator_pools = {
 }
 
 # Named AWS profile for Terraform provider authentication. The account ID is derived
-# from these credentials automatically (no aws_account_id input needed).
-aws_profile = "default"
+# from these credentials automatically (no aws_account_id input needed). Commented out
+# by default: with no named profile, Terraform uses the standard credential chain
+# (env vars, an EC2/ECS instance role, or AWS SSO) instead. Uncomment and set your
+# profile name only if you authenticate via a named ~/.aws/config profile.
+# aws_profile = "my-profile"
 
 # VPC CIDR. Use a /16 — accelerated ML nodes consume IPs heavily (VPC CNI secondary IPs +
 # one IP per EFA-only ENI; trn2/p5en = 16 ENIs, p5 = 32). A /21 or /24 exhausts fast and the
@@ -116,12 +119,22 @@ fsx_csi_driver_role_arn = ""
 # Empty = skip SNS subscriptions.
 cb_alert_email_addresses = []
 
+# --- Public ingress demo (opt-in) ---------------------------------------------
+# Off by default: a base cluster should never stand up a public, unauthenticated ALB.
+# enable_demo_app = true    # Phase 1: ALB Controller + demo echo app behind a plain ALB.
+# enable_cloudfront = true  # Phase 2 (requires enable_demo_app): CloudFront + SG lock-down.
+#                            # Apply Phase 1 first and wait for the ALB to exist before Phase 2.
+
 # --- Component versions (override to upgrade) --------------------------------
 karpenter_chart_version         = "1.13.0"
 gpu_operator_chart_version      = "v25.10.1"
 efa_device_plugin_chart_version = "v0.5.29"
 mpi_operator_version            = "v0.6.0"
 neuron_helm_chart_version       = "1.9.0"
+# Only used when enable_demo_app = true. alb_controller_app_version is a separate
+# variable from the chart version because the two are independent release series.
+alb_controller_chart_version = "3.4.1"
+alb_controller_app_version   = "3.4.1"
 
 # Common resource tags.
 tags = {

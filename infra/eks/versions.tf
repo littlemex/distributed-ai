@@ -30,5 +30,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.13" # time_sleep in cloudfront.tf — sequences demo Ingress finalizer
+      # cleanup before the ALB Controller that owns it is destroyed
+    }
   }
 }

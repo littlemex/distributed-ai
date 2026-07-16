@@ -128,6 +128,13 @@ variable "accelerator_pools" {
     condition     = alltrue([for k, p in var.accelerator_pools : p.capacity_type != "reserved" || p.cb_reservation_id != ""])
     error_message = "A pool with capacity_type \"reserved\" must set cb_reservation_id (cr-...)."
   }
+  validation {
+    # eventbridge-cb-alarm.tf formats cb_end_date with schedule_expression_timezone = "UTC",
+    # which reinterprets any non-Z offset as UTC — e.g. "...+09:00" would fire 9h late.
+    # Require a bare UTC ("Z") timestamp so the alert time is unambiguous.
+    condition     = alltrue([for k, p in var.accelerator_pools : p.cb_end_date == "" || can(regex("Z$", p.cb_end_date))])
+    error_message = "cb_end_date must be UTC (end with \"Z\", e.g. \"2026-01-01T12:00:00Z\") — a non-Z offset is misinterpreted as UTC by the EventBridge schedule and fires at the wrong time."
+  }
 }
 
 variable "cpu_nodepool_enabled" {
@@ -147,9 +154,14 @@ variable "cpu_instance_categories" {
 # variables were removed; a cluster can hold several Capacity Blocks, one per reserved pool.
 
 variable "aws_profile" {
-  description = "AWS CLI/Terraform provider profile name."
+  description = <<-EOT
+    Named AWS CLI/Terraform provider profile. Leave unset (null, the default) to use
+    the standard credential chain instead — environment variables, an EC2/ECS
+    instance role, or AWS SSO — which is required for users with no ~/.aws/config
+    profile named "default" (e.g. most CI runners).
+  EOT
   type        = string
-  default     = "default" # AWS named profile for authentication
+  default     = null
 }
 
 variable "vpc_cidr" {
@@ -368,9 +380,22 @@ variable "tags" {
 
 # ── CloudFront / demo endpoint ────────────────────────────────────────────────
 
+variable "enable_demo_app" {
+  description = <<-EOT
+    Create the AWS Load Balancer Controller and the demo echo app (Namespace,
+    Deployment, Service, Ingress → an internet-facing ALB). Off by default: a
+    fresh apply with no accelerator pools should not stand up a public,
+    unauthenticated endpoint. The demo Deployment's Pod is pinned to the CPU
+    NodePool (node-role=cpu) via nodeSelector, so also set
+    var.cpu_nodepool_enabled = true or it stays Pending forever.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "enable_cloudfront" {
   description = <<-EOT
-    Enable the CloudFront → ALB → EKS demo endpoint.
+    Enable the CloudFront → ALB → EKS demo endpoint. Requires enable_demo_app = true.
 
     Two-phase deployment required (see README.md):
       Phase 1 (default false): apply to create ALB via Ingress. Wait for ALB to become active.
@@ -381,10 +406,27 @@ variable "enable_cloudfront" {
   EOT
   type        = bool
   default     = false
+
+  validation {
+    condition     = !var.enable_cloudfront || var.enable_demo_app
+    error_message = "enable_cloudfront requires enable_demo_app = true (CloudFront fronts the demo app's ALB)."
+  }
 }
 
 variable "alb_controller_chart_version" {
   description = "Helm chart version for aws-load-balancer-controller (aws.github.io/eks-charts)."
+  type        = string
+  default     = "3.4.1"
+}
+
+variable "alb_controller_app_version" {
+  description = <<-EOT
+    aws-load-balancer-controller release tag used ONLY to fetch its upstream IAM
+    policy JSON (docs/install/iam_policy.json) from GitHub. This chart version's
+    app version happens to share the same "3.x" number as the chart today, but
+    chart and app versions are independent series (e.g. chart 1.1.6 shipped app
+    v2.1.3) — override this separately if you pin an older/newer chart version.
+  EOT
   type        = string
   default     = "3.4.1"
 }

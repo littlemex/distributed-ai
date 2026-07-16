@@ -2,8 +2,9 @@
 # Verified module variable names: cidr, azs, private_subnets, public_subnets, tags, name.
 #
 # The VPC spans var.azs (>= 2 AZs) because the EKS control plane requires subnets in at
-# least two AZs. GPU nodes are still pinned to a single AZ (var.gpu_zone) by the Karpenter
-# NodePool, which satisfies the single-AZ placement constraint of Capacity Block for ML.
+# least two AZs. Each accelerator pool still pins to a single AZ (accelerator_pools[k].zone)
+# via its Karpenter NodePool, which satisfies EFA's intra-AZ requirement and Capacity
+# Block's single-AZ placement constraint.
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"

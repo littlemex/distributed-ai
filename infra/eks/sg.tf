@@ -5,12 +5,13 @@
 # are set to all-traffic so that NCCL / libfabric can negotiate any protocol
 # (efa-direct, efa) without restriction.
 #
-# Reference: CLUSTER-GUIDE §1 — EFA device plugin exposes vpc.amazonaws.com/efa=16/node;
-# GPUDirect RDMA over EFA is the primary inter-node transport for collective operations.
+# The EFA device plugin advertises vpc.amazonaws.com/efa=<n> per node (see the
+# accelerator_pool_efa_schedulable output); GPUDirect RDMA over EFA is the
+# primary inter-node transport NCCL/libfabric select for collective operations.
 
 resource "aws_security_group" "efa_node" {
   name        = local.efa_sg_name
-  description = "Allow all traffic between EFA-enabled GPU nodes (NCCL / RDMA / GPUDirect)."
+  description = "Allow all traffic between EFA-enabled nodes, GPU or Neuron (NCCL / RDMA / GPUDirect)."
   vpc_id      = module.vpc.vpc_id
 
   tags = merge(var.tags, {

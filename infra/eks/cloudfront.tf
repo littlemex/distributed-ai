@@ -16,24 +16,36 @@
 #         PRODUCTION: attach an ACM certificate to the ALB listener and set
 #         origin_protocol_policy = "https-only". See README.md TODO section.
 #
+# Gated by var.enable_demo_app (default false) — see alb-controller.tf. The
+# Namespace/Deployment/Service/Ingress in this file require enable_demo_app;
+# the CloudFront distribution additionally requires enable_cloudfront.
+#
 # Two-phase deployment (var.enable_cloudfront, default = false):
-#   Phase 1  enable_cloudfront=false (default):
-#     terraform apply
+#   Phase 1  enable_demo_app=true, enable_cloudfront=false (default):
+#     terraform apply -var enable_demo_app=true
 #     → ALB Controller + demo Namespace/Deployment/Service/Ingress are created.
 #     → Wait until `kubectl get ingress -n demo` shows a non-empty ADDRESS.
 #     → Confirm: curl http://<alb-dns>/ returns 200 (no header guard yet).
 #   Phase 2  enable_cloudfront=true:
-#     terraform apply -var enable_cloudfront=true
+#     terraform apply -var enable_demo_app=true -var enable_cloudfront=true
 #     → aws_lb data source resolves the ALB DNS.
 #     → CloudFront distribution + ALB SG prefix-list rule + Ingress header
 #       condition are applied atomically.
 #     → Confirm: curl https://<cloudfront-domain>/ returns 200.
-#                curl http://<alb-dns>/ returns 403 (SG blocks direct access).
+#                curl http://<alb-dns>/ times out (SG blocks direct access at
+#                the network layer — this is a connection timeout, not a 403).
 #
-# To set permanently: add `enable_cloudfront = true` to terraform.tfvars.
+# To set permanently: add `enable_demo_app = true` (and `enable_cloudfront = true`
+# for Phase 2) to terraform.tfvars.
+#
+# Rolling back Phase 2 → Phase 1 (enable_cloudfront true → false) removes
+# aws_security_group.alb_cloudfront_only, but there is no explicit dependency forcing
+# the Ingress's security-groups annotation update (which detaches the SG from the ALB)
+# to land first — the SG delete can occasionally hit AWS's DependencyViolation and need
+# a retry (Terraform retries automatically). If it doesn't clear, re-run apply/destroy.
 ################################################################################
 
-# ── Guard: all resources in this file are created only when enable_cloudfront=true ──
+# ── Guard: CloudFront-only resources in this file require enable_cloudfront=true ──
 locals {
   cf_enabled = var.enable_cloudfront ? 1 : 0
 }
@@ -117,8 +129,27 @@ resource "aws_vpc_security_group_egress_rule" "alb_cloudfront_egress" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
+# kubectl_manifest reports "destroyed" the moment the Kubernetes API accepts the delete
+# request — it does not wait for the ALB Controller to finish its async finalizer cleanup
+# (ingress.k8s.aws/resources removes the Ingress's backing ALB before letting the object
+# disappear). Without a delay, destroying helm_release.alb_controller right after starting
+# the Ingress delete orphans it in Terminating forever (the controller that would remove
+# the finalizer is already gone). This resource sits between them so that, on destroy,
+# Terraform tears down demo_ingress → waits out destroy_duration here → THEN removes
+# alb_controller. Depends on alb_controller (not the reverse) specifically so destroy order
+# is its dependency's reverse: alb_controller is destroyed only after this resource, and
+# this resource only after demo_ingress (which depends on it below).
+resource "time_sleep" "demo_ingress_finalizer" {
+  count      = local.demo_app_enabled
+  depends_on = [helm_release.alb_controller[0]]
+
+  destroy_duration = "20s"
+}
+
 # ── Demo application: Namespace + Deployment + Service ────────────────────────
-# Namespace and workload are created unconditionally (Phase 1).
+# Gated by var.enable_demo_app (Phase 1). The demo Pod is pinned to the CPU
+# NodePool via nodeSelector — pair with var.cpu_nodepool_enabled = true, or it
+# stays Pending indefinitely with no healthy Ingress target.
 # The Ingress is managed here (in cloudfront.tf) via kubectl_manifest so that
 # Terraform can inject the origin_verify secret without hardcoding it in YAML.
 #
@@ -128,6 +159,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_cloudfront_egress" {
 #          AND the SG annotation restricts the ALB to CloudFront IPs.
 
 resource "kubectl_manifest" "demo_namespace" {
+  count = local.demo_app_enabled
   yaml_body = yamlencode({
     apiVersion = "v1"
     kind       = "Namespace"
@@ -141,6 +173,7 @@ resource "kubectl_manifest" "demo_namespace" {
 }
 
 resource "kubectl_manifest" "demo_deployment" {
+  count = local.demo_app_enabled
   yaml_body = yamlencode({
     apiVersion = "apps/v1"
     kind       = "Deployment"
@@ -181,10 +214,11 @@ resource "kubectl_manifest" "demo_deployment" {
       }
     }
   })
-  depends_on = [kubectl_manifest.demo_namespace]
+  depends_on = [kubectl_manifest.demo_namespace[0]]
 }
 
 resource "kubectl_manifest" "demo_service" {
+  count = local.demo_app_enabled
   yaml_body = yamlencode({
     apiVersion = "v1"
     kind       = "Service"
@@ -199,7 +233,7 @@ resource "kubectl_manifest" "demo_service" {
       ports    = [{ name = "http", port = 80, targetPort = 80, protocol = "TCP" }]
     }
   })
-  depends_on = [kubectl_manifest.demo_namespace]
+  depends_on = [kubectl_manifest.demo_namespace[0]]
 }
 
 # ── Demo Ingress ──────────────────────────────────────────────────────────────
@@ -217,6 +251,7 @@ resource "kubectl_manifest" "demo_service" {
 #   name here, actions.echo is omitted to avoid confusion.
 
 resource "kubectl_manifest" "demo_ingress" {
+  count = local.demo_app_enabled
   yaml_body = yamlencode({
     apiVersion = "networking.k8s.io/v1"
     kind       = "Ingress"
@@ -245,7 +280,9 @@ resource "kubectl_manifest" "demo_ingress" {
           "alb.ingress.kubernetes.io/security-groups"                     = aws_security_group.alb_cloudfront_only[0].id
           "alb.ingress.kubernetes.io/manage-backend-security-group-rules" = "true"
           # Require X-Origin-Verify header set by CloudFront (Layer 2 defence)
-          # Direct requests without the correct header receive 404 (ALB default rule)
+          # Direct requests reaching the ALB without the correct header get the
+          # ALB's default 404 rule; requests blocked by the SG (Layer 1) never
+          # reach the ALB at all and time out instead.
           "alb.ingress.kubernetes.io/conditions.echo" = jsonencode([{
             field = "http-header"
             httpHeaderConfig = {
@@ -275,8 +312,8 @@ resource "kubectl_manifest" "demo_ingress" {
     }
   })
   depends_on = [
-    kubectl_manifest.demo_service,
-    helm_release.alb_controller,
+    kubectl_manifest.demo_service[0],
+    time_sleep.demo_ingress_finalizer[0],
   ]
 }
 
@@ -348,7 +385,7 @@ resource "aws_cloudfront_distribution" "demo_echo" {
   })
 
   depends_on = [
-    kubectl_manifest.demo_ingress,
+    kubectl_manifest.demo_ingress[0],
     aws_security_group.alb_cloudfront_only,
   ]
 }
@@ -361,8 +398,22 @@ output "cloudfront_domain_name" {
 }
 
 output "alb_dns_name" {
-  description = "ALB DNS. Direct HTTP access returns 404 when enable_cloudfront=true (SG restricts to CloudFront IPs)."
-  value       = var.enable_cloudfront ? "http://${data.aws_lb.demo_echo[0].dns_name}/" : "(enable_cloudfront=false — ALB will be shown after Phase 1 apply)"
+  description = <<-EOT
+    Demo app ALB DNS. Direct HTTP access:
+      enable_cloudfront=false → 200 (no restriction yet, Phase 1).
+      enable_cloudfront=true  → connection times out (Layer 1 SG blocks non-CloudFront
+                                 IPs before the request reaches the ALB; a request that
+                                 does reach the ALB without the X-Origin-Verify header
+                                 gets a 404 from the ALB's default rule).
+  EOT
+  value = (
+    !var.enable_demo_app ? "(enable_demo_app=false — no ALB created)" :
+    var.enable_cloudfront ? "http://${data.aws_lb.demo_echo[0].dns_name}/" :
+    # data.aws_lb is itself gated on enable_cloudfront, so the DNS name isn't available
+    # from Terraform state in Phase 1 even though the ALB already exists — read it from
+    # the cluster instead.
+    "(enable_cloudfront=false — run: kubectl get ingress -n ${var.demo_namespace} echo)"
+  )
 }
 
 output "origin_verify_secret" {

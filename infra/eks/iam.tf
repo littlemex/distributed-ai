@@ -1,7 +1,7 @@
 ################################################################################
 # IAM for Karpenter — via terraform-aws-modules/eks/aws//modules/karpenter
 #
-# outputs.tf (adjacent team) expects:
+# outputs.tf re-exports:
 #   module.karpenter.iam_role_arn          → Karpenter controller role
 #   module.karpenter.node_iam_role_arn     → Karpenter node role
 #   module.karpenter.instance_profile_name → EC2 instance profile
@@ -53,7 +53,7 @@ module "karpenter" {
 
   # Additional policies on the Karpenter node role
   node_iam_role_additional_policies = {
-    AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+    AmazonSSMManagedInstanceCore = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
     NodeS3ReadWrite              = aws_iam_policy.karpenter_node_s3.arn
   }
 

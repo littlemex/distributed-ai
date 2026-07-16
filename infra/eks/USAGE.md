@@ -7,7 +7,7 @@ are copy-paste ready — replace `<angle-bracket>` placeholders with your values
 
 **Conventions**
 
-- `$` lines are shell commands you run from `infra/eks/`.
+- Shell commands run from `infra/eks/` unless stated otherwise.
 - Nothing here contains account IDs, cluster names, or IPs — set your own in
   `terraform.tfvars`.
 - If you use a named AWS profile, either `export AWS_PROFILE=<name>` once or add
@@ -21,9 +21,9 @@ You need Terraform 1.9+, AWS CLI 2.15+, kubectl 1.29+, and helm 3.14+. Confirm
 you are pointed at the right AWS account **before** creating anything:
 
 ```bash
-$ aws sts get-caller-identity          # is this the account you meant?
-$ cd infra/eks
-$ cp terraform.tfvars.example terraform.tfvars
+aws sts get-caller-identity          # is this the account you meant?
+cd infra/eks
+cp terraform.tfvars.example terraform.tfvars
 ```
 
 Open `terraform.tfvars` and set at least `region`, `azs`, `cluster_name`, and
@@ -33,7 +33,7 @@ On-Demand GPU pool:
 ```hcl
 accelerator_pools = {
   gpu-dev = {
-    instance_types = ["g5.12xlarge"]   # A10G x4, no Capacity Block needed
+    instance_types = ["g6e.12xlarge"]  # L40S x4, no Capacity Block needed
     device_plugin  = "nvidia"
     capacity_type  = "on-demand"
     zone           = "us-east-2a"
@@ -41,13 +41,19 @@ accelerator_pools = {
 }
 ```
 
+> If Karpenter reports `InsufficientInstanceCapacity` / `UnfulfillableCapacity`
+> for every AZ in `zone`, the instance type is temporarily out of capacity in
+> that AZ. Either try a different `zone` from `var.azs`, or list alternate
+> sizes in `instance_types` (e.g. add `"g6e.24xlarge"`) — Karpenter tries all
+> of them.
+
 Then bring the cluster up:
 
 ```bash
-$ terraform init
-$ terraform apply                      # ~15 minutes for the control plane + system nodes
-$ aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" --region <region>
-$ kubectl get nodes                    # you should see the system nodes
+terraform init
+terraform apply                      # ~15 minutes for the control plane + system nodes
+aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" --region <region>
+kubectl get nodes                    # you should see the system nodes
 ```
 
 No GPU node exists yet — Karpenter creates one on demand (next section).
@@ -55,7 +61,7 @@ No GPU node exists yet — Karpenter creates one on demand (next section).
 > **Always verify your kubectl context** before running cluster commands,
 > especially if your account has more than one cluster:
 > ```bash
-> $ kubectl config current-context     # must be YOUR cluster
+> kubectl config current-context     # must be YOUR cluster
 > ```
 
 ---
@@ -63,25 +69,30 @@ No GPU node exists yet — Karpenter creates one on demand (next section).
 ## 2. Run something on a GPU
 
 Karpenter provisions a GPU node the moment a Pod requests `nvidia.com/gpu`.
-Try it with a one-shot CUDA check:
+Try it with a one-shot CUDA check — the resource request has to be on the
+**container**, not just the Pod spec, so `--overrides` needs the full
+container block:
 
 ```bash
-$ kubectl run gpu-smoke --rm -it --restart=Never \
+kubectl run gpu-smoke --restart=Never \
     --image=nvidia/cuda:12.4.1-base-ubuntu22.04 \
-    --overrides='{"spec":{"tolerations":[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]}}' \
-    -- nvidia-smi
+    --overrides='{"spec":{"tolerations":[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}],"containers":[{"name":"gpu-smoke","image":"nvidia/cuda:12.4.1-base-ubuntu22.04","command":["nvidia-smi"],"resources":{"limits":{"nvidia.com/gpu":"1"}}}]}}'
 ```
 
 The first run takes a few minutes while Karpenter launches the node and the GPU
-Operator advertises `nvidia.com/gpu`. Watch it happen:
+Operator advertises `nvidia.com/gpu`. Watch it happen, then read the result:
 
 ```bash
-$ kubectl get nodeclaims -w           # a gpu-dev claim appears, then Ready
-$ kubectl get nodes -l karpenter.sh/nodepool=gpu-dev
+kubectl get nodeclaims -w           # a gpu-dev claim appears, then Ready
+kubectl get nodes -l karpenter.sh/nodepool=gpu-dev
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/gpu-smoke --timeout=5m
+kubectl logs gpu-smoke              # nvidia-smi output — confirms the driver + GPU
+kubectl delete pod gpu-smoke
 ```
 
-When the Pod finishes, Karpenter scales the empty GPU node back down after the
-idle window (5 minutes by default for on-demand/spot pools).
+After the Pod is deleted, Karpenter scales the empty GPU node back down once it
+has been idle past `consolidateAfter` (5 minutes by default for on-demand/spot
+pools). Watch it disappear with `kubectl get nodeclaims -w`.
 
 ---
 
@@ -91,7 +102,7 @@ For pools on EFA-capable instances (p5/p5en/trn2), **do not guess** the EFA
 count — the module computes the schedulable value for you:
 
 ```bash
-$ terraform output accelerator_pool_efa_schedulable
+terraform output accelerator_pool_efa_schedulable
 # {
 #   "gpu-p5en" = 15     # 16 network cards, but card 0 carries the node IP
 # }
@@ -118,22 +129,30 @@ workflow:
 
 ```bash
 # a. See what is offered for your instance type, duration, and AZ.
-$ ./scripts/00-check-cb-offerings.sh
+./scripts/00-check-cb-offerings.sh
 
 # b. Purchase it (prints the price and asks to confirm — needs budget approval).
-$ ./scripts/01-purchase-cb.sh --offering-id <id> --instance-type p5en.48xlarge --instance-count 2
+./scripts/01-purchase-cb.sh --offering-id <id> --instance-type p5en.48xlarge --instance-count 2
 
 # c. Turn the reservation into a pool block you can paste into terraform.tfvars.
-$ ./scripts/02-post-purchase.sh --cr-id cr-<hex> --end-date <RFC3339> \
+./scripts/02-post-purchase.sh --cr-id cr-<hex> --end-date <RFC3339> \
       --instance-type p5en.48xlarge --zone <az> --pool gpu-p5en
 ```
 
-Paste the printed block into `accelerator_pools`, then:
+Paste the printed block into `accelerator_pools`, then apply. Karpenter is
+demand-driven, so `terraform apply` alone launches nothing — the reserved
+NodePool exists but stays at zero nodes until a Pod requests it:
 
 ```bash
-$ terraform apply
-$ kubectl get nodes -l karpenter.sh/capacity-type=reserved   # CB node appears
+terraform apply
+kubectl run cb-smoke --restart=Never --image=nvidia/cuda:12.4.1-base-ubuntu22.04 \
+    --overrides='{"spec":{"tolerations":[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"},{"key":"capacity-reservation","operator":"Exists","effect":"NoSchedule"}],"containers":[{"name":"cb-smoke","image":"nvidia/cuda:12.4.1-base-ubuntu22.04","command":["nvidia-smi"],"resources":{"limits":{"nvidia.com/gpu":"8"}}}]}}'
+kubectl get nodes -l karpenter.sh/capacity-type=reserved   # CB node appears once the Pod is scheduled
 ```
+
+> Capacity Block nodes carry both the accelerator taint (`nvidia.com/gpu` or
+> `aws.amazon.com/neuron`) and a `capacity-reservation` taint — tolerate both,
+> with `operator: Exists` since the reservation-specific value varies.
 
 Set `cb_end_date` on the pool to get an SNS alert one hour before the
 reservation expires (subscribe an email via `cb_alert_email_addresses`). When
@@ -142,7 +161,7 @@ the block ends, AWS reclaims the node — drain your workload before then.
 Verify the fabric before a real multi-node run:
 
 ```bash
-$ ./scripts/03-verify-nccl.sh --nodes 2 --gpus-per-node 8
+./scripts/03-verify-nccl.sh --nodes 2 --gpus-per-node 8
 # Look for a high busbw and "NET/OFI Selected provider is efa" in the logs.
 ```
 
@@ -184,17 +203,19 @@ so device IDs are allocated contiguously. See
 
 ## 7. Expose a service to the internet (demo)
 
-A CloudFront → ALB → EKS path is included as a sample. It is a **two-phase**
-apply because the ALB must exist before CloudFront can point at it:
+A CloudFront → ALB → EKS path is included as a sample, off by default. It is a
+**two-phase** apply because the ALB must exist before CloudFront can point at
+it:
 
 ```bash
-$ terraform apply                              # phase 1: creates the ALB
-$ terraform apply -var enable_cloudfront=true  # phase 2: CloudFront + SG lock-down
-$ terraform output cloudfront_domain_name
+terraform apply -var enable_demo_app=true                              # phase 1: ALB Controller + demo app + ALB
+terraform apply -var enable_demo_app=true -var enable_cloudfront=true  # phase 2: CloudFront + SG lock-down
+terraform output cloudfront_domain_name
 ```
 
-This is a demo, not a production endpoint — see "Production hardening" in the
-README before relying on it.
+This is a demo, not a production endpoint — see [Production
+hardening](./README.md#production-hardening) in the README before relying on
+it.
 
 ---
 
@@ -203,8 +224,8 @@ README before relying on it.
 Stop paying for the cluster when you are done:
 
 ```bash
-$ ./scripts/04-teardown.sh            # drain the accelerator pools (keep the cluster)
-$ ./scripts/04-teardown.sh --destroy  # destroy everything
+./scripts/04-teardown.sh            # drain the accelerator pools (keep the cluster)
+./scripts/04-teardown.sh --destroy  # destroy everything
 ```
 
 If `terraform destroy` stalls on a subnet that "has dependencies", it is almost
@@ -212,8 +233,8 @@ always a leftover ENI from a Karpenter node or a load balancer that Terraform
 does not manage. Delete those first:
 
 ```bash
-$ kubectl delete nodepool --all       # Karpenter drains its nodes
-$ kubectl delete ingress --all -A     # removes ALBs created by the LB controller
+kubectl delete nodepool --all       # Karpenter drains its nodes
+kubectl delete ingress --all -A     # removes ALBs created by the LB controller
 # wait a minute for the ALB/ENIs to disappear, then re-run destroy
 ```
 

@@ -13,7 +13,7 @@
 #     no driver install is needed here — only the device plugin.
 #   - npd (Node Problem Detector) is disabled: Karpenter + Neuron NPD/DRA is unsupported.
 #   - Neuron nodes are tainted aws.amazon.com/neuron=true:NoSchedule by the plugin; serving
-#     pods must tolerate it (see manifests/neuron-serving-vllm.yaml).
+#     pods must tolerate it (see manifests/neuron-serving-vllm.yaml.tpl).
 #   - Pods request whole Neuron devices via resources: aws.amazon.com/neuron: "<n>"
 #     (trn2.48xlarge exposes 16). The Scheduler Extension (var.neuron_enable_scheduler)
 #     guarantees contiguous device IDs for multi-device tensor-parallel serving.

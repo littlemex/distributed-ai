@@ -118,8 +118,10 @@ resource "aws_efs_access_point" "neuron_workspace" {
 # aws-efs-csi-driver EKS addon (Pod Identity for dynamic access-point provisioning)
 # ---------------------------------------------------------------------------
 resource "aws_eks_addon" "efs_csi_driver" {
-  count         = var.efs_enabled ? 1 : 0
-  cluster_name  = var.cluster_name
+  count = var.efs_enabled ? 1 : 0
+  # module.eks.cluster_name (not var.cluster_name) so this addon implicitly depends on
+  # the cluster and never races its creation — same pattern as fsx.tf.
+  cluster_name  = module.eks.cluster_name
   addon_name    = "aws-efs-csi-driver"
   addon_version = var.efs_csi_driver_version
 
