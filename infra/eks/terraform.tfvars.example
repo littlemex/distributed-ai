@@ -112,8 +112,8 @@ fsx_enabled = false
 # FSx sizing (only used when fsx_enabled = true). Capacity must be a multiple of 2400 GiB.
 fsx_per_unit_storage_throughput = 250
 fsx_storage_capacity_gib        = 4800
-# IRSA role ARN for aws-fsx-csi-driver; empty = use EKS Pod Identity / instance profile.
-fsx_csi_driver_role_arn = ""
+# Must match the AZ (var.azs index) of the accelerator pool that will use this filesystem.
+fsx_subnet_index = 0
 
 # Email addresses notified 1 hour before a Capacity Block expires (per-pool cb_end_date).
 # Empty = skip SNS subscriptions.

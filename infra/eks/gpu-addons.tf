@@ -85,6 +85,11 @@ resource "helm_release" "gpu_operator" {
 
   values = [yamlencode(local.gpu_operator_values)]
 
+  # Destroy ordering: null_resource.wait_for_node_drain (karpenter.tf) depends_on this
+  # release, so it is destroyed only AFTER the drain-wait completes — the GPU Operator
+  # manages a per-node ClusterPolicy/device-plugin DaemonSet, and removing it while a GPU
+  # node is still draining can itself stall (observed live: an uninstall got stuck
+  # "uninstalling" with a live GPU node present).
   depends_on = [helm_release.karpenter]
 }
 
@@ -104,6 +109,7 @@ resource "helm_release" "aws_efa_k8s_device_plugin" {
 
   values = [yamlencode(local.efa_device_plugin_values)]
 
+  # See the identical comment on helm_release.gpu_operator above.
   depends_on = [helm_release.karpenter]
 }
 

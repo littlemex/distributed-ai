@@ -138,6 +138,10 @@ resource "aws_eks_addon" "efs_csi_driver" {
     Project     = "distributed-ai"
   }
 
+  # Destroy ordering: null_resource.wait_for_node_drain (karpenter.tf) depends_on this
+  # addon, so it is removed only after the drain-wait completes. A Pod on a draining
+  # accelerator node may have an EFS-backed volume; removing the CSI driver first can stall
+  # that Pod's volume unmount, which stalls the drain the wait is trying to observe.
   depends_on = [module.eks]
 }
 

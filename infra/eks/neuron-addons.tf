@@ -52,6 +52,8 @@ resource "helm_release" "neuron" {
   values = [yamlencode(local.neuron_helm_values)]
 
   # Needs the cluster and Karpenter CRDs/controller present; the plugin lands on Neuron
-  # nodes once Karpenter provisions them.
+  # nodes once Karpenter provisions them. For destroy ordering, see the identical comment
+  # on helm_release.gpu_operator in gpu-addons.tf — null_resource.wait_for_node_drain
+  # (karpenter.tf) depends_on this release the same way.
   depends_on = [helm_release.karpenter]
 }

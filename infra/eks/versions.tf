@@ -35,5 +35,10 @@ terraform {
       version = "~> 0.13" # time_sleep in cloudfront.tf — sequences demo Ingress finalizer
       # cleanup before the ALB Controller that owns it is destroyed
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2" # null_resource destroy-time provisioner in karpenter.tf — waits for
+      # Karpenter to drain/terminate accelerator nodes before its own removal
+    }
   }
 }

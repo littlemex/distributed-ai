@@ -315,8 +315,9 @@ variable "cpu_nodepool_cpu_limit" {
 
 variable "fsx_enabled" {
   description = <<-EOT
-    Create the FSx for Lustre file system, CSI driver, and StorageClass. Off by default:
-    FSx PERSISTENT_2 provisions terabytes of SSD that bill continuously while the cluster
+    Create the FSx for Lustre file system, CSI driver, and a static PersistentVolume bound
+    to it (no dynamic-provisioning StorageClass — see fsx.tf). Off by default: FSx
+    PERSISTENT_2 provisions terabytes of SSD that bill continuously while the cluster
     exists, which the quick start should not incur. Enable for training runs that need a
     high-throughput single-AZ scratch/checkpoint filesystem. (EFS, gated separately by
     var.efs_enabled, is the multi-AZ RWX cache option.)
@@ -337,10 +338,14 @@ variable "fsx_storage_capacity_gib" {
   default     = 4800
 }
 
-variable "fsx_csi_driver_role_arn" {
-  description = "ARN of the IRSA / Pod Identity role for the aws-fsx-csi-driver addon. Leave empty to omit the IRSA binding (suitable when using EKS Pod Identity)."
-  type        = string
-  default     = ""
+variable "fsx_subnet_index" {
+  description = <<-EOT
+    Index into module.vpc.private_subnets (i.e. into var.azs) for the single-AZ FSx
+    filesystem. FSx Lustre mounts are only routable from the same AZ, so this should match
+    the `zone` of whichever accelerator pool will use it (0 = var.azs[0], 1 = var.azs[1]).
+  EOT
+  type        = number
+  default     = 0
 }
 
 # ── EFS (shared, AZ-independent RWX for Neuron/HF caches) ─────────────────────

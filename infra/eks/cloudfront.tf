@@ -38,11 +38,9 @@
 # To set permanently: add `enable_demo_app = true` (and `enable_cloudfront = true`
 # for Phase 2) to terraform.tfvars.
 #
-# Rolling back Phase 2 → Phase 1 (enable_cloudfront true → false) removes
-# aws_security_group.alb_cloudfront_only, but there is no explicit dependency forcing
-# the Ingress's security-groups annotation update (which detaches the SG from the ALB)
-# to land first — the SG delete can occasionally hit AWS's DependencyViolation and need
-# a retry (Terraform retries automatically). If it doesn't clear, re-run apply/destroy.
+# Rolling back Phase 2 → Phase 1 (enable_cloudfront true → false): see the delete-timeout
+# comment on aws_security_group.alb_cloudfront_only below for the async-detach race this
+# guards against.
 ################################################################################
 
 # ── Guard: CloudFront-only resources in this file require enable_cloudfront=true ──
@@ -109,6 +107,17 @@ resource "aws_security_group" "alb_cloudfront_only" {
   tags = merge(var.tags, {
     Name = "${var.cluster_name}-alb-cloudfront-only"
   })
+
+  # Rolling back enable_cloudfront true → false: Terraform updates the Ingress's
+  # security-groups annotation (detaching this SG) before destroying this resource, but the
+  # ALB Controller's actual detachment is async — this SG can still be attached to the ALB's
+  # ENI for a few seconds after the Ingress update is accepted. The AWS provider retries
+  # DependencyViolation internally, so a generous delete timeout (rather than a time_sleep,
+  # which risks a dependency cycle here since this resource's id is a value the Ingress
+  # reads) is the safer fix for the same failure class as the demo_ingress_finalizer issue.
+  timeouts {
+    delete = "5m"
+  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "alb_from_cloudfront" {

@@ -175,7 +175,17 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
     }
   }
 
-  depends_on = [helm_release.karpenter]
+  # Discovered live: EC2NodeClass carries a karpenter.k8s.aws/termination finalizer that only
+  # the Karpenter controller can clear — kubectl_manifest reports this "destroyed" the moment
+  # the delete is accepted, same as the NodePool/NodeClaim issue null_resource.wait_for_node_drain
+  # exists for (see the comment there). Without this edge, this EC2NodeClass's destroy runs
+  # concurrently with the drain-wait instead of before it, and if helm_release.karpenter
+  # finishes destroying first, the finalizer is never cleared and the object (and the
+  # karpenter-crd chart's own destroy, which waits on its CRDs having no instances) hangs
+  # forever. depends_on the same resource the NodePool manifests do, for the same reason: it
+  # forces this destroy to be issued before the drain-wait resource, and the drain-wait
+  # resource is destroyed before Karpenter — see karpenter.tf.
+  depends_on = [helm_release.karpenter, null_resource.wait_for_node_drain]
 }
 
 # ── Accelerated NodePools (one per accelerator pool) ───────────────────────────
@@ -259,7 +269,15 @@ resource "kubectl_manifest" "accelerator_nodepool" {
     }
   })
 
-  depends_on = [kubectl_manifest.accelerator_nodeclass]
+  # Create-time this only needs accelerator_nodeclass. null_resource.wait_for_node_drain
+  # (karpenter.tf) is added here purely for DESTROY ordering: Terraform destroys in the
+  # reverse of depends_on order, so this makes the NodePool delete get issued BEFORE that
+  # resource's destroy-time provisioner starts polling for NodeClaims to drain — which in
+  # turn (via that resource's own depends_on) runs before Karpenter/its addons are removed.
+  depends_on = [
+    kubectl_manifest.accelerator_nodeclass,
+    null_resource.wait_for_node_drain,
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -287,7 +305,8 @@ resource "kubectl_manifest" "ec2nodeclass_cpu" {
     })
   })
 
-  depends_on = [helm_release.karpenter]
+  # See the identical comment on kubectl_manifest.accelerator_nodeclass above.
+  depends_on = [helm_release.karpenter, null_resource.wait_for_node_drain]
 }
 
 resource "kubectl_manifest" "nodepool_cpu" {
@@ -347,5 +366,10 @@ resource "kubectl_manifest" "nodepool_cpu" {
     }
   })
 
-  depends_on = [kubectl_manifest.ec2nodeclass_cpu]
+  # See the identical comment on kubectl_manifest.accelerator_nodepool above — this edge is
+  # for destroy ordering only (issue the CPU NodePool delete before the drain-wait starts).
+  depends_on = [
+    kubectl_manifest.ec2nodeclass_cpu,
+    null_resource.wait_for_node_drain,
+  ]
 }

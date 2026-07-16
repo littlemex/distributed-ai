@@ -187,6 +187,12 @@ EFA plugin, etc.) are pinned as defaults in `variables.tf`. IAM: permissions to
 create EKS, EC2/VPC, IAM roles, and (for Capacity Block)
 `ec2:*CapacityReservation*` / `ec2:*CapacityBlock*`.
 
+`terraform destroy` additionally requires `bash`, the AWS CLI, and `kubectl` on
+`PATH` on the machine running Terraform: a destroy-time provisioner
+(`null_resource.wait_for_node_drain` in `karpenter.tf`) uses them to confirm
+every accelerator node has actually terminated before removing Karpenter — see
+[Known limitations](#known-limitations).
+
 ```bash
 aws sts get-caller-identity   # confirm the intended account and region first
 ```
@@ -261,6 +267,18 @@ contiguous device IDs. See `manifests/neuron-serving-vllm.yaml.tpl`.
 > Neuron taint) but has not been hardware-verified in this module — see
 > [Known limitations](#known-limitations).
 
+Two components commonly paired with GPU/Neuron inference are deliberately
+**not** included — they are workload-layer concerns, not cluster infra:
+
+- **KEDA**, for scale-to-zero autoscaling (e.g. a vLLM Deployment that scales
+  Pod replicas with request rate/queue depth down to zero). Install it
+  separately; its `ScaledObject` drives the Deployment, and Karpenter (this
+  module) provisions the node underneath once KEDA scales past zero.
+- **Mountpoint for Amazon S3 CSI driver**, for mounting model weights directly
+  from S3. This module ships EFS and FSx for shared/scratch storage (see
+  above) but not an S3 mount — add the `aws-mountpoint-s3-csi-driver` EKS
+  addon the same way `efs.tf` adds the EFS one, if your workload needs it.
+
 ---
 
 ## CloudFront → ALB → EKS demo endpoint (opt-in)
@@ -307,7 +325,11 @@ Discovered by direct measurement and cluster inspection.
 | `expireAfter` rejected | ISO-8601 duration not accepted | Use a Go duration string, e.g. `"24h"`. |
 | Karpenter CRDs/NodeClaims vanish on a shared cluster | An unrelated Helm chart removed Karpenter's CRDs, cascading to every NodeClaim | `terraform taint` + apply the Karpenter releases and NodePool/EC2NodeClass. If a NodeClass is stuck `Terminating` on a finalizer, remove the stuck NodeClaim's finalizer first. This module installs the `karpenter-crd` chart separately so CRDs upgrade with the version. |
 | hugepages request blocks provisioning | A Pod requesting `hugepages-*` finds no matching instance type | Remove the hugepages request unless the node is configured for it. |
-| `terraform apply` fails creating the CB expiry schedule | `cb_end_date` is already in the past (the `at()` expression can't be in the past) or was not UTC (`Z` suffix — validated) | Use a future UTC timestamp, or omit `cb_end_date` to skip the alert entirely. |
+| CB expiry alert schedule silently disappears | The schedule fires once (`action_after_completion = "DELETE"`) and self-deletes; a pool whose alert time has already passed is also excluded from `for_each` so `apply` never tries to recreate an `at()` expression in the past | Expected — the alert already fired (or the window passed). Set a new `cb_end_date` for the next reservation. |
+| `terraform apply` fails: `cb_end_date must be UTC` | `cb_end_date` was not RFC3339 UTC (`Z` suffix — validated) | Use a UTC timestamp, e.g. `"2026-01-01T12:00:00Z"`. |
+| `terraform destroy` run with a live accelerator node pauses on `null_resource.wait_for_node_drain` for up to 30 minutes, or fails there | Node drain + EC2 termination is async work done by the Karpenter controller; `kubectl_manifest` reports a NodePool/NodeClaim delete "complete" as soon as the Kubernetes API accepts it, well before that finishes | Expected — this resource polls `kubectl get nodeclaims` (up to 30 min) before Karpenter, the device plugins, the EFS/FSx CSI drivers, and the EFA security group are removed, so nothing that owns a per-node AWS resource disappears while a node still exists. A measured single-node drain took ~9.5 minutes. If it fails after 30 minutes, a node is genuinely stuck — check `kubectl get nodeclaims` / `aws ec2 describe-instances` before re-running destroy. |
+| The drain-wait above never resolves even though the node's EC2 instance is already gone | Karpenter's controller Pod runs in a private subnet; if the NAT gateway becomes unavailable while the controller is still finalizing a NodeClaim, every AWS API call it makes (EC2, IAM, STS, SSM) times out and it can never clear the finalizer — discovered live during this module's own destroy testing, when the NAT gateway (unrelated to Karpenter in Terraform's dependency graph) was removed mid-drain | This module adds Interface VPC endpoints for EC2/STS/SSM (`vpc-endpoints.tf`) specifically so Karpenter keeps working even if the NAT is gone; `null_resource.wait_for_node_drain` depends on them so they outlive the wait. IAM has no regional Interface endpoint (it's a global service), so IAM calls (e.g. `ListInstanceProfiles`) still need the NAT — this residual risk is not fully closed. If you still hit this, check `kubectl -n karpenter logs` for `i/o timeout` errors — that confirms the API-connectivity theory — and retry destroy once resolved. |
+| `terraform destroy` fails: `helm_release.karpenter_crd` uninstallation `context deadline exceeded`, `kubectl get ec2nodeclass` still shows objects | An EC2NodeClass's `karpenter.k8s.aws/termination` finalizer is cleared by Karpenter's controller only after it successfully calls IAM (`ListInstanceProfiles`) — same NAT/IAM gap as the row above, but for EC2NodeClass instead of NodeClaim. `null_resource.wait_for_node_drain` waits for this best-effort (does not fail the destroy on its own timeout) precisely because it's known not to resolve without a NAT | Harmless — the underlying EC2 instance is already confirmed terminated by that point. Clear the stuck finalizer and re-run destroy: `kubectl patch ec2nodeclass <name> --type=merge -p '{"metadata":{"finalizers":[]}}'`. |
 
 ### EFA & NCCL
 
@@ -341,7 +363,10 @@ Discovered by direct measurement and cluster inspection.
 Rough guidance — check current pricing for your Region:
 
 - **Always-on while the cluster exists:** EKS control plane (~$0.10/h), NAT
-  gateway(s), and the system managed node group.
+  gateway(s), the system managed node group, and 3 Interface VPC endpoints
+  (EC2/STS/SSM — ~$0.01/h each; the S3 Gateway endpoint is free). The
+  endpoints exist so Karpenter keeps working if the NAT gateway is ever
+  unavailable during teardown — see the Gotchas row on destroy ordering.
 - **FSx for Lustre** (when `fsx_enabled = true`): PERSISTENT_2 SSD bills for the
   full provisioned capacity continuously — this is why it is off by default.
 - **Accelerators:** On-Demand GPU/Neuron nodes bill per hour while running;
@@ -369,6 +394,21 @@ deletes FSx/EFS and their contents (regenerable caches) — see below.
   cannot regenerate.
 - The `data.http` fetch for the ALB Controller IAM policy is a plan-time network
   dependency; the MPI operator manifest is vendored (committed) to avoid one.
+- **FSx is static-provisioning only:** aws-fsx-csi-driver cannot dynamically bind
+  a StorageClass to an existing filesystem (only create new ones), so this
+  module creates one filesystem and one fixed-`volumeHandle` PersistentVolume
+  (`fsx-training`) — no `fsx-lustre` StorageClass. Bind a PVC to it by name.
+- **`terraform destroy` requires `bash` + AWS CLI + `kubectl` on the local
+  machine's `PATH`.** A destroy-time provisioner polls for accelerator nodes to
+  fully drain before removing Karpenter and its addons (see the Gotchas row
+  above); if any of those tools are missing, the provisioner fails loudly
+  (`exit 1`) rather than silently skipping the safety check. This module has
+  not been exercised with a non-bash shell or on Windows.
+- **`terraform destroy` can fail once on `helm_release.karpenter_crd` if the
+  NAT gateway is already gone** when an EC2NodeClass's finalizer is still
+  waiting on an IAM call (see the Gotchas row above). Confirmed live: EC2
+  instances are unaffected (already terminated by that point); clear the
+  finalizer and re-run destroy.
 
 ---
 

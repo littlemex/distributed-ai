@@ -9,10 +9,25 @@
 # in AWS provider ~>5.80.
 
 locals {
-  # Reserved pools that provided a cb_end_date get a pre-expiry alert. Keyed by pool name.
-  cb_alert_pools = {
+  # Reserved pools that provided a cb_end_date. Two-stage filter (not one `&&` condition):
+  # timeadd() errors on an empty string, and HCL does not guarantee short-circuit evaluation
+  # of the RHS of && once the LHS is false, so cb_end_date != "" must fully exclude empty
+  # values in a separate stage before any timestamp function sees them.
+  cb_pools_with_end_date = {
     for k, p in var.accelerator_pools : k => p
     if p.capacity_type == "reserved" && p.cb_end_date != ""
+  }
+
+  # Excludes pools whose alert time (cb_end_date - 1h) has already passed: the schedule sets
+  # action_after_completion = "DELETE", so once it fires the aws_scheduler_schedule resource
+  # disappears from AWS; without this filter the next plan would try to recreate it with an
+  # at() expression in the past, which the Scheduler API rejects on every subsequent apply.
+  # Boundary case (not structurally fixable): a plan generated just before the alert time
+  # and applied just after it will fail — the at() expression is already in the past by the
+  # time apply runs the create. Re-run plan/apply if this happens near cb_end_date - 1h.
+  cb_alert_pools = {
+    for k, p in local.cb_pools_with_end_date : k => p
+    if timecmp(timeadd(p.cb_end_date, "-1h"), plantimestamp()) > 0
   }
 
   # Any alert pools at all → provision the shared SNS topic + scheduler role.
@@ -78,9 +93,10 @@ resource "aws_iam_role" "cb_expiry_scheduler" {
 }
 
 data "aws_iam_policy_document" "scheduler_sns_publish" {
+  count = local.has_cb_alert ? 1 : 0
   statement {
     actions   = ["sns:Publish"]
-    resources = local.has_cb_alert ? [aws_sns_topic.cb_expiry_alert[0].arn] : ["*"]
+    resources = [aws_sns_topic.cb_expiry_alert[0].arn]
   }
 }
 
@@ -88,7 +104,7 @@ resource "aws_iam_role_policy" "cb_expiry_scheduler_sns" {
   count  = local.has_cb_alert ? 1 : 0
   name   = "sns-publish"
   role   = aws_iam_role.cb_expiry_scheduler[0].id
-  policy = data.aws_iam_policy_document.scheduler_sns_publish.json
+  policy = data.aws_iam_policy_document.scheduler_sns_publish[0].json
 }
 
 # ---------------------------------------------------------------------------

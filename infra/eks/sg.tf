@@ -18,6 +18,14 @@ resource "aws_security_group" "efa_node" {
     Name                     = local.efa_sg_name
     "karpenter.sh/discovery" = var.cluster_name
   })
+
+  # This SG is attached to every accelerator node's ENI while it exists. Destroy ordering:
+  # null_resource.wait_for_node_drain (karpenter.tf) depends_on this resource, so it is
+  # removed only after the drain-wait has confirmed no NodeClaims remain. Without that edge,
+  # delete can hit DependencyViolation while a node's ENI is still attached.
+  timeouts {
+    delete = "10m"
+  }
 }
 
 # Ingress: allow all traffic from nodes that share this security group.

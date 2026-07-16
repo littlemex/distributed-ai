@@ -197,7 +197,11 @@ so device IDs are allocated contiguously. See
   created for you.
 - **FSx for Lustre** (`fsx_enabled = true`, off by default): single-AZ,
   high-throughput scratch/checkpoints. It bills for the full provisioned
-  capacity continuously — enable it only for runs that need it.
+  capacity continuously — enable it only for runs that need it. Set
+  `fsx_subnet_index` to match the AZ of the pool that will use it. A static PV
+  named `fsx-training` is created for you (no dynamic StorageClass — the CSI
+  driver can only create brand-new filesystems dynamically, not attach to an
+  existing one, so this module always uses a fixed PV).
 
 ---
 
