@@ -22,6 +22,10 @@
 #   - GPU (nccl): __NODE_ROLE__=<accelerator pool name, e.g. gpu-g5>, __NPROC__=<GPUs to use on
 #     one node, e.g. 1>, GPU resources requested.
 #
+# IMPORTANT (GPU): __NPROC__ MUST equal the requested nvidia.com/gpu count — torchrun spawns one
+# process per __NPROC__ and each grabs one GPU, so __NPROC__=2 with nvidia.com/gpu: "1" makes two
+# processes fight over a single GPU with no error, just contention. Keep them in lock-step.
+#
 # Prerequisites:
 #   - efs_enabled = true (creates the static PV `efs-neuron-workspace`, mounted here for the
 #     HF cache and output checkpoint so a retried/rescheduled Pod does not re-download).

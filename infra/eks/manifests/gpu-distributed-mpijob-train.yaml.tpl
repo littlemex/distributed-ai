@@ -36,13 +36,37 @@
 #   - CPU (gloo): __NODE_ROLE__=cpu, no GPU resources — needs cpu_nodepool_enabled=true.
 #   - GPU (nccl): __NODE_ROLE__=<accelerator pool name, e.g. gpu-g5 or gpu-g6e>, GPU resources
 #     requested, one worker pod per node (podAntiAffinity) so this genuinely spans 2 machines.
+#     The Launcher is pinned separately (__LAUNCHER_NODE_ROLE__) to a CPU node in BOTH backends
+#     — it runs only mpirun and requests no GPU, so parking it on the accelerator pool would
+#     just burn an extra accelerator node (see the comment on the Launcher's nodeSelector).
+#
+# Backend verification status: the CPU (gloo) 2-worker path is verified end-to-end on a real
+# cluster (MPIJob Succeeded, gradients synced across 2 nodes). The GPU (nccl) path is
+# reviewed but NOT yet run on a GPU cluster — treat the GPU sed below as a starting point.
+#
+# Scaling beyond 1 GPU per worker (READ BEFORE editing the GPU resource count): three values
+# must move together or ranks silently go idle —
+#   1. `-np` on the Launcher (line ~135)          = total processes = total GPUs across workers
+#   2. `slotsPerWorker` (line ~95)                = GPUs per worker
+#   3. `nvidia.com/gpu` on the Worker (sed value) = GPUs per worker (must equal slotsPerWorker)
+# e.g. 2 workers x 4 GPUs => -np "8", slotsPerWorker: 4, nvidia.com/gpu: "4". Bumping only the
+# GPU count leaves world_size at 2 and strands the extra GPUs with no error. Multi-GPU-per-node
+# also needs train_smollm.py to map LOCAL_RANK -> cuda device (the current script relies on
+# torchrun/one-GPU-per-proc and does NOT set CUDA_VISIBLE_DEVICES per rank).
+#
+# EFA / NCCL note: this manifest requests no vpc.amazonaws.com/efa and sets no NCCL_SOCKET_IFNAME
+# / FI_PROVIDER. On a multi-NIC accelerator node NCCL must still pick a working interface on its
+# own; if the first GPU MPIJob hangs at NCCL init, pin the interface (e.g. NCCL_SOCKET_IFNAME=eth0)
+# and, for real bandwidth, add EFA resources + the EFA device plugin. Out of scope for this
+# starter sample; nccl-test-sshd-pods.yaml.tpl is the EFA-aware reference.
 #
 # Prerequisites:
 #   - mpi-operator is always installed by this module (gpu-addons.tf) — no extra apply needed.
 #   - efs_enabled = true (HF cache + output checkpoint on the static PV `efs-neuron-workspace`,
 #     shared by launcher and both workers).
-#   - For the CPU backend: cpu_nodepool_enabled = true, and at least 2 schedulable CPU nodes
-#     (or let Karpenter provision 2 — podAntiAffinity forces one worker per node).
+#   - cpu_nodepool_enabled = true in BOTH backends — the Launcher always lands on a CPU node.
+#   - For the CPU backend: at least 2 schedulable CPU nodes for the Workers (or let Karpenter
+#     provision them — podAntiAffinity forces one worker per node).
 #   - For the GPU backend: an accelerator pool with device_plugin="nvidia" and enough quota
 #     for 2 nodes.
 #
@@ -50,17 +74,19 @@
 #   NAMESPACE=<your-namespace>
 #   IMAGE=<account>.dkr.ecr.<region>.amazonaws.com/mpijob-hf-sample:v1
 #   sed -e "s/__NAMESPACE__/${NAMESPACE}/g" -e "s#__MPIJOB_IMAGE__#${IMAGE}#g" \
-#       -e "s/__NODE_ROLE__/cpu/g" -e "s/__BACKEND__/gloo/g" \
+#       -e "s/__NODE_ROLE__/cpu/g" -e "s/__LAUNCHER_NODE_ROLE__/cpu/g" -e "s/__BACKEND__/gloo/g" \
 #       -e '/__GPU_RESOURCES_IF_NEEDED__/d' -e '/__GPU_TOLERATIONS_IF_NEEDED__/d' \
+#       -e '/__LAUNCHER_GPU_TOLERATIONS_IF_NEEDED__/d' \
 #       gpu-distributed-mpijob-train.yaml.tpl | kubectl apply -f -
 #
-# Usage (GPU, e.g. 2 g5 nodes, 1 GPU per worker):
+# Usage (GPU, e.g. 2 g5 nodes, 1 GPU per worker; Launcher still on a CPU node):
 #   NAMESPACE=<your-namespace>
 #   IMAGE=<account>.dkr.ecr.<region>.amazonaws.com/mpijob-hf-sample:v1
 #   sed -e "s/__NAMESPACE__/${NAMESPACE}/g" -e "s#__MPIJOB_IMAGE__#${IMAGE}#g" \
-#       -e "s/__NODE_ROLE__/gpu-g5/g" -e "s/__BACKEND__/nccl/g" \
+#       -e "s/__NODE_ROLE__/gpu-g5/g" -e "s/__LAUNCHER_NODE_ROLE__/cpu/g" -e "s/__BACKEND__/nccl/g" \
 #       -e 's/__GPU_RESOURCES_IF_NEEDED__/nvidia.com\/gpu: "1"/' \
 #       -e 's/__GPU_TOLERATIONS_IF_NEEDED__/{ key: nvidia.com\/gpu, operator: Exists, effect: NoSchedule }/' \
+#       -e '/__LAUNCHER_GPU_TOLERATIONS_IF_NEEDED__/d' \
 #       gpu-distributed-mpijob-train.yaml.tpl | kubectl apply -f -
 #
 # Verify:
@@ -115,11 +141,19 @@ spec:
           annotations:
             karpenter.sh/do-not-disrupt: "true"
         spec:
+          # The Launcher only runs mpirun (no GPU, ~1 vCPU) — pin it via a SEPARATE placeholder,
+          # not __NODE_ROLE__. Sharing __NODE_ROLE__ with the Workers would place this GPU-less
+          # Pod on the (expensive) accelerator pool on the GPU backend, where it requests no GPU
+          # yet still forces Karpenter to stand up an extra accelerator node just for the
+          # Launcher — the Workers fill their own nodes via the podAntiAffinity below, so the
+          # Launcher never fits alongside them. On the CPU backend both placeholders resolve to
+          # `cpu`, so this is byte-for-byte the verified single-pool run. The GPU backend
+          # therefore needs cpu_nodepool_enabled=true so this lands on a cheap CPU node.
           nodeSelector:
-            node-role: __NODE_ROLE__
+            node-role: __LAUNCHER_NODE_ROLE__
           tolerations:
             - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
-            - __GPU_TOLERATIONS_IF_NEEDED__
+            - __LAUNCHER_GPU_TOLERATIONS_IF_NEEDED__
           containers:
             - name: mpi-launcher
               image: __MPIJOB_IMAGE__
