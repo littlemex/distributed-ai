@@ -13,6 +13,18 @@ variable "azs" {
   EOT
   type        = list(string)
   default     = ["us-east-2a", "us-east-2b"]
+
+  # vpc.tf creates one private + one public subnet PER AZ by index, zipping var.azs against
+  # these two CIDR lists. If the lengths disagree, the extra AZs get NO subnet — and because
+  # accelerator_pools only validates `contains(var.azs, p.zone)`, a pool pinned to that AZ
+  # passes validation and applies cleanly, then Karpenter can never place a node (no matching
+  # subnet for the zone requirement) and the failure surfaces only in Karpenter's event log.
+  # This is the exact trap of Capacity Block operations: a CB lands in a new AZ, the operator
+  # appends it to var.azs, but forgets to grow the CIDR lists. Fail at plan time instead.
+  validation {
+    condition     = length(var.azs) == length(var.private_subnet_cidrs) && length(var.azs) == length(var.public_subnet_cidrs)
+    error_message = "azs, private_subnet_cidrs, and public_subnet_cidrs must all have the same length (one subnet CIDR per AZ). vpc.tf zips them by index, so a mismatch silently leaves an AZ with no subnet and any pool pinned there stuck Pending."
+  }
 }
 
 variable "cluster_name" {
@@ -99,6 +111,10 @@ variable "accelerator_pools" {
     consolidate_after = optional(string, "")
     cpu_limit         = optional(string, "10000")
     memory_limit      = optional(string, "100000Gi")
+    # CPU architecture of the node host. Defaults to amd64. Set "arm64" for Grace-based
+    # accelerator hosts (e.g. GB200 / p6e-gb200); an amd64-only requirement would otherwise
+    # leave an arm64 instance type stuck Pending with a requirements mismatch.
+    arch = optional(string, "amd64")
   }))
   # Default is empty: the module deploys a control plane + system nodes with no accelerator
   # pools, so it is Region-agnostic (no hardcoded AZ). The quick start supplies one pool via
@@ -134,6 +150,17 @@ variable "accelerator_pools" {
     # Require a bare UTC ("Z") timestamp so the alert time is unambiguous.
     condition     = alltrue([for k, p in var.accelerator_pools : p.cb_end_date == "" || can(regex("Z$", p.cb_end_date))])
     error_message = "cb_end_date must be UTC (end with \"Z\", e.g. \"2026-01-01T12:00:00Z\") — a non-Z offset is misinterpreted as UTC by the EventBridge schedule and fires at the wrong time."
+  }
+  validation {
+    condition     = alltrue([for k, p in var.accelerator_pools : contains(["amd64", "arm64"], p.arch)])
+    error_message = "Each accelerator pool's arch must be \"amd64\" or \"arm64\"."
+  }
+  validation {
+    # A cb_reservation_id set on a non-reserved pool is silently ignored: the NodeClass omits
+    # capacityReservationSelectorTerms, so the operator thinks they are drawing on a paid
+    # reservation but Karpenter launches on-demand/spot instead (double billing). Flag it.
+    condition     = alltrue([for k, p in var.accelerator_pools : p.cb_reservation_id == "" || p.capacity_type == "reserved"])
+    error_message = "A pool sets cb_reservation_id but capacity_type is not \"reserved\"; the reservation would be ignored and the pool billed on-demand/spot. Set capacity_type = \"reserved\" or clear cb_reservation_id."
   }
 }
 
@@ -330,22 +357,37 @@ variable "fsx_per_unit_storage_throughput" {
   description = "FSx for Lustre per-unit storage throughput in MB/s/TiB. Valid values for PERSISTENT_2 SSD: 125, 250, 500, 1000."
   type        = number
   default     = 250
+  validation {
+    # Otherwise the invalid value only surfaces as a CreateFileSystem API error minutes into apply.
+    condition     = contains([125, 250, 500, 1000], var.fsx_per_unit_storage_throughput)
+    error_message = "fsx_per_unit_storage_throughput must be one of 125, 250, 500, 1000 (PERSISTENT_2 SSD)."
+  }
 }
 
 variable "fsx_storage_capacity_gib" {
   description = "FSx for Lustre storage capacity in GiB. Must be a multiple of 2400 for PERSISTENT_2 SSD."
   type        = number
   default     = 4800
+  validation {
+    condition     = var.fsx_storage_capacity_gib >= 2400 && var.fsx_storage_capacity_gib % 2400 == 0
+    error_message = "fsx_storage_capacity_gib must be a positive multiple of 2400 (PERSISTENT_2 SSD tier size)."
+  }
 }
 
 variable "fsx_subnet_index" {
   description = <<-EOT
     Index into module.vpc.private_subnets (i.e. into var.azs) for the single-AZ FSx
-    filesystem. FSx Lustre mounts are only routable from the same AZ, so this should match
-    the `zone` of whichever accelerator pool will use it (0 = var.azs[0], 1 = var.azs[1]).
+    filesystem. FSx Lustre is single-AZ; mounting from a pod in a DIFFERENT AZ works within
+    the VPC but adds cross-AZ data-transfer cost and latency, so set this to match the `zone`
+    of whichever accelerator pool will use it for best performance (0 = var.azs[0], 1 = var.azs[1]).
   EOT
   type        = number
   default     = 0
+  validation {
+    # Out of range would otherwise fail deep in vpc.private_subnets[...] with an opaque index error.
+    condition     = var.fsx_subnet_index >= 0 && var.fsx_subnet_index < length(var.azs)
+    error_message = "fsx_subnet_index must be between 0 and length(azs)-1 (it indexes into the per-AZ private subnets)."
+  }
 }
 
 # ── EFS (shared, AZ-independent RWX for Neuron/HF caches) ─────────────────────

@@ -173,6 +173,35 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
       )
       error_message = "Pool ${each.key} (${local.pool_rep_instance_type[each.key]}) is a multi-card EFA instance but resolved to a single-card layout. Leave efa_interface_count/efa_multi_card unset to auto-derive, set efa_multi_card = true with the correct count, or set efa_interface_count = 0 to disable EFA."
     }
+    # Guard 3: never silently fall back to EFA=0 for an unknown instance type. If the
+    # representative type is absent from local.efa_capability AND the pool did not set
+    # efa_interface_count explicitly, the derivation would quietly yield 0 — producing a
+    # single-ENA node (no EFA) that "works but runs multi-node NCCL over TCP at a fraction of
+    # the bandwidth", or a pod that Pends forever if it requests vpc.amazonaws.com/efa. Force
+    # an explicit decision: add the type to the table, or set efa_interface_count (0 to opt
+    # out of EFA on purpose, or the real card count).
+    precondition {
+      condition = (
+        contains(keys(local.efa_capability), local.pool_rep_instance_type[each.key]) ||
+        each.value.efa_interface_count >= 0
+      )
+      error_message = "Pool ${each.key} uses instance type ${local.pool_rep_instance_type[each.key]}, which is not in the EFA capability table (locals.tf), and does not set efa_interface_count. Add the type to the table, or set efa_interface_count explicitly (0 to disable EFA, or the instance's EFA card count) so EFA is never silently disabled."
+    }
+    # Guard 4: a manual efa_interface_count override must not exceed the instance's physical
+    # card count when the type is known. Over-counting (e.g. 32 on p5en's 16 cards) makes
+    # Karpenter render networkInterfaces with cards that do not exist; RunInstances fails and
+    # Karpenter retries in a loop with the failure only in its event log.
+    precondition {
+      # try() is required: Terraform evaluates local.efa_capability[type] even when the
+      # contains() guard is false (no short-circuit for index errors), so an unknown type
+      # would raise "Invalid index" instead of passing. try(..., big) makes an unknown type
+      # skip this check (Guard 3 already handles unknown types).
+      condition = (
+        each.value.efa_interface_count < 0 ||
+        each.value.efa_interface_count <= try(local.efa_capability[local.pool_rep_instance_type[each.key]].cards, 999999)
+      )
+      error_message = "Pool ${each.key} sets efa_interface_count = ${each.value.efa_interface_count}, but ${local.pool_rep_instance_type[each.key]} has only ${try(local.efa_capability[local.pool_rep_instance_type[each.key]].cards, 0)} EFA card(s). Reduce efa_interface_count to at most the card count, or leave it unset to auto-derive."
+    }
   }
 
   # Discovered live: EC2NodeClass carries a karpenter.k8s.aws/termination finalizer that only
@@ -203,11 +232,6 @@ resource "kubectl_manifest" "accelerator_nodepool" {
             "node-role"             = each.key
             "distributed-ai/device" = each.value.device_plugin # "nvidia" | "neuron"
           }
-          # NOTE: Capacity Block nodes carry a `capacity-reservation` taint whose value
-          # changes per reservation; pods must tolerate it with operator: Exists. The
-          # nvidia/neuron device plugins add their own accelerator taints, which pods
-          # tolerate likewise. (Documented as a comment to avoid polluting reserved
-          # annotation domains.)
         }
         spec = {
           nodeClassRef = {
@@ -215,6 +239,20 @@ resource "kubectl_manifest" "accelerator_nodepool" {
             kind  = "EC2NodeClass"
             name  = each.key
           }
+          # Taint every accelerator node so only pods that explicitly tolerate the
+          # accelerator land here. Without this, arbitrary CPU workloads (coredns replicas,
+          # controllers, a Ray head, a data-prep pod) schedule onto an idle GPU/Neuron node
+          # and keep consolidationPolicy: WhenEmpty from ever firing — a multi-dollar-per-hour
+          # node bills indefinitely while "not empty". NEITHER the NVIDIA nor the Neuron
+          # device plugin taints the node (a common myth; GPU Operator does not either), so
+          # the NodePool must do it. gpu-addons.tf/neuron-addons.tf install the plugins with a
+          # matching toleration, and the workload manifests already tolerate nvidia.com/gpu.
+          # (Capacity Block nodes ALSO carry a per-reservation `capacity-reservation` taint;
+          # pods tolerate that with operator: Exists separately.)
+          taints = [{
+            key    = each.value.device_plugin == "neuron" ? "aws.amazon.com/neuron" : "nvidia.com/gpu"
+            effect = "NoSchedule"
+          }]
           requirements = [
             {
               # reserved (Capacity Block) | on-demand | spot
@@ -234,6 +272,15 @@ resource "kubectl_manifest" "accelerator_nodepool" {
               # pools across AZs — cross-AZ placement would silently break multi-node EFA
               # (NCCL falls back to TCP or fails) and cross-AZ FSx/traffic. If an AZ is
               # capacity-exhausted, prefer changing `zone` or using a Capacity Block.
+              #
+              # RESERVED pools: `zone` MUST equal the AZ where the Capacity Block was granted
+              # (a CB cannot choose its AZ). If they disagree, this zone requirement and the
+              # NodeClass's capacityReservationSelectorTerms contradict and NO node is ever
+              # launched — the only signal is a Karpenter event. Check the reservation's AZ
+              # with: aws ec2 describe-capacity-reservations --capacity-reservation-ids <id>
+              # --query 'CapacityReservations[0].AvailabilityZone'. (The AWS Terraform provider
+              # has no capacity-reservation data source, so this cannot be enforced at plan
+              # time; it is a hard operational requirement.)
               key      = "topology.kubernetes.io/zone"
               operator = "In"
               values   = [each.value.zone]
@@ -241,7 +288,7 @@ resource "kubectl_manifest" "accelerator_nodepool" {
             {
               key      = "kubernetes.io/arch"
               operator = "In"
-              values   = ["amd64"]
+              values   = [each.value.arch]
             },
             {
               key      = "kubernetes.io/os"
@@ -261,6 +308,14 @@ resource "kubectl_manifest" "accelerator_nodepool" {
         # nodes scale down after a short idle so an idle GPU pool does not bill indefinitely.
         consolidationPolicy = "WhenEmpty"
         consolidateAfter    = local.pool_consolidate_after[each.key]
+        # Drift is enabled by default in Karpenter v1 and fires INDEPENDENTLY of
+        # consolidationPolicy: a new "al2023@latest" AMI release marks a live node Drifted and
+        # Karpenter replaces it — mid-training — even with expireAfter/consolidateAfter =
+        # "Never". For reserved (Capacity Block = multi-hour/day training) pools that is
+        # data loss, so pin the disruption budget to zero nodes: nothing is voluntarily
+        # disrupted for the reservation window. On-demand/spot pools keep the default budget
+        # (10%) so idle-scaledown and AMI patching still work.
+        budgets = each.value.capacity_type == "reserved" ? [{ nodes = "0" }] : [{ nodes = "10%" }]
       }
       limits = {
         cpu    = each.value.cpu_limit

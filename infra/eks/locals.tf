@@ -20,6 +20,12 @@ locals {
     "g6e.12xlarge"   = { cards = 1, multi_card = false }
     "g6e.24xlarge"   = { cards = 1, multi_card = false }
     "g6e.48xlarge"   = { cards = 1, multi_card = false }
+    # EFA-less GPU types are listed explicitly with cards = 0 so a pool using them is a KNOWN
+    # "no EFA" case (Guard 3 in karpenter-resources.tf passes) rather than a silent
+    # unknown-type fallback. g5 (A10G) has no EFA at any size.
+    "g5.12xlarge"    = { cards = 0, multi_card = false }
+    "g5.24xlarge"    = { cards = 0, multi_card = false }
+    "g5.48xlarge"    = { cards = 0, multi_card = false }
   }
 
   # Representative instance type per pool (drives EFA derivation). All types in a pool must

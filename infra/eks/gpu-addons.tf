@@ -61,13 +61,38 @@ locals {
   # must tolerate the nvidia AND neuron accelerator taints, plus the per-CB capacity-reservation
   # taint (value varies per reservation → operator: Exists). Missing the neuron toleration would
   # keep the plugin off trn2 nodes, so vpc.amazonaws.com/efa is never advertised there.
-  efa_device_plugin_values = {
-    tolerations = [
-      { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
-      { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
-      { key = "aws.amazon.com/neuron", operator = "Exists", effect = "NoSchedule" },
-    ]
-  }
+  # Instance types that any EFA-enabled pool may launch. The aws-efa-k8s-device-plugin chart
+  # gates its DaemonSet with a nodeAffinity on node.kubernetes.io/instance-type built from
+  # supportedInstanceLabels; the CHART DEFAULT list does not include every EFA type (e.g.
+  # g6e.12xlarge is absent). On a type outside the default list the plugin Pod never schedules,
+  # so vpc.amazonaws.com/efa is never advertised and any pod requesting it Pends forever — the
+  # same "only the type we happened to test works" trap as other silent-fallback bugs. Derive
+  # the list from the pools that actually use EFA so it always covers what this cluster runs.
+  efa_supported_instance_types = distinct(flatten([
+    for k, p in var.accelerator_pools : p.instance_types if local.pool_efa[k].count > 0
+  ]))
+
+  # EFA device plugin tolerations. EFA is used by BOTH GPU and Neuron pools, so the DaemonSet
+  # must tolerate the nvidia AND neuron accelerator taints, plus the per-CB capacity-reservation
+  # taint (value varies per reservation → operator: Exists). Missing the neuron toleration would
+  # keep the plugin off trn2 nodes, so vpc.amazonaws.com/efa is never advertised there.
+  efa_device_plugin_values = merge(
+    {
+      tolerations = [
+        { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
+        { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+        { key = "aws.amazon.com/neuron", operator = "Exists", effect = "NoSchedule" },
+      ]
+    },
+    # Only override supportedInstanceLabels when we have types to add; an empty list would
+    # blank the chart default and strand the plugin everywhere.
+    length(local.efa_supported_instance_types) > 0 ? {
+      supportedInstanceLabels = {
+        keys   = ["node.kubernetes.io/instance-type"]
+        values = local.efa_supported_instance_types
+      }
+    } : {}
+  )
 }
 
 # ---------------------------------------------------------------------------

@@ -49,6 +49,15 @@ resource "aws_fsx_lustre_file_system" "training" {
     Project     = "distributed-ai"
   }
 
+  # FSx validates at CreateFileSystem time that the attached security group already permits
+  # Lustre LNET traffic on port 988 (and the 1018-1023 high ports). depends_on alone only
+  # orders the API CALLS — it does not wait for the SG rules to PROPAGATE to the FSx network
+  # validation service, so a create issued immediately after the rule APIs return can still
+  # get InvalidNetworkSettings (observed: first apply failed, re-apply succeeded). The
+  # time_sleep below adds a propagation delay so the first apply is deterministic, not
+  # "idempotent but probabilistic on the first try".
+  depends_on = [time_sleep.fsx_sg_propagation]
+
   # NOTE: prevent_destroy intentionally omitted. This is a reproducible sample environment
   # that is torn down and recreated; the filesystem holds no irreplaceable data (NEFF/HF
   # caches are regenerable). For a long-lived training cluster, set prevent_destroy = true.
@@ -72,6 +81,32 @@ resource "aws_security_group" "fsx" {
     Name        = "${var.cluster_name}-fsx-sg"
     Environment = var.environment
   }
+}
+
+# AWS's CreateFileSystem network check requires the FSx security group to permit Lustre LNET
+# traffic from ITSELF (the FSx ENIs and Lustre clients that share this SG talk to each other on
+# 988 + 1018-1023). Without these self-referencing rules CreateFileSystem returns
+# InvalidNetworkSettings ("...do not permit Lustre LNET network traffic on port 988") even though
+# the node<->fsx rules below are present. See
+# https://docs.aws.amazon.com/fsx/latest/LustreGuide/limit-access-security-groups.html
+resource "aws_vpc_security_group_ingress_rule" "fsx_self_988" {
+  count                        = var.fsx_enabled ? 1 : 0
+  security_group_id            = aws_security_group.fsx[0].id
+  description                  = "Lustre port 988 within the FSx security group (self-referencing)"
+  from_port                    = 988
+  to_port                      = 988
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.fsx[0].id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "fsx_self_high_ports" {
+  count                        = var.fsx_enabled ? 1 : 0
+  security_group_id            = aws_security_group.fsx[0].id
+  description                  = "Lustre high ports 1018-1023 within the FSx security group (self-referencing)"
+  from_port                    = 1018
+  to_port                      = 1023
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.fsx[0].id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "fsx_from_nodes_988" {
@@ -99,6 +134,23 @@ resource "aws_vpc_security_group_egress_rule" "fsx_egress_all" {
   security_group_id = aws_security_group.fsx[0].id
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
+}
+
+# Propagation delay so the FSx security-group rules above are visible to the FSx network
+# validation service before CreateFileSystem runs (see the comment on the filesystem's
+# depends_on). 30s is empirically enough; it only runs on first create (create_duration is
+# not re-triggered unless the triggers change).
+resource "time_sleep" "fsx_sg_propagation" {
+  count           = var.fsx_enabled ? 1 : 0
+  create_duration = "30s"
+
+  depends_on = [
+    aws_vpc_security_group_ingress_rule.fsx_self_988,
+    aws_vpc_security_group_ingress_rule.fsx_self_high_ports,
+    aws_vpc_security_group_ingress_rule.fsx_from_nodes_988,
+    aws_vpc_security_group_ingress_rule.fsx_from_nodes_high_ports,
+    aws_vpc_security_group_egress_rule.fsx_egress_all,
+  ]
 }
 
 # Client-side (EKS node) rules — the other half of the bidirectional requirement above.
@@ -217,12 +269,14 @@ resource "kubectl_manifest" "fsx_training_pv" {
       csi = {
         driver       = "fsx.csi.aws.com"
         volumeHandle = aws_fsx_lustre_file_system.training[0].id
-        # Required for static provisioning: the node plugin mounts "<dnsName>@tcp:/<mountname>"
+        # Required for static provisioning: the node plugin mounts "<dnsname>@tcp:/<mountname>"
         # and does not derive either value from volumeHandle alone (volumeHandle is only used
         # as the Kubernetes-side volume identifier, not resolved back to a filesystem via an
-        # AWS API call at mount time).
+        # AWS API call at mount time). BOTH keys are lowercase: aws-fsx-csi-driver reads
+        # "dnsname" (not "dnsName") — a camelCase key is silently ignored and NodeStageVolume
+        # fails with "dnsname is not provided", leaving the pod stuck in ContainerCreating.
         volumeAttributes = {
-          dnsName   = aws_fsx_lustre_file_system.training[0].dns_name
+          dnsname   = aws_fsx_lustre_file_system.training[0].dns_name
           mountname = aws_fsx_lustre_file_system.training[0].mount_name
         }
       }
