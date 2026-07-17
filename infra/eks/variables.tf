@@ -369,8 +369,10 @@ variable "fsx_storage_capacity_gib" {
   type        = number
   default     = 4800
   validation {
-    condition     = var.fsx_storage_capacity_gib >= 2400 && var.fsx_storage_capacity_gib % 2400 == 0
-    error_message = "fsx_storage_capacity_gib must be a positive multiple of 2400 (PERSISTENT_2 SSD tier size)."
+    # PERSISTENT_2 SSD allows 1200 GiB, then 2400 GiB and any multiple of 2400. Do not reject
+    # the valid 1200 GiB tier.
+    condition     = var.fsx_storage_capacity_gib == 1200 || (var.fsx_storage_capacity_gib >= 2400 && var.fsx_storage_capacity_gib % 2400 == 0)
+    error_message = "fsx_storage_capacity_gib must be 1200, 2400, or a multiple of 2400 (PERSISTENT_2 SSD tier sizes)."
   }
 }
 

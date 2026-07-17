@@ -311,10 +311,14 @@ resource "kubectl_manifest" "accelerator_nodepool" {
         # Drift is enabled by default in Karpenter v1 and fires INDEPENDENTLY of
         # consolidationPolicy: a new "al2023@latest" AMI release marks a live node Drifted and
         # Karpenter replaces it — mid-training — even with expireAfter/consolidateAfter =
-        # "Never". For reserved (Capacity Block = multi-hour/day training) pools that is
-        # data loss, so pin the disruption budget to zero nodes: nothing is voluntarily
-        # disrupted for the reservation window. On-demand/spot pools keep the default budget
-        # (10%) so idle-scaledown and AMI patching still work.
+        # "Never". For reserved (Capacity Block = multi-hour/day training) pools that is data
+        # loss, so pin the disruption budget to zero nodes: nothing is voluntarily disrupted for
+        # the reservation window. (Blocking WhenEmpty consolidation too is harmless — the CB is
+        # prepaid. A reason-scoped budget of ["Drifted"] would be more surgical but makes the
+        # two conditional branches different object types, which Terraform rejects.) On-demand/
+        # spot pools keep the default 10% budget so idle-scaledown and AMI patching still work; a
+        # long training job on those pools should set karpenter.sh/do-not-disrupt on its pods
+        # (see README) since this module cannot know which on-demand pools run long jobs.
         budgets = each.value.capacity_type == "reserved" ? [{ nodes = "0" }] : [{ nodes = "10%" }]
       }
       limits = {
