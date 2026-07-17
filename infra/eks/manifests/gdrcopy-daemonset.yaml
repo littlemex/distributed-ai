@@ -1,0 +1,159 @@
+# gdrcopy-daemonset.yaml
+#
+# Fallback DaemonSet: builds + insmods the NVIDIA GDRCopy kernel module (gdrdrv)
+# and creates /dev/gdrdrv on each B300 node.
+#
+# When to use:
+#   The shared cluster (ml-clusters-shared-us-west-2) runs gpu-operator v25.10.1,
+#   which normally provisions /dev/gdrdrv.  Apply this DaemonSet only when:
+#     - gpu-operator is absent or its gdrdrv component is disabled, OR
+#     - the cluster node AMI was not provisioned with the nvidia_gdrcopy Ansible role,
+#       and `ls /dev/gdrdrv` inside a probe pod returns "No such file or directory".
+#
+#   Ref: CLUSTER-GUIDE.md §9 (/dev/gdrdrv が無い → gdrcopy-loader 確認)
+#        investigations/llm-d-disagg-b300/upstream-ref/manifests/gdrdrv-loader-daemonset.yaml
+#        (source of the build recipe below; adapted to be namespace-agnostic)
+#
+# Build strategy:
+#   Uses amazonlinux:2023 (matches the EKS AL2023 AMI host distro/toolchain).
+#   Builds gdrdrv from NVIDIA/gdrcopy v2.5.2 against the node's own kernel headers
+#   (/usr/src/kernels/$(uname -r), bind-mounted from the host).
+#   The container shares the host kernel, so `insmod` loads into the live kernel.
+#   mknod targets /host-dev (= host /dev) to persist across future pod restarts.
+#
+#   IMPORTANT: rootless BuildKit is NOT used here (this is insmod, not a build job).
+#   The container runs privileged — required for insmod and mknod on the host.
+#
+# Scope:
+#   Targets all B300 nodes via nodeSelector:
+#     node.kubernetes.io/instance-type: p5en.48xlarge
+#   Adjust to p6-b300.48xlarge or add nvidia.com/gpu.product if needed.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gdrcopy-loader
+  # Deploy into the same namespace as your experiment, or kube-system for cluster-wide use.
+  # If deploying cluster-wide, ensure the namespace exists first.
+  namespace: kube-system
+  labels:
+    app: gdrcopy-loader
+    component: gpu-support
+spec:
+  selector:
+    matchLabels:
+      app: gdrcopy-loader
+
+  # OnDelete: do not roll out automatically when the DaemonSet spec changes.
+  # Manually delete individual pods to trigger re-build when upgrading gdrcopy.
+  updateStrategy:
+    type: OnDelete
+
+  template:
+    metadata:
+      labels:
+        app: gdrcopy-loader
+        component: gpu-support
+    spec:
+      hostPID: true    # Allows process-namespace introspection if needed.
+      priorityClassName: system-node-critical
+
+      # Target B300 (p5en.48xlarge) nodes only.
+      # Change instance-type to p6-b300.48xlarge for the shared cluster's node pool.
+      nodeSelector:
+        node.kubernetes.io/instance-type: p5en.48xlarge
+
+      # All five B300 taints.
+      tolerations:
+        - { key: nvidia.com/gpu,                          operator: Exists, effect: NoSchedule }
+        - { key: vpc.amazonaws.com/efa,                   operator: Exists, effect: NoSchedule }
+        - { key: workload,                                 operator: Equal,  value: bench, effect: NoSchedule }
+        - { key: capacity-reservation,                    operator: Exists, effect: NoSchedule }
+        - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal, value: Schedulable, effect: NoSchedule }
+
+      volumes:
+        # /dev on the host: gdrdrv device node is created here.
+        - { name: host-dev,     hostPath: { path: /dev } }
+        # Kernel module tree from the host (for depmod/modprobe if needed).
+        - { name: host-modules, hostPath: { path: /lib/modules } }
+        # Kernel headers from the host: required for `make driver`.
+        - { name: host-src,     hostPath: { path: /usr/src } }
+
+      containers:
+        - name: loader
+          # amazonlinux:2023 matches the AL2023 EKS AMI; provides dnf + kernel toolchain.
+          # Ref: llm-d-disagg-b300 upstream manifest — same base image, same rationale.
+          image: public.ecr.aws/amazonlinux/amazonlinux:2023
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true    # Required for insmod and mknod on host /dev.
+
+          volumeMounts:
+            - { name: host-dev,     mountPath: /host-dev }
+            - { name: host-modules, mountPath: /lib/modules }
+            - { name: host-src,     mountPath: /usr/src }
+
+          resources:
+            requests:
+              cpu:    "2"
+              memory: 4Gi
+            # No GPU or EFA resources: this DaemonSet does not require them.
+            # Requesting them when the main bench pod has all 8 GPUs / 16 EFAs
+            # would cause UnexpectedAdmissionError.
+            # Ref: CLUSTER-GUIDE.md §8.5 (same reasoning as rdmatop observer pods).
+
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              KVER="$(uname -r)"
+              echo "=== gdrcopy-loader on $(hostname) kernel ${KVER} ==="
+
+              # Idempotent: skip build+insmod if gdrdrv is already loaded.
+              if grep -qw gdrdrv /proc/modules; then
+                echo "gdrdrv already loaded; ensuring /dev/gdrdrv exists"
+              else
+                echo "--- installing build deps ---"
+                dnf install -y gcc make kmod git tar gzip elfutils-libelf-devel >/dev/null
+
+                KDIR="/usr/src/kernels/${KVER}"
+                if [ ! -d "${KDIR}" ]; then
+                  echo "ERROR: kernel headers not found at ${KDIR}" >&2
+                  exit 1
+                fi
+
+                echo "--- cloning NVIDIA/gdrcopy v2.5.2 ---"
+                rm -rf /tmp/gdrcopy
+                git clone --depth 1 -b v2.5.2 https://github.com/NVIDIA/gdrcopy.git /tmp/gdrcopy
+
+                # Must cd into the source dir: gdrdrv Makefile uses relative $PWD paths.
+                # `make -C` leaves PWD wrong and breaks the build.
+                # Ref: llm-d-disagg-b300 upstream manifest comment.
+                echo "--- building gdrdrv against ${KDIR} ---"
+                cd /tmp/gdrcopy && make driver KERNELDIR="${KDIR}"
+
+                echo "--- inserting gdrdrv module ---"
+                insmod /tmp/gdrcopy/src/gdrdrv/gdrdrv.ko \
+                  dbg_enabled=0 info_enabled=0 use_persistent_mapping=1
+              fi
+
+              # Determine major device number and create the char device on the host.
+              major="$(grep gdrdrv /proc/devices | awk '{print $1}')"
+              if [ -z "${major}" ]; then
+                echo "ERROR: gdrdrv not in /proc/devices after insmod" >&2
+                exit 1
+              fi
+              echo "gdrdrv major=${major}"
+
+              if [ ! -e /host-dev/gdrdrv ]; then
+                mknod /host-dev/gdrdrv c "${major}" 0
+              fi
+              chmod 666 /host-dev/gdrdrv
+              echo "=== READY: $(ls -l /host-dev/gdrdrv) ==="
+              echo "=== module: $(grep gdrdrv /proc/modules) ==="
+
+              # Keep the pod Running so the DaemonSet controller does not restart it.
+              # The kernel module persists in the host kernel regardless.
+              sleep infinity

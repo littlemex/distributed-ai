@@ -1,0 +1,143 @@
+# Copy this file to terraform.tfvars and fill in the values.
+# Do NOT commit terraform.tfvars — it may contain environment-specific values.
+
+# AWS region. Must contain the AZ of your Capacity Block offering.
+region = "us-east-2"
+
+# Availability zones for the VPC and EKS control plane. EKS requires >= 2 AZs.
+azs = ["us-east-2a", "us-east-2b"]
+
+# EKS cluster name.
+cluster_name = "distai-eks"
+
+# Kubernetes version.
+kubernetes_version = "1.35"
+
+# --- Accelerator pools -------------------------------------------------------
+# One map entry per accelerated NodePool. GPU (device_plugin="nvidia") and Trainium/
+# Inferentia (device_plugin="neuron") are described uniformly; the matching device-plugin
+# add-on is installed automatically, and the EFA layout is DERIVED from the instance type
+# (leave efa_interface_count/efa_multi_card unset unless you must override).
+#
+# Every pool pins to a single AZ (`zone`): EFA/RDMA is intra-AZ only, and Capacity Block is
+# single-AZ. capacity_type is per-pool, so on-demand / spot / reserved can be MIXED in one
+# cluster. The map key becomes Kubernetes resource names (must be RFC1123: [a-z0-9-]).
+accelerator_pools = {
+  # GPU on-demand pool: g6e.12xlarge (L40S x4, single-card EFA derived). Steady dev/verify.
+  gpu-dev = {
+    instance_types = ["g6e.12xlarge"]
+    device_plugin = "nvidia"
+    capacity_type = "on-demand"
+    zone          = "us-east-2a"
+    # efa_interface_count / efa_multi_card omitted → derived (g6e = 1, single-card).
+  }
+
+  # GPU spot pool: cheapest, interruptible. Same shape, capacity_type = "spot".
+  # gpu-spot = {
+  #   instance_types = ["g6e.12xlarge"]
+  #   device_plugin = "nvidia"
+  #   capacity_type = "spot"
+  #   zone          = "us-east-2a"
+  # }
+
+  # GPU Capacity Block pool: p5en.48xlarge (H200 x8, EFA x16 multi-card, derived).
+  # A Pod may request at most 15 EFA (card 0 carries the node IP) — see
+  # `terraform output accelerator_pool_efa_schedulable`.
+  # gpu-p5en = {
+  #   instance_types    = ["p5en.48xlarge"]
+  #   device_plugin     = "nvidia"
+  #   capacity_type     = "reserved"
+  #   zone              = "us-east-2a"
+  #   cb_reservation_id = "cr-REPLACE_ME"
+  #   cb_end_date       = "2026-01-01T12:00:00Z"  # optional: pre-expiry SNS alert for this pool
+  #   volume_size       = "500Gi"
+  # }
+
+  # Trainium2 serving pool: trn2.48xlarge (16 Trainium2, EFA x16 multi-card, derived).
+  # trn2-serving = {
+  #   instance_types    = ["trn2.48xlarge"]
+  #   device_plugin     = "neuron"
+  #   capacity_type     = "reserved"
+  #   zone              = "us-east-2b"
+  #   cb_reservation_id = "cr-REPLACE_ME"
+  #   ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
+  #   volume_size       = "500Gi"
+  # }
+}
+
+# Named AWS profile for Terraform provider authentication. The account ID is derived
+# from these credentials automatically (no aws_account_id input needed). Commented out
+# by default: with no named profile, Terraform uses the standard credential chain
+# (env vars, an EC2/ECS instance role, or AWS SSO) instead. Uncomment and set your
+# profile name only if you authenticate via a named ~/.aws/config profile.
+# aws_profile = "my-profile"
+
+# VPC CIDR. Use a /16 — accelerated ML nodes consume IPs heavily (VPC CNI secondary IPs +
+# one IP per EFA-only ENI; trn2/p5en = 16 ENIs, p5 = 32). A /21 or /24 exhausts fast and the
+# EKS control plane goes IMPAIRED (InsufficientFreeAddresses). Matches awslabs/awsome-distributed-ai.
+vpc_cidr = "10.0.0.0/16"
+
+# Private subnets (one per AZ). Node workloads run here — make them huge (/18 = 16,384 IPs
+# each). NOTE: leave headroom for the small public subnets carved from the TOP of the VPC.
+# Do NOT size these /17 — two /17s consume the entire /16 and collide with the public /24s
+# (InvalidSubnet.Conflict at apply). /18 x2 leaves 10.0.128.0/17 free for public + growth.
+private_subnet_cidrs = ["10.0.0.0/18", "10.0.64.0/18"]
+
+# Public subnets (one per AZ). NAT gateways + load balancers only — keep small (/24), carved
+# from the top of the VPC so they do not eat into the private ranges.
+public_subnet_cidrs = ["10.0.254.0/24", "10.0.255.0/24"]
+
+# Deployment environment label (used in resource tags).
+environment = "dev"
+
+# --- GPU Operator ------------------------------------------------------------
+# Install the NVIDIA driver via the operator? false = the AL2023 GPU AMI already ships it.
+gpu_operator_install_driver = false
+# Enable gdrcopy? Requires the gdrdrv kernel module; leave false unless the image builds it.
+gpu_operator_enable_gdrcopy = false
+
+# --- Neuron (Trainium/Inferentia) --------------------------------------------
+# Enable the Neuron Scheduler Extension for multi-device tensor-parallel serving.
+# neuron_enable_scheduler = true
+
+# --- CPU NodePool ------------------------------------------------------------
+cpu_nodepool_enabled    = true
+cpu_instance_categories = ["c", "m", "r"]
+
+# --- Shared storage ----------------------------------------------------------
+# EFS: multi-AZ ReadWriteMany cache (NEFF/HF). On by default (cheap, elastic).
+efs_enabled = true
+# FSx for Lustre: single-AZ high-throughput scratch. OFF by default (bills continuously).
+fsx_enabled = false
+# FSx sizing (only used when fsx_enabled = true). Capacity must be a multiple of 2400 GiB.
+fsx_per_unit_storage_throughput = 250
+fsx_storage_capacity_gib        = 4800
+# Must match the AZ (var.azs index) of the accelerator pool that will use this filesystem.
+fsx_subnet_index = 0
+
+# Email addresses notified 1 hour before a Capacity Block expires (per-pool cb_end_date).
+# Empty = skip SNS subscriptions.
+cb_alert_email_addresses = []
+
+# --- Public ingress demo (opt-in) ---------------------------------------------
+# Off by default: a base cluster should never stand up a public, unauthenticated ALB.
+# enable_demo_app = true    # Phase 1: ALB Controller + demo echo app behind a plain ALB.
+# enable_cloudfront = true  # Phase 2 (requires enable_demo_app): CloudFront + SG lock-down.
+#                            # Apply Phase 1 first and wait for the ALB to exist before Phase 2.
+
+# --- Component versions (override to upgrade) --------------------------------
+karpenter_chart_version         = "1.13.0"
+gpu_operator_chart_version      = "v25.10.1"
+efa_device_plugin_chart_version = "v0.5.29"
+mpi_operator_version            = "v0.6.0"
+neuron_helm_chart_version       = "1.9.0"
+# Only used when enable_demo_app = true. alb_controller_app_version is a separate
+# variable from the chart version because the two are independent release series.
+alb_controller_chart_version = "3.4.1"
+alb_controller_app_version   = "3.4.1"
+
+# Common resource tags.
+tags = {
+  Project   = "distributed-ai"
+  ManagedBy = "terraform"
+}
