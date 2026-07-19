@@ -24,9 +24,11 @@ mismatch-measurement flags are compatible with slime (verified on hardware).
 | Qwen3-4B GRPO, colocated, 1 step | Verified | H200x8 single node; rollout + weight sync + Megatron backward |
 | mismatch metrics (baseline) | Verified | mis_kl 0.000632 (matches slime ~0.00065) |
 | KV fp8 mismatch amplification | Verified | mis_kl 0.0310 (~49x baseline; matches slime's ~54x) |
-| ppo_kl = dropout artefact | Verified | ppo_kl 0.0 at dropout=0 (matches slime) |
+| ppo_kl = dropout artefact (both arms) | Verified | ppo_kl 0.0 at dropout=0, 0.30 at dropout=0.1; mis_kl unchanged (matches slime) |
 | miles image build (radixark/miles + EFA) | Verified | in-cluster buildkit -> ECR, 18.4GB |
 | RayCluster with head on a CPU node | UNVERIFIED | the shipped `raycluster.yaml` puts the head on a CPU node; the actual runs used the head-on-GPU overlay in `local-overlays/` because the borrowed cluster had no large-disk CPU node. The GRPO results are valid; only this head-placement variant of the manifest is untested. |
+| Multi-seed variance | UNVERIFIED | attempted; the p5en node went NotReady (EC2 impaired) mid-run. Results stay single-seed point estimates |
+| Collapse + TIS rescue on miles | UNVERIFIED | slime showed collapse at step 14-18 and TIS rescue; miles run cut short by the same node fault |
 | TIS rescue arm | UNVERIFIED | `env_vars.tis.example`; flags exist, run not executed |
 | Multi-node (>=2 nodes) | UNVERIFIED | single node only |
 | Qwen3-30B-A3B MoE, disaggregated | UNVERIFIED | `recipe/run_grpo_qwen3_30b_a3b.sh` mirrors slime; not executed |
@@ -72,7 +74,8 @@ TP1/PP1/CP1/EP1, colocated.
 |--------|-------|-------|-------------|
 | baseline mis_kl (LR 1e-6, dropout 0) | 0.00065 | 0.000632 | same order (~3% apart) |
 | KV fp8 mis_kl (see LR note) | 0.0327 (~54x) | 0.0310 (~49x) | same direction & order |
-| ppo_kl (dropout 0) | 0.0 | 0.0 | both zero |
+| ppo_kl at dropout 0 | 0.0 | 0.0 | both zero |
+| ppo_kl at dropout 0.1 | 0.31 | 0.30 | both ~0.30 (dropout artefact) |
 
 LR note: the baseline runs at LR 1e-6 and the KV fp8 runs at LR 1e-5, so the "~49x/~54x"
 figure varies dtype and LR together. `mis_kl` at step 0 is a property of the

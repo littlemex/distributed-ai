@@ -31,9 +31,19 @@ set by the rollout/trainer numerical-path difference, not by the RL framework. `
 also 0.0 at dropout=0, consistent with slime's finding that `ppo_kl` is a train-mode
 dropout artefact.
 
-Note on `ppo_kl`: 0.0 at dropout=0 is only the necessary half of that finding. The
-positive arm (ppo_kl becomes non-zero with dropout>0) was measured on slime, not re-run on
-miles; the "dropout artefact" attribution here is by reference to the slime result.
+### ppo_kl is a dropout artefact -- both arms measured on miles (step 0, LR 1e-6)
+
+| dropout | miles ppo_kl | miles pg_clipfrac | miles mis_kl |
+| --- | --- | --- | --- |
+| 0 (attention+hidden dropout 0) | 0.0 | 0.0 | 0.000632 |
+| 0.1 (Megatron default) | 0.3009 | 0.0471 | 0.000620 |
+
+Turning off the flags overrides gives dropout 0.1 (the Megatron default). `ppo_kl` jumps to
+0.30 and `pg_clipfrac` to 0.047, while `mis_kl` is unchanged (0.00062 either way). So on
+miles too, `ppo_kl` reflects the train-mode dropout mask difference (old_log_probs computed
+in eval mode with dropout off, loss log_probs in train mode with dropout on), not real
+off-policy drift -- and the mismatch metric is independent of it. miles's 0.30 matches
+slime's 0.31, and both go to 0.0 at dropout=0.
 
 ## KV fp8 amplification (real hardware, LR 1e-5, dropout=0)
 
@@ -59,6 +69,14 @@ factor varies dtype and LR together. Step-0 `mis_kl` is a property of the numeri
 before the optimizer diverges the policies, and both frameworks were compared under the
 identical LR pairing, so the *concordance* between slime and miles holds; the amplification
 factor itself is not a clean single-variable attribution.
+
+## Variance / additional arms (attempted, cut short by hardware)
+
+A multi-seed baseline (to put an error bar on the concordance) and a full
+collapse-then-TIS-rescue sequence were started, but the single p5en GPU node went
+`NotReady` (EC2 status `impaired` -- a borrowed-cluster hardware fault, not a workload
+issue) partway through the first extra seed. So the numbers above remain single-seed point
+estimates; multi-seed variance and the miles collapse/rescue arms are still UNVERIFIED.
 
 ## Verified vs not (see README Verification Status)
 
