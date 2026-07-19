@@ -1,0 +1,75 @@
+diff --git a/3.test_cases/pytorch/slime/recipe/run_grpo_qwen3_4b.sh b/3.test_cases/pytorch/slime/recipe/run_grpo_qwen3_4b.sh
+index f8202e2..b8cf1bd 100644
+--- a/3.test_cases/pytorch/slime/recipe/run_grpo_qwen3_4b.sh
++++ b/3.test_cases/pytorch/slime/recipe/run_grpo_qwen3_4b.sh
+@@ -72,6 +72,39 @@ if [ "${RM_TYPE}" = "remote_rm" ]; then
+     echo "  Reward:         remote_rm @ ${RM_URL}"
+ fi
+ 
++# Optional extra train.py flags, injected without editing this recipe. Set the
++# EXTRA_TRAIN_ARGS env var to a whitespace-separated list of flags in env_vars
++# (or on the command line) and they are appended verbatim to the train.py argv.
++# This is the supported extension point for experiments that need flags the
++# baseline recipe does not set — e.g. observability (--use-tensorboard) or the
++# training-inference mismatch study (--get-mismatch-metrics --custom-config-path
++# examples/train_infer_mismatch_helper/mis.py:compute_mis_weights_with_cp,
++# --use-tis, --use-rollout-logprobs) or LR scheduling (--lr-decay-style ...).
++# Word-splitting here is intentional so a single env var can carry several flags;
++# values containing spaces are not supported (none of the intended flags need
++# them). The array keeps each token separate across the Ray job boundary, the
++# same shell-safety property the rest of this recipe relies on.
++EXTRA_TRAIN_ARGS_ARR=()
++if [ -n "${EXTRA_TRAIN_ARGS:-}" ]; then
++    # shellcheck disable=SC2206
++    EXTRA_TRAIN_ARGS_ARR=(${EXTRA_TRAIN_ARGS})
++    echo "  Extra args:     ${EXTRA_TRAIN_ARGS}"
++fi
++
++# Dynamic batch is on by default (the baseline behaviour). It can be turned OFF
++# with USE_DYNAMIC_BATCH=false purely for a diagnostic run: --use-dynamic-batch-size
++# is a store_true flag, so EXTRA_TRAIN_ARGS cannot un-set it — this toggle is the
++# only way to render an argv WITHOUT it. When unset/true, DYNAMIC_BATCH_ARGS below
++# reproduces the exact tokens the baseline used (bit-identical argv). The only
++# intended use is the ppo_kl artefact diagnosis (does the spurious ppo_kl vanish
++# when micro-batch boundaries stop shifting between the old-logprob forward and
++# the loss forward?). It MUST stay at the default for every result-bearing run.
++DYNAMIC_BATCH_ARGS=(--use-dynamic-batch-size --max-tokens-per-gpu "${MAX_TOKENS_PER_GPU}")
++if [ "${USE_DYNAMIC_BATCH:-true}" = "false" ]; then
++    DYNAMIC_BATCH_ARGS=(--micro-batch-size "${MICRO_BATCH_SIZE:-1}")
++    echo "  Dynamic batch:  OFF (diagnostic) micro-batch-size=${MICRO_BATCH_SIZE:-1}"
++fi
++
+ TRAIN_ARGS=(
+     --hf-checkpoint "${MODEL_LOCAL}"
+     --ref-load "${MODEL_DIST}"
+@@ -113,8 +146,7 @@ TRAIN_ARGS=(
+     --recompute-method uniform
+     --recompute-num-layers 1
+ 
+-    --use-dynamic-batch-size
+-    --max-tokens-per-gpu "${MAX_TOKENS_PER_GPU}"
++    "${DYNAMIC_BATCH_ARGS[@]}"
+ 
+     --advantage-estimator grpo
+     --use-kl-loss
+@@ -144,6 +176,10 @@ TRAIN_ARGS=(
+     # check never passes and training hangs before it starts. Use lowercase
+     # "warning" to preserve the original intended verbosity.
+     --sglang-log-level warning
++
++    # Experiment-specific flags injected via the EXTRA_TRAIN_ARGS env var (empty
++    # by default, so the baseline behaviour is unchanged). See the block above.
++    "${EXTRA_TRAIN_ARGS_ARR[@]}"
+ )
+ 
+ # Submit via Ray job API.
+@@ -166,7 +202,8 @@ ray job submit \
+             \"TOKENIZERS_PARALLELISM\": \"false\",
+             \"NCCL_DEBUG\": \"WARN\",
+             \"FI_PROVIDER\": \"efa\",
+-            \"FI_EFA_USE_DEVICE_RDMA\": \"1\"
++            \"FI_EFA_USE_DEVICE_RDMA\": \"1\",
++            \"TENSORBOARD_DIR\": \"${TENSORBOARD_DIR:-}\"
+         }
+     }" \
+     -- bash grpo_launch.sh "${TRAIN_ARGS[@]}"
