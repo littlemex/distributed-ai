@@ -26,6 +26,11 @@ terraform {
       source  = "hashicorp/http"
       version = "~> 3.4" # data.http in alb-controller.tf (fetches the AWS LB Controller IAM policy)
     }
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.3" # data.external in capacity-block.tf — resolves CB end_date/zone/state
+      # from cb_reservation_id via the aws CLI (no aws_ec2_capacity_reservation data source exists)
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"

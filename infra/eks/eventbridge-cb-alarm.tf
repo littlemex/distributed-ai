@@ -13,9 +13,13 @@ locals {
   # timeadd() errors on an empty string, and HCL does not guarantee short-circuit evaluation
   # of the RHS of && once the LHS is false, so cb_end_date != "" must fully exclude empty
   # values in a separate stage before any timestamp function sees them.
+  # end_date now comes from local.pool_cb_end_date (capacity-block.tf): the reservation's
+  # EndDate resolved from cb_reservation_id, or an explicit tfvars cb_end_date override.
+  # Keep the empty-string filter (a reserved pool whose CB could not be resolved yields "")
+  # BEFORE any timeadd() sees the value — timeadd("") errors and would fail the whole plan.
   cb_pools_with_end_date = {
-    for k, p in var.accelerator_pools : k => p
-    if p.capacity_type == "reserved" && p.cb_end_date != ""
+    for k, p in local.cb_reserved_pools : k => p
+    if lookup(local.pool_cb_end_date, k, "") != ""
   }
 
   # Excludes pools whose alert time (cb_end_date - 1h) has already passed: the schedule sets
@@ -27,7 +31,7 @@ locals {
   # time apply runs the create. Re-run plan/apply if this happens near cb_end_date - 1h.
   cb_alert_pools = {
     for k, p in local.cb_pools_with_end_date : k => p
-    if timecmp(timeadd(p.cb_end_date, "-1h"), plantimestamp()) > 0
+    if timecmp(timeadd(local.pool_cb_end_date[k], "-1h"), plantimestamp()) > 0
   }
 
   # Any alert pools at all → provision the shared SNS topic + scheduler role.
@@ -38,7 +42,7 @@ locals {
   # single-quoted 'T' is a literal separator. at() takes no timezone suffix.
   cb_alert_schedule_expr = {
     for k, p in local.cb_alert_pools :
-    k => "at(${formatdate("YYYY-MM-DD'T'HH:mm:ss", timeadd(p.cb_end_date, "-1h"))})"
+    k => "at(${formatdate("YYYY-MM-DD'T'HH:mm:ss", timeadd(local.pool_cb_end_date[k], "-1h"))})"
   }
 }
 
