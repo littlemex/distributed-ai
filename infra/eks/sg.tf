@@ -39,7 +39,7 @@ resource "aws_security_group_rule" "efa_node_ingress_self" {
   source_security_group_id = aws_security_group.efa_node.id
 }
 
-# Egress: unrestricted (EFA RDMA, S3 access, ECR pull, etc.).
+# Egress: unrestricted IP egress (S3 access, ECR pull, etc.).
 resource "aws_security_group_rule" "efa_node_egress_all" {
   security_group_id = aws_security_group.efa_node.id
   type              = "egress"
@@ -48,4 +48,20 @@ resource "aws_security_group_rule" "efa_node_egress_all" {
   from_port         = 0
   to_port           = 0
   cidr_blocks       = ["0.0.0.0/0"]
+}
+
+# Egress: self-referencing all-traffic. REQUIRED for EFA and NOT covered by the
+# 0.0.0.0/0 rule above: EFA's OS-bypass SRD traffic is not IP traffic, so a CIDR
+# egress rule does not authorize it. Without this, multi-node NCCL initializes and
+# selects the efa provider (bootstrap is TCP), then every data transfer times out
+# with "NET/OFI ... Error 15 (Unreachable remote)" because the outbound SRD packets
+# are dropped. EFA SGs need self-referencing all-traffic on BOTH ingress and egress.
+resource "aws_security_group_rule" "efa_node_egress_self" {
+  security_group_id        = aws_security_group.efa_node.id
+  type                     = "egress"
+  description              = "All traffic to peer EFA nodes (self-referencing; required for EFA SRD)."
+  protocol                 = "-1"
+  from_port                = 0
+  to_port                  = 0
+  source_security_group_id = aws_security_group.efa_node.id
 }

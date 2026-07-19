@@ -27,6 +27,7 @@ mismatch-measurement flags are compatible with slime (verified on hardware).
 | ppo_kl = dropout artefact (both arms) | Verified | ppo_kl 0.0 at dropout=0, 0.30 at dropout=0.1; mis_kl unchanged (matches slime) |
 | miles image build (radixark/miles + EFA) | Verified | in-cluster buildkit -> ECR, 18.4GB |
 | RayCluster with head on a CPU node | UNVERIFIED | the shipped `raycluster.yaml` puts the head on a CPU node; the actual runs used the head-on-GPU overlay in `local-overlays/` because the borrowed cluster had no large-disk CPU node. The GRPO results are valid; only this head-placement variant of the manifest is untested. |
+| 2-node EFA (16 GPU NCCL) | Verified | busbw 190-257 GB/s over EFA (efa-direct + GPUDirect RDMA, no TCP fallback); see docs/EFA_2NODE.md. Required fixing a self-referencing egress gap in the EFA security group |
 | Multi-seed variance | UNVERIFIED | attempted; the p5en node went NotReady (EC2 impaired) mid-run. Results stay single-seed point estimates |
 | Collapse + TIS rescue on miles | UNVERIFIED | slime showed collapse at step 14-18 and TIS rescue; miles run cut short by the same node fault |
 | TIS rescue arm | UNVERIFIED | `env_vars.tis.example`; flags exist, run not executed |
