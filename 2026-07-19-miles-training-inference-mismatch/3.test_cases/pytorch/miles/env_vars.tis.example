@@ -1,0 +1,82 @@
+# STATUS: UNVERIFIED -- TIS rescue arm; flags exist in miles CLI but this run was not executed on hardware.
+$1 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+# ============================================================
+# miles on EKS - Environment (mismatch study: TIS correction, the "cure")
+#
+# Identical to env_vars.amplified.example (KV fp8, LR 1e-5) EXCEPT the loss now
+# applies Truncated Importance Sampling (TIS): --use-tis with mis.yaml
+# (use_tis=true, tis_upper_bound=2.0) caps the per-token importance-sampling
+# weight. The cap clamps the fp8 outlier ratios that otherwise blow up the
+# gradient variance, so the run that collapses without correction (amplified)
+# is rescued: mis_kl stays bounded and reward keeps improving.
+#
+# This is the paper's prescription (truncated importance sampling). Compare
+# against configs/mis_nocap.yaml (cap effectively disabled, tis_upper_bound=100)
+# to isolate the cap itself as the causal rescue factor.
+#
+#   cp env/env_vars.tis.example env_vars && vim env_vars
+# ============================================================
+
+# ----- AWS / ECR -----
+export AWS_REGION="${AWS_REGION:-$(aws configure get region)}"
+export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+export REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/"
+export IMAGE="miles-hyperpod"
+export TAG="miles-dev202607182122-efa1.48"
+export FULL_IMAGE="${REGISTRY}${IMAGE}:${TAG}"
+
+# ----- HuggingFace -----
+export HF_TOKEN=""   # <-- Set your HuggingFace token here
+
+# ----- Model (Qwen3-4B dense, bf16 weights; KV cache quantized at rollout) -----
+export MODEL_NAME="Qwen/Qwen3-4B"
+export MODEL_LOCAL="/fsx/models/Qwen3-4B"
+export MODEL_DIST="/fsx/models/Qwen3-4B_torch_dist"
+export COLOCATE="true"
+export TP_SIZE=1
+export PP_SIZE=1
+export CP_SIZE=1
+export EP_SIZE=1
+export ROLLOUT_NUM_GPUS=8
+export ROLLOUT_GPUS_PER_ENGINE=1
+export ACTOR_NUM_NODES=1
+export ACTOR_GPUS_PER_NODE=8
+export MAX_TOKENS_PER_GPU=8192
+export ROLLOUT_MAX_RESPONSE_LEN=8192
+export MODEL_SCRIPT="qwen3-4B.sh"
+
+# ----- Cluster -----
+export NAMESPACE="default"
+export FSX_CLAIM="fsx-claim"
+export NUM_NODES=1
+export GPUS_PER_NODE=8
+export TOTAL_GPUS=$((NUM_NODES * GPUS_PER_NODE))
+
+# ----- Training -----
+export PROMPT_DATA="/fsx/data/dapo-math-17k/dapo-math-17k.jsonl"
+export EVAL_DATA="/fsx/data/aime-2024/aime-2024.jsonl"
+export CHECKPOINT_DIR="/fsx/runs/tis/ckpt"
+export SAVE_INTERVAL=1000
+export NUM_ROLLOUT=30
+export ROLLOUT_BATCH_SIZE=16
+export N_SAMPLES_PER_PROMPT=8
+export GLOBAL_BATCH_SIZE=128
+export NUM_STEPS_PER_ROLLOUT=1
+export LEARNING_RATE="1e-5"
+export ROLLOUT_TEMPERATURE=1.0
+
+# ----- Reward -----
+export RM_TYPE="deepscaler"
+
+# ============================================================
+# Mismatch-study additions
+# ============================================================
+export TENSORBOARD_DIR="/fsx/tb/tis"
+# --use-tis turns the mismatch weights into an actual loss correction (not just
+# a metric). mis.yaml sets tis_mode=truncate with tis_upper_bound=2.0, so the
+# IS weight is capped at 2.0 -- trading a small amount of bias for a large drop
+# in gradient variance. --use-tis and --use-rollout-logprobs are mutually
+# exclusive (TIS keeps the train-side logprob and multiplies by the correction
+# weight; use-rollout-logprobs replaces the logprob outright).
+export EXTRA_TRAIN_ARGS="--use-tensorboard --get-mismatch-metrics --use-tis --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0 --sglang-kv-cache-dtype fp8_e5m2"

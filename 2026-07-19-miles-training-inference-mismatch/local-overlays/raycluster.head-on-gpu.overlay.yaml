@@ -21,10 +21,10 @@ spec:
             requiredDuringSchedulingIgnoredDuringExecution:
               nodeSelectorTerms:
               - matchExpressions:
-                - key: nvidia.com/gpu.present
-                  operator: NotIn
+                - key: node-role
+                  operator: In
                   values:
-                  - 'true'
+                  - gpu-g5
         containers:
         - env:
           - name: NVIDIA_VISIBLE_DEVICES
@@ -74,6 +74,10 @@ spec:
             medium: Memory
             sizeLimit: 64Gi
           name: dshm
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
   rayVersion: 2.55.1
   workerGroupSpecs:
   - groupName: gpu-workers

@@ -1,0 +1,156 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  labels:
+    app: miles-grpo
+  name: miles-ray
+  namespace: default
+spec:
+  enableInTreeAutoscaling: false
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: 0.0.0.0
+      num-gpus: '0'
+    template:
+      metadata:
+        labels:
+          ray.io/node-type: head
+      spec:
+        containers:
+        - env:
+          - name: NVIDIA_VISIBLE_DEVICES
+            value: void
+          - name: RAY_memory_monitor_refresh_ms
+            value: '0'
+          - name: PYTHONPATH
+            value: /root/Megatron-LM:/root/miles
+          - name: HF_TOKEN
+            valueFrom:
+              secretKeyRef:
+                key: HF_TOKEN
+                name: hf-token
+          - name: NCCL_DEBUG
+            value: WARN
+          image: ${FULL_IMAGE}
+          imagePullPolicy: IfNotPresent
+          name: ray-head
+          ports:
+          - containerPort: 6379
+            protocol: TCP
+          - containerPort: 8265
+            protocol: TCP
+          - containerPort: 10001
+            protocol: TCP
+          resources:
+            limits:
+              cpu: '4'
+              memory: 16Gi
+              ephemeral-storage: 60Gi
+            requests:
+              cpu: '2'
+              memory: 8Gi
+              ephemeral-storage: 40Gi
+          volumeMounts:
+          - mountPath: /fsx
+            name: fsx
+          - mountPath: /dev/shm
+            name: dshm
+        restartPolicy: Never
+        terminationGracePeriodSeconds: 120
+        volumes:
+        - name: fsx
+          persistentVolumeClaim:
+            claimName: fsx-claim
+        - emptyDir:
+            medium: Memory
+            sizeLimit: 64Gi
+          name: dshm
+        nodeSelector:
+          node-role: cpu
+  rayVersion: 2.55.1
+  workerGroupSpecs:
+  - groupName: gpu-workers
+    maxReplicas: 1
+    minReplicas: 1
+    numOfHosts: 1
+    rayStartParams:
+      num-gpus: '8'
+      resources: '"{\"gpu_node\": 1}"'
+    replicas: 1
+    template:
+      metadata:
+        labels:
+          ray.io/node-type: worker
+      spec:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                - key: ray.io/node-type
+                  operator: In
+                  values:
+                  - worker
+              topologyKey: kubernetes.io/hostname
+        containers:
+        - env:
+          - name: RAY_memory_monitor_refresh_ms
+            value: '0'
+          - name: PYTHONPATH
+            value: /root/Megatron-LM:/root/miles
+          - name: HF_TOKEN
+            valueFrom:
+              secretKeyRef:
+                key: HF_TOKEN
+                name: hf-token
+          - name: FI_PROVIDER
+            value: efa
+          - name: FI_EFA_USE_DEVICE_RDMA
+            value: '1'
+          - name: FI_EFA_FORK_SAFE
+            value: '1'
+          - name: NCCL_PROTO
+            value: Simple
+          - name: NCCL_DEBUG
+            value: WARN
+          - name: RDMAV_FORK_SAFE
+            value: '1'
+          - name: NCCL_SOCKET_IFNAME
+            value: ^lo
+          - name: TOKENIZERS_PARALLELISM
+            value: 'false'
+          image: ${FULL_IMAGE}
+          imagePullPolicy: IfNotPresent
+          name: ray-worker
+          resources:
+            limits:
+              cpu: '96'
+              memory: 1900Gi
+              nvidia.com/gpu: '8'
+              vpc.amazonaws.com/efa: '8'
+            requests:
+              cpu: '90'
+              memory: 1800Gi
+              nvidia.com/gpu: '8'
+              vpc.amazonaws.com/efa: '8'
+          volumeMounts:
+          - mountPath: /fsx
+            name: fsx
+          - mountPath: /dev/shm
+            name: dshm
+        nodeSelector:
+          node-role: gpu-p5en
+        restartPolicy: Never
+        terminationGracePeriodSeconds: 300
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+        volumes:
+        - name: fsx
+          persistentVolumeClaim:
+            claimName: fsx-claim
+        - emptyDir:
+            medium: Memory
+            sizeLimit: 256Gi
+          name: dshm

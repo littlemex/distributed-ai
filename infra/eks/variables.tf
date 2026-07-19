@@ -329,7 +329,14 @@ variable "system_node_desired_size" {
 # (GPU/Neuron node disk, lifetime, and limits are per-pool in var.accelerator_pools.)
 
 variable "cpu_node_volume_size" {
-  description = "Root EBS volume size for CPU nodes (e.g. \"50Gi\")."
+  # For controllers and light non-GPU workloads the 50Gi default is fine. If you
+  # schedule a KubeRay head (or any pod pulling a large RL training image, e.g.
+  # the ~18GB slime/miles images) onto the CPU pool, raise this to 150Gi+: an
+  # 18GB image needs ~40GB during pull (compressed + extracted layers) plus head
+  # logs / GCS / object spilling, and 50Gi will Evict the pod mid-pull. This is a
+  # per-cluster override, not a default bump, so the shared CPU pool's EBS cost is
+  # not inflated for every user.
+  description = "Root EBS volume size for CPU nodes (e.g. \"50Gi\"; use \"150Gi\"+ if a KubeRay head or other large-image pod lands here)."
   type        = string
   default     = "50Gi"
 }
