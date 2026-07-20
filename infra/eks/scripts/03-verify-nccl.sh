@@ -11,7 +11,8 @@
 #     --namespace <ns> \
 #     --image <nccl-tests-image> \
 #     [--nodes 2] \
-#     [--gpus-per-node 8]
+#     [--gpus-per-node 8] \
+#     [--efa-per-node 15]
 #
 # Requirements:
 #   - kubectl, helm, python3
@@ -32,6 +33,7 @@ NAMESPACE="default"
 IMAGE=""
 NUM_NODES=2
 GPUS_PER_NODE=8
+EFA_PER_NODE=""
 JOB_NAME="nccl-verify-$(date +%s)"
 TIMEOUT_SECONDS=600
 
@@ -41,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --image)          IMAGE="$2";          shift 2 ;;
     --nodes)          NUM_NODES="$2";      shift 2 ;;
     --gpus-per-node)  GPUS_PER_NODE="$2";  shift 2 ;;
+    --efa-per-node)   EFA_PER_NODE="$2";   shift 2 ;;
     --job-name)       JOB_NAME="$2";       shift 2 ;;
     --timeout)        TIMEOUT_SECONDS="$2";shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
@@ -53,6 +56,19 @@ if [[ -z "$IMAGE" ]]; then
   exit 1
 fi
 
+# Derive schedulable EFA count if not explicitly set. On multi-card instances
+# (p5/p5en/trn2), card 0 carries the node IP and is NOT advertised as EFA, so
+# the schedulable count is (total_cards - 1). Querying a node's allocatable is
+# the most reliable source; fall back to 15 (p5en default) if no EFA node found.
+if [[ -z "$EFA_PER_NODE" ]]; then
+  EFA_PER_NODE=$(kubectl get nodes -l "node-role=gpu-p5en" \
+    -o jsonpath='{.items[0].status.allocatable.vpc\.amazonaws\.com/efa}' 2>/dev/null || true)
+  if [[ -z "$EFA_PER_NODE" ]]; then
+    EFA_PER_NODE=15
+    echo "Warning: could not query EFA allocatable from nodes; defaulting to $EFA_PER_NODE" >&2
+  fi
+fi
+
 TOTAL_PROCS=$(( NUM_NODES * GPUS_PER_NODE ))
 
 echo "=== NCCL Verification: 2-node all_reduce_perf ==="
@@ -60,6 +76,7 @@ echo "  Namespace      : $NAMESPACE"
 echo "  Image          : $IMAGE"
 echo "  Nodes          : $NUM_NODES"
 echo "  GPUs/node      : $GPUS_PER_NODE"
+echo "  EFA/node       : $EFA_PER_NODE"
 echo "  Total ranks    : $TOTAL_PROCS"
 echo "  Job name       : $JOB_NAME"
 echo ""
@@ -114,8 +131,6 @@ spec:
       restartPolicy: OnFailure
       template:
         spec:
-          hostNetwork: true
-          dnsPolicy: ClusterFirstWithHostNet
           tolerations:
           - { key: nvidia.com/gpu,          operator: Exists, effect: NoSchedule }
           - { key: vpc.amazonaws.com/efa,   operator: Exists, effect: NoSchedule }
@@ -128,7 +143,7 @@ spec:
             resources:
               limits:
                 nvidia.com/gpu: "$GPUS_PER_NODE"
-                vpc.amazonaws.com/efa: "16"
+                vpc.amazonaws.com/efa: "$EFA_PER_NODE"
             env:
             - { name: FI_PROVIDER,             value: "efa" }
             - { name: FI_EFA_USE_DEVICE_RDMA,  value: "1" }
