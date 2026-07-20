@@ -58,9 +58,15 @@ error: 'struct efadv_qp_init_attr' has no member named 'sl'
 error: 'EFADV_QP_FLAGS_UNSOLICITED_WRITE_RECV' was not declared in this scope
 ```
 
-`UNSOLICITED_WRITE_RECV` landed in **rdma-core v52**. Ubuntu 24.04 (NGC base)
-ships rdma-core 50. Fix by building a newer rdma-core and putting its headers /
-libs ahead of the OS ones:
+`UNSOLICITED_WRITE_RECV` landed in **rdma-core v52**; the `sl` field is an
+efadv-specific QP attribute added around the same time. Ubuntu 24.04 (NGC base)
+ships rdma-core 50, where **both the headers and the libraries are old**.
+
+Upgrade the WHOLE rdma-core (headers AND libs), not just the header. Replacing
+only `efadv.h` makes it compile but the new feature won't work at runtime if the
+linked/loaded `libefa.so` / `libibverbs.so` are still v50 (missing symbols / the
+new attribute is ignored). Also confirm the kernel-side EFA driver is recent
+enough. Build a newer rdma-core and put its headers AND libs ahead of the OS ones:
 
 ```bash
 apt-get install -y libnl-3-dev libnl-route-3-dev libudev-dev ninja-build pkg-config
@@ -68,10 +74,12 @@ git clone --depth 1 --branch v56.0 https://github.com/linux-rdma/rdma-core.git
 cd rdma-core && bash build.sh
 cp -a build/include/infiniband/efadv.h /usr/include/infiniband/efadv.h
 cp -a build/lib/libefa.so* build/lib/libibverbs.so* /usr/lib/x86_64-linux-gnu/ && ldconfig
+# at RUN time on the bench nodes, also prepend these libs via LD_LIBRARY_PATH.
 ```
 
-(The current aws-efa-installer 1.49.0 also ships a new rdma-core; either source
-works as long as `efadv.h` has the new members.)
+(The current aws-efa-installer 1.49.0 also ships a new rdma-core userspace; that
+works too. The point is: header + library + kernel driver must all be recent, not
+the header alone.)
 
 ### 2b. Must pin `TORCH_CUDA_ARCH_LIST="9.0"`
 
