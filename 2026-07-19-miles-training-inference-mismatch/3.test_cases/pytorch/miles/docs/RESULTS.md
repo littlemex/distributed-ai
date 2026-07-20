@@ -141,24 +141,70 @@ the "30B disaggregated" layout the README table originally listed as the target.
 is what allows the disaggregated actor-8 layout. 30B disaggregated on H200 remains
 UNVERIFIED.
 
-## Variance / additional arms (attempted, cut short by hardware)
+## Collapse arm: KV fp8 amplification driven to divergence (verified)
 
-A multi-seed baseline (to put an error bar on the concordance) and a full
-collapse-then-TIS-rescue sequence were started, but the single p5en GPU node went
-`NotReady` (EC2 status `impaired` -- a borrowed-cluster hardware fault, not a workload
-issue) partway through the first extra seed. So the numbers above remain single-seed point
-estimates; multi-seed variance and the miles collapse/rescue arms are still UNVERIFIED.
+Running the KV fp8 amplified config (LR 1e-5, dropout 0, `--sglang-kv-cache-dtype
+fp8_e5m2`, no TIS) out to 25 steps reproduces slime's late-training collapse on miles. The
+mismatch is quiet for the first ~8 steps and then runs away:
+
+| step | train/mis_kl | train/grad_norm |
+| --- | --- | --- |
+| 0 | 0.033 | 0.22 |
+| 8 | 0.034 | 0.33 |
+| 10 | 0.059 | 0.43 |
+| 12 | 0.059 | 0.66 |
+| 14 | 0.151 | 1.34 |
+| 16 | 0.177 | 1.92 |
+| 18 | 0.426 | 2.88 |
+| 19 | 0.504 | 4.59 |
+| 22 | 0.807 | 5.78 |
+| 24 | **2.097** | **14.3** |
+
+By step 24 `mis_kl` is ~64x its step-0 value and `grad_norm` has run from 0.22 to 14.3 --
+an unmistakable divergence, matching slime's step-14-18 onset. This confirms on miles that
+the KV fp8 rollout/train numerical gap, left uncorrected, destabilises GRPO training in the
+same regime slime showed.
+
+## TIS rescue arm (in progress -- early grad-norm suppression observed)
+
+The same KV fp8 config **with** TIS enabled (`--use-tis`, `mis.yaml`; identical seed and
+LR) was run to compare. TIS turns the mismatch importance ratio into an actual loss
+correction, so the prediction is that it holds `grad_norm` down through the region where the
+no-TIS arm diverges. At matched early steps, the TIS arm already shows a consistently lower
+`grad_norm` for the same `mis_kl` (same seed, so `mis_kl` matches step-for-step):
+
+| step | mis_kl (both) | grad_norm no-TIS | grad_norm TIS |
+| --- | --- | --- | --- |
+| 0 | 0.033 / 0.032 | 0.223 | 0.131 |
+| 1 | 0.029 / 0.029 | 0.101 | 0.074 |
+
+This is the expected direction (TIS damping the gradient the mismatch would otherwise
+inject), but the decisive test is whether TIS keeps `grad_norm` bounded through steps 14-24
+where the no-TIS arm blew up. That portion of the TIS run had not yet reached the collapse
+region at the time of writing (the TIS correction adds per-step cost, so the arm advances
+slowly); the full through-collapse TIS trajectory is therefore still **UNVERIFIED**.
+
+## Multi-seed variance (UNVERIFIED)
+
+A multi-seed baseline (to put an error bar on the concordance) was started but the single
+p5en GPU node went `NotReady` (EC2 status `impaired` -- a borrowed-cluster hardware fault,
+not a workload issue) partway through the first extra seed. The baseline/30B numbers above
+remain single-seed point estimates.
 
 ## Verified vs not (see README Verification Status)
 
 - Verified: Qwen3-4B colocated (single node + 2-node 3-cycle), Qwen3-30B-A3B MoE colocated
   on 2 nodes (16 GPU), GRPO step completion, weight sync, baseline + KV fp8 mismatch
   metrics, ppo_kl=0 at dropout=0 (4B and 30B), clean 30B slime-vs-miles pair, 2-node EFA
-  (busbw 190-257 GB/s), image build.
+  (busbw 190-257 GB/s), image build, and the **KV fp8 collapse arm** (mis_kl 0.033 -> 2.10,
+  grad_norm 0.22 -> 14.3 over 25 steps; matches slime's late-training divergence).
 - Blocked: `save_model()` fails with `_pickle.UnpicklingError: pickle data was truncated`
   (Megatron distributed checkpoint `gather_object`); independent of the GRPO loop. This
   blocks the HF<->Megatron round-trip (`scripts/convert_checkpoint.sh`) and long
   checkpointing runs. Should be filed as an upstream miles issue.
-- Untested (UNVERIFIED): TIS rescue arm, multi-seed variance, the collapse/rescue sequence,
+- Partial: the TIS rescue arm shows lower grad_norm than the no-TIS arm at matched early
+  steps (the expected damping direction), but had not yet reached the step-14-24 collapse
+  region, so the decisive "TIS keeps grad_norm bounded through collapse" claim is UNVERIFIED.
+- Untested (UNVERIFIED): the full through-collapse TIS trajectory, multi-seed variance,
   Qwen3-30B-A3B MoE *disaggregated* (verified only as colocated; disaggregated needs B300
   HBM), and the disaggregated reward service. All mirror slime and are marked UNVERIFIED.
