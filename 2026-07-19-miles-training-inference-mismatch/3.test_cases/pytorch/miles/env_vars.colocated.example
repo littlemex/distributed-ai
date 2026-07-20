@@ -1,0 +1,146 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+# ============================================================
+# miles on EKS - Environment (mismatch study: BASELINE, measurement-only)
+#
+# Single-node colocated Qwen3-4B GRPO. Training (Megatron) and rollout (SGLang)
+# share 8 GPUs. This is the mismatch-study baseline: the loss is the unmodified
+# GRPO objective, and the training-inference mismatch metrics are computed
+# ALONGSIDE it (never fed back into the loss) via --get-mismatch-metrics with a
+# measurement-only config (use_tis=false / use_rs=false).
+#
+# Copy to env_vars and adjust paths:
+#   cp env_vars.colocated.example env_vars && vim env_vars
+# (HF_TOKEN is provided to the pods via the k8s Secret `hf-token`, not this file.)
+# ============================================================
+
+# ----- AWS / ECR -----
+# Region and account are derived from your current AWS credentials/config so
+# nothing environment-specific is hard-coded. Override AWS_REGION if needed.
+export AWS_REGION="${AWS_REGION:-$(aws configure get region)}"
+export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+export REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/"
+export IMAGE="miles-hyperpod"
+export TAG="miles-dev202607182122-efa1.48"   # pinned image tag; avoid ":latest"
+export FULL_IMAGE="${REGISTRY}${IMAGE}:${TAG}"
+
+# ----- HuggingFace -----
+# The pods read HF_TOKEN from the k8s Secret `hf-token` (see raycluster.yaml), so
+# it is NOT passed via the Ray runtime-env. Create the Secret once:
+#   kubectl create secret generic hf-token --from-literal=HF_TOKEN=hf_xxx -n "${NAMESPACE:-default}"
+
+# ----- Model (Qwen3-4B dense, bf16) -----
+export MODEL_NAME="Qwen/Qwen3-4B"
+export MODEL_LOCAL="/fsx/models/Qwen3-4B"              # SGLang rollout init (--hf-checkpoint)
+export MODEL_DIST="/fsx/models/Qwen3-4B_torch_dist"    # Megatron training (--ref-load), bf16
+export COLOCATE="true"
+export TP_SIZE=1
+export PP_SIZE=1
+export CP_SIZE=1
+export EP_SIZE=1
+export ROLLOUT_NUM_GPUS=8
+export ROLLOUT_GPUS_PER_ENGINE=1
+export ACTOR_NUM_NODES=1
+export ACTOR_GPUS_PER_NODE=8
+export MAX_TOKENS_PER_GPU=8192
+export ROLLOUT_MAX_RESPONSE_LEN=8192
+export MODEL_SCRIPT="qwen3-4B.sh"
+
+# ----- Cluster -----
+export NAMESPACE="default"
+export FSX_CLAIM="fsx-claim"
+export NUM_NODES=1
+export GPUS_PER_NODE=8
+export TOTAL_GPUS=$((NUM_NODES * GPUS_PER_NODE))
+
+# ----- Training -----
+export PROMPT_DATA="/fsx/data/dapo-math-17k/dapo-math-17k.jsonl"
+export EVAL_DATA="/fsx/data/aime-2024/aime-2024.jsonl"
+# Each run MUST get its own CHECKPOINT_DIR: --load otherwise tries to resume a
+# scheduler built for a different total-iteration count. train_iters = num_rollout
+# here (16 x 8 // 128 = 1 step/rollout), so NUM_ROLLOUT == optimizer steps.
+export CHECKPOINT_DIR="/fsx/runs/baseline/ckpt"
+export SAVE_INTERVAL=1000
+# The 2-node 4B verification ran NUM_ROLLOUT=3 (issue #1163 pillar 1). 100 is a
+# longer training run; set it to 3 to reproduce exactly the verified short cycle.
+export NUM_ROLLOUT=100
+export ROLLOUT_BATCH_SIZE=16
+export N_SAMPLES_PER_PROMPT=8
+export GLOBAL_BATCH_SIZE=128
+export NUM_STEPS_PER_ROLLOUT=1
+export LEARNING_RATE="1e-6"
+export ROLLOUT_TEMPERATURE=1.0
+
+# ----- Reward -----
+export RM_TYPE="deepscaler"
+
+# ============================================================
+# Mismatch-study additions (measurement-only, loss unchanged)
+# These drive the recipe's EXTRA_TRAIN_ARGS extension point (the
+# `EXTRA_TRAIN_ARGS_ARR` block in recipe/run_grpo_qwen3_4b.sh, mirrored in the 30B
+# recipe). TENSORBOARD_DIR is forwarded into the Ray runtime env by the recipe so
+# --use-tensorboard writes event files onto shared storage.
+# ============================================================
+export TENSORBOARD_DIR="/fsx/tb/baseline"
+# --get-mismatch-metrics measures the rollout-vs-training KL / importance ratio
+# WITHOUT changing the loss. Its assert requires --custom-tis-function-path even
+# for metrics-only.
+# GOTCHA 1: the function path must be a pure DOTTED module path
+#   (examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp), NOT
+#   the "file.py:func" form: SLIME's load_function does rpartition(".") +
+#   import_module, so "mis.py:func" fails with ModuleNotFoundError at train()
+#   (the rollout still runs, so it fails late). /root/miles is on PYTHONPATH (set via runtime-env; not baked into the image).
+# GOTCHA 2: --custom-config-path supplies the TIS/RS parameters the function
+#   reads off `args`; without it it dies with AttributeError on tis_lower_bound.
+#   mis_metrics_only.yaml has use_tis/use_rs=false, so the loss stays the
+#   unmodified GRPO baseline while the mismatch metrics are still computed.
+# GOTCHA 3: RL fine-tuning leaves dropout=0.1 on by default, which makes ppo_kl
+#   ~0.30 (old_log_probs come from an eval-mode forward with dropout OFF; the
+#   loss log_probs from a train-mode forward with dropout ON). Set dropout=0 so
+#   ppo_kl reflects real off-policy drift, not a dropout artefact. mis_kl is
+#   independent of dropout.
+# Seeds are pinned (== SLIME defaults) so prompt order and sampling are identical
+# across runs and only the studied variable differs.
+export EXTRA_TRAIN_ARGS="--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0"
+
+# ============================================================
+# ALTERNATE: Qwen3-30B-A3B MoE, colocated on 2 nodes (16 GPU) -- VERIFIED
+# ------------------------------------------------------------
+# To run the 30B MoE case instead of 4B, override the model block above with the
+# values below (uncomment) and launch recipe/run_grpo_qwen3_30b_a3b.sh. This is
+# the exact configuration that completed step 0 on 2 p5en nodes (16 GPU, EFA):
+# mis_kl 0.00192, ppo_kl 0.0 at dropout 0, job SUCCEEDED.
+#
+# The actor spans ALL 16 GPU (2 nodes x 8) with --use-distributed-optimizer
+# (added by the recipe) so the 30B optimizer state is sharded and fits H200
+# (141GB). Confining the actor to 8 GPU OOMs. Colocated rollout time-shares the
+# same 16 GPU. MoE online weight update needs the triton runner + explicit
+# --sglang-expert-parallel-size (both added by the recipe from EP_SIZE).
+#
+# export MODEL_NAME="Qwen/Qwen3-30B-A3B"
+# export MODEL_LOCAL="/fsx/models/Qwen3-30B-A3B"
+# export MODEL_DIST="/fsx/models/Qwen3-30B-A3B_torch_dist"
+# export MODEL_SCRIPT="qwen3-30B-A3B.sh"
+# export COLOCATE="true"
+# export TP_SIZE=2
+# export PP_SIZE=1
+# export CP_SIZE=1
+# export EP_SIZE=2
+# export ACTOR_NUM_NODES=2
+# export ACTOR_GPUS_PER_NODE=8
+# export ROLLOUT_NUM_GPUS=16
+# export ROLLOUT_GPUS_PER_ENGINE=2
+# export NUM_NODES=2
+# export MAX_TOKENS_PER_GPU=8192
+# export SGLANG_MEM_FRACTION=0.75
+# export NUM_ROLLOUT=1
+# export CHECKPOINT_DIR="/fsx/runs/moe30bc/ckpt"
+# export TENSORBOARD_DIR="/fsx/tb/moe30bc"
+# NOTE: do NOT set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True for the 30B
+# colocated run -- SGLang's torch_memory_saver (used to release rollout memory
+# during the training phase) is incompatible with expandable_segments and aborts
+# the rollout engine at init. The 4B run tolerates it; the 30B colocated run must
+# omit it. CUDA_DEVICE_MAX_CONNECTIONS=1 is required by Megatron whenever TP>1 (or
+# CP>1); the 30B recipe sets it in its runtime-env. The 4B recipe does NOT (the
+# baseline is TP=1); if you raise the 4B config to TP>1, add it to that recipe's
+# runtime-env too or the run asserts at startup.

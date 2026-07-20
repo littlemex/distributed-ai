@@ -100,6 +100,14 @@ variable "accelerator_pools" {
     # cb_end_date (RFC3339) optionally schedules a pre-expiry alert for THIS pool.
     cb_reservation_id = optional(string, "")
     cb_end_date       = optional(string, "")
+    # EC2 placement group for tight multi-node placement. null = none. "cluster" packs nodes
+    # onto one low-latency spine (best for multi-node NCCL on on-demand/spot); "spread" /
+    # "partition" reduce correlated failure. DO NOT set on a Capacity Block pool: a CB already
+    # colocates its nodes in one UltraCluster, and overlaying a self-made cluster group risks
+    # "capacity reserved but placement-group-unsatisfiable" (a validation below enforces this).
+    # partition_count applies only to strategy "partition".
+    placement_group_strategy = optional(string, null)
+    partition_count          = optional(number, null)
     ami_alias         = optional(string, "al2023@latest")
     ami_ssm_parameter = optional(string, "")
     volume_size       = optional(string, "200Gi")
@@ -143,6 +151,21 @@ variable "accelerator_pools" {
   validation {
     condition     = alltrue([for k, p in var.accelerator_pools : p.capacity_type != "reserved" || p.cb_reservation_id != ""])
     error_message = "A pool with capacity_type \"reserved\" must set cb_reservation_id (cr-...)."
+  }
+  validation {
+    # coalesce(...) avoids passing null to contains() (HCL contains errors on a null value).
+    condition     = alltrue([for k, p in var.accelerator_pools : contains(["cluster", "partition", "spread", "none"], coalesce(p.placement_group_strategy, "none"))])
+    error_message = "placement_group_strategy must be null or one of \"cluster\", \"partition\", \"spread\"."
+  }
+  validation {
+    # A Capacity Block already places its nodes in one UltraCluster; a self-made placement
+    # group can conflict with that fixed placement (capacity reserved but PG-unsatisfiable).
+    condition     = alltrue([for k, p in var.accelerator_pools : p.placement_group_strategy == null || p.capacity_type != "reserved"])
+    error_message = "Do not set placement_group_strategy on a reserved (Capacity Block) pool — the CB already colocates its nodes in one UltraCluster, and a self-made placement group risks 'capacity reserved but placement-group-unsatisfiable'."
+  }
+  validation {
+    condition     = alltrue([for k, p in var.accelerator_pools : coalesce(p.placement_group_strategy, "none") != "partition" || (coalesce(p.partition_count, 0) >= 1 && coalesce(p.partition_count, 0) <= 7)])
+    error_message = "placement_group_strategy \"partition\" requires partition_count in 1..7 (EC2 max 7 partitions per AZ)."
   }
   validation {
     # eventbridge-cb-alarm.tf formats cb_end_date with schedule_expression_timezone = "UTC",
@@ -329,7 +352,14 @@ variable "system_node_desired_size" {
 # (GPU/Neuron node disk, lifetime, and limits are per-pool in var.accelerator_pools.)
 
 variable "cpu_node_volume_size" {
-  description = "Root EBS volume size for CPU nodes (e.g. \"50Gi\")."
+  # For controllers and light non-GPU workloads the 50Gi default is fine. If you
+  # schedule a KubeRay head (or any pod pulling a large RL training image, e.g.
+  # the ~18GB slime/miles images) onto the CPU pool, raise this to 150Gi+: an
+  # 18GB image needs ~40GB during pull (compressed + extracted layers) plus head
+  # logs / GCS / object spilling, and 50Gi will Evict the pod mid-pull. This is a
+  # per-cluster override, not a default bump, so the shared CPU pool's EBS cost is
+  # not inflated for every user.
+  description = "Root EBS volume size for CPU nodes (e.g. \"50Gi\"; use \"150Gi\"+ if a KubeRay head or other large-image pod lands here)."
   type        = string
   default     = "50Gi"
 }

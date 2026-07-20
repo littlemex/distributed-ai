@@ -111,6 +111,32 @@ locals {
   EOT
 }
 
+# ── EC2 placement groups for pools that request one ────────────────────────────
+# Karpenter selects an existing placement group via placementGroupSelector but does not
+# create one, so we create it here and reference it by name in the EC2NodeClass. Only
+# non-reserved pools reach here (a validation forbids placement_group_strategy on CB pools).
+# VERIFIED that the EC2NodeClass v1 CRD accepts placementGroupSelector (it is NOT pruned):
+# on the live cluster `kubectl get ec2nodeclass -o yaml` shows a `PlacementGroupReady: True`
+# status condition on the applied NodeClass. If you bump the Karpenter version, re-check
+# with a server-side dry-run so a schema change can't silently prune the field into a no-op.
+# Note: a placement group cannot be deleted while instances are still in it, so a pool
+# teardown must drain nodes first. The EC2NodeClass -> PG name reference only gives an
+# IMPLICIT create-order edge; on destroy, PG deletion could otherwise race the drain and
+# DeletePlacementGroup would fail while instances remain. The ordering is enforced the same
+# way sg.tf orders aws_security_group.efa_node: null_resource.wait_for_node_drain
+# depends_on THIS resource (see karpenter.tf), so on destroy the drain-wait runs first and
+# the PG is deleted only after the nodes are gone. Do NOT add depends_on here (that would
+# reverse the destroy order and delete the PG before the drain).
+resource "aws_placement_group" "accelerator" {
+  for_each = { for k, p in var.accelerator_pools : k => p if p.placement_group_strategy != null }
+
+  name            = "${var.cluster_name}-${each.key}"
+  strategy        = each.value.placement_group_strategy
+  partition_count = each.value.placement_group_strategy == "partition" ? each.value.partition_count : null
+
+  tags = merge(var.tags, { Name = "${var.cluster_name}-${each.key}" })
+}
+
 # ── Accelerated EC2NodeClasses (one per accelerator pool) ──────────────────────
 resource "kubectl_manifest" "accelerator_nodeclass" {
   for_each = var.accelerator_pools
@@ -128,6 +154,9 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
       { amiSelectorTerms = local.pool_ami_selector_terms[each.key] },
       each.value.capacity_type == "reserved" ? {
         capacityReservationSelectorTerms = [{ id = each.value.cb_reservation_id }]
+      } : {},
+      each.value.placement_group_strategy != null ? {
+        placementGroupSelector = { name = aws_placement_group.accelerator[each.key].name }
       } : {},
       length(local.pool_network_interfaces[each.key]) > 0 ? {
         networkInterfaces = local.pool_network_interfaces[each.key]

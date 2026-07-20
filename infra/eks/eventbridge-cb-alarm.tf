@@ -13,9 +13,13 @@ locals {
   # timeadd() errors on an empty string, and HCL does not guarantee short-circuit evaluation
   # of the RHS of && once the LHS is false, so cb_end_date != "" must fully exclude empty
   # values in a separate stage before any timestamp function sees them.
+  # end_date now comes from local.pool_cb_end_date (capacity-block.tf): the reservation's
+  # EndDate resolved from cb_reservation_id, or an explicit tfvars cb_end_date override.
+  # Keep the empty-string filter (a reserved pool whose CB could not be resolved yields "")
+  # BEFORE any timeadd() sees the value — timeadd("") errors and would fail the whole plan.
   cb_pools_with_end_date = {
-    for k, p in var.accelerator_pools : k => p
-    if p.capacity_type == "reserved" && p.cb_end_date != ""
+    for k, p in local.cb_reserved_pools : k => p
+    if lookup(local.pool_cb_end_date, k, "") != ""
   }
 
   # Excludes pools whose alert time (cb_end_date - 1h) has already passed: the schedule sets
@@ -27,7 +31,7 @@ locals {
   # time apply runs the create. Re-run plan/apply if this happens near cb_end_date - 1h.
   cb_alert_pools = {
     for k, p in local.cb_pools_with_end_date : k => p
-    if timecmp(timeadd(p.cb_end_date, "-1h"), plantimestamp()) > 0
+    if timecmp(timeadd(local.pool_cb_end_date[k], "-1h"), plantimestamp()) > 0
   }
 
   # Any alert pools at all → provision the shared SNS topic + scheduler role.
@@ -38,7 +42,7 @@ locals {
   # single-quoted 'T' is a literal separator. at() takes no timezone suffix.
   cb_alert_schedule_expr = {
     for k, p in local.cb_alert_pools :
-    k => "at(${formatdate("YYYY-MM-DD'T'HH:mm:ss", timeadd(p.cb_end_date, "-1h"))})"
+    k => "at(${formatdate("YYYY-MM-DD'T'HH:mm:ss", timeadd(local.pool_cb_end_date[k], "-1h"))})"
   }
 }
 
@@ -130,13 +134,18 @@ resource "aws_scheduler_schedule" "cb_expiry_alert" {
     arn      = aws_sns_topic.cb_expiry_alert[0].arn
     role_arn = aws_iam_role.cb_expiry_scheduler[0].arn
 
+    # Use the derived end_date (local.pool_cb_end_date), NOT each.value.cb_end_date:
+    # the latter is the raw tfvars value, which is typically "" now that the end_date
+    # is resolved from the reservation id in capacity-block.tf. The schedule time and
+    # the filters above already key off local.pool_cb_end_date; the message body must
+    # match, or the notification reads "expires at " with an empty date.
     input = jsonencode({
       source      = "eventbridge-scheduler"
       cluster     = var.cluster_name
       pool        = each.key
       reservation = each.value.cb_reservation_id
-      cb_end_date = each.value.cb_end_date
-      message     = "Capacity Block ${each.value.cb_reservation_id} (pool ${each.key}, cluster ${var.cluster_name}) expires at ${each.value.cb_end_date}. Begin graceful drain now (1 hour remaining)."
+      cb_end_date = local.pool_cb_end_date[each.key]
+      message     = "Capacity Block ${each.value.cb_reservation_id} (pool ${each.key}, cluster ${var.cluster_name}) expires at ${local.pool_cb_end_date[each.key]}. Begin graceful drain now (1 hour remaining)."
     })
   }
 }
