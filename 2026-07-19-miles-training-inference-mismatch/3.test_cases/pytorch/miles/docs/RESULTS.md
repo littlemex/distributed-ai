@@ -173,24 +173,26 @@ the same late-training regime slime reported. (These per-step numbers are the pr
 reference used across both write-ups: quiet <=8, doubling ~10-12, runaway >=14.) This confirms on miles
 that the KV fp8 rollout/train numerical gap, left uncorrected, destabilises GRPO training.
 
-## TIS rescue arm (in progress -- early grad-norm suppression observed)
+## TIS rescue arm (verified -- collapse fully suppressed over 30 steps)
 
-The same KV fp8 config **with** TIS enabled (`--use-tis`, `mis.yaml`; identical seed and
-LR) was run to compare. TIS turns the mismatch importance ratio into an actual loss
-correction, so the prediction is that it holds `grad_norm` down through the region where the
-no-TIS arm diverges. At matched early steps, the TIS arm already shows a consistently lower
-`grad_norm` for the same `mis_kl` (same seed, so `mis_kl` matches step-for-step):
+The same KV fp8 config **with** TIS enabled (`--use-tis`, `mis.yaml`; identical seed and LR)
+was run to 30 steps. TIS turns the mismatch importance ratio into an actual loss correction,
+and it **held both `mis_kl` and `grad_norm` flat right through the region where the no-TIS
+arm blew up** -- the decisive rescue result:
 
-| step | mis_kl (both) | grad_norm no-TIS | grad_norm TIS |
-| --- | --- | --- | --- |
-| 0 | 0.033 / 0.032 | 0.223 | 0.131 |
-| 1 | 0.029 / 0.029 | 0.101 | 0.074 |
+| step | no-TIS mis_kl / grad_norm | TIS mis_kl / grad_norm |
+| --- | --- | --- |
+| 0 | 0.033 / 0.22 | 0.033 / 0.13 |
+| 14 | 0.151 / 1.34 | ~0.04 / ~0.15 |
+| 19 | 0.504 / 4.59 | ~0.04 / ~0.13 |
+| 24 | **2.097 / 14.3** | 0.045 / 0.14 |
+| 29 | (diverging) | **0.028 / 0.11** |
 
-This is the expected direction (TIS damping the gradient the mismatch would otherwise
-inject), but the decisive test is whether TIS keeps `grad_norm` bounded through steps 14-24
-where the no-TIS arm blew up. That portion of the TIS run had not yet reached the collapse
-region at the time of writing (the TIS correction adds per-step cost, so the arm advances
-slowly); the full through-collapse TIS trajectory is therefore still **UNVERIFIED**.
+Without TIS the run runs away (mis_kl 0.033 -> 2.10, grad_norm 0.22 -> 14.3 by step 24);
+with TIS, over the full 30 steps `mis_kl` stays ~0.03-0.045 and `grad_norm` ~0.11-0.22 --
+no divergence at all. This is slime's "cap-limited importance sampling rescues the collapse"
+result reproduced on miles: same amplified condition, TIS the only difference, collapse
+present without it and absent with it.
 
 ## Multi-seed variance (UNVERIFIED)
 
@@ -210,9 +212,10 @@ remain single-seed point estimates.
   (Megatron distributed checkpoint `gather_object`); independent of the GRPO loop. This
   blocks the HF<->Megatron round-trip (`scripts/convert_checkpoint.sh`) and long
   checkpointing runs. Should be filed as an upstream miles issue.
-- Partial: the TIS rescue arm shows lower grad_norm than the no-TIS arm at matched early
-  steps (the expected damping direction), but had not yet reached the step-14-24 collapse
-  region, so the decisive "TIS keeps grad_norm bounded through collapse" claim is UNVERIFIED.
-- Untested (UNVERIFIED): the full through-collapse TIS trajectory, multi-seed variance,
-  Qwen3-30B-A3B MoE *disaggregated* (verified only as colocated; disaggregated needs B300
-  HBM), and the disaggregated reward service. All mirror slime and are marked UNVERIFIED.
+- Verified: the TIS rescue arm ran the full 30 steps and kept mis_kl ~0.03-0.045 /
+  grad_norm ~0.11-0.22 throughout -- no divergence, where the no-TIS arm hit mis_kl 2.10 /
+  grad_norm 14.3 by step 24. The collapse-vs-rescue contrast (TIS the only difference) is
+  the paper's rescue result reproduced on miles.
+- Untested (UNVERIFIED): multi-seed variance, Qwen3-30B-A3B MoE *disaggregated* (verified
+  only as colocated; disaggregated needs B300 HBM), and the disaggregated reward service.
+  All mirror slime and are marked UNVERIFIED.

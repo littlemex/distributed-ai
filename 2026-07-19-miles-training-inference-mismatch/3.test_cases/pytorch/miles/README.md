@@ -34,7 +34,7 @@ mismatch-measurement flags are compatible with slime (verified on hardware).
 | Qwen3-30B-A3B MoE, colocated, 2 nodes (16 GPU) | Verified | actor 2x8 + `--use-distributed-optimizer` + triton EP2; step 0 SUCCEEDED (mis_kl 0.00192, ppo_kl 0.0 at dropout 0); see docs/RESULTS.md |
 | Multi-seed variance | UNVERIFIED | attempted; the p5en node went NotReady (EC2 impaired) mid-run. Results stay single-seed point estimates |
 | KV fp8 collapse arm (no TIS) | Verified | driven to divergence: mis_kl 0.033 -> 2.10, grad_norm 0.22 -> 14.3 over 25 steps; matches slime's step-14-18 collapse. See docs/RESULTS.md |
-| TIS rescue arm (through collapse) | UNVERIFIED (partial) | `env_vars.tis.example` run executed; lower grad_norm than no-TIS at matched early steps, but had not reached the step-14-24 collapse region. See docs/RESULTS.md |
+| TIS rescue arm (through collapse) | Verified | `env_vars.tis.example`, 30 steps: with TIS, mis_kl stays ~0.03-0.045 and grad_norm ~0.11-0.22 throughout -- no divergence, vs the no-TIS arm's mis_kl 2.10 / grad_norm 14.3 at step 24. See docs/RESULTS.md |
 | Multi-node (>=2 nodes) | Verified | 4B + 30B MoE both ran colocated on 2 p5en nodes (16 GPU) over EFA |
 | Qwen3-30B-A3B MoE, disaggregated | UNVERIFIED | verified as **colocated 16 GPU** (fits H200 141GB with distributed optimizer); the disaggregated actor-8 layout needs B300 288GB and is not run here |
 | 30B slime-vs-miles clean pairing | Verified | both run with identical mismatch/dropout/seed flags: ppo_kl 0.0/0.0, mis_kl 0.00182/0.00192. See docs/RESULTS.md |
