@@ -1,0 +1,34 @@
+{
+  "environment": {
+    "instances": "2x p5en.48xlarge (H200 x8 x2 = 16 GPU)",
+    "interconnect": "intra-node NVLink, inter-node EFA (per-GPU 400 Gbps)",
+    "os_kernel": "Amazon Linux 2023 / 6.12.94",
+    "gpu_driver": "NVIDIA 580.159.03 (Open Kernel Module)",
+    "efa_driver": "3.1.0g",
+    "nvidia_peermem": "not loaded",
+    "container": "nvcr.io/nvidia/pytorch:25.01-py3 (Python 3.12 / CUDA 12.8 / torch 2.6)",
+    "uccl_build": "github main, USE_DMABUF=1 TORCH_CUDA_ARCH_LIST=9.0",
+    "rdma_core": ">= v52 (for newer efadv.h)",
+    "ep_config": "EP16",
+    "gpu_mem_registration": "dma-buf (ibv_reg_dmabuf_mr), no nvidia_peermem"
+  },
+  "normal_mode": {
+    "bench": "ep/bench/test_internode.py",
+    "args": "--num-tokens=4096 --hidden=7168 --num-topk=8 --num-experts=256",
+    "dispatch_bf16": { "rdma_gb_s": 41.28, "nvl_gb_s": 134.74 },
+    "dispatch_fp8":  { "rdma_gb_s": 38.94, "nvl_gb_s": 127.11 },
+    "combine":       { "rdma_gb_s": 18.04, "nvl_gb_s": 58.89 },
+    "note": "RDMA column is the inter-node EFA path. per-GPU EFA 400 Gbps ~= 50 GB/s; dispatch reaches ~82%."
+  },
+  "low_latency_mode": {
+    "bench": "ep/bench/test_low_latency.py",
+    "args": "--num-tokens=128 --hidden=7168 --num-topk=8 --num-experts=256",
+    "dispatch": { "gb_s": 20.21, "avg_us": 371.60 },
+    "combine":  { "gb_s": 30.80, "avg_us": 471.92 },
+    "dispatch_plus_combine": { "gb_s": 16.64, "avg_us": 1324.76 }
+  },
+  "reference_official_blog_NOT_comparable": {
+    "note": "UCCL blog reports p5en EP32: dispatch 54 GB/s, combine 43 GB/s. Different EP size, NOT directly comparable to our EP16.",
+    "source": "https://uccl-project.github.io/posts/uccl-ep-full/"
+  }
+}
