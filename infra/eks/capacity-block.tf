@@ -13,7 +13,10 @@
 #   - availability_zone : validated against the pool's hand-set zone (catch a CR/zone mismatch
 #                         before Karpenter pins a NodePool to the wrong AZ and can't launch).
 #   - state             : gated to "active" so a plan/apply against a still-"scheduled" CB
-#                         fails fast, instead of Karpenter silently failing to launch nodes.
+#                         surfaces a loud WARNING at plan time (via the check block below),
+#                         instead of Karpenter silently failing to launch nodes. NOTE: a
+#                         check-block assertion only WARNS -- it does NOT block the apply
+#                         (see the check block's own comment); it is a visibility aid, not a gate.
 
 locals {
   # Reserved pools that carry a reservation id. Keyed by pool name.
@@ -37,6 +40,12 @@ data "external" "capacity_reservations" {
   query = {
     ids    = local.cb_reservation_ids_csv
     region = var.region
+    # Pass the same profile the AWS provider uses so the describe call resolves the SAME
+    # account/credentials. Without it the script would fall back to the ambient credential
+    # chain and, in a multi-profile shell, could describe a reservation in the wrong account.
+    # coalesce to "" because var.aws_profile defaults to null and a null map value has
+    # version-dependent behaviour in the external provider; the script treats "" as "ambient".
+    profile = coalesce(var.aws_profile, "")
   }
 }
 
@@ -62,9 +71,11 @@ locals {
   }
 }
 
-# Fail fast on a still-scheduled/expired CB and on a CR/zone mismatch. A check block reports
-# on every plan/apply without blocking unrelated changes, and (unlike gating a NodePool's
-# for_each on state) never silently destroys a NodePool when a CB later flips to "expired".
+# Surface a loud WARNING on a still-scheduled/expired CB and on a CR/zone mismatch. A check
+# block WARNS on every plan/apply but does NOT block the apply (that is intentional here:
+# gating a NodePool's for_each on state would silently DESTROY the NodePool when a CB later
+# flips to "expired", which is worse than a warning). So this is a visibility aid, not a
+# hard gate -- treat the warning as the signal to act, do not expect it to stop an apply.
 check "capacity_block_ready" {
   assert {
     condition = alltrue([

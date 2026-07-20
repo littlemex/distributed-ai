@@ -163,6 +163,10 @@ resource "null_resource" "wait_for_node_drain" {
     aws_eks_addon.efs_csi_driver,
     aws_eks_addon.fsx_csi_driver,
     aws_security_group.efa_node,
+    # Same reason as efa_node above: on destroy the drain-wait must run BEFORE the placement
+    # group is deleted (a PG cannot be deleted while instances are still in it). depends_on
+    # here => destroy order is drain-wait first, then aws_placement_group.accelerator.
+    aws_placement_group.accelerator,
     aws_vpc_endpoint.interface,
     aws_vpc_endpoint.s3,
   ]

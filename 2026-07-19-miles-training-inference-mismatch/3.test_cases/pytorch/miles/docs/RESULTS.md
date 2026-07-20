@@ -19,18 +19,22 @@ backward were all exercised on hardware -- on a single node and across 2 nodes o
 
 Directly comparable to the slime baseline (both measured on the same H200 x8 node):
 
-| Metric | miles (measured) | slime (measured, same cluster) | Concordance |
+Comparison is at the matched condition (dropout=0). slime's dropout=0 run measured
+`mis_kl` 0.00053 (its 0.00065 figure quoted elsewhere is the dropout=0.1 run -- see
+PPOKL_ROOTCAUSE). slime's own three runs span mis_kl 0.00053-0.00074 (~±17% run-to-run), so
+the honest claim is "same order, within slime's own run-to-run spread", NOT a tight percent
+match.
+
+| Metric | miles (dropout=0) | slime (dropout=0) | Concordance |
 | --- | --- | --- | --- |
-| train/mis_kl | 0.000632 | 0.00065 | same order (~3% apart) |
-| train/mis_ppl_ratio | 1.00063 | 1.0006 | matches |
-| train/mis_chi2_token | 0.00131 | 0.0012 | matches |
-| train/train_rollout_logprob_abs_diff | 0.0130 | 0.0128 | matches |
+| train/mis_kl | 0.000632 | 0.00053 | same order (within slime's 0.00053-0.00074 spread) |
+| train/mis_ppl_ratio | 1.00063 | ~1.0005 | same order |
+| train/train_rollout_logprob_abs_diff | 0.0130 | 0.0129 | matches |
 | train/ppo_kl (dropout=0) | 0.0 | 0.0 | both zero |
 | rollout/raw_reward | 0.531 | (same range) | - |
-| perf/rollout_time | 56.7s | (same order) | - |
 
-Conclusion: on miles too, the bf16 SGLang-vs-Megatron `mis_kl` is ~6e-4, matching slime to
-the same order. This supports the parent conclusion -- the *magnitude* of the mismatch is
+Conclusion: on miles too, the bf16 SGLang-vs-Megatron `mis_kl` is ~6e-4, the same order as
+slime and inside slime's own run-to-run spread. This supports the parent conclusion -- the *magnitude* of the mismatch is
 set by the rollout/trainer numerical-path difference, and does not shift across this
 framework fork (slime -> miles; a direct fork, not an independent implementation -- see the
 README concordance caveat). `ppo_kl` is also 0.0 at dropout=0, consistent with slime's
@@ -65,9 +69,10 @@ on miles as well. Observed over the first steps:
 
 vs miles baseline 0.000632 -> ~49x at step 0. slime's same amplification was
 0.0006 -> 0.0327 (~54x), same direction and order. The early steps stay flat around 0.03
-(slime likewise held 0.026-0.034 early and only diverged later, around step 14-18); at 8
-steps this run is short of the divergence. The SGLang engine generates correctly with the
-fp8 KV cache (a correct answer with reward 1 was observed).
+(slime likewise held 0.026-0.034 early and only ran away from step >=14); this short probe
+was stopped at 8 steps (table shows steps 0-4), before the divergence. The full through-
+collapse trajectory is in the "Collapse arm" section below. The SGLang engine generates
+correctly with the fp8 KV cache (a correct answer with reward 1 was observed).
 
 LR-pairing caveat: baseline is at LR 1e-6 and the fp8 run at LR 1e-5, so the amplification
 factor varies dtype and LR together. Step-0 `mis_kl` is a property of the numerical path
@@ -105,7 +110,7 @@ on both (miles job SUCCEEDED in ~1223s; the slime job reached step 0 with the sa
 | Metric (step 0) | slime 30B | miles 30B | Concordance |
 | --- | --- | --- | --- |
 | train/ppo_kl (dropout=0) | 0.0 | 0.0 | both zero |
-| train/mis_kl | 0.00182 | 0.00192 | same order (~5% apart) |
+| train/mis_kl | 0.00182 | 0.00192 | same order (single-run point estimates; cf. slime's ~±17% run-to-run spread at 4B) |
 | train/mis_ppl_ratio | 1.00182 | 1.00192 | matches |
 | train/mis_chi2_token | 0.00373 | 0.00415 | same order |
 | train/train_rollout_logprob_abs_diff | 0.0197 | 0.0198 | matches |
@@ -160,10 +165,13 @@ mismatch is quiet for the first ~8 steps and then runs away:
 | 22 | 0.807 | 5.78 |
 | 24 | **2.097** | **14.3** |
 
-By step 24 `mis_kl` is ~64x its step-0 value and `grad_norm` has run from 0.22 to 14.3 --
-an unmistakable divergence, matching slime's step-14-18 onset. This confirms on miles that
-the KV fp8 rollout/train numerical gap, left uncorrected, destabilises GRPO training in the
-same regime slime showed.
+On this miles run the onset is clear from the data itself: `mis_kl` is flat (~0.03) through
+step 8, roughly doubles by step 10-12 (0.059), and then runs away from step 14 (0.151) to
+step 24 (2.097, ~64x its step-0 value), with `grad_norm` climbing 0.22 -> 14.3 over the same
+span. So the divergence *onset* is around step 10-12 and becomes unmistakable by step 14 --
+the same late-training regime slime reported. (These per-step numbers are the precise
+reference used across both write-ups: quiet <=8, doubling ~10-12, runaway >=14.) This confirms on miles
+that the KV fp8 rollout/train numerical gap, left uncorrected, destabilises GRPO training.
 
 ## TIS rescue arm (in progress -- early grad-norm suppression observed)
 

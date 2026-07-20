@@ -24,7 +24,7 @@ mismatch-measurement flags are compatible with slime (verified on hardware).
 | Component | Status | Environment / Note |
 |-----------|--------|--------------------|
 | Qwen3-4B GRPO, colocated, 1 step | Verified | H200x8 single node; rollout + weight sync + Megatron backward |
-| mismatch metrics (baseline) | Verified | mis_kl 0.000632 (matches slime ~0.00065) |
+| mismatch metrics (baseline) | Verified | mis_kl 0.000632 (dropout=0; same order as slime's dropout=0 0.00053, within slime's 0.00053-0.00074 run spread) |
 | KV fp8 mismatch amplification | Verified | mis_kl 0.0310 (~49x baseline; matches slime's ~54x) |
 | ppo_kl = dropout artefact (both arms) | Verified | ppo_kl 0.0 at dropout=0, 0.30 at dropout=0.1; mis_kl unchanged (matches slime) |
 | miles image build (radixark/miles + EFA) | Verified | in-cluster buildkit -> ECR, 18.4GB |
@@ -78,11 +78,11 @@ TP1/PP1/CP1/EP1, colocated.
 
 | Metric | slime | miles | Concordance |
 |--------|-------|-------|-------------|
-| baseline mis_kl (4B, LR 1e-6, dropout 0) | 0.00065 | 0.000632 | same order (~3% apart) |
+| baseline mis_kl (4B, dropout 0) | 0.00053 | 0.000632 | same order (within slime's 0.00053-0.00074 run spread; the 0.00065 quoted elsewhere is slime's dropout=0.1 run) |
 | KV fp8 mis_kl (4B, see LR note) | 0.0327 (~54x) | 0.0310 (~49x) | same direction & order |
 | ppo_kl at dropout 0 (4B) | 0.0 | 0.0 | both zero |
 | ppo_kl at dropout 0.1 (4B) | 0.31 | 0.30 | both ~0.30 (dropout artefact) |
-| 30B MoE mis_kl (colocated 16 GPU, dropout 0) | 0.00182 | 0.00192 | same order (~5% apart) |
+| 30B MoE mis_kl (colocated 16 GPU, dropout 0) | 0.00182 | 0.00192 | same order (single-run point estimates) |
 | 30B MoE ppo_kl at dropout 0 | 0.0 | 0.0 | both zero |
 
 The 30B MoE pair was measured with identical flags on both frameworks (see docs/RESULTS.md);

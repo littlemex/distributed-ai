@@ -134,13 +134,18 @@ resource "aws_scheduler_schedule" "cb_expiry_alert" {
     arn      = aws_sns_topic.cb_expiry_alert[0].arn
     role_arn = aws_iam_role.cb_expiry_scheduler[0].arn
 
+    # Use the derived end_date (local.pool_cb_end_date), NOT each.value.cb_end_date:
+    # the latter is the raw tfvars value, which is typically "" now that the end_date
+    # is resolved from the reservation id in capacity-block.tf. The schedule time and
+    # the filters above already key off local.pool_cb_end_date; the message body must
+    # match, or the notification reads "expires at " with an empty date.
     input = jsonencode({
       source      = "eventbridge-scheduler"
       cluster     = var.cluster_name
       pool        = each.key
       reservation = each.value.cb_reservation_id
-      cb_end_date = each.value.cb_end_date
-      message     = "Capacity Block ${each.value.cb_reservation_id} (pool ${each.key}, cluster ${var.cluster_name}) expires at ${each.value.cb_end_date}. Begin graceful drain now (1 hour remaining)."
+      cb_end_date = local.pool_cb_end_date[each.key]
+      message     = "Capacity Block ${each.value.cb_reservation_id} (pool ${each.key}, cluster ${var.cluster_name}) expires at ${local.pool_cb_end_date[each.key]}. Begin graceful drain now (1 hour remaining)."
     })
   }
 }

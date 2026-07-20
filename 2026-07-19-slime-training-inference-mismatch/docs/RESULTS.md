@@ -32,8 +32,9 @@ rollout/trainer の数値経路差 (エンジン・精度) の大きさで決ま
 
 1. **mismatch が崩壊の原因**: baseline と amplified の差分は mismatch のみ (mis_kl 0.0006 vs 0.03)。
    同じ LR 1e-5 で bf16 は安定・KV fp8 は崩壊した。
-2. **mismatch 発散が崩壊に先行する** (amplified): mis_kl が step8 から指数発散し、遅れて
-   reward/entropy が崩れた。これは論文の因果順序そのもの。
+2. **mismatch 発散が崩壊に先行する** (amplified): mis_kl は step8 頃までは静かで、step10-12
+   で倍増し、step14 以降に急発散する (miles の同条件 collapse arm の per-step 値が精密な参照:
+   <=8 静穏 / ~10-12 倍増 / >=14 暴走)。遅れて reward/entropy が崩れる、論文の因果順序そのもの。
 3. **適切な補正で救済できる** (TIS): cap 付き importance sampling で崩壊領域を乗り越え、
    reward が上昇に転じた。
 4. **cap こそが救済の因果因子** (TIS vs TIS-nocap): この 2 者の差分は cap の値のみ。
