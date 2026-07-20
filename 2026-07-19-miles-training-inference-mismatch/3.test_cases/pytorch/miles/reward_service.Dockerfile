@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 #
-# CPU-only image for the SLIME remote reward service. Deliberately lightweight
+# CPU-only image for the miles remote reward service. Deliberately lightweight
 # (no CUDA / NGC base) so it schedules on cheap CPU instances and starts fast.
 FROM python:3.12-slim
 

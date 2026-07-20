@@ -2,7 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 #
-# DISAGGREGATED workload profile for the SLIME GRPO sample.
+# DISAGGREGATED workload profile for the miles GRPO sample.
 #
 # An overlay sourced ON TOP OF the base env_vars. It moves reward scoring to a
 # separate CPU instance group (disaggregating it from the GPU rollout) and turns

@@ -22,7 +22,7 @@ export AWS_REGION="${AWS_REGION:-$(aws configure get region)}"
 export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 export REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/"
 export IMAGE="miles-hyperpod"
-export TAG="miles-dev202607182122-efa1.48"
+export TAG="miles-dev202607182122-efa1.48"   # pinned build tag from buildkit-job (avoid ":latest")
 export FULL_IMAGE="${REGISTRY}${IMAGE}:${TAG}"
 
 # ----- HuggingFace -----

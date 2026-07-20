@@ -13,9 +13,11 @@ topologies. The train loop is rewritten sync -> async, but the `train.py` CLI an
 mismatch-measurement flags are compatible with slime (verified on hardware).
 
 > This directory is a hardware-validation record intended as the basis for a future
-> upstream `3.test_cases/pytorch/miles/` contribution to awsome-distributed-ai. It was
-> validated on a **single H200x8 node only**. Components that mirror slime but were not
-> executed on this hardware are marked `UNVERIFIED`; see the Verification Status table.
+> upstream `3.test_cases/pytorch/miles/` contribution to awsome-distributed-ai. The core
+> mismatch study (baseline / KV fp8 / dropout arms) was validated on a **single H200x8
+> node**; the 4B and 30B-MoE GRPO loops were additionally validated **across 2 p5en nodes
+> (16 GPU) over EFA** (colocated). Components that mirror slime but were not executed on
+> this hardware are marked `UNVERIFIED`; see the Verification Status table.
 
 ## Verification Status
 
@@ -28,11 +30,14 @@ mismatch-measurement flags are compatible with slime (verified on hardware).
 | miles image build (radixark/miles + EFA) | Verified | in-cluster buildkit -> ECR, 18.4GB |
 | RayCluster with head on a CPU node | UNVERIFIED | the shipped `raycluster.yaml` puts the head on a CPU node; the actual runs used the head-on-GPU overlay in `local-overlays/` because the borrowed cluster had no large-disk CPU node. The GRPO results are valid; only this head-placement variant of the manifest is untested. |
 | 2-node EFA (16 GPU NCCL) | Verified | busbw 190-257 GB/s over EFA (efa-direct + GPUDirect RDMA, no TCP fallback); see docs/EFA_2NODE.md. Required fixing a self-referencing egress gap in the EFA security group |
+| Qwen3-4B GRPO, colocated, 2 nodes (16 GPU), 3 cycles | Verified | actor 2x8 + rollout 16 over EFA; 3 rollouts SUCCEEDED (raw_reward 0.48/0.52/0.49); see docs/RESULTS.md |
+| Qwen3-30B-A3B MoE, colocated, 2 nodes (16 GPU) | Verified | actor 2x8 + `--use-distributed-optimizer` + triton EP2; step 0 SUCCEEDED (mis_kl 0.00192, ppo_kl 0.0 at dropout 0); see docs/RESULTS.md |
 | Multi-seed variance | UNVERIFIED | attempted; the p5en node went NotReady (EC2 impaired) mid-run. Results stay single-seed point estimates |
 | Collapse + TIS rescue on miles | UNVERIFIED | slime showed collapse at step 14-18 and TIS rescue; miles run cut short by the same node fault |
 | TIS rescue arm | UNVERIFIED | `env_vars.tis.example`; flags exist, run not executed |
-| Multi-node (>=2 nodes) | UNVERIFIED | single node only |
-| Qwen3-30B-A3B MoE, disaggregated | UNVERIFIED | `recipe/run_grpo_qwen3_30b_a3b.sh` mirrors slime; not executed |
+| Multi-node (>=2 nodes) | Verified | 4B + 30B MoE both ran colocated on 2 p5en nodes (16 GPU) over EFA |
+| Qwen3-30B-A3B MoE, disaggregated | UNVERIFIED | verified as **colocated 16 GPU** (fits H200 141GB with distributed optimizer); the disaggregated actor-8 layout needs B300 288GB and is not run here |
+| 30B slime-vs-miles clean pairing | Verified | both run with identical mismatch/dropout/seed flags: ppo_kl 0.0/0.0, mis_kl 0.00182/0.00192. See docs/RESULTS.md |
 | Disaggregated reward (remote_rm on CPU pool) | UNVERIFIED | `reward_service/`, `kubernetes/reward-service.yaml`; miles remote_rm lacks slime's retry |
 | Checkpoint convert / long run | Known Issue | `save_model()` fails with `_pickle.UnpicklingError`; see Known Issues |
 
@@ -73,10 +78,15 @@ TP1/PP1/CP1/EP1, colocated.
 
 | Metric | slime | miles | Concordance |
 |--------|-------|-------|-------------|
-| baseline mis_kl (LR 1e-6, dropout 0) | 0.00065 | 0.000632 | same order (~3% apart) |
-| KV fp8 mis_kl (see LR note) | 0.0327 (~54x) | 0.0310 (~49x) | same direction & order |
-| ppo_kl at dropout 0 | 0.0 | 0.0 | both zero |
-| ppo_kl at dropout 0.1 | 0.31 | 0.30 | both ~0.30 (dropout artefact) |
+| baseline mis_kl (4B, LR 1e-6, dropout 0) | 0.00065 | 0.000632 | same order (~3% apart) |
+| KV fp8 mis_kl (4B, see LR note) | 0.0327 (~54x) | 0.0310 (~49x) | same direction & order |
+| ppo_kl at dropout 0 (4B) | 0.0 | 0.0 | both zero |
+| ppo_kl at dropout 0.1 (4B) | 0.31 | 0.30 | both ~0.30 (dropout artefact) |
+| 30B MoE mis_kl (colocated 16 GPU, dropout 0) | 0.00182 | 0.00192 | same order (~5% apart) |
+| 30B MoE ppo_kl at dropout 0 | 0.0 | 0.0 | both zero |
+
+The 30B MoE pair was measured with identical flags on both frameworks (see docs/RESULTS.md);
+the concordance now holds on both the 4B dense and 30B MoE scales.
 
 LR note: the baseline runs at LR 1e-6 and the KV fp8 runs at LR 1e-5, so the "~49x/~54x"
 figure varies dtype and LR together. `mis_kl` at step 0 is a property of the
@@ -97,13 +107,14 @@ pitfalls found on real hardware: [docs/PORT_NOTES.md](./docs/PORT_NOTES.md).
 | Component | Specification |
 |-----------|---------------|
 | Instance type | p5en.48xlarge (this study) |
-| Nodes | 1 (single-node only -- multi-node UNVERIFIED) |
-| GPUs | 8x NVIDIA H200 |
+| Nodes | 1 for the core mismatch arms; 2 (16 GPU, EFA) for the 4B + 30B-MoE GRPO loops |
+| GPUs | 8x NVIDIA H200 per node |
 | Storage | FSx for Lustre, mounted as PVC `fsx-claim` |
 | Kubernetes | EKS v1.35, KubeRay operator |
 
-The slime test case targets 2x p5.48xlarge (H100x16). This study used a single
-H200x8 node, so anything requiring more than one node is UNVERIFIED.
+The slime test case targets 2x p5.48xlarge (H100x16). The mismatch metric arms
+(baseline / KV fp8 / dropout) were measured on a single H200x8 node; the 4B and 30B-MoE
+GRPO loops were additionally run across 2 p5en nodes (16 GPU) over EFA.
 
 ## Quick Start (Qwen3-4B colocated -- the verified path)
 
@@ -117,8 +128,11 @@ the Ray head (see Infra note below); models/data staged on FSx.
 > Verification Status table.
 
 ```bash
-# 0. Configure env
-cp env_vars.colocated.example env_vars && vim env_vars   # set HF_TOKEN, paths
+# 0. Configure env FIRST (defines NAMESPACE/FSX_CLAIM), then create the HF Secret
+#    in that namespace so the pods can mount it.
+cp env_vars.colocated.example env_vars && vim env_vars   # set paths, NAMESPACE, FSX_CLAIM
+source env_vars
+kubectl create secret generic hf-token --from-literal=HF_TOKEN=hf_xxx -n "${NAMESPACE}"
 
 # 1. Build + push the miles image (GPU not needed; runs on a large-disk node)
 #    Edit kubernetes/buildkit-job.yaml nodeSelector to a node with >=120GB ephemeral.
@@ -127,15 +141,16 @@ kubectl apply -f kubernetes/buildkit-job.yaml
 # 2. Stage mismatch configs on FSx
 #    configs/{mis.yaml,mis_metrics_only.yaml,mis_nocap.yaml} -> /fsx/configs/
 
-# 3. Deploy the Ray cluster (head on a CPU node, worker on the GPU node)
+# 3. Deploy the Ray cluster (head on a CPU node, worker(s) on the GPU node(s))
+source env_vars
 envsubst < kubernetes/raycluster.yaml | kubectl apply -f -
 
-# 4. Launch GRPO. The driver MUST run on a GPU worker (miles imports mooncake,
-#    which needs libcuda, at module load): route it there with a custom resource.
-ray job submit \
-  --entrypoint-resources '{"gpu_node": 0.001}' \
-  --working-dir recipe \
-  -- bash grpo_launch.sh <train.py flags from env_vars>
+# 4. Port-forward the Ray dashboard (the recipe submits to 127.0.0.1:8265), then
+#    launch GRPO via the recipe -- it sets --entrypoint-resources (driver on a GPU
+#    worker; miles imports mooncake/libcuda at module load), the runtime env, and
+#    the full train.py argv from env_vars.
+kubectl port-forward -n "${NAMESPACE}" svc/miles-ray-head-svc 8265:8265 &
+bash recipe/run_grpo_qwen3_4b.sh
 ```
 
 See the slime test case README for the full 8-step workflow (model download, HF->Megatron
@@ -202,8 +217,8 @@ miles/                                   # -> 3.test_cases/pytorch/miles (upstre
 │   ├── reward-service.yaml             # [UNVERIFIED] CPU reward Deployment + Service
 │   └── data-prep-pod.yaml              # [UNVERIFIED] data-prep utility pod
 ├── recipe/
-│   ├── run_grpo_qwen3_4b.sh            # Verified: GRPO submit (Qwen3-4B colocated)
-│   ├── run_grpo_qwen3_30b_a3b.sh       # [UNVERIFIED] MoE disaggregated (mirrors slime)
+│   ├── run_grpo_qwen3_4b.sh            # Verified: GRPO submit (Qwen3-4B colocated, 1 + 2 node)
+│   ├── run_grpo_qwen3_30b_a3b.sh       # Verified: MoE colocated 16 GPU (disaggregated variant UNVERIFIED)
 │   └── launcher/grpo_launch.sh         # Ray job entrypoint (SLIME_DIR -> /root/miles)
 ├── scripts/
 │   ├── convert_checkpoint.sh           # [UNVERIFIED] HF<->Megatron (see Known Issues)

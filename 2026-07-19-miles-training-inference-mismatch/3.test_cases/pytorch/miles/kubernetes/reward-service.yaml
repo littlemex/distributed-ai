@@ -2,7 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 #
-# Remote reward service for SLIME GRPO (rm_type=remote_rm).
+# Remote reward service for miles GRPO (rm_type=remote_rm).
 #
 # Runs on a same-AZ CPU instance group -- NOT on the GPU nodes. This frees the
 # scarce GPU rollout/training actors from CPU-bound reward scoring and lets the

@@ -4,7 +4,7 @@ metadata:
   labels:
     app: miles-grpo
   name: miles-ray
-  namespace: default
+  namespace: ${NAMESPACE}
 spec:
   enableInTreeAutoscaling: false
   headGroupSpec:
@@ -60,7 +60,7 @@ spec:
         volumes:
         - name: fsx
           persistentVolumeClaim:
-            claimName: fsx-claim
+            claimName: ${FSX_CLAIM}
         - emptyDir:
             medium: Memory
             sizeLimit: 64Gi
@@ -69,8 +69,13 @@ spec:
           node-role: cpu
   rayVersion: 2.55.1
   workerGroupSpecs:
+  # Single-node baseline (Qwen3-4B mismatch arms). For the 2-node runs (4B 3-cycle
+  # and 30B MoE colocated on 16 GPU, both hardware-verified over EFA) set
+  # replicas/minReplicas/maxReplicas to 2 -- each worker is one p5en (8 GPU), so
+  # 2 replicas = 16 GPU. Keep podAntiAffinity (below) so the two workers land on
+  # separate nodes and the actor spans both.
   - groupName: gpu-workers
-    maxReplicas: 1
+    maxReplicas: 2
     minReplicas: 1
     numOfHosts: 1
     rayStartParams:
@@ -149,7 +154,7 @@ spec:
         volumes:
         - name: fsx
           persistentVolumeClaim:
-            claimName: fsx-claim
+            claimName: ${FSX_CLAIM}
         - emptyDir:
             medium: Memory
             sizeLimit: 256Gi

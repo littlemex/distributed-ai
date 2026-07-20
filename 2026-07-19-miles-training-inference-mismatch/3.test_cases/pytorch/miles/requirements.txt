@@ -2,7 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-# Reinforcement-learning Python dependencies for the SLIME image.
+# Reinforcement-learning Python dependencies for the miles image.
 
 # Megatron-LM asserts numpy 1.x at init (slime .../megatron_utils/initialize.py:
 # `assert np.__version__.startswith("1.")`, per NVIDIA/Megatron-LM#1563), but

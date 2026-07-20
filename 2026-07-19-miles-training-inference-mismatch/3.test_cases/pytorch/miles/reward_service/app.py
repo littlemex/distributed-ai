@@ -2,7 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 """
-Remote Reward Service for SLIME GRPO training.
+Remote Reward Service for miles GRPO training.
 
 This is a CPU-hosted HTTP reward server that implements the contract expected by
 SLIME's ``remote_rm`` hook (slime/rollout/rm_hub/__init__.py):

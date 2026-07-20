@@ -2,9 +2,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 # ============================================================
-# SLIME GRPO Training — Qwen3-4B on HyperPod EKS (Colocated)
+# miles GRPO Training — Qwen3-4B on HyperPod EKS (Colocated)
 #
-# This script submits a Ray job to run GRPO training using SLIME
+# This script submits a Ray job to run GRPO training using miles
 # with Megatron-LM training and SGLang inference on shared GPUs.
 #
 # Prerequisites:
@@ -32,7 +32,11 @@ if [[ -z "${MODEL_LOCAL:-}" ]]; then
 fi
 
 # Validate required variables
-for var in MODEL_LOCAL MODEL_DIST PROMPT_DATA CHECKPOINT_DIR; do
+for var in MODEL_LOCAL MODEL_DIST PROMPT_DATA CHECKPOINT_DIR MODEL_SCRIPT RM_TYPE \
+           COLOCATE ACTOR_NUM_NODES ACTOR_GPUS_PER_NODE ROLLOUT_NUM_GPUS \
+           ROLLOUT_GPUS_PER_ENGINE NUM_ROLLOUT ROLLOUT_BATCH_SIZE N_SAMPLES_PER_PROMPT \
+           GLOBAL_BATCH_SIZE MAX_TOKENS_PER_GPU ROLLOUT_MAX_RESPONSE_LEN \
+           ROLLOUT_TEMPERATURE LEARNING_RATE SAVE_INTERVAL; do
     if [[ -z "${!var:-}" ]]; then
         echo "[ERROR] ${var} is not set. Please configure env_vars."
         exit 1
@@ -40,7 +44,7 @@ for var in MODEL_LOCAL MODEL_DIST PROMPT_DATA CHECKPOINT_DIR; do
 done
 
 echo "============================================================"
-echo "  SLIME GRPO Training — Qwen3-4B (Colocated Mode)"
+echo "  miles GRPO Training — Qwen3-4B (Colocated Mode)"
 echo "============================================================"
 echo "  Model:          ${MODEL_LOCAL}"
 echo "  Megatron ckpt:  ${MODEL_DIST}"
@@ -57,14 +61,14 @@ echo "============================================================"
 # is one argv token, so values are never re-split by a shell. The array is
 # expanded into the `ray job submit -- ...` argv below; MODEL_ARGS itself is
 # expanded inside recipe/launcher/grpo_launch.sh, in the same shell that sources
-# the SLIME model script. See that launcher for why this avoids the shell
+# the miles model script. See that launcher for why this avoids the shell
 # escaping trap that a `-- bash -c "...${MODEL_ARGS[@]}..."` string would hit.
 #
-# When RM_TYPE=remote_rm, point SLIME at the CPU-hosted reward Service via
+# When RM_TYPE=remote_rm, point miles at the CPU-hosted reward Service via
 # --rm-url (see kubernetes/reward-service.yaml). Otherwise scoring is in-process.
 RM_ARGS=(--rm-type "${RM_TYPE}")
 if [ "${RM_TYPE}" = "remote_rm" ]; then
-    if [ -z "${RM_URL}" ]; then
+    if [ -z "${RM_URL:-}" ]; then
         echo "[ERROR] RM_TYPE=remote_rm but RM_URL is not set. Configure it in env_vars."
         exit 1
     fi
@@ -77,9 +81,15 @@ fi
 # (or on the command line) and they are appended verbatim to the train.py argv.
 # This is the supported extension point for experiments that need flags the
 # baseline recipe does not set — e.g. observability (--use-tensorboard) or the
-# training-inference mismatch study (--get-mismatch-metrics --custom-config-path
-# examples/train_infer_mismatch_helper/mis.py:compute_mis_weights_with_cp,
-# --use-tis, --use-rollout-logprobs) or LR scheduling (--lr-decay-style ...).
+# training-inference mismatch study (--get-mismatch-metrics
+# --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp
+# --custom-config-path /fsx/configs/mis_metrics_only.yaml) or LR scheduling
+# (--lr-decay-style ...). The measurement-only baseline uses mis_metrics_only.yaml
+# (use_tis=false) so the loss is unchanged; the TIS RESCUE arm (env_vars.tis.example)
+# is the one that adds --use-tis with mis.yaml. NOTE the TIS function path is a DOTTED module
+# path (load_function does rpartition('.') + import_module); the "file.py:func"
+# form fails with ModuleNotFoundError at the loss forward (late, after rollout).
+# --custom-tis-function-path takes the module.func; --custom-config-path takes the YAML.
 # Word-splitting here is intentional so a single env var can carry several flags;
 # values containing spaces are not supported (none of the intended flags need
 # them). The array keeps each token separate across the Ray job boundary, the
@@ -166,6 +176,11 @@ TRAIN_ARGS=(
     --actor-num-nodes "${ACTOR_NUM_NODES}"
     --actor-num-gpus-per-node "${ACTOR_GPUS_PER_NODE}"
     --colocate
+    # Colocated: actor and rollout share the same GPUs, so rollout-num-gpus should
+    # equal the actor GPU count (ACTOR_NUM_NODES x ACTOR_GPUS_PER_NODE). On 1 node
+    # this is 8; on 2 nodes 16. Set it explicitly so scaling nodes does not silently
+    # leave the rollout at a stale GPU count.
+    --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --rollout-num-gpus-per-engine "${ROLLOUT_GPUS_PER_ENGINE}"
 
     --sglang-mem-fraction-static 0.8
@@ -179,25 +194,35 @@ TRAIN_ARGS=(
 
     # Experiment-specific flags injected via the EXTRA_TRAIN_ARGS env var (empty
     # by default, so the baseline behaviour is unchanged). See the block above.
-    "${EXTRA_TRAIN_ARGS_ARR[@]}"
+    # The ${arr[@]+"${arr[@]}"} form expands to nothing (not an "unbound variable"
+    # error) when the array is empty under `set -u` on bash < 4.4 (e.g. macOS 3.2).
+    ${EXTRA_TRAIN_ARGS_ARR[@]+"${EXTRA_TRAIN_ARGS_ARR[@]}"}
 )
 
 # Submit via Ray job API.
 #
 # The entrypoint after `--` is `bash grpo_launch.sh <flags>` (plain argv tokens,
 # no shell array crosses the ray boundary). --working-dir uploads the launcher
-# to the Ray workers; the SLIME code itself is already in the image at
-# /opt/slime. MODEL_SCRIPT is forwarded so the launcher can source the right
-# model definition.
+# to the Ray workers; the miles code itself is already in the image at
+# /root/miles (on PYTHONPATH below). MODEL_SCRIPT is forwarded so the launcher
+# can source the right model definition.
+#
+# --entrypoint-resources '{"gpu_node": 0.001}' pins the Ray job DRIVER to a GPU
+# worker. miles imports mooncake (libcuda-dependent) at module load, and the head
+# is a non-GPU pod, so a head-scheduled driver dies with a libcuda import error.
+# The 0.001 fractional request lands the driver on a worker without consuming a
+# whole GPU (does not disturb the colocated placement group). HF_TOKEN is NOT set
+# here: it is injected into the pod env from the k8s Secret in raycluster.yaml, so
+# it never lands in the Ray GCS runtime-env (visible via the dashboard API).
 echo "[INFO] Submitting Ray job..."
 
 ray job submit \
     --address="http://127.0.0.1:8265" \
+    --entrypoint-resources '{"gpu_node": 0.001}' \
     --working-dir "${SCRIPT_DIR}/launcher" \
     --runtime-env-json="{
         \"env_vars\": {
             \"PYTHONPATH\": \"/root/Megatron-LM:/root/miles\",
-            \"HF_TOKEN\": \"${HF_TOKEN}\",
             \"MODEL_SCRIPT\": \"${MODEL_SCRIPT}\",
             \"TOKENIZERS_PARALLELISM\": \"false\",
             \"NCCL_DEBUG\": \"WARN\",
