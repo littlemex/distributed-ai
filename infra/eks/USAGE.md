@@ -94,6 +94,11 @@ After the Pod is deleted, Karpenter scales the empty GPU node back down once it
 has been idle past `consolidateAfter` (5 minutes by default for on-demand/spot
 pools). Watch it disappear with `kubectl get nodeclaims -w`.
 
+For anything past a one-shot smoke test — multi-node NCCL/EFA benches, Neuron
+DDP, torchrun/MPIJob training, vLLM serving — use the **`charts/experiments`**
+Helm chart instead of hand-writing manifests. See `charts/experiments/README.md`
+for the workload catalog, prerequisites, and known issues.
+
 ---
 
 ## 3. How much EFA can a Pod request?
@@ -118,7 +123,8 @@ resources:
 ```
 
 Also add the accelerator toleration and the NCCL/EFA environment your framework
-expects (see the multi-node example in `manifests/`).
+expects (see the multi-node examples — `ncclSshd` for NVIDIA/NCCL, `neuronDdp`
+for Neuron — in `charts/experiments`).
 
 ---
 
@@ -185,7 +191,7 @@ trn2 = {
 Pods request whole devices with `aws.amazon.com/neuron: "<n>"`. For
 tensor-parallel serving across many chips, set `neuron_enable_scheduler = true`
 so device IDs are allocated contiguously. See
-`manifests/neuron-serving-vllm.yaml.tpl`.
+`charts/experiments` (`neuronServingVllm` workload).
 
 ---
 

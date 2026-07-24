@@ -1,0 +1,168 @@
+{{- /*
+mpijob-train — two-node HF Trainer fine-tune of SmolLM2-135M via kubeflow.org/v2beta1
+MPIJob (Launcher + 2 Workers). Uses mpi-operator (always installed by gpu-addons.tf) and
+the mpijob-image (Open MPI + sshd + train_smollm.py baked in; see manifests/mpijob-image/).
+
+Backend gloo (CPU) or nccl (GPU). The Launcher only runs mpirun (no GPU) and is pinned to a
+CPU node in BOTH backends via launcherNodeRole — sharing the Worker nodeRole on the nccl
+backend would strand an extra accelerator node just for the Launcher.
+
+Backend verification status: the gloo 2-worker path is verified end-to-end (MPIJob
+Succeeded, gradients synced across 2 nodes). The nccl path is reviewed but not yet run on a
+GPU cluster — treat it as a starting point.
+
+Scaling GPUs/worker: -np (=2*gpu.count), slotsPerWorker, and gpu.count must move together
+or ranks silently idle; train_smollm.py also currently assumes one GPU per proc.
+
+Requires efs_enabled=true, cpu_nodepool_enabled=true (Launcher lands on cpu), and image set.
+
+Render + apply (CPU, 2 workers):
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set mpijobTrain.enabled=true --set mpijobTrain.image=$IMG | kubectl apply -f -
+Render + apply (GPU, 2 g5 nodes x 1 GPU):
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set mpijobTrain.enabled=true --set mpijobTrain.image=$IMG \
+    --set mpijobTrain.backend=nccl --set mpijobTrain.nodeRole=gpu-g5 \
+    --set mpijobTrain.gpu.enabled=true --set mpijobTrain.gpu.count=1 | kubectl apply -f -
+Verify:
+  kubectl -n $NS get mpijob smollm-mpijob -w
+  kubectl -n $NS logs -f job/smollm-mpijob-launcher
+*/ -}}
+{{- if .Values.mpijobTrain.enabled }}
+{{- $v := .Values.mpijobTrain }}
+{{- if not $v.image }}{{ fail "mpijobTrain.image is required (the mpijob-hf-sample image URI)" }}{{- end }}
+{{- /* The efs-shared-claim PVC is rendered once by templates/efs-shared-pvc.yaml (shared
+     with torchrunTrain) so enabling both does not emit two copies of the same object. */ -}}
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: smollm-mpijob
+  namespace: {{ include "experiments.namespace" . }}
+spec:
+  slotsPerWorker: {{ $v.gpu.count | default 1 }}
+  # WaitForWorkersReady: the default AtStartup races the Workers' EFS-chown initContainer +
+  # sshd startup and burns the Launcher's backoff budget before the Workers are Ready
+  # (reproduced: Launcher BackoffLimitExceeded while Workers still Init:0/1).
+  launcherCreationPolicy: WaitForWorkersReady
+  runPolicy:
+    cleanPodPolicy: Running
+  sshAuthMountPath: /home/mpiuser/.ssh
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      restartPolicy: OnFailure
+      template:
+        metadata:
+          # CPU NodePool consolidates underutilized nodes after 30s and evicted a Worker
+          # mid-run in an earlier rehearsal; do-not-disrupt pins launcher and workers.
+          annotations:
+            karpenter.sh/do-not-disrupt: "true"
+        spec:
+          # Launcher runs only mpirun (~1 vCPU, no GPU) — pinned SEPARATELY to a CPU node.
+          # On the gloo backend launcherNodeRole == nodeRole == cpu (byte-for-byte the
+          # verified run); on nccl it stays on cpu so no extra accelerator node is burned.
+          nodeSelector:
+            node-role: {{ $v.launcherNodeRole }}
+          tolerations:
+            - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+          containers:
+            - name: mpi-launcher
+              image: {{ $v.image }}
+              securityContext: { runAsUser: 1000 }
+              command:
+                - mpirun
+              args:
+                - -np
+                - {{ mul 2 ($v.gpu.count | default 1 | int) | quote }}
+                - -x
+                - MPIJOB_MASTER_ADDR=smollm-mpijob-worker-0
+                - -x
+                - HF_HOME=/shared/hf-cache
+                - -x
+                - OUTPUT_DIR=/shared/output/mpijob-{{ $v.backend }}
+                # Non-interactive SSH does not inherit the image's Docker ENV PATH, so this
+                # is an absolute path, not a bare `python3`.
+                - /opt/conda/bin/python3
+                - /home/mpiuser/train_smollm.py
+              resources:
+                limits: { memory: 2Gi }
+                requests: { cpu: "1", memory: 2Gi }
+    Worker:
+      replicas: 2
+      restartPolicy: Never
+      template:
+        metadata:
+          annotations:
+            karpenter.sh/do-not-disrupt: "true"
+        spec:
+          nodeSelector:
+            node-role: {{ $v.nodeRole }}
+          tolerations:
+            - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+            {{- if $v.gpu.enabled }}
+            - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+            {{- end }}
+          # One worker per physical node — otherwise both could land on one node and the run
+          # would not exercise cross-node communication.
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels: { training.kubeflow.org/job-name: smollm-mpijob }
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: mpi-worker
+              image: {{ $v.image }}
+              securityContext: { runAsUser: 1000 }
+              # Explicit sshd command: mpi-operator v0.6.0's auto-injection is only
+              # ["/usr/sbin/sshd", "-De"] (no -f), which reads the stock sshd_config pointing
+              # at host keys never generated in this image ("no hostkeys available"). Passing
+              # -f /home/mpiuser/.sshd_config (like upstream examples/v2beta1/pi) makes it use
+              # the image's HostKey that setupSSHOnPod's ssh-auth mount provides.
+              command: [/usr/sbin/sshd]
+              args: [-De, -f, /home/mpiuser/.sshd_config]
+              resources:
+                limits:
+                  {{- if $v.gpu.enabled }}
+                  nvidia.com/gpu: {{ $v.gpu.count | quote }}
+                  {{- end }}
+                  memory: {{ $v.workerMemory }}
+                requests:
+                  cpu: {{ $v.workerCpu | quote }}
+                  memory: {{ $v.workerMemory }}
+              volumeMounts:
+                - { name: shared, mountPath: /shared }
+                - { name: shm, mountPath: /dev/shm }
+          # The EFS access point is owned by uid/gid 0; mpiuser is uid 1000. Both Worker
+          # replicas run this (mkdir/chown are idempotent).
+          initContainers:
+            - name: fix-perms
+              image: {{ $v.image }}
+              securityContext: { runAsUser: 0 }
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  mkdir -p /shared/hf-cache /shared/output/mpijob-{{ $v.backend }}
+                  # This chown assumes the EFS Access Point (efs.tf) grants root (uid/gid 0)
+                  # write access, which is true only if the AP has no posixUser/creationInfo
+                  # enforcing a different owner. If the AP DOES enforce a posixUser, NFS-side
+                  # squashing rejects this chown with EPERM regardless of in-container
+                  # privilege — no amount of retrying or extra capabilities fixes it from here.
+                  # Known occurrence: EPERM against a dynamically-provisioned EFS PVC whose AP
+                  # enforces posixUser (root init container's own error, not a Kubernetes
+                  # scheduling issue). Fail loudly instead of hanging on a silent write error:
+                  chown -R 1000:1000 /shared/hf-cache /shared/output/mpijob-{{ $v.backend }} || {
+                    echo "FATAL: chown EPERM — the EFS Access Point for this PVC's PV likely" >&2
+                    echo "enforces a posixUser that squashes root. Fix at the infra layer:" >&2
+                    echo "either point volumeName at a static PV backed by an AP with no" >&2
+                    echo "posixUser (root-writable), or reconfigure the AP's posixUser to" >&2
+                    echo "uid/gid 1000 so this chown is unnecessary. See efs.tf." >&2
+                    exit 1
+                  }
+              volumeMounts:
+                - { name: shared, mountPath: /shared }
+          volumes:
+            - { name: shared, persistentVolumeClaim: { claimName: efs-shared-claim } }
+            - { name: shm, emptyDir: { medium: Memory, sizeLimit: 4Gi } }
+{{- end }}

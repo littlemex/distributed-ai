@@ -1,0 +1,120 @@
+{{- /*
+neuron-ddp — two-node Neuron (Trainium/Inferentia) multi-node DDP over EFA.
+
+Renders a ConfigMap (allreduce_test.py, from files/), a server pod and a client pod on
+two different nodes (podAntiAffinity), each running sshd on port 2222. The Neuron
+counterpart of the NVIDIA/NCCL nccl-sshd workload.
+
+VERIFIED end-to-end on trn2.48xlarge x2 over EFA: single-node (32 logical cores) and
+two-node (world_size=64) torch-neuronx all-reduce, plus the aws-neuron-samples MNIST MLP
+DDP. libfabric selected the efa provider ("Opened fabric: efa-direct") and both hosts'
+EFA NIC RDMA-write counters incremented symmetrically.
+
+── Render + apply ────────────────────────────────────────────────────────────
+  helm template exp ./charts/experiments \
+    --set namespace=$NS --set neuronDdp.enabled=true --set neuronDdp.nodeRole=trn2 \
+    | kubectl apply -f -
+  # trn3 etc.: override neuronDevices/efaCount/lnc/nprocPerNode/image (see values.yaml
+  # preset table). ALWAYS confirm neuronDevices via `neuron-ls` and efaCount via
+  # `kubectl get node <n> -o jsonpath='{.status.allocatable.vpc\.amazonaws\.com/efa}'`.
+
+── After both pods are Running: distribute SSH keys ───────────────────────────
+  kubectl -n $NS exec neuron-server -- bash -lc \
+    '[ -f /root/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f /root/.ssh/id_ed25519 -q; \
+     cp /root/.ssh/id_ed25519.pub /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys'
+  PRIV=$(kubectl -n $NS exec neuron-server -- bash -lc 'base64 -w0 < /root/.ssh/id_ed25519')
+  PUB=$(kubectl -n $NS exec neuron-server -- bash -lc 'cat /root/.ssh/id_ed25519.pub')
+  kubectl -n $NS exec neuron-client -- bash -lc \
+    "echo '$PRIV' | base64 -d > /root/.ssh/id_ed25519 && chmod 600 /root/.ssh/id_ed25519; \
+     echo '$PUB' > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys; \
+     chown -R root:root /root/.ssh"   # owner mismatch makes sshd StrictModes reject the key
+
+── Run two-node DDP all-reduce (pods are hostNetwork; pod IP == node IP) ───────
+  kubectl -n $NS get pods -o wide     # read the IPs fresh (they change on re-provision)
+  SERVER_IP=<neuron-server node IP> ; CLIENT_IP=<neuron-client node IP>
+  kubectl -n $NS exec neuron-client -- bash -lc "cd /opt/test && \
+    torchrun --nnodes=2 --node-rank=1 --nproc-per-node={{ .Values.neuronDdp.nprocPerNode }} \
+      --master-addr=$SERVER_IP --master-port=29500 allreduce_test.py" &
+  kubectl -n $NS exec neuron-server -- bash -lc "cd /opt/test && \
+    torchrun --nnodes=2 --node-rank=0 --nproc-per-node={{ .Values.neuronDdp.nprocPerNode }} \
+      --master-addr=$SERVER_IP --master-port=29500 allreduce_test.py"
+  # Expect rank-0: "ALL 20 STEPS OK. world_size={{ mul 2 (.Values.neuronDdp.nprocPerNode | int) }}" then "DONE - SUCCESS".
+  # A real model: aws-neuron-samples torch-neuronx/training/mnist_mlp/train_torchrun.py.
+
+── Troubleshooting: nrt_init "ucode_lib_ll_create failed, error: 6" ────────────
+  Cause: the host kernel driver (aws-neuronx-dkms) and the in-container Neuron runtime
+  disagree on the zerocopy ioctl (NEURON_IOCTL_MEM_BUF_ZEROCOPY64) struct size — an ABI
+  mismatch; the driver returns EINVAL (aws-neuron-driver neuron_cdev.c enforces
+  _IOC_SIZE(cmd) == sizeof(arg)). Seen with host dkms 2.29.0.0 + runtime 2.32.31.0. This
+  is NOT a hugepages problem. Permanent fix: align the node AMI's aws-neuronx-dkms with
+  the DLC's Neuron SDK. Workaround: --set neuronDdp.disableZerocopy=true.
+*/ -}}
+{{- if .Values.neuronDdp.enabled }}
+{{- $v := .Values.neuronDdp }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neuron-ddp-test
+  namespace: {{ include "experiments.namespace" . }}
+data:
+  allreduce_test.py: |-
+{{ .Files.Get "files/allreduce_test.py" | indent 4 }}
+{{- range $role := (list "server" "client") }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: neuron-{{ $role }}
+  namespace: {{ include "experiments.namespace" $ }}
+  labels:
+    app: neuron-ddp
+    role: {{ $role }}
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  restartPolicy: Never
+  # Karpenter labels nodes node-role=<accelerator_pools key>; match the pool key.
+  nodeSelector:
+    node-role: {{ $v.nodeRole }}
+  # Spread the two pods onto different physical nodes so inter-node EFA is exercised.
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels: { app: neuron-ddp }
+          topologyKey: kubernetes.io/hostname
+  tolerations:
+    {{- include "experiments.neuronTolerations" $ | nindent 4 }}
+  containers:
+    - name: neuron
+      image: {{ $v.image }}
+      # sshd as PID-1 subordinate keeps the container alive; port 2222 avoids the node's sshd.
+      command:
+        {{- include "experiments.sshdCommand" $ | nindent 8 }}
+      # IPC_LOCK (+ unlimited memlock) is enough for Neuron/EFA RDMA registration;
+      # SYS_ADMIN / privileged are NOT needed (unlike the NCCL/gdrcopy GPU bench).
+      securityContext:
+        capabilities:
+          add: ["IPC_LOCK"]
+      env:
+        {{- include "experiments.neuronDdpEnv" $v | nindent 8 }}
+      resources:
+        limits:
+          aws.amazon.com/neuron: {{ $v.neuronDevices | quote }}   # whole Neuron devices
+          vpc.amazonaws.com/efa: {{ $v.efaCount | quote }}        # schedulable EFA (physical - card0)
+          hugepages-2Mi: {{ $v.hugepages }}
+          memory: {{ $v.memory }}
+        requests:
+          cpu: {{ $v.cpu | quote }}
+          memory: {{ $v.memory }}
+          hugepages-2Mi: {{ $v.hugepages }}
+      volumeMounts:
+        - { name: test,      mountPath: /opt/test }
+        - { name: shm,       mountPath: /dev/shm }
+        - { name: hugepages, mountPath: /dev/hugepages }
+  volumes:
+    - { name: test,      configMap: { name: neuron-ddp-test } }
+    - { name: shm,       emptyDir: { medium: Memory, sizeLimit: {{ $v.shmSize }} } }
+    - { name: hugepages, emptyDir: { medium: HugePages } }
+{{- end }}
+{{- end }}

@@ -1,0 +1,204 @@
+# values.yaml — distributed-ai EKS experiment workloads.
+#
+# Every workload is OFF by default. Turn on exactly the one you want and render it:
+#
+#   helm template exp ./charts/experiments \
+#     --set namespace=my-ns --set neuronDdp.enabled=true \
+#     | kubectl apply -f -
+#
+# Defaults reflect values VERIFIED on this cluster (trn2.48xlarge x2, g5, p5en);
+# override per run with --set. Nothing here is region- or account-specific except the
+# example image URIs, which you should replace with your own ECR / pinned tags.
+
+# Namespace every rendered object is placed in. Create it first: kubectl create ns <x>
+# (this chart does not create the Namespace itself, so the same render can target a
+# pre-existing one). Leave "" (the default) to use whatever `-n <x>` you pass to
+# `helm template`; set --set namespace=<x> only if you want to override that.
+# IMPORTANT: do not default this to a literal namespace name (e.g. "default") — a non-empty
+# value here always wins over `-n`, so `helm template exp . -n foo` would silently render
+# into the wrong namespace with no error.
+namespace: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1) neuronProbe — single-node Neuron (Trainium/Inferentia) sanity probe.
+#    Confirms the pod lands on a Neuron node, the device plugin advertises
+#    aws.amazon.com/neuron, and neuron-ls enumerates the devices.
+# ─────────────────────────────────────────────────────────────────────────────
+neuronProbe:
+  enabled: false
+  # Karpenter labels each node node-role=<accelerator_pools key>; set this to that key.
+  nodeRole: trn2
+  # DLC with neuron-ls / aws-neuronx-tools. Confirm tag/region with:
+  #   aws ecr describe-images --registry-id 763104351884 \
+  #     --repository-name pytorch-inference-neuronx --region <region>
+  image: 763104351884.dkr.ecr.us-east-2.amazonaws.com/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04
+  # Minimal claim: one device + one EFA is enough to prove scheduling + enumeration.
+  # (Do NOT request hugepages on a probe that triggers Karpenter provisioning — Karpenter
+  # does not size new nodes against hugepages and reports "no instance type has enough
+  # resources", so the NodeClaim is never created. Verified on trn2.48xlarge.)
+  neuronDevices: 1
+  efaCount: 1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2) neuronDdp — two-node Neuron multi-node DDP over EFA (torch-neuronx).
+#    Renders a ConfigMap (allreduce_test.py), a server pod and a client pod on two
+#    different nodes (podAntiAffinity), each with persistent sshd on port 2222.
+#    VERIFIED on trn2.48xlarge x2: single-node (32 logical cores) and two-node
+#    (world_size=64) all-reduce, plus the aws-neuron-samples MNIST MLP DDP.
+# ─────────────────────────────────────────────────────────────────────────────
+neuronDdp:
+  enabled: false
+  nodeRole: trn2
+  image: 763104351884.dkr.ecr.us-east-2.amazonaws.com/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04
+  # Per-instance topology. CONFIRM on a live node — do not trust the spec sheet:
+  #   neuronDevices: neuron-ls row count (aws.amazon.com/neuron the pod requests)
+  #   efaCount     : kubectl get node <n> -o jsonpath='{.status.allocatable.vpc\.amazonaws\.com/efa}'
+  #                  (schedulable EFA = physical cards - 1; card 0 carries the node IP)
+  #   nprocPerNode : (devices x physical cores/device) / lnc.
+  #                  trn2 LNC=2: 16 x 4 / 2 = 32. Change lnc and nprocPerNode together.
+  #   type            neuronDevices  efaCount  lnc  nprocPerNode   status
+  #   trn2.48xlarge   16             15        2    32             verified
+  #   trn1.32xlarge   16             8         1    32             untested
+  #   inf2.48xlarge   12             1         1    24             untested
+  neuronDevices: 16
+  efaCount: 15
+  lnc: 2
+  nprocPerNode: 32
+  # hugepages-2Mi request. 32Gi verified for trn2 2-node DDP; true minimum unmeasured.
+  # The Neuron runtime uses 2Mi hugepages for DMA / EFA. The node AMI must reserve them
+  # (vm.nr_hugepages) or the pod stays Pending on hugepages.
+  hugepages: 32Gi
+  memory: 384Gi
+  cpu: "40"
+  shmSize: 32Gi
+  # EFA libfabric env. Leave on; these make NCCL/Neuron pick EFA and be fork-safe.
+  efaEnv: true
+  # Print libfabric provider-selection logs (proves "Opened fabric: efa-direct").
+  fiLogInfo: false
+  # zerocopy ABI-skew workaround. Enable ONLY if nrt_init dies with
+  # "ucode_lib_ll_create failed, error: 6" — the host aws-neuronx-dkms and the
+  # in-container Neuron runtime disagree on the zerocopy ioctl struct size. The real
+  # fix is to align the node AMI's driver with the DLC's Neuron SDK; this just bypasses
+  # the fast path. Off by default so it does not silently hide version skew.
+  disableZerocopy: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3) ncclProbe — single-node NVIDIA/CUDA sanity probe (opens a CUDA context).
+# ─────────────────────────────────────────────────────────────────────────────
+ncclProbe:
+  enabled: false
+  # GPU probe pins by the NVIDIA product label (set by the GPU operator / node), not
+  # node-role, to match a specific GPU SKU. THIS DEFAULT IS UNTESTED ON THIS MODULE: this
+  # chart's own verified GPU run was g5.24xlarge (A10G), whose product label is
+  # "NVIDIA-A10G" — not B300. B300 was carried over from another cluster's reference and
+  # left here as an example of the label FORMAT, not a working default. Read the real
+  # value from a live node before relying on it:
+  #   kubectl get node <n> -o jsonpath='{.metadata.labels.nvidia\.com/gpu\.product}'
+  # A selector mismatch does not error — the pod just stays Pending forever.
+  gpuProduct: NVIDIA-B300-SXM6-AC
+  image: public.ecr.aws/hpc-cloud/nccl-tests:latest
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4) ncclSshd — two-node NVIDIA NCCL all_reduce bench over EFA (sshd + mpirun).
+#    UNTESTED on this module (no B300/p5en-class 2-node capacity available at review time;
+#    this cluster's verified GPU run was single-node g5.24xlarge/A10G, no EFA). Defaults
+#    below (gpuProduct/gpuCount/efaCount/hugepages) are carried over from a B300 reference
+#    and are a starting point, not a confirmed-working configuration.
+# ─────────────────────────────────────────────────────────────────────────────
+ncclSshd:
+  enabled: false
+  gpuProduct: NVIDIA-B300-SXM6-AC
+  image: public.ecr.aws/hpc-cloud/nccl-tests:latest
+  gpuCount: 8       # GPUs per node (p5en/B300 = 8)
+  efaCount: 16      # EFA ENIs per node (full multi-card count for the NCCL bench)
+  hugepages: 8Gi
+  memory: 128Gi
+  cpu: "16"
+  shmSize: 16Gi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5) torchrunTrain — single-node HF Trainer fine-tune via `torchrun` (batch/v1 Job).
+#    Backend gloo (CPU) or nccl (GPU). Requires efs_enabled=true and the mpijob image.
+# ─────────────────────────────────────────────────────────────────────────────
+torchrunTrain:
+  enabled: false
+  # "gloo" or "nccl" — LABEL ONLY. This value is not read by torch.distributed; it only
+  # names the OUTPUT_DIR subfolder (/shared/output/torchrun-<backend>) so gloo/nccl runs
+  # don't clobber each other's checkpoints. The actual backend train_smollm.py picks is
+  # determined by whether a GPU is visible (gpu.enabled below + the pod's nvidia.com/gpu
+  # request), not by this string. Set it to describe what you're actually running; setting
+  # backend=nccl without gpu.enabled=true does NOT make it use nccl.
+  backend: gloo
+  nodeRole: cpu
+  # torchrun --nproc_per_node. MUST equal the GPU count on the nccl backend (one proc
+  # per GPU); on gloo it is just the CPU process count (2 is a fine default).
+  nprocPerNode: 2
+  gpu:
+    enabled: false     # set true for the nccl backend
+    count: 1           # nvidia.com/gpu per pod; keep == nprocPerNode on GPU
+  image: ""            # REQUIRED: <account>.dkr.ecr.<region>.amazonaws.com/mpijob-hf-sample:v1
+  memory: 16Gi
+  cpu: "4"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6) mpijobTrain — two-node HF Trainer fine-tune via kubeflow.org/v2beta1 MPIJob.
+#    Launcher always on a CPU node; Workers on nodeRole (cpu for gloo, an accelerator
+#    pool for nccl). Requires mpi-operator (always installed) + efs_enabled=true.
+# ─────────────────────────────────────────────────────────────────────────────
+mpijobTrain:
+  enabled: false
+  # "gloo" or "nccl" — LABEL ONLY, same caveat as torchrunTrain.backend: this only names the
+  # OUTPUT_DIR subfolder (/shared/output/mpijob-<backend>). The real backend is whatever
+  # device train_smollm.py finds visible, driven by gpu.enabled + the Worker's nvidia.com/gpu
+  # request below, not by this string.
+  backend: gloo
+  nodeRole: cpu          # Worker pool (cpu for gloo; e.g. gpu-g5 for nccl)
+  launcherNodeRole: cpu  # Launcher is GPU-less; keep on a cheap CPU node in both backends
+  gpu:
+    enabled: false       # set true for the nccl backend
+    count: 1             # nvidia.com/gpu per Worker; keep == slotsPerWorker (=1 here)
+  image: ""              # REQUIRED: the mpijob-hf-sample image
+  workerMemory: 16Gi
+  workerCpu: "4"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7) gpuServingVllm — single-GPU vLLM OpenAI-compatible serving Deployment + Service.
+# ─────────────────────────────────────────────────────────────────────────────
+gpuServingVllm:
+  enabled: false
+  nodeRole: gpu-g5
+  model: NousResearch/Meta-Llama-3-8B-Instruct
+  image: vllm/vllm-openai:latest
+  gpuCount: 1
+  memory: 48Gi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8) neuronServingVllm — Neuron vLLM serving Deployment + Service (whole trn2 node).
+# ─────────────────────────────────────────────────────────────────────────────
+neuronServingVllm:
+  enabled: false
+  nodeRole: trn2
+  model: NousResearch/Meta-Llama-3-8B-Instruct
+  image: 763104351884.dkr.ecr.us-east-2.amazonaws.com/huggingface-vllm-inference-neuronx:0.11.0-optimum0.4.5-neuronx-py310-sdk2.26.1-ubuntu22.04
+  neuronDevices: 16
+  # tensor-parallel-size = logical NeuronCores. trn2: 16 devices x LNC=2 = 32.
+  tpSize: 32
+  # This is single-node tensor-parallel serving: all NeuronCores talk over on-chip NeuronLink,
+  # not EFA (EFA is for INTER-node traffic). Do not copy neuronDdp's efaCount here — that
+  # pool's own comment says schedulable EFA = physical cards - 1 (15 on trn2.48xlarge); this
+  # workload requesting 16 would make it permanently Unschedulable against that same
+  # allocatable, for a resource it does not even use. Bump above 0 only if you multi-node this
+  # (untested — no CB available to verify at review time).
+  efaCount: 0
+  memory: 512Gi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9) vllmRay — two-node tensor-parallel vLLM over a Ray head+worker (GPU).
+# ─────────────────────────────────────────────────────────────────────────────
+vllmRay:
+  enabled: false
+  nodeRole: gpu-g5
+  model: NousResearch/Meta-Llama-3-8B-Instruct
+  image: vllm/vllm-openai:v0.6.3.post1
+  gpuCount: 1
+  memory: 48Gi

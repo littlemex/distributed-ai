@@ -1,0 +1,55 @@
+{{- /*
+neuron-probe — single-node Neuron (Trainium/Inferentia) sanity probe.
+
+Confirms that: (1) the pod lands on a Neuron node (the accelerator pool named by
+.Values.neuronProbe.nodeRole — Karpenter labels nodes node-role=<pool key>), (2) the
+Neuron device plugin advertises aws.amazon.com/neuron, (3) neuron-ls enumerates the
+devices. Generation-agnostic: works for any Neuron pool by setting nodeRole/image.
+
+Render + apply:
+  helm template exp ./charts/experiments \
+    --set namespace=$NS --set neuronProbe.enabled=true --set neuronProbe.nodeRole=trn2 \
+    | kubectl apply -f -
+Verify:
+  kubectl -n $NS exec neuron-probe -- neuron-ls
+  kubectl -n $NS exec neuron-probe -- /opt/amazon/efa/bin/fi_info -p efa -t FI_EP_RDM | grep -c provider
+*/ -}}
+{{- if .Values.neuronProbe.enabled }}
+{{- $v := .Values.neuronProbe }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: neuron-probe
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: neuron-probe
+spec:
+  restartPolicy: Never
+  # Karpenter labels nodes node-role=<accelerator_pools key> (karpenter-resources.tf:
+  # "node-role" = each.key), so this must equal the pool key (e.g. "trn2"), NOT
+  # "<pool>-serving".
+  nodeSelector:
+    node-role: {{ $v.nodeRole }}
+  tolerations:
+    {{- include "experiments.neuronTolerations" . | nindent 4 }}
+  containers:
+    - name: probe
+      image: {{ $v.image }}
+      command: ["sleep", "3600"]
+      # No hugepages request here on purpose: Karpenter does not size a new node against
+      # hugepages, so requesting them on a pod that triggers provisioning makes Karpenter
+      # report "no instance type has enough resources" and never create the NodeClaim.
+      resources:
+        limits:
+          aws.amazon.com/neuron: {{ $v.neuronDevices | quote }}
+          vpc.amazonaws.com/efa: {{ $v.efaCount | quote }}
+          memory: 16Gi
+        requests:
+          cpu: "4"
+          memory: 16Gi
+      volumeMounts:
+        - { name: shm, mountPath: /dev/shm }
+  volumes:
+    - name: shm
+      emptyDir: { medium: Memory, sizeLimit: 8Gi }
+{{- end }}
