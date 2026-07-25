@@ -1,0 +1,97 @@
+{{- /*
+torchrun-train — single-node HF Trainer fine-tune of SmolLM2-135M via `torchrun`
+(batch/v1 Job, zero operator). Backend gloo (CPU) or nccl (GPU). Reuses the mpijob-image
+(train_smollm.py baked in) so one image covers both this and mpijob-train.
+
+Requires efs_enabled=true (static PV efs-neuron-workspace) and torchrunTrain.image set.
+
+GPU note: nprocPerNode MUST equal gpu.count — torchrun spawns one proc per nproc and each
+grabs one GPU; a mismatch makes procs contend for a GPU with no error.
+
+Render + apply (CPU):
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set torchrunTrain.enabled=true --set torchrunTrain.image=$IMG | kubectl apply -f -
+Render + apply (GPU, 1 g5 GPU):
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set torchrunTrain.enabled=true --set torchrunTrain.image=$IMG \
+    --set torchrunTrain.backend=nccl --set torchrunTrain.nodeRole=gpu-g5 \
+    --set torchrunTrain.nprocPerNode=1 \
+    --set torchrunTrain.gpu.enabled=true --set torchrunTrain.gpu.count=1 | kubectl apply -f -
+Verify:
+  kubectl -n $NS logs -f job/smollm-torchrun
+*/ -}}
+{{- if .Values.torchrunTrain.enabled }}
+{{- $v := .Values.torchrunTrain }}
+{{- if not $v.image }}{{ fail "torchrunTrain.image is required (the mpijob-hf-sample image URI)" }}{{- end }}
+{{- /* The efs-shared-claim PVC is rendered once by templates/efs-shared-pvc.yaml (shared
+     with mpijobTrain) so enabling both does not emit two copies of the same object. */ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smollm-torchrun
+  namespace: {{ include "experiments.namespace" . }}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: { app: smollm-torchrun }
+      # The CPU NodePool consolidates underutilized nodes after 30s and can evict this Pod
+      # mid-training; do-not-disrupt pins it. Harmless on the GPU pools (WhenEmpty).
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        node-role: {{ $v.nodeRole }}
+      tolerations:
+        - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+        {{- if $v.gpu.enabled }}
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        {{- end }}
+      # The EFS access point (efs.tf) is owned by uid/gid 0; the image's mpiuser is uid 1000.
+      # A root initContainer hands over a per-sample subdirectory once.
+      initContainers:
+        - name: fix-perms
+          image: {{ $v.image }}
+          securityContext: { runAsUser: 0 }
+          command:
+            - /bin/bash
+            - -c
+            - |
+              mkdir -p /shared/hf-cache /shared/output/torchrun-{{ $v.backend }}
+              # See the identical chown in mpijob-train.yaml for why this can EPERM: it
+              # depends on the EFS Access Point's posixUser (efs.tf), not on this container.
+              chown -R 1000:1000 /shared/hf-cache /shared/output/torchrun-{{ $v.backend }} || {
+                echo "FATAL: chown EPERM — the EFS Access Point likely enforces a posixUser" >&2
+                echo "that squashes root. Fix at the infra layer (see efs.tf), not here." >&2
+                exit 1
+              }
+          volumeMounts:
+            - { name: shared, mountPath: /shared }
+      containers:
+        - name: train
+          image: {{ $v.image }}
+          command:
+            - torchrun
+            - --standalone
+            - --nproc_per_node={{ $v.nprocPerNode }}
+            - /home/mpiuser/train_smollm.py
+          env:
+            - { name: HF_HOME, value: /shared/hf-cache }
+            - { name: OUTPUT_DIR, value: /shared/output/torchrun-{{ $v.backend }} }
+          resources:
+            limits:
+              {{- if $v.gpu.enabled }}
+              nvidia.com/gpu: {{ $v.gpu.count | quote }}
+              {{- end }}
+              memory: {{ $v.memory }}
+            requests:
+              cpu: {{ $v.cpu | quote }}
+              memory: {{ $v.memory }}
+          volumeMounts:
+            - { name: shared, mountPath: /shared }
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - { name: shared, persistentVolumeClaim: { claimName: efs-shared-claim } }
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: 4Gi } }
+{{- end }}

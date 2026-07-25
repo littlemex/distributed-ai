@@ -1,0 +1,20 @@
+apiVersion: v2
+name: experiments
+description: |
+  Hand-run experiment workloads for the distributed-ai EKS reference cluster:
+  single-/two-node accelerator sanity probes, NCCL / Neuron collective benches,
+  torchrun & MPIJob training samples, and vLLM serving (GPU and Neuron). Each
+  workload is toggled on independently (`--set <workload>.enabled=true`) and is
+  meant to be applied by hand with `helm template ... | kubectl apply -f -`.
+
+  This chart replaces the earlier manifests/*.yaml.tpl sed-substitution templates:
+  those were not valid YAML on disk (no schema check / dry-run possible before
+  substitution) and could not express the GPU-vs-CPU conditional blocks cleanly.
+  Helm was chosen over Kustomize because several workloads need conditional
+  resource/toleration blocks and per-run scalar overrides, and because the module
+  already depends on Helm (the Terraform helm provider installs Karpenter, the GPU
+  operator, the ALB controller, and the Neuron device plugin).
+type: application
+version: 0.1.0
+# appVersion tracks nothing external; these are cluster-local sample workloads.
+appVersion: "0.1.0"

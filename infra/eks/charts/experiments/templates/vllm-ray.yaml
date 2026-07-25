@@ -1,0 +1,146 @@
+{{- /*
+vllm-ray — multi-node distributed vLLM inference across TWO GPU nodes via Ray + pipeline
+parallelism (PP). Proves a single model can be sharded across separate nodes. EFA is NOT
+required — cross-node traffic is Ray/RPC + pipeline activations over TCP.
+
+Topology: vllm-ray-head (Ray head + vLLM API :8000) on node A, vllm-ray-worker on node B;
+podAntiAffinity forces different nodes. vLLM runs --pipeline-parallel-size=2.
+
+Prereq: a GPU accelerator pool (device_plugin="nvidia").
+
+Render + apply:
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set vllmRay.enabled=true --set vllmRay.nodeRole=gpu-g5 \
+    --set vllmRay.model=Qwen/Qwen2.5-7B-Instruct | kubectl apply -f -
+Verify:
+  kubectl -n $NS rollout status deploy/vllm-ray-head --timeout=20m
+  kubectl -n $NS exec deploy/vllm-ray-head -- ray status   # 2 nodes / 2 GPUs
+
+Image note: pinned to vllm/vllm-openai:v0.6.3.post1 (ships ray 2.37.0); :latest dropped the
+ray dependency that multi-node vLLM needs.
+*/ -}}
+{{- if .Values.vllmRay.enabled }}
+{{- $v := .Values.vllmRay }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-ray-scripts
+  namespace: {{ include "experiments.namespace" . }}
+data:
+  # Head: start Ray head (GCS on 6379), wait for all nodes to join, then launch vLLM.
+  # --node-ip-address=$POD_IP binds GCS to the routable Pod IP so the worker's Service DNS
+  # resolves to a reachable endpoint.
+  head.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    ray start --head --node-ip-address="${POD_IP}" --port=6379 \
+      --dashboard-host=0.0.0.0 --num-gpus={{ $v.gpuCount }}
+    echo "[head] waiting for ${EXPECTED_NODES} Ray nodes to join..."
+    for i in $(seq 1 180); do
+      alive=$(python3 -c "import ray; ray.init(address='auto'); print(sum(1 for x in ray.nodes() if x['Alive']))" 2>/dev/null || echo 0)
+      echo "[head] alive Ray nodes: ${alive}/${EXPECTED_NODES}"
+      [ "${alive}" -ge "${EXPECTED_NODES}" ] && break
+      sleep 5
+    done
+    echo "[head] starting vLLM (PP=${EXPECTED_NODES}, TP={{ $v.gpuCount }}) across the Ray cluster"
+    exec vllm serve "${MODEL}" \
+      --tensor-parallel-size={{ $v.gpuCount }} \
+      --pipeline-parallel-size="${EXPECTED_NODES}" \
+      --distributed-executor-backend=ray \
+      --max-model-len=4096 \
+      --gpu-memory-utilization=0.90 \
+      --port=8000
+  # Worker: join the head's Ray cluster and block. Retry until GCS is listening (startup race).
+  worker.sh: |
+    #!/bin/bash
+    set -uo pipefail
+    echo "[worker] joining Ray head at ${HEAD_ADDR}:6379 (node-ip ${POD_IP})"
+    until ray start --address="${HEAD_ADDR}:6379" --node-ip-address="${POD_IP}" --num-gpus={{ $v.gpuCount }}; do
+      echo "[worker] GCS not reachable yet; retrying in 5s..."
+      sleep 5
+    done
+    echo "[worker] joined Ray cluster; blocking."
+    sleep infinity
+{{- range $role := (list "head" "worker") }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-ray-{{ $role }}
+  namespace: {{ include "experiments.namespace" $ }}
+  labels: { app: vllm-ray, role: {{ $role }} }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: vllm-ray, role: {{ $role }} }
+  template:
+    metadata:
+      labels: { app: vllm-ray, role: {{ $role }} }
+    spec:
+      nodeSelector: { node-role: {{ $v.nodeRole }} }
+      tolerations:
+        - { key: nvidia.com/gpu,        operator: Exists, effect: NoSchedule }
+        - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+        - { key: capacity-reservation,  operator: Exists, effect: NoSchedule }
+      # Force head and worker onto different nodes.
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: { matchLabels: { app: vllm-ray } }
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: vllm
+          image: {{ $v.image }}
+          command: ["/bin/bash", "/scripts/{{ $role }}.sh"]
+          env:
+            {{- if eq $role "head" }}
+            - { name: MODEL, value: {{ $v.model | quote }} }
+            - { name: EXPECTED_NODES, value: "2" }   # head + 1 worker = pipeline-parallel-size
+            {{- else }}
+            - { name: HEAD_ADDR, value: "vllm-ray-head.{{ $.Values.namespace | default $.Release.Namespace }}.svc.cluster.local" }
+            {{- end }}
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+          {{- if eq $role "head" }}
+          ports:
+            - { name: http, containerPort: 8000 }
+            - { name: ray,  containerPort: 6379 }
+          # startupProbe absorbs the long Ray-join + model-load window; readiness gates traffic.
+          startupProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 15
+            failureThreshold: 120   # up to ~30 min for join + model load
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 15
+            failureThreshold: 4
+          {{- end }}
+          resources:
+            limits: { nvidia.com/gpu: {{ $v.gpuCount | quote }}, memory: {{ $v.memory }} }
+            requests: { cpu: "8", memory: {{ $v.memory }} }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - { name: scripts, configMap: { name: vllm-ray-scripts } }
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: 8Gi } }
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-ray-head
+  namespace: {{ include "experiments.namespace" . }}
+  labels: { app: vllm-ray, role: head }
+spec:
+  # Headless so the worker resolves the head pod directly for Ray GCS traffic.
+  clusterIP: None
+  # CRITICAL: publish the head's DNS record BEFORE it passes readiness. The head becomes
+  # ready only once vLLM is up, but vLLM waits for the worker to join, and the worker
+  # resolves the head via this Service — a deadlock unless not-ready addresses are published.
+  publishNotReadyAddresses: true
+  selector: { app: vllm-ray, role: head }
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }
+    - { name: ray,  port: 6379, targetPort: 6379 }
+{{- end }}

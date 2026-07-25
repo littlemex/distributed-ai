@@ -1,0 +1,91 @@
+{{- /*
+gpu-serving-vllm — vLLM OpenAI-compatible server on the NVIDIA GPU pool. Verified on
+g6e.12xlarge (L40S x4) with a small ungated model (no HF token needed).
+
+Prereqs: an accelerator pool with device_plugin="nvidia"; the GPU operator (gpu-addons.tf).
+
+Render + apply:
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set gpuServingVllm.enabled=true --set gpuServingVllm.nodeRole=gpu-g5 \
+    --set gpuServingVllm.model=Qwen/Qwen2.5-0.5B-Instruct | kubectl apply -f -
+Verify:
+  kubectl -n $NS rollout status deploy/gpu-vllm --timeout=15m
+  kubectl -n $NS port-forward svc/gpu-vllm 8000:8000 &
+  curl localhost:8000/v1/models
+*/ -}}
+{{- if .Values.gpuServingVllm.enabled }}
+{{- $v := .Values.gpuServingVllm }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-vllm
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: gpu-vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gpu-vllm
+  template:
+    metadata:
+      labels:
+        app: gpu-vllm
+    spec:
+      # Land on the GPU accelerator pool (Karpenter node-role=<pool key>).
+      nodeSelector:
+        node-role: {{ $v.nodeRole }}
+      tolerations:
+        - { key: nvidia.com/gpu,        operator: Exists, effect: NoSchedule }
+        - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+        - { key: capacity-reservation,  operator: Exists, effect: NoSchedule }
+      containers:
+        - name: vllm
+          image: {{ $v.image }}
+          args:
+            - --model={{ $v.model }}
+            - --tensor-parallel-size={{ $v.gpuCount }}
+            - --max-model-len=4096
+            - --gpu-memory-utilization=0.85
+            - --port=8000
+          env:
+            # HF token for gated models (optional; ungated models need no token).
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+                  optional: true
+          ports:
+            - { name: http, containerPort: 8000 }
+          resources:
+            limits:
+              nvidia.com/gpu: {{ $v.gpuCount | quote }}
+              memory: {{ $v.memory }}
+            requests:
+              cpu: "8"
+              memory: {{ $v.memory }}
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 90
+          volumeMounts:
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 8Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-vllm
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: gpu-vllm
+spec:
+  selector:
+    app: gpu-vllm
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }
+{{- end }}

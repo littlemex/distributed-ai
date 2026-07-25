@@ -1,0 +1,67 @@
+{{- /*
+nccl-probe — single-node NVIDIA/EFA sanity probe.
+
+Confirms: (1) the pod lands on a GPU node with an EFA ENI, (2) /dev/gdrdrv is present
+(gdrcopy-loader DaemonSet Running), (3) fi_info -p efa returns provider entries.
+
+Render + apply:
+  helm template exp ./charts/experiments \
+    --set namespace=$NS --set ncclProbe.enabled=true | kubectl apply -f -
+Verify:
+  kubectl -n $NS exec nccl-probe -- fi_info -p efa -t FI_EP_RDM   # B300: 32 entries (16 NIC x efa/efa-direct)
+  kubectl -n $NS exec nccl-probe -- ls -l /dev/gdrdrv
+*/ -}}
+{{- if .Values.ncclProbe.enabled }}
+{{- $v := .Values.ncclProbe }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nccl-probe
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: nccl-probe
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  restartPolicy: Never
+  # Pin to a specific GPU SKU via the NVIDIA product label. Swap for a hostname
+  # (kubernetes.io/hostname: ip-...) to target one node.
+  nodeSelector:
+    nvidia.com/gpu.product: {{ $v.gpuProduct }}
+  # capacity-reservation value rotates per CB, so Exists is mandatory.
+  tolerations:
+    - { key: nvidia.com/gpu,                             operator: Exists, effect: NoSchedule }
+    - { key: vpc.amazonaws.com/efa,                      operator: Exists, effect: NoSchedule }
+    - { key: workload,                                   operator: Equal,  value: bench, effect: NoSchedule }
+    - { key: capacity-reservation,                       operator: Exists, effect: NoSchedule }
+    - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal,  value: Schedulable, effect: NoSchedule }
+  containers:
+    - name: probe
+      image: {{ $v.image }}
+      command: ["sleep", "3600"]
+      securityContext:
+        privileged: true   # Required for EFA and /dev/gdrdrv access.
+      # NCCL_SOCKET_IFNAME uses the exclusion prefix "^" to avoid TCP fallback (~28x slower).
+      env:
+        - { name: FI_PROVIDER,            value: "efa" }
+        - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
+        - { name: FI_EFA_FORK_SAFE,       value: "1" }
+        - { name: NCCL_SOCKET_IFNAME,     value: "^lo,docker,veth" }
+        - { name: NCCL_DEBUG,             value: "WARN" }
+      resources:
+        limits:
+          nvidia.com/gpu:        "1"    # Minimal GPU claim; enough to open a CUDA context.
+          vpc.amazonaws.com/efa: "1"    # One EFA ENI; sufficient for the fi_info probe.
+          hugepages-2Mi:         2Gi    # Required when requesting EFA (RDMA registration).
+          memory:                16Gi
+        requests:
+          cpu:           "4"
+          memory:        16Gi
+          hugepages-2Mi: 2Gi
+      volumeMounts:
+        - { name: gdrdrv, mountPath: /dev/gdrdrv }
+        - { name: shm,    mountPath: /dev/shm }
+  volumes:
+    - { name: gdrdrv, hostPath: { path: /dev/gdrdrv, type: CharDevice } }
+    - { name: shm,    emptyDir: { medium: Memory, sizeLimit: 8Gi } }
+{{- end }}

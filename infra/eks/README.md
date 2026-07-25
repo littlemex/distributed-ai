@@ -261,11 +261,12 @@ Neuron AL2023 EKS AMI (the driver ships in that AMI; only the device plugin is
 installed). Pods request whole devices via `aws.amazon.com/neuron: "<n>"`.
 For tensor-parallel serving across many chips, set
 `neuron_enable_scheduler = true` so the Neuron scheduler extension allocates
-contiguous device IDs. See `manifests/neuron-serving-vllm.yaml.tpl`.
+contiguous device IDs. See `charts/experiments` (`neuronServingVllm` workload).
 
-> Multi-node Neuron over EFA is wired (the EFA device plugin tolerates the
-> Neuron taint) but has not been hardware-verified in this module — see
-> [Known limitations](#known-limitations).
+> Multi-node Neuron over EFA is hardware-verified in this module (trn2.48xlarge
+> x2, world_size=64 all-reduce + MNIST MLP DDP) — see
+> [Known limitations](#known-limitations) and `charts/experiments`
+> (`neuronDdp` workload) for the reproducible pod spec and runbook.
 
 Two components commonly paired with GPU/Neuron inference are deliberately
 **not** included — they are workload-layer concerns, not cluster infra:
@@ -380,8 +381,13 @@ deletes FSx/EFS and their contents (regenerable caches) — see below.
 
 ## Known limitations
 
-- **Multi-node Neuron over EFA is untested** on this module (single-node Neuron
-  and multi-node GPU are verified).
+- **Multi-node Neuron over EFA is verified**: trn2.48xlarge x2 (Capacity Block),
+  world_size=64 torch-neuronx all-reduce and the aws-neuron-samples MNIST MLP
+  DDP both completed, with EFA confirmed via libfabric provider selection
+  ("Opened fabric: efa-direct") and symmetric RDMA-write counter increases on
+  both hosts. See `charts/experiments` (`neuronDdp` workload) for the
+  reproducible pod spec, SSH/torchrun runbook, and a known driver/runtime ABI
+  mismatch (`NEURON_RT_DBG_ZEROCOPY`) hit during verification.
 - **Kubernetes-provider first-apply flake:** NodePool/EC2NodeClass occasionally
   need a second `apply` if the Karpenter CRDs are not yet Established.
 - **CRD upgrades:** the `karpenter-crd` chart is installed separately so CRDs

@@ -1,0 +1,107 @@
+{{- /*
+neuron-serving-vllm — vLLM OpenAI-compatible server on the Neuron (Trainium) pool.
+Requests all Neuron devices on the node (one whole trn2). Counterpart to gpu-serving-vllm.
+
+tensor-parallel-size = neuronServingVllm.tpSize (default 32 for trn2 = 16 devices x LNC=2).
+Override for other generations.
+
+Requires a PVC `neuron-cache-pvc` for compiled-NEFF persistence (create separately, e.g.
+from the EFS RWX StorageClass) and, for gated models, an `hf-token` secret.
+
+Render + apply:
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set neuronServingVllm.enabled=true --set neuronServingVllm.nodeRole=trn2 \
+    --set neuronServingVllm.model=$MODEL | kubectl apply -f -
+Verify:
+  kubectl -n $NS rollout status deploy/neuron-vllm --timeout=30m   # first run compiles NEFF
+*/ -}}
+{{- if .Values.neuronServingVllm.enabled }}
+{{- $v := .Values.neuronServingVllm }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neuron-vllm
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: neuron-vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neuron-vllm
+  template:
+    metadata:
+      labels:
+        app: neuron-vllm
+    spec:
+      # Land on the Neuron accelerator pool (Karpenter node-role=<pool key>, NOT <pool>-serving).
+      nodeSelector:
+        node-role: {{ $v.nodeRole }}
+      tolerations:
+        - { key: aws.amazon.com/neuron,  operator: Exists, effect: NoSchedule }
+        - { key: vpc.amazonaws.com/efa,  operator: Exists, effect: NoSchedule }
+        - { key: capacity-reservation,   operator: Exists, effect: NoSchedule }
+      containers:
+        - name: vllm
+          image: {{ $v.image }}
+          command: ["python", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --model={{ $v.model }}
+            - --tensor-parallel-size={{ $v.tpSize }}   # trn2: 16 devices x LNC=2 -> 32 logical cores
+            - --max-num-seqs=4
+            - --max-model-len=4096
+            - --device=neuron
+            - --port=8000
+          env:
+            - { name: VLLM_NEURON_FRAMEWORK, value: "neuronx-distributed-inference" }
+            - { name: NEURON_COMPILED_ARTIFACTS, value: "/mnt/neuron-cache" }
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+                  optional: true
+          ports:
+            - { name: http, containerPort: 8000 }
+          # No hugepages request: Karpenter does not size new nodes against hugepages, so
+          # requesting it on a provisioning-triggering pod makes it skip the NodeClaim.
+          resources:
+            limits:
+              aws.amazon.com/neuron: {{ $v.neuronDevices | quote }}
+              {{- if gt ($v.efaCount | int) 0 }}
+              vpc.amazonaws.com/efa: {{ $v.efaCount | quote }}
+              {{- end }}
+              memory: {{ $v.memory }}
+            requests:
+              aws.amazon.com/neuron: {{ $v.neuronDevices | quote }}
+              cpu: "48"
+              memory: {{ $v.memory }}
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            # First run compiles the model to NEFF (many minutes); start late.
+            initialDelaySeconds: 300
+            periodSeconds: 15
+            failureThreshold: 120
+          volumeMounts:
+            - { name: neuron-cache, mountPath: /mnt/neuron-cache }
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: neuron-cache
+          persistentVolumeClaim:
+            claimName: neuron-cache-pvc
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 8Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neuron-vllm
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: neuron-vllm
+spec:
+  selector:
+    app: neuron-vllm
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }
+{{- end }}
