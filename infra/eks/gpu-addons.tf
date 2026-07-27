@@ -16,8 +16,12 @@
 #     README/blog; on g6e the plugin still advertises EFA once an efa-only ENI exists.)
 #   - training-operator standalone manifest is published per release tag on GitHub; it is the
 #     idiomatic operator for PyTorchJob (kubeflow.org/v1), the same one the awsome-distributed-ai
-#     DDP sample installs. It injects MASTER_ADDR/MASTER_PORT/WORLD_SIZE/RANK into each pod so a
-#     PyTorchJob needs no sshd/OpenMPI (that was the tax of the old MPIJob-on-PyTorch approach).
+#     DDP sample installs. A PyTorchJob needs no sshd/OpenMPI (that was the tax of the old
+#     MPIJob-on-PyTorch approach): a Worker-only job discovers its peers via torchrun's c10d
+#     rendezvous, which spec.elasticPolicy makes the operator wire up (PET_RDZV_BACKEND=c10d +
+#     PET_RDZV_ENDPOINT=<job>-worker-0:23456). The operator injects MASTER_ADDR/MASTER_PORT/
+#     WORLD_SIZE/RANK as pod env only when a Master replica exists; the charts/experiments
+#     pytorchjobTrain workload is Worker-only, so it relies on the c10d path instead.
 
 locals {
   # GPU Operator Helm values, assembled once so the release stays declarative and diffs
