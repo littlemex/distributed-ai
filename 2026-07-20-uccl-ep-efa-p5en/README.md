@@ -38,15 +38,19 @@ fraction of the per-GPU line rate.**
 ```
 2026-07-20-uccl-ep-efa-p5en/
   manifests/   kubernetes manifests (probe pod, 2-node bench job)
-  scripts/     task-runner JSON tasks + wrappers (build UCCL, run benches)
-  docs/        verification plan, results write-up, gotchas
-  results/     captured logs and parsed metrics (small files tracked)
+  scripts/     build-uccl.sh (USE_DMABUF build) + run-bench.sh (kubectl wrapper)
+  docs/        results write-up (RESULTS.md), build/run gotchas (GOTCHAS.md)
+  results/     captured logs (one per run) + parsed metrics (summary.json)
 ```
+
+`results/` holds 3 runs per mode from 2026-07-28
+(`*_run{1,2,3}.log`) plus the earlier 2026-07-20 run (`*_prev20260720.log`),
+kept as evidence. See `docs/RESULTS.md` for the reproducibility/variance summary.
 
 ## Environment (this run)
 
 - Cluster: EKS, 2x `p5en.48xlarge` (H200 x8 each = 16 GPU), reserved (Capacity Block).
-- Per-node EFA: 32 cards total; schedulable `vpc.amazonaws.com/efa = 15` (card 0
+- Per-node EFA: 16 cards total; schedulable `vpc.amazonaws.com/efa = 15` (card 0
   carries the node IP and is not advertised as EFA).
 - Exact cluster name / account / region are environment-specific and kept out of
   this doc; see the team connection notes.

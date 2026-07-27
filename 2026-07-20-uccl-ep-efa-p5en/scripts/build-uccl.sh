@@ -35,13 +35,24 @@ echo "[build] UCCL main, USE_DMABUF=1, sm_90 only"
 cd /tmp && rm -rf uccl
 git clone --depth 1 https://github.com/uccl-project/uccl.git
 cd uccl/ep
-USE_DMABUF=1 TORCH_CUDA_ARCH_LIST="9.0" pip install . --no-build-isolation --no-deps --root-user-action=ignore
+# NOTE: this pip install exits non-zero at the very end with
+#   ValueError: Egg metadata expected at ...ep-*.egg-info but not found
+#   error: option --all not recognized   (setup.py clean --all)
+# but that is AFTER setup.py has already run its own installer and printed
+# "Installation complete. Module installed as: .../uccl/ep.abi3.so". The .so IS
+# built and installed; only pip's wheel-metadata/clean wrapper trips (UCCL's
+# setup.py is not a standards-based build backend). So we tolerate the failure
+# and verify the .so directly below instead of trusting pip's exit code.
+USE_DMABUF=1 TORCH_CUDA_ARCH_LIST="9.0" pip install . --no-build-isolation --no-deps --root-user-action=ignore || \
+  echo "[build] pip returned non-zero (expected: post-install wheel-metadata step); verifying .so directly"
 
 echo "[build] verify GPUDirect (dma-buf) works without peermem"
 python -c "from uccl import ep; assert ep.can_register_rdma_gpu_buffer(0, 64<<20), 'GPU MR reg still fails'; print('  can_register_rdma_gpu_buffer: True')"
 
 echo "[build] stage artifacts on FSx"
-SP="$(python -c 'import uccl,os;print(os.path.dirname(uccl.__file__))')"
+# `uccl` is an implicit namespace package (no __init__.py) so uccl.__file__ is
+# None; derive the install dir from the installed submodule instead.
+SP="$(python -c 'import uccl.ep as m, os; print(os.path.dirname(m.__file__))')"
 cp -a "$SP"/ep*.so "$STAGE/uccl/"
 [ -f "$STAGE/uccl/__init__.py" ] || echo "" > "$STAGE/uccl/__init__.py"
 cp -a bench/{test_intranode.py,test_internode.py,test_low_latency.py,utils.py,buffer.py} "$STAGE/bench/"

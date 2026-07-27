@@ -1,0 +1,710 @@
+[init] uccl.ep sanity (expect can_reg=True, host_allocated=False)
+uccl: /fsx/uccl-dmabuf/uccl/__init__.py
+can_reg: True
+[init] EFA devices
+libibverbs: Warning: couldn't open config directory '/tmp/rdma-core/build/etc/libibverbs.d'.
+    device          	   node GUID
+    ------          	----------------
+[init] rank=0 world_size=2 master=rank0.uccl-bench.default.svc.cluster.local:12355
+[init] launching torchrun (nnodes=2, node_rank=0)
+NCCL version 2.25.1+cuda12.8
+[DEBUG] IP distribution across 16 ranks:
+[DEBUG]   10.0.x.x: 8 ranks
+[DEBUG]   10.0.x.x: 8 ranks
+Registered proxies for device 4 (low-latency mode)
+Registered proxies for device 1 (low-latency mode)
+Registered proxies for device 6 (low-latency mode)
+Registered proxies for device 5 (low-latency mode)
+Registered proxies for device 2 (low-latency mode)
+Registered proxies for device 7 (low-latency mode)
+Registered proxies for device 3 (low-latency mode)
+Registered proxies for device 0 (low-latency mode)
+[RDMA] Selected NIC rdmap110s0 (index 3) for affinity rank 2, CUDA device 2, NUMA node 0
+[RDMA] Selected NIC rdmap86s0 (index 1) for affinity rank 1, CUDA device 1, NUMA node 0
+[RDMA] DMA-BUF: gpu_buf=0x7f45c2000000 bytes=1880098944 export_size=1881145344 (1.8 GiB)
+[RDMA] Selected NIC rdmap85s0 (index 0) for affinity rank 0, CUDA device 0, NUMA node 0
+[RDMA] DMA-BUF: gpu_buf=0x7ff77e000000 bytes=1880098944 export_size=1881145344 (1.8 GiB)
+[RDMA] DMA-BUF: gpu_buf=0x7f557e000000 bytes=1880098944 export_size=1881145344 (1.8 GiB)
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f45c2000000, len=1880098944, rkey=0x200036) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 3 sharing NIC rdmap110s0 context with 1 other thread(s) for affinity rank 2
+[RDMA] Thread 1 sharing NIC rdmap110s0 context with 2 other thread(s) for affinity rank 2
+[RDMA] Thread 2 sharing NIC rdmap110s0 context with 3 other thread(s) for affinity rank 2
+Pinned to NUMA node 0, thread_idx: 0, local_rank: 2, running on CPU 8.
+Local CPU thread pinned to NUMA node 0, thread_idx: 0, local_rank: 2, running on CPU 8.
+Pinned to NUMA node 0, thread_idx: 1, local_rank: 2, running on CPU 9.
+Pinned to NUMA node 0, thread_idx: 3, local_rank: 2, running on CPU 11.
+Local CPU thread pinned to NUMA node 0, thread_idx: 3, local_rank: 2, running on CPU 11.
+Local CPU thread pinned to NUMA node 0, thread_idx: 1, local_rank: 2, running on CPU 9.
+Pinned to NUMA node 0, thread_idx: 2, local_rank: 2, running on CPU 10.
+Local CPU thread pinned to NUMA node 0, thread_idx: 2, local_rank: 2, running on CPU 10.
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7ff77e000000, len=1880098944, rkey=0x200007) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 3 sharing NIC rdmap86s0 context with 1 other thread(s) for affinity rank 1
+[RDMA] Thread 2 sharing NIC rdmap86s0 context with 2 other thread(s) for affinity rank 1
+[RDMA] Selected NIC rdmap111s0 (index 4) for affinity rank 3, CUDA device 3, NUMA node 0
+[RDMA] Thread 1 sharing NIC rdmap86s0 context with 3 other thread(s) for affinity rank 1
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f557e000000, len=1880098944, rkey=0x20000f) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+Pinned to NUMA node 0, thread_idx: 0, local_rank: 1, running on CPU 4.
+Local CPU thread pinned to NUMA node 0, thread_idx: 0, local_rank: 1, running on CPU 4.
+[RDMA] Thread 1 sharing NIC rdmap85s0 context with 1 other thread(s) for affinity rank 0
+[RDMA] Selected NIC rdmap161s0 (index 12) for affinity rank 7, CUDA device 7, NUMA node 1
+Pinned to NUMA node 0, thread_idx: 2, local_rank: 1, running on CPU 6.
+Local CPU thread pinned to NUMA node 0, thread_idx: 2, local_rank: 1, running on CPU 6.
+Pinned to NUMA node 0, thread_idx: 3, local_rank: 1, running on CPU 7.
+Local CPU thread pinned to NUMA node 0, thread_idx: 3, local_rank: 1, running on CPU 7.
+Pinned to NUMA node 0, thread_idx: 1, local_rank: 1, running on CPU 5.
+Local CPU thread pinned to NUMA node 0, thread_idx: 1, local_rank: 1, running on CPU 5.
+Pinned to NUMA node 0, thread_idx: 0, local_rank: 0, running on CPU 0.
+Local CPU thread pinned to NUMA node 0, thread_idx: 0, local_rank: 0, running on CPU 0.
+[RDMA] Thread 3 sharing NIC rdmap85s0 context with 2 other thread(s) for affinity rank 0
+[RDMA] DMA-BUF: gpu_buf=0x7f3c12000000 bytes=1880098944 export_size=1881145344 (1.8 GiB)
+Pinned to NUMA node 0, thread_idx: 3, local_rank: 0, running on CPU 3.
+Local CPU thread pinned to NUMA node 0, thread_idx: 3, local_rank: 0, running on CPU 3.
+[RDMA] Selected NIC rdmap136s0 (index 8) for affinity rank 5, CUDA device 5, NUMA node 1
+[RDMA] Thread 2 sharing NIC rdmap85s0 context with 3 other thread(s) for affinity rank 0
+[RDMA] Selected NIC rdmap160s0 (index 11) for affinity rank 6, CUDA device 6, NUMA node 1
+[RDMA] Selected NIC rdmap135s0 (index 7) for affinity rank 4, CUDA device 4, NUMA node 1
+Pinned to NUMA node 0, thread_idx: 2, local_rank: 0, running on CPU 2.
+Local CPU thread pinned to NUMA node 0, thread_idx: 2, local_rank: 0, running on CPU 2.
+[RDMA] DMA-BUF: gpu_buf=0x7f9e62000000 bytes=1880098944 export_size=1881145344 (1.8 GiB)
+[RDMA] DMA-BUF: gpu_buf=0x7fcb26000000 bytes=1880098944 export_size=1881145344 (1.8 GiB)
+[RDMA] DMA-BUF: gpu_buf=0x7f0fd2000000 bytes=1880098944 export_size=1881145344 (1.8 GiB)
+[RDMA] DMA-BUF: gpu_buf=0x7f22fa000000 bytes=1880098944 export_size=1881145344 (1.8 GiB)
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f3c12000000, len=1880098944, rkey=0x200039) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 2 sharing NIC rdmap111s0 context with 1 other thread(s) for affinity rank 3
+[RDMA] Thread 1 sharing NIC rdmap111s0 context with 2 other thread(s) for affinity rank 3
+[RDMA] Thread 3 sharing NIC rdmap111s0 context with 3 other thread(s) for affinity rank 3
+Pinned to NUMA node 0, thread_idx: 2, local_rank: 3, running on CPU 14.
+Pinned to NUMA node 0, thread_idx: 1, local_rank: 3, running on CPU 13.
+Pinned to NUMA node 0, thread_idx: 3, local_rank: 3, running on CPU 15.
+Local CPU thread pinned to NUMA node 0, thread_idx: 2, local_rank: 3, running on CPU 14.
+Local CPU thread pinned to NUMA node 0, thread_idx: 3, local_rank: 3, running on CPU 15.
+Local CPU thread pinned to NUMA node 0, thread_idx: 1, local_rank: 3, running on CPU 13.
+Pinned to NUMA node 0, thread_idx: 0, local_rank: 3, running on CPU 12.
+Local CPU thread pinned to NUMA node 0, thread_idx: 0, local_rank: 3, running on CPU 12.
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f9e62000000, len=1880098944, rkey=0x200033) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 3 sharing NIC rdmap161s0 context with 1 other thread(s) for affinity rank 7
+[RDMA] Thread 1 sharing NIC rdmap161s0 context with 2 other thread(s) for affinity rank 7
+[RDMA] Thread 2 sharing NIC rdmap161s0 context with 3 other thread(s) for affinity rank 7
+Pinned to NUMA node 1, thread_idx: 1, local_rank: 7, running on CPU 77.
+Local CPU thread pinned to NUMA node 1, thread_idx: 1, local_rank: 7, running on CPU 77.
+Pinned to NUMA node 1, thread_idx: 2, local_rank: 7, running on CPU 78.
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631a00000, len=81960, rkey=0x200037
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x7f5610000000, len=81960, rkey=0x200018
+Pinned to NUMA node 1, thread_idx: 0, local_rank: 7, running on CPU 76.
+Pinned to NUMA node 1, thread_idx: 3, local_rank: 7, running on CPU 79.
+Local CPU thread pinned to NUMA node 1, thread_idx: 3, local_rank: 7, running on CPU 79.
+Local CPU thread pinned to NUMA node 1, thread_idx: 2, local_rank: 7, running on CPU 78.
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7fcb26000000, len=1880098944, rkey=0x200015) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+Local CPU thread pinned to NUMA node 1, thread_idx: 0, local_rank: 7, running on CPU 76.
+[RDMA] Thread 1 sharing NIC rdmap136s0 context with 1 other thread(s) for affinity rank 5
+[RDMA] Thread 3 sharing NIC rdmap136s0 context with 2 other thread(s) for affinity rank 5
+[RDMA] Thread 2 sharing NIC rdmap160s0 context with 1 other thread(s) for affinity rank 6
+[RDMA] Thread 3 sharing NIC rdmap160s0 context with 2 other thread(s) for affinity rank 6
+[RDMA] Thread 2 sharing NIC rdmap136s0 context with 3 other thread(s) for affinity rank 5
+[RDMA] Thread 1 sharing NIC rdmap160s0 context with 3 other thread(s) for affinity rank 6
+[RDMA] Thread 3 sharing NIC rdmap135s0 context with 1 other thread(s) for affinity rank 4
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x200018
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f0fd2000000, len=1880098944, rkey=0x200035) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f22fa000000, len=1880098944, rkey=0x200015) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 2 sharing NIC rdmap135s0 context with 2 other thread(s) for affinity rank 4
+Pinned to NUMA node 1, thread_idx: 2, local_rank: 6, running on CPU 74.
+Pinned to NUMA node 1, thread_idx: 3, local_rank: 5, running on CPU 71.
+[RDMA] Thread 0 sharing NIC rdmap135s0 context with 3 other thread(s) for affinity rank 4
+Pinned to NUMA node 1, thread_idx: 0, local_rank: 6, running on CPU 72.
+Pinned to NUMA node 1, thread_idx: 3, local_rank: 6, running on CPU 75.
+Pinned to NUMA node 1, thread_idx: 1, local_rank: 5, running on CPU 69.
+Local CPU thread pinned to NUMA node 1, thread_idx: 2, local_rank: 6, running on CPU 74.
+Pinned to NUMA node 1, thread_idx: 0, local_rank: 5, running on CPU 68.
+Pinned to NUMA node 1, thread_idx: 1, local_rank: 6, running on CPU 73.
+Pinned to NUMA node 1, thread_idx: 2, local_rank: 5, running on CPU 70.
+Local CPU thread pinned to NUMA node 1, thread_idx: 1, local_rank: 6, running on CPU 73.
+Pinned to NUMA node 1, thread_idx: 3, local_rank: 4, running on CPU 67.
+Local CPU thread pinned to NUMA node 1, thread_idx: 1, local_rank: 5, running on CPU 69.
+Local CPU thread pinned to NUMA node 1, thread_idx: 2, local_rank: 5, running on CPU 70.
+Local CPU thread pinned to NUMA node 1, thread_idx: 3, local_rank: 4, running on CPU 67.
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631a00000, len=81960, rkey=0x200038
+Local CPU thread pinned to NUMA node 1, thread_idx: 0, local_rank: 5, running on CPU 68.
+Local CPU thread pinned to NUMA node 1, thread_idx: 0, local_rank: 6, running on CPU 72.
+Pinned to NUMA node 1, thread_idx: 2, local_rank: 4, running on CPU 66.
+Local CPU thread pinned to NUMA node 1, thread_idx: 3, local_rank: 6, running on CPU 75.
+Local CPU thread pinned to NUMA node 1, thread_idx: 3, local_rank: 5, running on CPU 71.
+Pinned to NUMA node 1, thread_idx: 0, local_rank: 4, running on CPU 64.
+Local CPU thread pinned to NUMA node 1, thread_idx: 0, local_rank: 4, running on CPU 64.
+Local CPU thread pinned to NUMA node 1, thread_idx: 2, local_rank: 4, running on CPU 66.
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x7f5610000000, len=81960, rkey=0x200015
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x200015
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631a00000, len=81960, rkey=0x200039
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x7f5610000000, len=81960, rkey=0x200016
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x200016
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631a00000, len=81960, rkey=0x20003f
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x200017
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x20003a
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9630e00000, len=81960, rkey=0x200021
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x962de00000, len=81960, rkey=0x200039
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9630e00000, len=81960, rkey=0x20001a
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9630e00000, len=81960, rkey=0x20001f
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x962de00000, len=81960, rkey=0x200034
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x200021
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631600000, len=81960, rkey=0x200037
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x962de00000, len=81960, rkey=0x200035
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x20003d
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x20001a
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631600000, len=81960, rkey=0x20003b
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x962de00000, len=81960, rkey=0x20003a
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x20001f
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631600000, len=81960, rkey=0x20003c
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x200020
+[RDMA] Auto-detected GID index 0 for rdmap85s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x7f5610000000, len=81960, rkey=0x200018
+[RDMA] Auto-detected GID index 0 for rdmap85s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x7f5610000000, len=81960, rkey=0x200015
+[RDMA] Auto-detected GID index 0 for rdmap85s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x7f5610000000, len=81960, rkey=0x200016
+Pinned to NUMA node 0, thread_idx: 1, local_rank: 0, running on CPU 1.
+Local CPU thread pinned to NUMA node 0, thread_idx: 1, local_rank: 0, running on CPU 1.
+[RDMA] Auto-detected GID index 0 for rdmap135s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9630e00000, len=81960, rkey=0x200021
+[RDMA] Auto-detected GID index 0 for rdmap135s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9630e00000, len=81960, rkey=0x20001a
+[RDMA] Auto-detected GID index 0 for rdmap135s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9630e00000, len=81960, rkey=0x20001f
+Pinned to NUMA node 1, thread_idx: 1, local_rank: 4, running on CPU 65.
+Local CPU thread pinned to NUMA node 1, thread_idx: 1, local_rank: 4, running on CPU 65.
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x7f5610000000, len=81960, rkey=0x200037
+[RDMA] Auto-detected GID index 0 for rdmap110s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631a00000, len=81960, rkey=0x200037
+[RDMA] Auto-detected GID index 0 for rdmap110s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631a00000, len=81960, rkey=0x200038
+[RDMA] Auto-detected GID index 0 for rdmap86s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x200018
+[RDMA] Auto-detected GID index 0 for rdmap110s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631a00000, len=81960, rkey=0x200039
+[RDMA] Auto-detected GID index 0 for rdmap86s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x200015
+[RDMA] Auto-detected GID index 0 for rdmap110s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631a00000, len=81960, rkey=0x20003f
+[RDMA] Auto-detected GID index 0 for rdmap86s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x200016
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9630e00000, len=81960, rkey=0x20003a
+[RDMA] Auto-detected GID index 0 for rdmap86s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x200017
+[RDMA] Auto-detected GID index 0 for rdmap111s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x20003a
+[RDMA] Auto-detected GID index 0 for rdmap111s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x20003b
+[RDMA] Auto-detected GID index 0 for rdmap111s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x20003c
+[RDMA] Auto-detected GID index 0 for rdmap161s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x962de00000, len=81960, rkey=0x200039
+[RDMA] Auto-detected GID index 0 for rdmap111s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x20003d
+[RDMA] Auto-detected GID index 0 for rdmap161s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x962de00000, len=81960, rkey=0x200034
+[RDMA] Auto-detected GID index 0 for rdmap160s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631600000, len=81960, rkey=0x20003d
+[RDMA] Auto-detected GID index 0 for rdmap161s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x962de00000, len=81960, rkey=0x200035
+[RDMA] Auto-detected GID index 0 for rdmap160s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631600000, len=81960, rkey=0x200037
+[RDMA] Auto-detected GID index 0 for rdmap136s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x200021
+[RDMA] Auto-detected GID index 0 for rdmap161s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x962de00000, len=81960, rkey=0x20003a
+[RDMA] Auto-detected GID index 0 for rdmap160s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631600000, len=81960, rkey=0x20003b
+[RDMA] Auto-detected GID index 0 for rdmap136s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x20001a
+[RDMA] Auto-detected GID index 0 for rdmap160s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631600000, len=81960, rkey=0x20003c
+[RDMA] Auto-detected GID index 0 for rdmap136s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x20001f
+[RDMA] Auto-detected GID index 0 for rdmap136s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x200020
+[RDMA] Auto-detected GID index 0 for rdmap85s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x7f5610000000, len=81960, rkey=0x200037
+[RDMA] Auto-detected GID index 0 for rdmap135s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200042
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0xb00035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200043
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0xb00035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200042
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003b
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0xb00035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003c
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0xb00035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200043
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200043
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0xb00035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200043
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200042
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x200037)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200003
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003b
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0xb00035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200043
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200008
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200008
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200043
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200042
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x200037)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200003
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x20003b)
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200043
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0xb00035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200040
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200042
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0xb00035)
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x200042
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200008
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200033
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200040
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20003b
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x200004)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000e
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x200037)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200003
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x20003b)
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200004
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x200037)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200003
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000f
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200008
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200033
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003b
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x200037)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200003
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200008
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200042
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200001
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200040
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200040
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000f
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200039
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x20003b)
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x20003b)
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200004
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x200004)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000e
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200043
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x20003b)
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200033
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200008
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200040
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200033
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x20003c
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200001
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x200035)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200042
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000f
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20003b
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x200037)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200003
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200000
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200033
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000f
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x200004)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000e
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200039
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200001
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x200004)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000e
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200008
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200004
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200008
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x200004)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000e
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x200043
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x200037)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200003
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200040
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200039
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200033
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000f
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003b
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x200037)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200003
+[Proxy] Remote atomic buffer info for peer 8: addr=0x7f9ae8000000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x20003b)
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200039
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200038
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200000
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200040
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200043
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200040
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200038
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x20003b)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000f
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x200043
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x200004)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000e
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200000
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200039
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x20003c
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x20003b)
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200004
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200037
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200033
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000f
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200000
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200037
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200001
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9631a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20003b
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000f
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200039
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x20003c
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x200004)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000e
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200038
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x200004)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20000e
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x200033
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200038
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200000
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200038
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x20003b
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200037
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9630e00000, len=81960, rkey=0x20003a
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200038
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200039
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200039
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9633a00000, len=81960, rkey=0x200043
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200037
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200000
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x20003c
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x20003d
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200037
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200038
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200038
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200037
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9631600000, len=81960, rkey=0x200001
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200000
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200000
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x20003c
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200037
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x20003c
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x200036)
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200001
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962f600000, len=81960, rkey=0x200037
+Testing with seed 0 ...
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=False
+
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=False
+
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=False round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=False use_ue8m0=False
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+
+Start experiment with settings: return_recv_hook=False dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+
+
+
+
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=False round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+
+
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=False use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=FalseStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=False
+
+
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=False
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=TrueStart experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+
+Start experiment with settings: return_recv_hook=True dispatch_use_fp8=True round_scale=True use_ue8m0=True
+✓ All correctness tests passed!✓ All correctness tests passed!
+
+✓ All correctness tests passed!✓ All correctness tests passed!✓ All correctness tests passed!
+
+
+✓ All correctness tests passed!
+✓ All correctness tests passed!
+✓ All correctness tests passed!
+[rank 4] Dispatch + combine bandwidth: 16.53 GB/s, avg_t=1333.76 us, min_t=1195.55 us, max_t=1411.10 us[rank 0] Dispatch + combine bandwidth: 16.52 GB/s, avg_t=1334.59 us, min_t=1237.41 us, max_t=1432.03 us[rank 6] Dispatch + combine bandwidth: 16.52 GB/s, avg_t=1334.96 us, min_t=1224.61 us, max_t=1410.11 us[rank 2] Dispatch + combine bandwidth: 16.52 GB/s, avg_t=1334.35 us, min_t=1199.55 us, max_t=1446.02 us[rank 1] Dispatch + combine bandwidth: 16.52 GB/s, avg_t=1334.61 us, min_t=1233.09 us, max_t=1432.16 us
+
+
+
+
+[rank 7] Dispatch + combine bandwidth: 16.52 GB/s, avg_t=1334.51 us, min_t=1234.37 us, max_t=1445.09 us[rank 5] Dispatch + combine bandwidth: 16.52 GB/s, avg_t=1334.43 us, min_t=1214.82 us, max_t=1418.69 us
+
+[rank 3] Dispatch + combine bandwidth: 16.52 GB/s, avg_t=1334.77 us, min_t=1234.11 us, max_t=1419.94 us
+[rank 5] Dispatch bandwidth: 9.39 GB/s, avg_t=800.07 us | Combine bandwidth: 41.80 GB/s, avg_t=347.75 us
+[rank 2] Dispatch bandwidth: 9.50 GB/s, avg_t=790.50 us | Combine bandwidth: 40.44 GB/s, avg_t=359.48 us
+[rank 1] Dispatch bandwidth: 9.41 GB/s, avg_t=798.30 us | Combine bandwidth: 41.60 GB/s, avg_t=349.46 us
+[rank 6] Dispatch bandwidth: 9.16 GB/s, avg_t=820.05 us | Combine bandwidth: 44.31 GB/s, avg_t=328.04 us
+[rank 0] Dispatch bandwidth: 8.73 GB/s, avg_t=859.99 us | Combine bandwidth: 50.48 GB/s, avg_t=287.97 us
+[rank 4] Dispatch bandwidth: 9.55 GB/s, avg_t=786.41 us | Combine bandwidth: 40.18 GB/s, avg_t=361.81 us
+[rank 7] Dispatch bandwidth: 9.32 GB/s, avg_t=806.33 us | Combine bandwidth: 42.54 GB/s, avg_t=341.75 us
+[rank 3] Dispatch bandwidth: 9.40 GB/s, avg_t=799.01 us | Combine bandwidth: 41.60 GB/s, avg_t=349.46 us
+[rank 7] Dispatch send/recv time: 28.89 + 31.34 us | Combine send/recv time: 38.52 + 69.10 us
+[rank 5] Dispatch send/recv time: 30.76 + 117.08 us | Combine send/recv time: 39.66 + 203.75 us
+[rank 3] Dispatch send/recv time: 28.29 + 114.89 us | Combine send/recv time: 38.40 + 219.30 us
+[rank 2] Dispatch send/recv time: 28.87 + 45.23 us | Combine send/recv time: 39.62 + 117.34 us
+[rank 0] Dispatch send/recv time: 28.74 + 48.66 us | Combine send/recv time: 41.15 + 96.57 us
+[rank 1] Dispatch send/recv time: 29.08 + 102.76 us | Combine send/recv time: 38.58 + 190.17 us
+[rank 6] Dispatch send/recv time: 29.99 + 79.17 us | Combine send/recv time: 39.02 + 138.99 us
+[rank 4] Dispatch send/recv time: 29.23 + 106.73 us | Combine send/recv time: 40.14 + 206.21 us
