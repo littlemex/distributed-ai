@@ -1,10 +1,11 @@
 {{- /*
-torchrun-train — single-node HF Trainer fine-tune of SmolLM2-135M via `torchrun`
-(batch/v1 Job, zero operator). Backend gloo (CPU) or nccl (GPU). Reuses the hf-train-sample
-image (train_smollm.py baked in) so one image covers both this and pytorchjob-train. This is
-the "what can you do with NO operator" step; pytorchjob-train is the multi-node step above it.
+torchrun-train — single-node MNIST MLP DistributedDataParallel run via `torchrun`
+(batch/v1 Job, zero operator). Backend gloo (CPU) or nccl (GPU). Reuses the ddp-sample image
+(ddp.py baked in) so one image covers both this and pytorchjob-train. This is the "what can you
+do with NO operator" step; pytorchjob-train is the multi-node step above it.
 
-Requires efs_enabled=true (static PV efs-neuron-workspace) and torchrunTrain.image set.
+Requires the sharedStorage.backend filesystem enabled in Terraform (default openzfs → the
+FSx OpenZFS static PV openzfs-shared, ON by default) and torchrunTrain.image set.
 
 GPU note: nprocPerNode MUST equal gpu.count — torchrun spawns one proc per nproc and each
 grabs one GPU; a mismatch makes procs contend for a GPU with no error.
@@ -19,23 +20,23 @@ Render + apply (GPU, 1 g5 GPU):
     --set torchrunTrain.nprocPerNode=1 \
     --set torchrunTrain.gpu.enabled=true --set torchrunTrain.gpu.count=1 | kubectl apply -f -
 Verify:
-  kubectl -n $NS logs -f job/smollm-torchrun
+  kubectl -n $NS logs -f job/ddp-torchrun
 */ -}}
 {{- if .Values.torchrunTrain.enabled }}
 {{- $v := .Values.torchrunTrain }}
-{{- if not $v.image }}{{ fail "torchrunTrain.image is required (the hf-train-sample image URI)" }}{{- end }}
-{{- /* The efs-shared-claim PVC is rendered once by templates/efs-shared-pvc.yaml (shared
-     with pytorchjobTrain) so enabling both does not emit two copies of the same object. */ -}}
+{{- if not $v.image }}{{ fail "torchrunTrain.image is required (the ddp-sample image URI)" }}{{- end }}
+{{- /* The shared-claim PVC is rendered once by templates/shared-pvc.yaml (shared with
+     pytorchjobTrain) so enabling both does not emit two copies of the same object. */ -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: smollm-torchrun
+  name: ddp-torchrun
   namespace: {{ include "experiments.namespace" . }}
 spec:
   backoffLimit: 0
   template:
     metadata:
-      labels: { app: smollm-torchrun }
+      labels: { app: ddp-torchrun }
       # The CPU NodePool consolidates underutilized nodes after 30s and can evict this Pod
       # mid-training; do-not-disrupt pins it. Harmless on the GPU pools (WhenEmpty).
       annotations:
@@ -49,9 +50,11 @@ spec:
         {{- if $v.gpu.enabled }}
         - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
         {{- end }}
-      # No fix-perms initContainer: the hf-train-sample image runs as root (uid 0) and the EFS
-      # Access Point (efs.tf) enforces posixUser uid/gid 0, so every NFS write is already owned
-      # correctly. HuggingFace / Trainer create the cache and output subdirs on first write.
+      # No fix-perms initContainer: the ddp-sample image runs as root (uid 0), and every shared
+      # backend hands root a writable mount — FSx OpenZFS exports no_root_squash (openzfs.tf),
+      # FSx Lustre mounts as root, and the EFS Access Point pins posixUser 0 (efs.tf) — so writes
+      # are owned correctly. ddp.py creates the MNIST data / output / snapshot dirs on first
+      # write (os.makedirs).
       containers:
         - name: train
           image: {{ $v.image }}
@@ -59,9 +62,8 @@ spec:
             - torchrun
             - --standalone
             - --nproc_per_node={{ $v.nprocPerNode }}
-            - /workspace/train_smollm.py
+            - /workspace/ddp.py
           env:
-            - { name: HF_HOME, value: /shared/hf-cache }
             - { name: OUTPUT_DIR, value: /shared/output/torchrun-{{ $v.backend }} }
           resources:
             limits:
@@ -76,6 +78,6 @@ spec:
             - { name: shared, mountPath: /shared }
             - { name: shm, mountPath: /dev/shm }
       volumes:
-        - { name: shared, persistentVolumeClaim: { claimName: efs-shared-claim } }
+        - { name: shared, persistentVolumeClaim: { claimName: shared-claim } }
         - { name: shm, emptyDir: { medium: Memory, sizeLimit: 4Gi } }
 {{- end }}

@@ -1,9 +1,16 @@
 # fsx.tf
-# FSx for Lustre — optional single-AZ, high-throughput scratch/checkpoint filesystem.
-# Gated by var.fsx_enabled (off by default: PERSISTENT_2 provisions TBs of SSD that bill
-# continuously). prevent_destroy is intentionally NOT set so the environment stays
-# destroyable; teardown deletes the filesystem and its data (regenerable caches). Set
-# prevent_destroy = true for a long-lived cluster holding irreplaceable data.
+# FSx for Lustre — single-AZ, high-throughput scratch/checkpoint filesystem. This is the fast
+# scratch layer of the default two-layer storage set (Lustre scratch here + OpenZFS NFS home
+# in openzfs.tf), mirroring awsome-distributed-ai. ON by default (var.fsx_enabled): the
+# distributed-training samples cannot run without a shared high-throughput volume.
+# prevent_destroy is intentionally NOT set so the environment stays destroyable; teardown
+# deletes the filesystem and its data (regenerable caches). Set prevent_destroy = true for a
+# long-lived cluster holding irreplaceable data.
+#
+# CSI-driver DECOUPLING: the aws-fsx-csi-driver add-on and its IAM role are created
+# UNCONDITIONALLY — a CSI driver is a permanent cluster capability, independent of whether an
+# FSx filesystem currently exists. var.fsx_enabled gates ONLY the filesystem, its security
+# groups, and the static PV below. (Same decoupling as efs.tf.)
 #
 # Static provisioning only (mirrors efs.tf): Terraform creates ONE filesystem and a
 # PersistentVolume with a fixed volumeHandle. There is no dynamic-provisioning StorageClass
@@ -13,7 +20,7 @@
 # multi-TB filesystem). See https://github.com/kubernetes-sigs/aws-fsx-csi-driver/issues/400.
 #
 # Notes:
-#   - aws-fsx-csi-driver EKS addon: v1.9.0-eksbuild.1
+#   - aws-fsx-csi-driver EKS addon: var.fsx_csi_driver_version (default v1.9.0-eksbuild.1)
 #   - region and account are taken from the configured AWS provider
 
 # ---------------------------------------------------------------------------
@@ -178,13 +185,13 @@ resource "aws_vpc_security_group_ingress_rule" "nodes_from_fsx_high_ports" {
 
 # ---------------------------------------------------------------------------
 # IAM role for EKS Pod Identity (mirrors the EFS/EBS CSI pattern in efs.tf/iam.tf).
-# fsx:DescribeFileSystems is the only call the driver makes for static provisioning
-# (CreateFileSystem/DeleteFileSystem/UpdateFileSystem are dynamic-provisioning-only code
-# paths, never exercised by a fixed-volumeHandle PV) — FSx does not support ARN-scoped
-# resource permissions, so this is Resource "*" regardless.
+# Created unconditionally (permanent infra): the driver is installed whether or not an FSx
+# filesystem exists. fsx:DescribeFileSystems is the only call the driver makes for static
+# provisioning (CreateFileSystem/DeleteFileSystem/UpdateFileSystem are dynamic-provisioning-
+# only code paths, never exercised by a fixed-volumeHandle PV) — FSx does not support
+# ARN-scoped resource permissions, so this is Resource "*" regardless.
 # ---------------------------------------------------------------------------
 data "aws_iam_policy_document" "fsx_csi_assume" {
-  count = var.fsx_enabled ? 1 : 0
   statement {
     actions = ["sts:AssumeRole", "sts:TagSession"]
     principals {
@@ -195,14 +202,12 @@ data "aws_iam_policy_document" "fsx_csi_assume" {
 }
 
 resource "aws_iam_role" "fsx_csi" {
-  count              = var.fsx_enabled ? 1 : 0
   name               = "${var.cluster_name}-fsx-csi"
-  assume_role_policy = data.aws_iam_policy_document.fsx_csi_assume[0].json
+  assume_role_policy = data.aws_iam_policy_document.fsx_csi_assume.json
   tags               = var.tags
 }
 
 data "aws_iam_policy_document" "fsx_csi_describe" {
-  count = var.fsx_enabled ? 1 : 0
   statement {
     actions   = ["fsx:DescribeFileSystems"]
     resources = ["*"]
@@ -210,26 +215,23 @@ data "aws_iam_policy_document" "fsx_csi_describe" {
 }
 
 resource "aws_iam_role_policy" "fsx_csi_describe" {
-  count  = var.fsx_enabled ? 1 : 0
   name   = "fsx-describe"
-  role   = aws_iam_role.fsx_csi[0].id
-  policy = data.aws_iam_policy_document.fsx_csi_describe[0].json
+  role   = aws_iam_role.fsx_csi.id
+  policy = data.aws_iam_policy_document.fsx_csi_describe.json
 }
 
 # ---------------------------------------------------------------------------
-# aws-fsx-csi-driver EKS addon
-# Version v1.9.0-eksbuild.1 confirmed.
+# aws-fsx-csi-driver EKS addon — installed unconditionally (permanent infra).
 # ---------------------------------------------------------------------------
 resource "aws_eks_addon" "fsx_csi_driver" {
-  count = var.fsx_enabled ? 1 : 0
   # Reference module.eks output (not var.cluster_name) so the addon implicitly depends on the
   # cluster and never races its creation.
   cluster_name  = module.eks.cluster_name
   addon_name    = "aws-fsx-csi-driver"
-  addon_version = "v1.9.0-eksbuild.1"
+  addon_version = var.fsx_csi_driver_version
 
   pod_identity_association {
-    role_arn        = aws_iam_role.fsx_csi[0].arn
+    role_arn        = aws_iam_role.fsx_csi.arn
     service_account = "fsx-csi-controller-sa"
   }
 

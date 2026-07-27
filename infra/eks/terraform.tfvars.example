@@ -117,15 +117,30 @@ cpu_nodepool_enabled    = true
 cpu_instance_categories = ["c", "m", "r"]
 
 # --- Shared storage ----------------------------------------------------------
-# EFS: multi-AZ ReadWriteMany cache (NEFF/HF). On by default (cheap, elastic).
-efs_enabled = true
-# FSx for Lustre: single-AZ high-throughput scratch. OFF by default (bills continuously).
-fsx_enabled = false
-# FSx sizing (only used when fsx_enabled = true). Capacity must be a multiple of 2400 GiB.
+# Default set = two single-AZ FSx layers (matches awsome-distributed-ai). Multi-AZ storage is
+# a bad practice in this cluster: every accelerator pool is pinned to one AZ (EFA/RDMA is
+# intra-AZ, Capacity Block is single-AZ), so a regional filesystem would be the anomaly.
+# The CSI drivers for all three (Lustre/OpenZFS/EFS) are permanent infra installed regardless
+# of these flags; the flags gate only the filesystems/PVs.
+#
+# FSx for Lustre: single-AZ high-throughput scratch/checkpoint. ON by default (nothing to
+# write to otherwise). Capacity must be a multiple of 2400 GiB for PERSISTENT_2 SSD.
+fsx_enabled                     = true
 fsx_per_unit_storage_throughput = 250
 fsx_storage_capacity_gib        = 4800
 # Must match the AZ (var.azs index) of the accelerator pool that will use this filesystem.
 fsx_subnet_index = 0
+#
+# FSx for OpenZFS: single-AZ NFS home/general-shared layer (many small files). ON by default.
+# throughput valid values for SINGLE_AZ_1 (non-HA): 64/128/256/512/1024/2048/3072/4096 MB/s.
+openzfs_enabled             = true
+openzfs_storage_capacity_gib = 256
+openzfs_throughput_capacity  = 256
+openzfs_subnet_index         = 0
+#
+# EFS: DEMOTED to opt-in. Regional multi-AZ RWX; enable only for the one workload that needs a
+# cache surviving a cross-AZ Karpenter reschedule (voice-image-edit NEFF/HF cache). OFF here.
+efs_enabled = false
 
 # Email addresses notified 1 hour before a Capacity Block expires (per-pool cb_end_date).
 # Empty = skip SNS subscriptions.

@@ -29,8 +29,8 @@ your subsequent `kubectl -n my-experiment ...` commands.
 | `neuronDdp` | two-node Neuron DDP over EFA (ConfigMap + `neuron-server`/`neuron-client` pods) | trn2.48xlarge x2 | **verified**: world_size=64 all-reduce + aws-neuron-samples MNIST MLP, both completed; EFA confirmed via libfabric log + host RDMA-write counters |
 | `ncclProbe` | single-node NVIDIA/EFA sanity check (`nccl-probe` pod) | — | untested on this module (defaults carried over from a B300 reference; this module's own verified GPU run was g5.24xlarge/A10G, no EFA) |
 | `ncclSshd` | two-node NVIDIA NCCL bench over EFA (`nccl-server`/`nccl-client` pods) | — | untested on this module, same caveat as `ncclProbe` |
-| `torchrunTrain` | single-node HF Trainer fine-tune via `torchrun` (batch/v1 Job, zero operator) | c6a.large (CPU/gloo, single-node) / g5.24xlarge (GPU path reviewed, not yet run) | gloo verified via the two-node gloo probe below; nccl path untested |
-| `pytorchjobTrain` | two-node HF Trainer fine-tune via PyTorchJob (`kubeflow.org/v1`) | r5a.large x2 (CPU/gloo) | **verified**: `[rank 0/2]`+`[rank 1/2]` gloo DDP, synchronized `grad_norm`, job Succeeded, model saved to EFS by rank 0; nccl path reviewed, not yet run on a GPU cluster |
+| `torchrunTrain` | single-node MNIST MLP DDP via `torchrun` (batch/v1 Job, zero operator) | c6a.large (CPU/gloo, single-node) / g5.24xlarge (GPU path reviewed, not yet run) | gloo verified via the two-node gloo probe below; nccl path untested |
+| `pytorchjobTrain` | two-node MNIST MLP DDP via PyTorchJob (`kubeflow.org/v1`) | r5a.large x2 (CPU/gloo) | **verified** (with the earlier HF-Trainer body, identical DDP mechanics): `[rank 0/2]`+`[rank 1/2]` gloo DDP, synchronized grads, job Succeeded, checkpoint saved to the shared mount by rank 0 (verified against EFS; the default backend is now FSx OpenZFS, same RWX contract); nccl path reviewed, not yet run on a GPU cluster |
 | `gpuServingVllm` | single-GPU vLLM OpenAI-compatible serving | g5.24xlarge (A10G x4) node bring-up verified (`nvidia-smi` confirmed the GPU); vLLM serving itself not yet exercised through this chart | partially verified |
 | `neuronServingVllm` | Neuron vLLM serving (whole trn2 node) | — | untested (no `neuron-cache-pvc` provisioned during review) |
 | `vllmRay` | two-node pipeline-parallel vLLM via Ray | — | untested |
@@ -51,8 +51,8 @@ Every workload's failure mode for a missing prerequisite is the same: the Pod/Jo
 
 | workload | prerequisite | how to check | symptom if missing |
 |---|---|---|---|
-| `torchrunTrain`, `pytorchjobTrain` | static PV `efs-neuron-workspace` bound and free (`efs_enabled=true` in the Terraform module) | `kubectl get pv efs-neuron-workspace` | PVC `efs-shared-claim` stays Pending |
-| `torchrunTrain`, `pytorchjobTrain` | `pytorchjobTrain.image` / `torchrunTrain.image` set to a real image (PyTorch + HF Trainer stack + `train_smollm.py`; see `manifests/hf-train-sample/` in the module root for the build) | — | render itself fails with a `required` error (not a Pending — this one fails loud) |
+| `torchrunTrain`, `pytorchjobTrain` | the `sharedStorage.backend` static PV bound and free — default `openzfs` → `openzfs-shared` (`openzfs_enabled=true`, ON by default); or `fsx` → `fsx-training`, `efs` → `efs-neuron-workspace` | `kubectl get pv $(helm template exp . --set ...\|grep volumeName)` — or just `kubectl get pv openzfs-shared` for the default | PVC `shared-claim` stays Pending |
+| `torchrunTrain`, `pytorchjobTrain` | `pytorchjobTrain.image` / `torchrunTrain.image` set to a real image (PyTorch + `ddp.py` MNIST MLP; see `manifests/ddp-sample/` in the module root for the build) | — | render itself fails with a `required` error (not a Pending — this one fails loud) |
 | `neuronServingVllm` | PVC `neuron-cache-pvc` (RWX; not created by this chart — bind it to your own EFS/FSx StorageClass or a static PV before enabling) | `kubectl get pvc neuron-cache-pvc` | Deployment's Pod stays Pending |
 | `gpuServingVllm`, `neuronServingVllm` | (optional) Secret `hf-token` with key `token`, for gated HF models | `kubectl get secret hf-token` | fine if ungated model; gated model pull fails at container start |
 | any GPU workload | a `device_plugin="nvidia"` accelerator pool exists in `accelerator_pools` (terraform.tfvars) | `kubectl get nodepool` | Pod stays Pending, no matching node-role |
@@ -85,14 +85,16 @@ helm template exp . -n my-experiment --set neuronDdp.enabled=true --set neuronDd
 
 ## Teardown and the static-PV trap
 
-`torchrunTrain`/`pytorchjobTrain`'s PVC (`efs-shared-claim`) binds the single static PV
-`efs-neuron-workspace`, which **can only be Bound to one PVC at a time**. If you delete the
-PVC (e.g. via `kubectl delete -f -` above) while its reclaim policy is `Retain`, the PV goes
-to `Released` and the *next* apply (same namespace or a different one) binds nothing —
-PVC Pending forever, no useful event. Recover with:
+`torchrunTrain`/`pytorchjobTrain`'s PVC (`shared-claim`) binds the single static PV of the
+selected `sharedStorage.backend` (default `openzfs-shared`; or `fsx-training` / `efs-neuron-
+workspace`), which **can only be Bound to one PVC at a time**. If you delete the PVC (e.g. via
+`kubectl delete -f -` above) while its reclaim policy is `Retain`, the PV goes to `Released`
+and the *next* apply (same namespace or a different one) binds nothing — PVC Pending forever,
+no useful event. Recover by clearing the stale claimRef on whichever PV you use, e.g. for the
+default:
 
 ```bash
-kubectl patch pv efs-neuron-workspace --type json -p '[{"op":"remove","path":"/spec/claimRef"}]'
+kubectl patch pv openzfs-shared --type json -p '[{"op":"remove","path":"/spec/claimRef"}]'
 ```
 
 Bare pods (`neuronProbe`, `neuronDdp`, `ncclProbe`, `ncclSshd`) are not requeued on node
@@ -110,13 +112,15 @@ Secret).
   `aws-neuronx-dkms` with the DLC's Neuron SDK release. Workaround:
   `--set neuronDdp.disableZerocopy=true` (off by default so it doesn't silently mask the
   version skew — see the flag's comment in `values.yaml`).
-- **EFS writes and the Access Point `posixUser`.** `torchrunTrain`/`pytorchjobTrain` write
-  the HF cache and checkpoints to the shared EFS mount. The `hf-train-sample` image runs as
-  root (uid 0) and the EFS Access Point (`efs.tf`) enforces `posixUser` uid/gid 0, so every
-  NFS write is owned correctly with no init-container `chown` step. If you fork this and run
-  the training container as a non-root uid while the Access Point still squashes to uid 0,
-  writes will fail with `Operation not permitted`; either keep the container as root or
-  reconfigure the Access Point's `posixUser` to match the container uid.
+- **Shared-mount writes run as root.** `torchrunTrain`/`pytorchjobTrain` write the MNIST data
+  and snapshot to the `sharedStorage.backend` mount, and the `ddp-sample` image runs as root
+  (uid 0). Every backend hands root a writable mount with no init-container `chown`:
+  FSx OpenZFS exports `no_root_squash` (`openzfs.tf`), FSx Lustre mounts as root, and the EFS
+  Access Point pins `posixUser` uid/gid 0 (`efs.tf`). If you fork this and run the training
+  container as a non-root uid, this changes per backend — the EFS Access Point would squash
+  writes to uid 0 (`Operation not permitted` unless you reconfigure its `posixUser`), while
+  the FSx backends honour the container uid. Keeping the container as root is the simplest
+  path across all three.
 - **Closed/NAT-less networks**: the sshd containers (`neuronDdp`, `ncclSshd`) run
   `apt-get install openssh-server` at startup if the image doesn't already ship it. With no
   egress this fails, and `command -v sshd` then aborts the container with a clear error —
@@ -169,8 +173,8 @@ Secret).
 
 ```
 Chart.yaml, values.yaml       chart metadata + all workload parameters (see inline comments)
-templates/_helpers.tpl        shared helpers: experiments.namespace, tolerations, sshd command, neuron env
-templates/efs-shared-pvc.yaml single efs-shared-claim PVC, shared by torchrunTrain + pytorchjobTrain
+templates/_helpers.tpl        shared helpers: experiments.namespace, sharedVolumeName, tolerations, sshd command, neuron env
+templates/shared-pvc.yaml     single shared-claim PVC (backend openzfs|fsx|efs), shared by torchrunTrain + pytorchjobTrain
 templates/<workload>.yaml     one file per workload; header comment has render/verify/troubleshooting steps
 files/allreduce_test.py       torch-neuronx all-reduce probe, mounted into neuronDdp via ConfigMap
 ```

@@ -1,27 +1,30 @@
 {{- /*
-pytorchjob-train — two-node HF Trainer fine-tune of SmolLM2-135M via kubeflow.org/v1
+pytorchjob-train — two-node MNIST MLP DistributedDataParallel run via kubeflow.org/v1
 PyTorchJob (Worker-only). Uses the Kubeflow Training Operator (installed by gpu-addons.tf)
-and the hf-train-sample image (train_smollm.py baked in; see manifests/hf-train-sample/).
+and the ddp-sample image (ddp.py baked in; see manifests/ddp-sample/).
 
 This is the idiomatic operator for PyTorch DDP, the same one the awsome-distributed-ai DDP
-sample uses. It is Worker-only (no Master/Launcher, no sshd, no Open MPI). Rendezvous is
-handled by torchrun's c10d backend: spec.elasticPolicy makes the operator inject
-PET_RDZV_BACKEND=c10d and PET_RDZV_ENDPOINT=<job>-worker-0:23456 into every Worker, and
-torchrun reads those to elect Worker-0 as the rendezvous host and assign node ranks
-dynamically. A Worker-only PyTorchJob WITHOUT elasticPolicy gets only PET_NNODES /
-PET_NPROC_PER_NODE and no rendezvous endpoint (the operator injects MASTER_ADDR / RANK /
-WORLD_SIZE only when a Master replica exists), so torchrun cannot find its peers. That is why
-elasticPolicy is present even though we do not want autoscaling — minReplicas==maxReplicas==
-workers pins the size, and elasticPolicy is used purely to supply the rendezvous endpoint.
+sample uses (ddp.py is adapted from it; we swap that sample's etcd rendezvous for c10d). It is
+Worker-only (no Master/Launcher, no sshd, no Open MPI). Rendezvous is handled by torchrun's
+c10d backend: spec.elasticPolicy makes the operator inject PET_RDZV_BACKEND=c10d and
+PET_RDZV_ENDPOINT=<job>-worker-0:23456 into every Worker, and torchrun reads those to elect
+Worker-0 as the rendezvous host and assign node ranks dynamically. A Worker-only PyTorchJob
+WITHOUT elasticPolicy gets only PET_NNODES / PET_NPROC_PER_NODE and no rendezvous endpoint (the
+operator injects MASTER_ADDR / RANK / WORLD_SIZE only when a Master replica exists), so torchrun
+cannot find its peers. That is why elasticPolicy is present even though we do not want
+autoscaling — minReplicas==maxReplicas==workers pins the size, and elasticPolicy is used purely
+to supply the rendezvous endpoint.
 
 Backend gloo (CPU) or nccl (GPU). --nnodes and --nproc_per_node are set on the command from
 Helm values (known at render time), so no $(VAR) env expansion is involved; torchrun spawns
 nprocPerNode local processes per Worker and the global world size is workers*nprocPerNode.
 
 Scaling GPUs/worker: nprocPerNode and gpu.count must move together (one proc per GPU) or
-ranks silently contend for a device; train_smollm.py also currently assumes one GPU per proc.
+ranks silently contend for a device; ddp.py maps LOCAL_RANK to cuda:$LOCAL_RANK (one GPU/proc).
 
-Requires efs_enabled=true, cpu_nodepool_enabled=true (for the gloo backend), and image set.
+Requires the sharedStorage.backend filesystem enabled in Terraform (default openzfs → the
+FSx OpenZFS static PV openzfs-shared, ON by default), cpu_nodepool_enabled=true (for the gloo
+backend), and image set.
 
 Render + apply (CPU, 2 workers):
   helm template exp ./charts/experiments --set namespace=$NS \
@@ -33,18 +36,18 @@ Render + apply (GPU, 2 g5 nodes x 1 GPU):
     --set pytorchjobTrain.gpu.enabled=true --set pytorchjobTrain.gpu.count=1 \
     --set pytorchjobTrain.nprocPerNode=1 | kubectl apply -f -
 Verify:
-  kubectl -n $NS get pytorchjob smollm-pytorchjob -w
-  kubectl -n $NS logs -f smollm-pytorchjob-worker-0
+  kubectl -n $NS get pytorchjob ddp-pytorchjob -w
+  kubectl -n $NS logs -f ddp-pytorchjob-worker-0
 */ -}}
 {{- if .Values.pytorchjobTrain.enabled }}
 {{- $v := .Values.pytorchjobTrain }}
-{{- if not $v.image }}{{ fail "pytorchjobTrain.image is required (the hf-train-sample image URI)" }}{{- end }}
-{{- /* The efs-shared-claim PVC is rendered once by templates/efs-shared-pvc.yaml (shared
-     with torchrunTrain) so enabling both does not emit two copies of the same object. */ -}}
+{{- if not $v.image }}{{ fail "pytorchjobTrain.image is required (the ddp-sample image URI)" }}{{- end }}
+{{- /* The shared-claim PVC is rendered once by templates/shared-pvc.yaml (shared with
+     torchrunTrain) so enabling both does not emit two copies of the same object. */ -}}
 apiVersion: kubeflow.org/v1
 kind: PyTorchJob
 metadata:
-  name: smollm-pytorchjob
+  name: ddp-pytorchjob
   namespace: {{ include "experiments.namespace" . }}
 spec:
   # runPolicy.cleanPodPolicy=Running keeps failed pods around for log inspection until the
@@ -90,7 +93,7 @@ spec:
             podAntiAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
                 - labelSelector:
-                    matchLabels: { training.kubeflow.org/job-name: smollm-pytorchjob }
+                    matchLabels: { training.kubeflow.org/job-name: ddp-pytorchjob }
                   topologyKey: kubernetes.io/hostname
           containers:
             - name: pytorch
@@ -102,16 +105,15 @@ spec:
               # PET_RDZV_ENDPOINT=<job>-worker-0:23456 that spec.elasticPolicy makes the
               # operator inject, and torchrun assigns node ranks dynamically. torchrun then
               # re-exports RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR / MASTER_PORT INTO each
-              # spawned training process — that is where train_smollm.py reads them. (They are
-              # NOT present in this container's top-level env, which is why $(RANK)-style
-              # k8s expansion cannot work here.) No sshd / mpirun anywhere.
+              # spawned training process — that is where ddp.py reads them. (They are NOT present
+              # in this container's top-level env, which is why $(RANK)-style k8s expansion cannot
+              # work here.) No sshd / mpirun anywhere.
               command:
                 - torchrun
                 - --nnodes={{ $v.workers | default 2 | int }}
                 - --nproc_per_node={{ $v.nprocPerNode }}
-                - /workspace/train_smollm.py
+                - /workspace/ddp.py
               env:
-                - { name: HF_HOME, value: /shared/hf-cache }
                 - { name: OUTPUT_DIR, value: /shared/output/pytorchjob-{{ $v.backend }} }
               resources:
                 limits:
@@ -125,11 +127,12 @@ spec:
               volumeMounts:
                 - { name: shared, mountPath: /shared }
                 - { name: shm, mountPath: /dev/shm }
-          # No fix-perms initContainer: the hf-train-sample image runs as root (uid 0) and the
-          # EFS Access Point (efs.tf) enforces posixUser uid/gid 0, so every NFS write is
-          # already owned correctly. mkdir of the HF cache / output subdirs happens naturally
-          # on first write (HuggingFace and Trainer create their target dirs).
+          # No fix-perms initContainer: the ddp-sample image runs as root (uid 0), and every
+          # shared backend hands root a writable mount — FSx OpenZFS exports no_root_squash
+          # (openzfs.tf), FSx Lustre mounts as root, and the EFS Access Point pins posixUser 0
+          # (efs.tf). ddp.py creates the MNIST data / output / snapshot dirs on first write
+          # (os.makedirs), so there is nothing to pre-provision.
           volumes:
-            - { name: shared, persistentVolumeClaim: { claimName: efs-shared-claim } }
+            - { name: shared, persistentVolumeClaim: { claimName: shared-claim } }
             - { name: shm, emptyDir: { medium: Memory, sizeLimit: 4Gi } }
 {{- end }}

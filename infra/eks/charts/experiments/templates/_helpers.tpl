@@ -14,6 +14,25 @@ quote so a namespace like "true"/"off" is not YAML-coerced to a bool.
 {{- end -}}
 
 {{/*
+Shared-storage static PV name for the training workloads' /shared mount. The three storage
+backends each expose ONE static PV, created by the matching *.tf (all RWX):
+  openzfs → "openzfs-shared"       (openzfs.tf; single-AZ NFS home/general-shared — DEFAULT)
+  fsx     → "fsx-training"         (fsx.tf; single-AZ Lustre high-throughput scratch)
+  efs     → "efs-neuron-workspace" (efs.tf; regional multi-AZ RWX — demoted opt-in)
+The chosen filesystem must be enabled in Terraform (its var.<x>_enabled = true) so the PV
+exists, or the PVC below stays Pending. fail on an unknown backend so a typo is caught at
+render time rather than binding to nothing.
+*/}}
+{{- define "experiments.sharedVolumeName" -}}
+{{- $b := .Values.sharedStorage.backend -}}
+{{- if eq $b "openzfs" -}}openzfs-shared
+{{- else if eq $b "fsx" -}}fsx-training
+{{- else if eq $b "efs" -}}efs-neuron-workspace
+{{- else -}}{{ fail (printf "sharedStorage.backend must be openzfs|fsx|efs, got %q" $b) }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Neuron accelerator tolerations: the device-plugin taint, the EFA taint, and the
 Capacity Block taint (value rotates per reservation, so Exists). Indented under a
 `tolerations:` key by the caller; include with the correct indent, e.g.

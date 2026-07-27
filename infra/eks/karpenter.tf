@@ -162,6 +162,7 @@ resource "null_resource" "wait_for_node_drain" {
     helm_release.neuron,
     aws_eks_addon.efs_csi_driver,
     aws_eks_addon.fsx_csi_driver,
+    helm_release.openzfs_csi_driver,
     aws_security_group.efa_node,
     # Same reason as efa_node above: on destroy the drain-wait must run BEFORE the placement
     # group is deleted (a PG cannot be deleted while instances are still in it). depends_on

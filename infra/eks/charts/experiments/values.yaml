@@ -117,17 +117,32 @@ ncclSshd:
   shmSize: 16Gi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5) torchrunTrain — single-node HF Trainer fine-tune via `torchrun` (batch/v1 Job).
-#    Backend gloo (CPU) or nccl (GPU). Requires efs_enabled=true and the hf-train-sample image.
+# sharedStorage — the /shared RWX mount for torchrunTrain + pytorchjobTrain. Selects which
+# Terraform-managed static PV the shared-claim PVC binds to. The three backends map to the
+# three storage layers (see infra/eks/openzfs.tf / fsx.tf / efs.tf):
+#   openzfs → FSx OpenZFS single-AZ NFS home/general-shared (openzfs_enabled, ON by default)
+#   fsx     → FSx Lustre single-AZ high-throughput scratch  (fsx_enabled, ON by default)
+#   efs     → EFS regional multi-AZ RWX                       (efs_enabled, DEMOTED/off)
+# The chosen backend's var.<x>_enabled must be true in Terraform so its PV exists, else the
+# PVC stays Pending. Default openzfs matches the awsome-distributed-ai home-on-OpenZFS layout.
+# ─────────────────────────────────────────────────────────────────────────────
+sharedStorage:
+  backend: openzfs      # openzfs | fsx | efs
+  requestSize: 256Gi    # PVC request; must be <= the backing PV's capacity
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5) torchrunTrain — single-node MNIST MLP DDP via `torchrun` (batch/v1 Job).
+#    Backend gloo (CPU) or nccl (GPU). Requires sharedStorage.backend enabled (default
+#    openzfs, ON) and the ddp-sample image.
 # ─────────────────────────────────────────────────────────────────────────────
 torchrunTrain:
   enabled: false
   # "gloo" or "nccl" — LABEL ONLY. This value is not read by torch.distributed; it only
   # names the OUTPUT_DIR subfolder (/shared/output/torchrun-<backend>) so gloo/nccl runs
-  # don't clobber each other's checkpoints. The actual backend train_smollm.py picks is
-  # determined by whether a GPU is visible (gpu.enabled below + the pod's nvidia.com/gpu
-  # request), not by this string. Set it to describe what you're actually running; setting
-  # backend=nccl without gpu.enabled=true does NOT make it use nccl.
+  # don't clobber each other's snapshots. The actual backend ddp.py picks is determined by
+  # whether a GPU is visible (gpu.enabled below + the pod's nvidia.com/gpu request), not by
+  # this string. Set it to describe what you're actually running; setting backend=nccl
+  # without gpu.enabled=true does NOT make it use nccl.
   backend: gloo
   nodeRole: cpu
   # torchrun --nproc_per_node. MUST equal the GPU count on the nccl backend (one proc
@@ -136,23 +151,24 @@ torchrunTrain:
   gpu:
     enabled: false     # set true for the nccl backend
     count: 1           # nvidia.com/gpu per pod; keep == nprocPerNode on GPU
-  image: ""            # REQUIRED: <account>.dkr.ecr.<region>.amazonaws.com/hf-train-sample:<sha>
+  image: ""            # REQUIRED: <account>.dkr.ecr.<region>.amazonaws.com/ddp-sample:<sha>
   memory: 16Gi
   cpu: "4"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6) pytorchjobTrain — multi-node HF Trainer fine-tune via kubeflow.org/v1 PyTorchJob.
+# 6) pytorchjobTrain — multi-node MNIST MLP DDP via kubeflow.org/v1 PyTorchJob.
 #    Worker-only (Worker-0 is the c10d rendezvous master); Workers on nodeRole (cpu for
 #    gloo, an accelerator pool for nccl). Requires the Kubeflow Training Operator (installed
-#    by gpu-addons.tf) + efs_enabled=true. This is the idiomatic PyTorch DDP operator (same
-#    one the awsome-distributed-ai DDP sample uses) — no Launcher, no sshd, no Open MPI.
+#    by gpu-addons.tf) + sharedStorage.backend enabled (default openzfs, ON). This is the
+#    idiomatic PyTorch DDP operator (same one the awsome-distributed-ai DDP sample uses) —
+#    no Launcher, no sshd, no Open MPI.
 # ─────────────────────────────────────────────────────────────────────────────
 pytorchjobTrain:
   enabled: false
   # "gloo" or "nccl" — LABEL ONLY, same caveat as torchrunTrain.backend: this only names the
   # OUTPUT_DIR subfolder (/shared/output/pytorchjob-<backend>). The real backend is whatever
-  # device train_smollm.py finds visible, driven by gpu.enabled + the Worker's nvidia.com/gpu
-  # request below, not by this string.
+  # device ddp.py finds visible, driven by gpu.enabled + the Worker's nvidia.com/gpu request
+  # below, not by this string.
   backend: gloo
   workers: 2           # Worker replicas = nodes; the operator injects WORLD_SIZE = this count
   nodeRole: cpu        # Worker pool (cpu for gloo; e.g. gpu-g5 for nccl)
@@ -162,7 +178,7 @@ pytorchjobTrain:
   gpu:
     enabled: false     # set true for the nccl backend
     count: 1           # nvidia.com/gpu per Worker; keep == nprocPerNode on GPU
-  image: ""            # REQUIRED: the hf-train-sample image
+  image: ""            # REQUIRED: the ddp-sample image
   workerMemory: 16Gi
   workerCpu: "4"
 

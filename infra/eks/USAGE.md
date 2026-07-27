@@ -203,17 +203,32 @@ so device IDs are allocated contiguously. See
 
 ## 6. Shared storage
 
-- **EFS** (`efs_enabled = true`, on by default): multi-AZ, ReadWriteMany. Ideal
-  for a compiled-model / Hugging Face cache that must survive a Pod reschedule
-  when Karpenter replaces a node. A static PV named `efs-neuron-workspace` is
-  created for you.
-- **FSx for Lustre** (`fsx_enabled = true`, off by default): single-AZ,
-  high-throughput scratch/checkpoints. It bills for the full provisioned
-  capacity continuously — enable it only for runs that need it. Set
-  `fsx_subnet_index` to match the AZ of the pool that will use it. A static PV
-  named `fsx-training` is created for you (no dynamic StorageClass — the CSI
-  driver can only create brand-new filesystems dynamically, not attach to an
-  existing one, so this module always uses a fixed PV).
+The default storage set is two single-AZ FSx layers (the awsome-distributed-ai
+design), matching a cluster that pins every accelerator pool to one AZ. All
+three CSI drivers (OpenZFS, Lustre, EFS) install unconditionally as permanent
+infrastructure; the `*_enabled` flags gate only whether each filesystem and its
+static PV are created (see the base-layer invariant in the README).
+
+- **FSx for OpenZFS** (`openzfs_enabled = true`, on by default): single-AZ NFS
+  home/shared layer, mounted at `/shared` by the training samples. Handles many
+  small files without the IOPS saturation Lustre hits on that pattern. A static
+  PV named `openzfs-shared` is created for you. Bills for its provisioned
+  capacity continuously.
+- **FSx for Lustre** (`fsx_enabled = true`, on by default): single-AZ,
+  high-throughput scratch/checkpoints. Bills for the full provisioned capacity
+  continuously. Set `fsx_subnet_index` to match the AZ of the pool that will use
+  it. A static PV named `fsx-training` is created for you (no dynamic
+  StorageClass — the CSI driver can only create brand-new filesystems, not
+  attach to an existing one, so this module always uses a fixed PV).
+- **EFS** (`efs_enabled = true`, off by default): regional, multi-AZ,
+  ReadWriteMany. Demoted to opt-in: a multi-AZ filesystem is the anomaly in a
+  single-AZ cluster, so it earns its place only for the one case that needs
+  cross-AZ RWX — a compiled-model / Hugging Face cache that must survive a Pod
+  rescheduled into another AZ when Karpenter replaces a node. A static PV named
+  `efs-neuron-workspace` is created when enabled.
+
+For a compute-only cluster with no shared storage, set `openzfs_enabled=false`
+and `fsx_enabled=false` (the CSI drivers remain, but no filesystem is billed).
 
 ---
 

@@ -2,19 +2,27 @@
 # Shared, multi-AZ, ReadWriteMany EFS filesystem for the Neuron/HF compile caches used by
 # accelerated serving apps (e.g. voice-image-edit expects /mnt/efs/neuron-workspace).
 #
-# Why EFS (not FSx Lustre) for this:
+# EFS is a DEMOTED opt-in layer (see var.efs_enabled). The default storage set is the two
+# single-AZ FSx filesystems (Lustre scratch in fsx.tf + OpenZFS NFS home in openzfs.tf),
+# matching awsome-distributed-ai. EFS still earns its keep for one case:
 #   - Multi-AZ: mount targets in every private subnet, so a Pod on the trn2 Capacity-Block
-#     AZ mounts the same cache as a Pod on any other AZ. FSx Lustre is single-AZ.
+#     AZ mounts the same cache as a Pod on any other AZ. Both FSx layers are single-AZ.
 #   - ReadWriteMany: many model Pods share one NEFF/HF cache.
-#   - Survives node loss: when Karpenter replaces a CB/Spot node, the rescheduled Pod
-#     re-mounts the cache and skips the multi-ten-minute recompile.
-# All resources are gated on var.efs_enabled.
+#   - Survives node loss: when Karpenter replaces a CB/Spot node in a different AZ, the
+#     rescheduled Pod re-mounts the cache and skips the multi-ten-minute recompile.
+#
+# CSI-driver DECOUPLING: the aws-efs-csi-driver add-on and its IAM role are created
+# UNCONDITIONALLY — a CSI driver is a permanent cluster capability, independent of whether an
+# EFS filesystem currently exists (the same reasoning that made us keep the driver when EFS
+# was demoted). var.efs_enabled gates ONLY the filesystem, mount targets, access point,
+# StorageClass, and PV below.
 
 # ---------------------------------------------------------------------------
-# EFS CSI driver — IAM role for EKS Pod Identity (mirrors the EBS CSI pattern in iam.tf)
+# EFS CSI driver — IAM role for EKS Pod Identity (mirrors the EBS CSI pattern in iam.tf).
+# Created unconditionally (permanent infra); the Pod Identity association on the add-on
+# binds this role to efs-csi-controller-sa whether or not a filesystem exists.
 # ---------------------------------------------------------------------------
 data "aws_iam_policy_document" "efs_csi_assume" {
-  count = var.efs_enabled ? 1 : 0
   statement {
     actions = ["sts:AssumeRole", "sts:TagSession"]
     principals {
@@ -25,15 +33,13 @@ data "aws_iam_policy_document" "efs_csi_assume" {
 }
 
 resource "aws_iam_role" "efs_csi" {
-  count              = var.efs_enabled ? 1 : 0
   name               = "${var.cluster_name}-efs-csi"
-  assume_role_policy = data.aws_iam_policy_document.efs_csi_assume[0].json
+  assume_role_policy = data.aws_iam_policy_document.efs_csi_assume.json
   tags               = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "efs_csi" {
-  count      = var.efs_enabled ? 1 : 0
-  role       = aws_iam_role.efs_csi[0].name
+  role       = aws_iam_role.efs_csi.name
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy"
 }
 
@@ -115,10 +121,11 @@ resource "aws_efs_access_point" "neuron_workspace" {
 }
 
 # ---------------------------------------------------------------------------
-# aws-efs-csi-driver EKS addon (Pod Identity for dynamic access-point provisioning)
+# aws-efs-csi-driver EKS addon (Pod Identity for dynamic access-point provisioning).
+# Installed unconditionally (permanent infra) — the driver stays even though EFS is demoted
+# to opt-in, so a future efs_enabled=true needs only the filesystem, not a driver rollout.
 # ---------------------------------------------------------------------------
 resource "aws_eks_addon" "efs_csi_driver" {
-  count = var.efs_enabled ? 1 : 0
   # module.eks.cluster_name (not var.cluster_name) so this addon implicitly depends on
   # the cluster and never races its creation — same pattern as fsx.tf.
   cluster_name  = module.eks.cluster_name
@@ -126,7 +133,7 @@ resource "aws_eks_addon" "efs_csi_driver" {
   addon_version = var.efs_csi_driver_version
 
   pod_identity_association {
-    role_arn        = aws_iam_role.efs_csi[0].arn
+    role_arn        = aws_iam_role.efs_csi.arn
     service_account = "efs-csi-controller-sa"
   }
 

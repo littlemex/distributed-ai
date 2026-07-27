@@ -108,9 +108,9 @@ variable "accelerator_pools" {
     # partition_count applies only to strategy "partition".
     placement_group_strategy = optional(string, null)
     partition_count          = optional(number, null)
-    ami_alias         = optional(string, "al2023@latest")
-    ami_ssm_parameter = optional(string, "")
-    volume_size       = optional(string, "200Gi")
+    ami_alias                = optional(string, "al2023@latest")
+    ami_ssm_parameter        = optional(string, "")
+    volume_size              = optional(string, "200Gi")
     # expire_after: Go duration ("24h") or "Never". Node lifetime.
     expire_after = optional(string, "Never")
     # consolidate_after: Go duration ("5m") or "Never". Karpenter scales an empty node
@@ -376,15 +376,26 @@ variable "cpu_nodepool_cpu_limit" {
 
 variable "fsx_enabled" {
   description = <<-EOT
-    Create the FSx for Lustre file system, CSI driver, and a static PersistentVolume bound
-    to it (no dynamic-provisioning StorageClass — see fsx.tf). Off by default: FSx
-    PERSISTENT_2 provisions terabytes of SSD that bill continuously while the cluster
-    exists, which the quick start should not incur. Enable for training runs that need a
-    high-throughput single-AZ scratch/checkpoint filesystem. (EFS, gated separately by
-    var.efs_enabled, is the multi-AZ RWX cache option.)
+    Create the FSx for Lustre FILE SYSTEM and a static PersistentVolume bound to it (no
+    dynamic-provisioning StorageClass — see fsx.tf). This gates only the filesystem/SG/PV;
+    the aws-fsx-csi-driver add-on is installed unconditionally as permanent infrastructure
+    (a CSI driver is a cluster capability, decoupled from whether any filesystem currently
+    exists). ON by default: with FSx Lustre off there is no high-throughput scratch for the
+    training samples to write to. FSx Lustre is single-AZ (see var.fsx_subnet_index) — the
+    whole cluster pins accelerators to one AZ (EFA/RDMA is intra-AZ, Capacity Block is
+    single-AZ), so a multi-AZ filesystem would be the anomaly. This is the high-throughput
+    scratch/checkpoint layer; FSx OpenZFS (var.openzfs_enabled) is the NFS home/shared layer,
+    mirroring the awsome-distributed-ai two-layer (Lustre + OpenZFS) storage design. EFS
+    (var.efs_enabled) is a demoted opt-in multi-AZ RWX cache.
   EOT
   type        = bool
-  default     = false
+  default     = true
+}
+
+variable "fsx_csi_driver_version" {
+  description = "Version of the aws-fsx-csi-driver EKS add-on (FSx for Lustre). Installed unconditionally (see fsx.tf)."
+  type        = string
+  default     = "v1.9.0-eksbuild.1"
 }
 
 variable "fsx_per_unit_storage_throughput" {
@@ -426,22 +437,100 @@ variable "fsx_subnet_index" {
   }
 }
 
-# ── EFS (shared, AZ-independent RWX for Neuron/HF caches) ─────────────────────
-# The voice-image-edit app persists compiled NEFFs and the HF cache under
-# /mnt/efs/neuron-workspace so that a rescheduled Pod (Karpenter node replacement on
-# CB/Spot loss) reuses them instead of recompiling (tens of minutes). EFS is chosen over
-# FSx Lustre here because it is multi-AZ / ReadWriteMany: the accelerator pool AZ (e.g.
-# trn2 in the Capacity Block AZ) may differ from any single-AZ FSx, and multiple model
-# Pods share one cache. See efs.tf.
+# ── FSx for OpenZFS (single-AZ NFS home/shared layer) ────────────────────────
+# The second half of the awsome-distributed-ai two-layer storage design: FSx Lustre is the
+# high-throughput scratch, FSx OpenZFS is the NFS-based home/general shared filesystem that
+# handles many small files without the IOPS saturation Lustre hits on that pattern. Single-AZ
+# to match the rest of the cluster (all accelerator pools pin to one AZ). The CSI driver is
+# NOT an EKS managed add-on (only aws-fsx-csi-driver, for Lustre, is) so it is installed via
+# Helm; see openzfs.tf.
 
-variable "efs_enabled" {
-  description = "Create the shared EFS filesystem, CSI driver, and RWX StorageClass for Neuron/HF caches."
+variable "openzfs_enabled" {
+  description = <<-EOT
+    Create the FSx for OpenZFS FILE SYSTEM and a static PersistentVolume bound to it. Gates
+    only the filesystem/SG/PV; the aws-fsx-openzfs-csi-driver Helm release is installed
+    unconditionally as permanent infrastructure (same decoupling as the Lustre/EFS drivers).
+    ON by default: this is the NFS home/shared layer (/shared) the training samples mount, so
+    turning it off leaves nothing for them to write to. SINGLE_AZ_1 (non-HA) placement pins to
+    var.openzfs_subnet_index — keep it aligned with the accelerator pool that uses it, for the
+    same intra-AZ reason as FSx Lustre.
+  EOT
   type        = bool
   default     = true
 }
 
+variable "openzfs_csi_driver_chart_version" {
+  description = "Version of the aws-fsx-openzfs-csi-driver Helm chart (kubernetes-sigs). Not an EKS managed add-on."
+  type        = string
+  default     = "1.3.0"
+}
+
+variable "openzfs_storage_capacity_gib" {
+  description = "FSx OpenZFS storage capacity in GiB. Minimum 64."
+  type        = number
+  default     = 256
+  validation {
+    # The API rejects < 64 GiB only minutes into CreateFileSystem; catch it at plan time.
+    condition     = var.openzfs_storage_capacity_gib >= 64
+    error_message = "openzfs_storage_capacity_gib must be at least 64 (FSx OpenZFS minimum)."
+  }
+}
+
+variable "openzfs_throughput_capacity" {
+  description = "FSx OpenZFS throughput capacity in MB/s. Valid for SINGLE_AZ_1 (non-HA): 64, 128, 256, 512, 1024, 2048, 3072, 4096."
+  type        = number
+  default     = 256
+  validation {
+    # SINGLE_AZ_2/Multi-AZ use a different ladder (160, 320, ...); this module deploys
+    # SINGLE_AZ_1 (non-HA), whose valid values are the 64-based ladder. An invalid value
+    # otherwise only surfaces as a CreateFileSystem API error minutes into apply.
+    condition     = contains([64, 128, 256, 512, 1024, 2048, 3072, 4096], var.openzfs_throughput_capacity)
+    error_message = "openzfs_throughput_capacity must be one of 64, 128, 256, 512, 1024, 2048, 3072, 4096 (SINGLE_AZ_1 non-HA)."
+  }
+}
+
+variable "openzfs_subnet_index" {
+  description = <<-EOT
+    Index into module.vpc.private_subnets (i.e. into var.azs) for the single-AZ FSx OpenZFS
+    filesystem. Access is over NFS within the VPC; mounting from a pod in a DIFFERENT AZ works
+    but adds cross-AZ data-transfer cost, so set this to match the `zone` of the accelerator
+    pool that uses it (0 = var.azs[0], 1 = var.azs[1]).
+  EOT
+  type        = number
+  default     = 0
+  validation {
+    condition     = var.openzfs_subnet_index >= 0 && var.openzfs_subnet_index < length(var.azs)
+    error_message = "openzfs_subnet_index must be between 0 and length(azs)-1 (it indexes into the per-AZ private subnets)."
+  }
+}
+
+# ── EFS (demoted opt-in, AZ-independent RWX for Neuron/HF caches) ─────────────
+# EFS is DEMOTED from the default storage set. The primary layers are now the two single-AZ
+# FSx filesystems (Lustre scratch + OpenZFS NFS home), matching awsome-distributed-ai. A
+# regional multi-AZ filesystem is the anomaly in a cluster that deliberately pins every
+# accelerator pool to one AZ, so EFS is opt-in for the specific case where it earns its keep:
+# the voice-image-edit app persists compiled NEFFs and the HF cache under
+# /mnt/efs/neuron-workspace, and a Pod rescheduled onto a DIFFERENT AZ (Karpenter node
+# replacement on CB/Spot loss) must still re-mount that cache to skip the multi-ten-minute
+# recompile — the one workload where multi-AZ RWX genuinely helps. See efs.tf.
+#
+# The aws-efs-csi-driver add-on is installed UNCONDITIONALLY (permanent infra, decoupled from
+# this flag); var.efs_enabled gates only the filesystem/mount-targets/PV.
+
+variable "efs_enabled" {
+  description = <<-EOT
+    Create the shared EFS FILE SYSTEM, mount targets, and RWX StorageClass/PV for Neuron/HF
+    caches. Gates only the filesystem/mount-targets/PV; the aws-efs-csi-driver add-on is
+    installed unconditionally as permanent infrastructure (see efs.tf). OFF by default: EFS is
+    demoted in favour of the two single-AZ FSx layers (Lustre + OpenZFS). Enable only for the
+    multi-AZ RWX cache case described above.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "efs_csi_driver_version" {
-  description = "Version of the aws-efs-csi-driver EKS addon."
+  description = "Version of the aws-efs-csi-driver EKS add-on. Installed unconditionally (see efs.tf)."
   type        = string
   default     = "v3.3.0-eksbuild.1"
 }

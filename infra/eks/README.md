@@ -15,10 +15,10 @@ without editing resource blocks. You add a workload by adding a map entry.
 > the reference.
 
 > **This is a reference module, not an official AWS project.** It creates
-> billable resources (EKS control plane, NAT gateways, system nodes, and — when
-> enabled — accelerators and FSx) that cost money **while they exist, even when
-> idle**. Run `terraform destroy` when you are done. See [Cost](#cost) and
-> [Known limitations](#known-limitations).
+> billable resources (EKS control plane, NAT gateways, system nodes, the two
+> default-on FSx filesystems, and — when enabled — accelerators) that cost money
+> **while they exist, even when idle**. Run `terraform destroy` when you are
+> done. See [Cost](#cost) and [Known limitations](#known-limitations).
 
 ---
 
@@ -38,9 +38,20 @@ without editing resource blocks. You add a workload by adding a map entry.
   outputs the *schedulable* EFA count a Pod may request (see the p5en gotcha).
 - **Single-AZ accelerator placement.** Every accelerator pool pins to one AZ so
   EFA/RDMA collectives stay intra-AZ (they are not routable across subnets).
-- **Optional shared storage.** EFS (multi-AZ, ReadWriteMany — a NEFF / Hugging
-  Face cache that survives Pod reschedule) and FSx for Lustre (single-AZ,
-  high-throughput scratch). FSx is off by default because it bills continuously.
+- **Two-layer single-AZ shared storage, on by default.** FSx for OpenZFS
+  (single-AZ NFS home/shared `/shared`) and FSx for Lustre (single-AZ,
+  high-throughput scratch) — the awsome-distributed-ai two-layer design. Both
+  bill continuously (hence "even when idle" above), but they are on by default
+  because the workloads have nothing to write to otherwise. EFS (regional,
+  multi-AZ, ReadWriteMany) is demoted to opt-in for the one case that needs
+  cross-AZ RWX — a NEFF / Hugging Face cache that must survive a Pod rescheduled
+  into another AZ. In a cluster that pins every accelerator to one AZ, a
+  multi-AZ filesystem is the anomaly, not the default.
+- **CSI drivers are permanent infra, decoupled from the filesystems.** The EBS,
+  FSx (OpenZFS + Lustre), and EFS CSI drivers all install unconditionally as
+  cluster capabilities; `openzfs_enabled` / `fsx_enabled` / `efs_enabled` gate
+  only whether each *filesystem* (and its static PV) is created. This is one
+  instance of the module's base-layer invariant — see below.
 - **Public ingress sample.** AWS Load Balancer Controller + a
   CloudFront → ALB → EKS reference path. Off by default (`enable_demo_app`);
   a base cluster never stands up an internet-facing endpoint.
@@ -64,8 +75,34 @@ VPC (/16 — sized large: GPU/Neuron nodes + EFA-only ENIs consume many IPs)
 │    └─ neuron / reserved (CB) .. aws.amazon.com/neuron, EFA multi-card (e.g. trn2)
 │
 ├─ Add-ons (conditional) ...... GPU Operator · Neuron plugin · EFA plugin
-└─ Storage (optional) ......... EFS (RWX, multi-AZ) · FSx for Lustre (single-AZ scratch)
+├─ CSI drivers (always on) .... EBS · FSx OpenZFS · FSx Lustre · EFS (drivers; filesystems gated separately)
+└─ Storage .................... FSx OpenZFS (single-AZ NFS /shared, default on) · FSx Lustre (single-AZ scratch, default on) · EFS (multi-AZ RWX, opt-in)
 ```
+
+---
+
+## Base-layer invariant
+
+One rule governs what this module installs: **everything a workload depends on
+at runtime is permanently managed by Terraform.** CSI drivers, the Kubeflow
+Training Operator, the Karpenter controller, and the shared-storage static PVs
+are cluster infrastructure that lives for the cluster's lifetime — they are not
+created and torn down alongside the Pods that use them. This is why the
+per-workload docs can assume "it's already there after `terraform apply`."
+
+Two consequences worth calling out explicitly:
+
+- **CSI driver ≠ filesystem.** The drivers install unconditionally; the
+  `*_enabled` flags gate only the filesystems. A driver is a cluster
+  capability, so it stays available even when its filesystem is off — enabling
+  EFS later is then "add one filesystem," not "add an addon."
+- **No CD mechanism is bundled, by design.** There is no Argo CD / Flux /
+  GitOps controller here. Because every runtime prerequisite is held by
+  Terraform, running a workload is just `helm template … | kubectl apply -f -`;
+  a continuous-delivery controller is not a base-layer dependency. Its absence
+  is a consequence of pushing prerequisites into Terraform, not a missing
+  feature. Layer GitOps on top if you want it — it is a consumer of this base,
+  not something the base depends on.
 
 ---
 
@@ -202,11 +239,13 @@ Generate an inputs/outputs reference with
 
 ---
 
-## Quick start (no Capacity Block, no FSx)
+## Quick start (no Capacity Block)
 
-`accelerator_pools` defaults to empty and FSx is off, so the base cluster is
-Region-agnostic and cheap to stand up. Supply one On-Demand GPU pool in
-`terraform.tfvars`:
+`accelerator_pools` defaults to empty, so the base cluster is Region-agnostic
+and stands up without any accelerator. The two single-AZ FSx filesystems are
+on by default (they bill continuously — set `fsx_enabled=false` and
+`openzfs_enabled=false` for a storage-free compute-only cluster). Supply one
+On-Demand GPU pool in `terraform.tfvars`:
 
 ```bash
 cd infra/eks
@@ -288,9 +327,9 @@ Two components commonly paired with GPU/Neuron inference are deliberately
   separately; its `ScaledObject` drives the Deployment, and Karpenter (this
   module) provisions the node underneath once KEDA scales past zero.
 - **Mountpoint for Amazon S3 CSI driver**, for mounting model weights directly
-  from S3. This module ships EFS and FSx for shared/scratch storage (see
-  above) but not an S3 mount — add the `aws-mountpoint-s3-csi-driver` EKS
-  addon the same way `efs.tf` adds the EFS one, if your workload needs it.
+  from S3. This module ships the two FSx layers plus EFS for shared/scratch
+  storage (see above) but not an S3 mount — add the `aws-mountpoint-s3-csi-driver`
+  EKS addon the same way `efs.tf` adds the EFS one, if your workload needs it.
 
 ---
 
@@ -377,12 +416,17 @@ Discovered by direct measurement and cluster inspection.
 Rough guidance — check current pricing for your Region:
 
 - **Always-on while the cluster exists:** EKS control plane (~$0.10/h), NAT
-  gateway(s), the system managed node group, and 3 Interface VPC endpoints
-  (EC2/STS/SSM — ~$0.01/h each; the S3 Gateway endpoint is free). The
-  endpoints exist so Karpenter keeps working if the NAT gateway is ever
-  unavailable during teardown — see the Gotchas row on destroy ordering.
-- **FSx for Lustre** (when `fsx_enabled = true`): PERSISTENT_2 SSD bills for the
-  full provisioned capacity continuously — this is why it is off by default.
+  gateway(s), the system managed node group, 3 Interface VPC endpoints
+  (EC2/STS/SSM — ~$0.01/h each; the S3 Gateway endpoint is free), and the two
+  default-on FSx filesystems (below). The endpoints exist so Karpenter keeps
+  working if the NAT gateway is ever unavailable during teardown — see the
+  Gotchas row on destroy ordering.
+- **FSx (both layers on by default):** FSx for Lustre (`fsx_enabled = true`,
+  PERSISTENT_2 SSD) and FSx for OpenZFS (`openzfs_enabled = true`,
+  SINGLE_AZ_1) each bill for their full provisioned capacity continuously.
+  They are on by default because the sample workloads need somewhere to write;
+  set both flags to `false` for a compute-only cluster. EFS
+  (`efs_enabled = true`) is off by default and bills only for what it stores.
 - **Accelerators:** On-Demand GPU/Neuron nodes bill per hour while running;
   on-demand/spot pools consolidate empty nodes after a short idle by default.
   **Capacity Block** is billed upfront at purchase for the whole reserved window.
