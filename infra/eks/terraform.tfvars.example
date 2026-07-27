@@ -66,15 +66,27 @@ accelerator_pools = {
 }
 
 # Named AWS profile for Terraform provider authentication. The account ID is derived
-# from these credentials automatically (no aws_account_id input needed). Commented out
-# by default: with no named profile, Terraform uses the standard credential chain
-# (env vars, an EC2/ECS instance role, or AWS SSO) instead. Uncomment and set your
-# profile name only if you authenticate via a named ~/.aws/config profile.
+# from these credentials automatically (no aws_account_id input needed).
+#
+# IF YOU AUTHENTICATE VIA A NAMED PROFILE (AWS SSO, Isengard/assume-role, or any
+# named ~/.aws/config profile — this is the COMMON case), SET IT HERE and DO NOT
+# leave it commented out. When set, Terraform passes --profile consistently to the
+# aws/helm/kubectl providers AND the aws-CLI helpers (capacity-block describe,
+# destroy-time drain), so every path authenticates as the SAME principal.
+#
+# Leave it commented out ONLY if your DEFAULT credential chain already resolves to
+# the principal you want — i.e. static keys in [default], env vars, or an EC2/ECS
+# instance role (e.g. CI runners). If your [default] profile is a DIFFERENT
+# principal than the one you apply with (a classic trap: apply as an SSO/assume-role
+# profile but [default] is a plain IAM user), the cluster grants admin only to the
+# APPLYING principal, and a later `kubectl`/`update-kubeconfig` on [default] fails
+# with "Unauthorized". See Basic01 for the matching `aws eks update-kubeconfig
+# --profile ...` step.
 # aws_profile = "my-profile"
 
-# VPC CIDR. Use a /16 — accelerated ML nodes consume IPs heavily (VPC CNI secondary IPs +
-# one IP per EFA-only ENI; trn2/p5en = 16 ENIs, p5 = 32). A /21 or /24 exhausts fast and the
-# EKS control plane goes IMPAIRED (InsufficientFreeAddresses). Matches awslabs/awsome-distributed-ai.
+# VPC CIDR. Use a /16 — accelerated ML nodes consume IPs heavily via VPC CNI secondary IPs
+# (prefix delegation reserves /28 = 16 IPs per slot). EFA-only interfaces do NOT consume IPs,
+# but the CNI warm pool alone can exhaust a small subnet. Matches awslabs/awsome-distributed-ai.
 vpc_cidr = "10.0.0.0/16"
 
 # Private subnets (one per AZ). Node workloads run here — make them huge (/18 = 16,384 IPs

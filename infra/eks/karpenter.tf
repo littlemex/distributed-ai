@@ -137,7 +137,7 @@ resource "null_resource" "wait_for_node_drain" {
   triggers = {
     cluster_name = module.eks.cluster_name
     region       = var.region
-    aws_profile  = coalesce(var.aws_profile, "")
+    aws_profile  = var.aws_profile != null ? var.aws_profile : ""
   }
 
   # Every controller/addon that owns a per-node resource, so all of them are destroyed only

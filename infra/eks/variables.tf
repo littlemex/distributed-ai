@@ -205,10 +205,14 @@ variable "cpu_instance_categories" {
 
 variable "aws_profile" {
   description = <<-EOT
-    Named AWS CLI/Terraform provider profile. Leave unset (null, the default) to use
-    the standard credential chain instead — environment variables, an EC2/ECS
-    instance role, or AWS SSO — which is required for users with no ~/.aws/config
-    profile named "default" (e.g. most CI runners).
+    Named AWS CLI/Terraform provider profile. Set this whenever you authenticate via a
+    named profile (AWS SSO, an assume-role/Isengard profile, or any ~/.aws/config
+    profile) — it is threaded consistently to the aws/helm/kubectl providers and the
+    aws-CLI helpers so every path uses the SAME principal. Leave unset (null, the
+    default) only when the standard credential chain already resolves to the intended
+    principal — static keys in [default], environment variables, an EC2/ECS instance
+    role, etc. (e.g. most CI runners). If [default] is a different principal than the
+    one you apply with, kubectl/update-kubeconfig on [default] will get "Unauthorized".
   EOT
   type        = string
   default     = null

@@ -43,9 +43,9 @@ data "external" "capacity_reservations" {
     # Pass the same profile the AWS provider uses so the describe call resolves the SAME
     # account/credentials. Without it the script would fall back to the ambient credential
     # chain and, in a multi-profile shell, could describe a reservation in the wrong account.
-    # coalesce to "" because var.aws_profile defaults to null and a null map value has
-    # version-dependent behaviour in the external provider; the script treats "" as "ambient".
-    profile = coalesce(var.aws_profile, "")
+    # Normalize null → "" so the external data source receives a valid string.
+    # The script treats "" as "use ambient credentials" (no --profile flag).
+    profile = var.aws_profile != null ? var.aws_profile : ""
   }
 }
 

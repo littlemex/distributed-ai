@@ -214,12 +214,24 @@ cp terraform.tfvars.example terraform.tfvars   # edit region, azs, and one pool
 terraform init
 terraform apply                                # ~15 min
 
-aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" --region <region>
+# If you set aws_profile in terraform.tfvars, pass the SAME profile here (or
+# `export AWS_PROFILE=<name>` first) — otherwise update-kubeconfig/kubectl use your
+# [default] principal, which the cluster never granted access to, and you get
+# "Unauthorized". Drop --profile only if [default] already IS the applying principal.
+aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" \
+  --region <region> --profile <same-as-tfvars>
 kubectl get nodes
 ```
 
 Karpenter provisions a GPU node when the first pod requesting `nvidia.com/gpu`
 is scheduled.
+
+> **"Unauthorized" from kubectl right after apply?** Two causes: (1) `kubectl`
+> runs as a *different* IAM principal than the one that applied — `enable_cluster_creator_admin_permissions`
+> grants admin only to the applying principal, so pass the matching `--profile`
+> (above) or `export AWS_PROFILE`. Verify with `aws sts get-caller-identity` (the
+> ARN must match the apply-time one). (2) Access-entry propagation lag — the admin
+> access entry can take a minute or two to become effective; wait and retry.
 
 ---
 
@@ -351,6 +363,7 @@ Discovered by direct measurement and cluster inspection.
 
 | Symptom | Root cause | Fix |
 |---|---|---|
+| `kubectl` / `update-kubeconfig`: `Unauthorized` | The principal `kubectl` uses differs from the one that applied (e.g. `aws_profile` set in tfvars but `update-kubeconfig` run without `--profile`, so it falls back to `[default]`); the cluster granted admin only to the applying principal | Run `update-kubeconfig` with the SAME `--profile` as `aws_profile` (or `export AWS_PROFILE`); confirm with `aws sts get-caller-identity`. If the ARNs already match, the admin access entry may still be propagating — wait a minute and retry. |
 | `kubectl` acts on the wrong cluster | Multi-cluster account; context silently switched | Always check `kubectl config current-context` before operating. |
 | Large accelerator image build fails: "no space left" | A small local VM disk cannot hold NGC-based images | Build on a GPU node (large NVMe) with a privileged buildkit pod, pushing straight to ECR. |
 | sshd/torchrun dies (exit 143) under `kubectl exec` | Background process killed when the exec session closes | Run it as the Pod's `command:` (PID 1 subtree), not inside `exec`. |

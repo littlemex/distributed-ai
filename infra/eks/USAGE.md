@@ -11,7 +11,10 @@ are copy-paste ready — replace `<angle-bracket>` placeholders with your values
 - Nothing here contains account IDs, cluster names, or IPs — set your own in
   `terraform.tfvars`.
 - If you use a named AWS profile, either `export AWS_PROFILE=<name>` once or add
-  `aws_profile = "<name>"` to `terraform.tfvars`.
+  `aws_profile = "<name>"` to `terraform.tfvars`. Use the SAME profile for
+  `terraform apply` and for `aws eks update-kubeconfig` — if they resolve to
+  different IAM principals, `kubectl` gets `Unauthorized` (the cluster grants admin
+  only to the principal that applied).
 
 ---
 
@@ -52,7 +55,10 @@ Then bring the cluster up:
 ```bash
 terraform init
 terraform apply                      # ~15 minutes for the control plane + system nodes
-aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" --region <region>
+# Pass the SAME profile you applied with (or export AWS_PROFILE) — drop --profile
+# only if [default] already is the applying principal. See the note in Conventions.
+aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" \
+  --region <region> --profile <same-as-tfvars>
 kubectl get nodes                    # you should see the system nodes
 ```
 
@@ -262,6 +268,7 @@ kubectl delete ingress --all -A     # removes ALBs created by the LB controller
 | Karpenter never launches a reserved node | The Capacity Block slot may not be free yet (previous instance still terminating), or `cb_reservation_id` is wrong. Confirm the reservation is `active`. |
 | GPU Pod runs but `nvidia-smi` shows nothing | The GPU Operator may still be initializing on a fresh node; give it 2–3 minutes and check `kubectl -n gpu-operator get pods`. |
 | NCCL is slow / not using EFA | Set `NCCL_SOCKET_IFNAME=^lo,docker,veth` (exclusion pattern) and confirm `FI_PROVIDER=efa`; look for `NET/OFI Selected provider is efa` in logs. |
+| `kubectl` / `update-kubeconfig`: `Unauthorized` | The principal `kubectl` uses differs from the one that applied — pass the SAME `--profile` as `aws_profile` (or `export AWS_PROFILE`) and verify with `aws sts get-caller-identity`; if the ARNs already match, the admin access entry is still propagating, so wait a minute and retry. |
 | `kubectl` commands hit the wrong cluster | `kubectl config current-context` — run `aws eks update-kubeconfig` for the intended cluster. |
 | Hugging Face downloads fail with `429` | Your egress IP is rate-limited. Set `HF_HUB_DISABLE_XET=1`, and for multi-rank jobs pre-stage the tokenizer/dataset to shared storage and load from the local path. |
 | `terraform apply` fails once on a Karpenter CRD, succeeds on retry | Known first-apply timing with the Kubernetes provider; just re-run `terraform apply`. |
