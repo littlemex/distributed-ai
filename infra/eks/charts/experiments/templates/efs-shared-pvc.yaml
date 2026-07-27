@@ -1,7 +1,7 @@
 {{- /*
-efs-shared-pvc — the ReadWriteMany PVC that torchrunTrain and mpijobTrain both bind to the
-static PV `efs-neuron-workspace` (efs.tf). Split out of both templates so there is exactly
-one PVC definition (rendering both workloads together used to emit two identical
+efs-shared-pvc — the ReadWriteMany PVC that torchrunTrain and pytorchjobTrain both bind to
+the static PV `efs-neuron-workspace` (efs.tf). Split out of both templates so there is
+exactly one PVC definition (rendering both workloads together used to emit two identical
 PersistentVolumeClaim documents; harmless while they stayed identical, but the first one to
 drift becomes a silent last-wins bug, and it invites copy-paste of a definition that should
 have one source of truth).
@@ -11,7 +11,7 @@ time. Applying this into a second namespace while the first PVC is still Bound l
 second PVC permanently Pending. Delete the first namespace's PVC first, or provision a
 second static PV before running the same workload elsewhere.
 */ -}}
-{{- if or .Values.torchrunTrain.enabled .Values.mpijobTrain.enabled }}
+{{- if or .Values.torchrunTrain.enabled .Values.pytorchjobTrain.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

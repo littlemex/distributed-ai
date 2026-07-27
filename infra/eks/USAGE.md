@@ -101,7 +101,7 @@ has been idle past `consolidateAfter` (5 minutes by default for on-demand/spot
 pools). Watch it disappear with `kubectl get nodeclaims -w`.
 
 For anything past a one-shot smoke test — multi-node NCCL/EFA benches, Neuron
-DDP, torchrun/MPIJob training, vLLM serving — use the **`charts/experiments`**
+DDP, torchrun/PyTorchJob training, vLLM serving — use the **`charts/experiments`**
 Helm chart instead of hand-writing manifests. See `charts/experiments/README.md`
 for the workload catalog, prerequisites, and known issues.
 

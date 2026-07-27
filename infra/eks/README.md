@@ -412,7 +412,7 @@ deletes FSx/EFS and their contents (regenerable caches) — see below.
   environment is disposable). Set it, or back up, before storing anything you
   cannot regenerate.
 - The `data.http` fetch for the ALB Controller IAM policy is a plan-time network
-  dependency; the MPI operator manifest is vendored (committed) to avoid one.
+  dependency; the Training Operator manifest is vendored (committed) to avoid one.
 - **FSx is static-provisioning only:** aws-fsx-csi-driver cannot dynamically bind
   a StorageClass to an existing filesystem (only create new ones), so this
   module creates one filesystem and one fixed-`volumeHandle` PersistentVolume

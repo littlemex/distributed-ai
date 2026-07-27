@@ -3,7 +3,7 @@
 #   1. NVIDIA GPU Operator      (var.gpu_operator_chart_version) — only if a GPU pool exists
 #   2. AWS EFA k8s Device Plugin (var.efa_device_plugin_chart_version) — if any pool uses EFA
 #      (shared by GPU and Neuron pools; trn2/p5/p5en/g6e all surface EFA via this plugin)
-#   3. Kubeflow MPI Operator     (var.mpi_operator_version) — always (multi-node launcher)
+#   3. Kubeflow Training Operator (var.training_operator_version) — always (PyTorchJob)
 # The Neuron device plugin is a separate add-on (neuron-addons.tf).
 #
 # Verified facts:
@@ -14,7 +14,10 @@
 #     differs from the app/image version; p5en.48xlarge/p5.48xlarge are in the default
 #     supportedInstanceLabels list. (g6e.12xlarge is NOT — see the EFA gotcha in the
 #     README/blog; on g6e the plugin still advertises EFA once an efa-only ENI exists.)
-#   - mpi-operator v2beta1 single-file manifest is published per release tag on GitHub.
+#   - training-operator standalone manifest is published per release tag on GitHub; it is the
+#     idiomatic operator for PyTorchJob (kubeflow.org/v1), the same one the awsome-distributed-ai
+#     DDP sample installs. It injects MASTER_ADDR/MASTER_PORT/WORLD_SIZE/RANK into each pod so a
+#     PyTorchJob needs no sshd/OpenMPI (that was the tax of the old MPIJob-on-PyTorch approach).
 
 locals {
   # GPU Operator Helm values, assembled once so the release stays declarative and diffs
@@ -139,37 +142,42 @@ resource "helm_release" "aws_efa_k8s_device_plugin" {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Kubeflow MPI Operator (optional; multi-node MPIJob launcher)
-#    Applied from a VENDORED manifest committed at manifests/mpi-operator-<version>.yaml
+# 3. Kubeflow Training Operator (optional; PyTorchJob multi-node launcher)
+#    Applied from a VENDORED manifest committed at manifests/training-operator-<version>.yaml
 #    (not fetched at plan time — an upstream tag is mutable and a plan-time HTTP dependency
-#    is fragile). Refresh it by re-downloading the release YAML when bumping the version.
-#    Gated by var.mpi_operator_enabled. The gavinbunney/kubectl provider's
+#    is fragile). Refresh it by re-rendering the release's standalone overlay when bumping the
+#    version:
+#      kubectl kustomize "github.com/kubeflow/training-operator/manifests/overlays/standalone?ref=<version>" \
+#        > manifests/training-operator-<version>.yaml
+#    Gated by var.training_operator_enabled. The gavinbunney/kubectl provider's
 #    kubectl_file_documents splits the multi-doc YAML into individual docs.
 # ---------------------------------------------------------------------------
-data "kubectl_file_documents" "mpi_operator" {
-  count   = var.mpi_operator_enabled ? 1 : 0
-  content = file("${path.module}/manifests/mpi-operator-${var.mpi_operator_version}.yaml")
+data "kubectl_file_documents" "training_operator" {
+  count   = var.training_operator_enabled ? 1 : 0
+  content = file("${path.module}/manifests/training-operator-${var.training_operator_version}.yaml")
 }
 
-resource "kubectl_manifest" "mpi_operator" {
-  for_each  = var.mpi_operator_enabled ? data.kubectl_file_documents.mpi_operator[0].manifests : {}
+resource "kubectl_manifest" "training_operator" {
+  for_each  = var.training_operator_enabled ? data.kubectl_file_documents.training_operator[0].manifests : {}
   yaml_body = each.value
 
-  # The MPIJob CRD is large; a client-side apply stores the whole schema in the
-  # last-applied-configuration annotation and exceeds the 262144-byte limit.
+  # The PyTorchJob (and sibling) CRDs are large; a client-side apply stores the whole schema
+  # in the last-applied-configuration annotation and exceeds the 262144-byte limit.
   # Server-side apply avoids that annotation entirely.
   server_side_apply = true
 
-  # The aggregated ClusterRoles (kubeflow-mpijobs-admin/edit/view) have their
-  # .rules populated by the cluster's clusterrole-aggregation-controller, which
-  # then owns that field. Server-side apply conflicts with it; force ownership
-  # back to this manifest (the aggregation controller re-reconciles harmlessly).
+  # The aggregated ClusterRoles (kubeflow-training-admin/edit/view) have their .rules
+  # populated by the cluster's clusterrole-aggregation-controller, which then owns that
+  # field. Server-side apply conflicts with it; force ownership back to this manifest (the
+  # aggregation controller re-reconciles harmlessly). The webhook caBundle is likewise
+  # written by the operator's own cert-controller at startup, so let it own that too.
   force_conflicts = true
 
-  # Ignore updates to fields managed by the operator's own controllers.
-  ignore_fields = ["metadata.annotations"]
+  # Ignore updates to fields managed by the operator's own controllers (webhook caBundle,
+  # operator-set annotations).
+  ignore_fields = ["metadata.annotations", "webhooks"]
 
-  # The MPI Operator runs on system nodes and does not depend on the GPU stack; it only
+  # The Training Operator runs on system nodes and does not depend on the GPU stack; it only
   # needs the cluster API to be reachable (the kubectl provider already targets module.eks).
   depends_on = [module.eks]
 }

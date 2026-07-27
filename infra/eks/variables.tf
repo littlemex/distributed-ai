@@ -302,16 +302,16 @@ variable "efa_device_plugin_chart_version" {
   default     = "v0.5.29"
 }
 
-variable "mpi_operator_enabled" {
-  description = "Install the Kubeflow MPI Operator (multi-node MPIJob launcher). Disable for inference-only clusters that do not run MPIJobs."
+variable "training_operator_enabled" {
+  description = "Install the Kubeflow Training Operator (PyTorchJob multi-node launcher). Disable for inference-only clusters that do not run PyTorchJobs."
   type        = bool
   default     = true
 }
 
-variable "mpi_operator_version" {
-  description = "Kubeflow MPI Operator release tag. Used only for the vendored manifest filename (manifests/mpi-operator-<version>.yaml); the manifest is committed to the repo, not fetched at plan time."
+variable "training_operator_version" {
+  description = "Kubeflow Training Operator release tag. Used only for the vendored manifest filename (manifests/training-operator-<version>.yaml); the manifest is committed to the repo, not fetched at plan time."
   type        = string
-  default     = "v0.6.0"
+  default     = "v1.9.0"
 }
 
 variable "neuron_helm_chart_version" {

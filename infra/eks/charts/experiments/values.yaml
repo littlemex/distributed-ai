@@ -118,7 +118,7 @@ ncclSshd:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5) torchrunTrain — single-node HF Trainer fine-tune via `torchrun` (batch/v1 Job).
-#    Backend gloo (CPU) or nccl (GPU). Requires efs_enabled=true and the mpijob image.
+#    Backend gloo (CPU) or nccl (GPU). Requires efs_enabled=true and the hf-train-sample image.
 # ─────────────────────────────────────────────────────────────────────────────
 torchrunTrain:
   enabled: false
@@ -136,28 +136,33 @@ torchrunTrain:
   gpu:
     enabled: false     # set true for the nccl backend
     count: 1           # nvidia.com/gpu per pod; keep == nprocPerNode on GPU
-  image: ""            # REQUIRED: <account>.dkr.ecr.<region>.amazonaws.com/mpijob-hf-sample:v1
+  image: ""            # REQUIRED: <account>.dkr.ecr.<region>.amazonaws.com/hf-train-sample:<sha>
   memory: 16Gi
   cpu: "4"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6) mpijobTrain — two-node HF Trainer fine-tune via kubeflow.org/v2beta1 MPIJob.
-#    Launcher always on a CPU node; Workers on nodeRole (cpu for gloo, an accelerator
-#    pool for nccl). Requires mpi-operator (always installed) + efs_enabled=true.
+# 6) pytorchjobTrain — multi-node HF Trainer fine-tune via kubeflow.org/v1 PyTorchJob.
+#    Worker-only (Worker-0 is the c10d rendezvous master); Workers on nodeRole (cpu for
+#    gloo, an accelerator pool for nccl). Requires the Kubeflow Training Operator (installed
+#    by gpu-addons.tf) + efs_enabled=true. This is the idiomatic PyTorch DDP operator (same
+#    one the awsome-distributed-ai DDP sample uses) — no Launcher, no sshd, no Open MPI.
 # ─────────────────────────────────────────────────────────────────────────────
-mpijobTrain:
+pytorchjobTrain:
   enabled: false
   # "gloo" or "nccl" — LABEL ONLY, same caveat as torchrunTrain.backend: this only names the
-  # OUTPUT_DIR subfolder (/shared/output/mpijob-<backend>). The real backend is whatever
+  # OUTPUT_DIR subfolder (/shared/output/pytorchjob-<backend>). The real backend is whatever
   # device train_smollm.py finds visible, driven by gpu.enabled + the Worker's nvidia.com/gpu
   # request below, not by this string.
   backend: gloo
-  nodeRole: cpu          # Worker pool (cpu for gloo; e.g. gpu-g5 for nccl)
-  launcherNodeRole: cpu  # Launcher is GPU-less; keep on a cheap CPU node in both backends
+  workers: 2           # Worker replicas = nodes; the operator injects WORLD_SIZE = this count
+  nodeRole: cpu        # Worker pool (cpu for gloo; e.g. gpu-g5 for nccl)
+  # torchrun --nproc_per_node: local processes PER Worker. MUST equal gpu.count on the nccl
+  # backend (one proc per GPU); on gloo it is the CPU process count per node (1 is fine).
+  nprocPerNode: 1
   gpu:
-    enabled: false       # set true for the nccl backend
-    count: 1             # nvidia.com/gpu per Worker; keep == slotsPerWorker (=1 here)
-  image: ""              # REQUIRED: the mpijob-hf-sample image
+    enabled: false     # set true for the nccl backend
+    count: 1           # nvidia.com/gpu per Worker; keep == nprocPerNode on GPU
+  image: ""            # REQUIRED: the hf-train-sample image
   workerMemory: 16Gi
   workerCpu: "4"
 

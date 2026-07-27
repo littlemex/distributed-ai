@@ -29,16 +29,16 @@ your subsequent `kubectl -n my-experiment ...` commands.
 | `neuronDdp` | two-node Neuron DDP over EFA (ConfigMap + `neuron-server`/`neuron-client` pods) | trn2.48xlarge x2 | **verified**: world_size=64 all-reduce + aws-neuron-samples MNIST MLP, both completed; EFA confirmed via libfabric log + host RDMA-write counters |
 | `ncclProbe` | single-node NVIDIA/EFA sanity check (`nccl-probe` pod) | — | untested on this module (defaults carried over from a B300 reference; this module's own verified GPU run was g5.24xlarge/A10G, no EFA) |
 | `ncclSshd` | two-node NVIDIA NCCL bench over EFA (`nccl-server`/`nccl-client` pods) | — | untested on this module, same caveat as `ncclProbe` |
-| `torchrunTrain` | single-node HF Trainer fine-tune via `torchrun` (batch/v1 Job) | c6a.large (CPU/gloo, 2 nodes via `mpijobTrain`'s Worker path; torchrunTrain itself run single-node) / g5.24xlarge (GPU path reviewed, not yet run) | gloo verified via the two-node gloo probe below; nccl path untested |
-| `mpijobTrain` | two-node HF Trainer fine-tune via MPIJob | CPU (gloo) verified end-to-end (MPIJob Succeeded, gradients synced) | nccl path reviewed, not yet run on a GPU cluster |
+| `torchrunTrain` | single-node HF Trainer fine-tune via `torchrun` (batch/v1 Job, zero operator) | c6a.large (CPU/gloo, single-node) / g5.24xlarge (GPU path reviewed, not yet run) | gloo verified via the two-node gloo probe below; nccl path untested |
+| `pytorchjobTrain` | two-node HF Trainer fine-tune via PyTorchJob (`kubeflow.org/v1`) | r5a.large x2 (CPU/gloo) | **verified**: `[rank 0/2]`+`[rank 1/2]` gloo DDP, synchronized `grad_norm`, job Succeeded, model saved to EFS by rank 0; nccl path reviewed, not yet run on a GPU cluster |
 | `gpuServingVllm` | single-GPU vLLM OpenAI-compatible serving | g5.24xlarge (A10G x4) node bring-up verified (`nvidia-smi` confirmed the GPU); vLLM serving itself not yet exercised through this chart | partially verified |
 | `neuronServingVllm` | Neuron vLLM serving (whole trn2 node) | — | untested (no `neuron-cache-pvc` provisioned during review) |
 | `vllmRay` | two-node pipeline-parallel vLLM via Ray | — | untested |
 
 A **two-node CPU gloo all-reduce** (`ALL 10 STEPS OK. world_size=2`, `DONE - SUCCESS`) was
 verified on two separate `cpu` pool nodes using a hand-written probe outside this chart's
-`torchrunTrain`/`mpijobTrain` templates (those hit the EFS chown issue below); the
-underlying `cpu` NodePool + gloo collective path itself is confirmed working.
+`torchrunTrain`/`pytorchjobTrain` templates; the underlying `cpu` NodePool + gloo collective
+path itself is confirmed working.
 
 "Verified" always means a specific instance type + image tag + value set, not "this
 workload's current defaults." Where the defaults differ from what was verified, that is
@@ -51,13 +51,13 @@ Every workload's failure mode for a missing prerequisite is the same: the Pod/Jo
 
 | workload | prerequisite | how to check | symptom if missing |
 |---|---|---|---|
-| `torchrunTrain`, `mpijobTrain` | static PV `efs-neuron-workspace` bound and free (`efs_enabled=true` in the Terraform module) | `kubectl get pv efs-neuron-workspace` | PVC `efs-shared-claim` stays Pending |
-| `torchrunTrain`, `mpijobTrain` | `mpijobTrain.image` / `torchrunTrain.image` set to a real image (Open MPI + sshd + `train_smollm.py`; see `manifests/mpijob-image/` in the module root for the build) | — | render itself fails with a `required` error (not a Pending — this one fails loud) |
+| `torchrunTrain`, `pytorchjobTrain` | static PV `efs-neuron-workspace` bound and free (`efs_enabled=true` in the Terraform module) | `kubectl get pv efs-neuron-workspace` | PVC `efs-shared-claim` stays Pending |
+| `torchrunTrain`, `pytorchjobTrain` | `pytorchjobTrain.image` / `torchrunTrain.image` set to a real image (PyTorch + HF Trainer stack + `train_smollm.py`; see `manifests/hf-train-sample/` in the module root for the build) | — | render itself fails with a `required` error (not a Pending — this one fails loud) |
 | `neuronServingVllm` | PVC `neuron-cache-pvc` (RWX; not created by this chart — bind it to your own EFS/FSx StorageClass or a static PV before enabling) | `kubectl get pvc neuron-cache-pvc` | Deployment's Pod stays Pending |
 | `gpuServingVllm`, `neuronServingVllm` | (optional) Secret `hf-token` with key `token`, for gated HF models | `kubectl get secret hf-token` | fine if ungated model; gated model pull fails at container start |
 | any GPU workload | a `device_plugin="nvidia"` accelerator pool exists in `accelerator_pools` (terraform.tfvars) | `kubectl get nodepool` | Pod stays Pending, no matching node-role |
 | any Neuron workload | a `device_plugin="neuron"` accelerator pool exists | `kubectl get nodepool` | Pod stays Pending |
-| `mpijobTrain` | `mpi-operator` (always installed by `gpu-addons.tf`) | `kubectl get pods -n mpi-operator` (or wherever it's installed) | MPIJob object created but never schedules Pods |
+| `pytorchjobTrain` | Kubeflow Training Operator (always installed by `gpu-addons.tf`) | `kubectl get pods -n kubeflow` | PyTorchJob object created but never schedules Pods |
 
 ### Toleration ↔ NodePool taint mismatch
 
@@ -74,8 +74,8 @@ assuming the copy-paste example works verbatim.
 Pod and Job specs are largely **immutable** after creation. Re-rendering with different
 `--set` values and re-applying fails with `field is immutable`/`may not change fields
 other than...` for `neuronProbe`, `neuronDdp`, `ncclProbe`, `ncclSshd`, `torchrunTrain`
-(Job), and `mpijobTrain` (MPIJob) alike. Always delete the previous render before applying
-a changed one:
+(Job), and `pytorchjobTrain` (PyTorchJob) alike. Always delete the previous render before
+applying a changed one:
 
 ```bash
 helm template exp . -n my-experiment --set neuronDdp.enabled=true | kubectl delete -f - --ignore-not-found
@@ -85,7 +85,7 @@ helm template exp . -n my-experiment --set neuronDdp.enabled=true --set neuronDd
 
 ## Teardown and the static-PV trap
 
-`torchrunTrain`/`mpijobTrain`'s PVC (`efs-shared-claim`) binds the single static PV
+`torchrunTrain`/`pytorchjobTrain`'s PVC (`efs-shared-claim`) binds the single static PV
 `efs-neuron-workspace`, which **can only be Bound to one PVC at a time**. If you delete the
 PVC (e.g. via `kubectl delete -f -` above) while its reclaim policy is `Retain`, the PV goes
 to `Released` and the *next* apply (same namespace or a different one) binds nothing —
@@ -110,13 +110,13 @@ Secret).
   `aws-neuronx-dkms` with the DLC's Neuron SDK release. Workaround:
   `--set neuronDdp.disableZerocopy=true` (off by default so it doesn't silently mask the
   version skew — see the flag's comment in `values.yaml`).
-- **EFS Access Point `chown` fails with `Operation not permitted`.** `torchrunTrain` and
-  `mpijobTrain`'s root init container tries to `chown` the shared EFS mount to uid/gid 1000.
-  If the EFS Access Point backing the PV enforces a `posixUser` (NFS-side squashing), this
-  `chown` is rejected regardless of in-container privilege — no retry or extra capability
-  fixes it from inside the Pod. The init container now fails loudly with a message pointing
-  at `efs.tf`; the real fix is either an Access Point with no enforced `posixUser`, or one
-  already configured for uid/gid 1000 (making the chown unnecessary).
+- **EFS writes and the Access Point `posixUser`.** `torchrunTrain`/`pytorchjobTrain` write
+  the HF cache and checkpoints to the shared EFS mount. The `hf-train-sample` image runs as
+  root (uid 0) and the EFS Access Point (`efs.tf`) enforces `posixUser` uid/gid 0, so every
+  NFS write is owned correctly with no init-container `chown` step. If you fork this and run
+  the training container as a non-root uid while the Access Point still squashes to uid 0,
+  writes will fail with `Operation not permitted`; either keep the container as root or
+  reconfigure the Access Point's `posixUser` to match the container uid.
 - **Closed/NAT-less networks**: the sshd containers (`neuronDdp`, `ncclSshd`) run
   `apt-get install openssh-server` at startup if the image doesn't already ship it. With no
   egress this fails, and `command -v sshd` then aborts the container with a clear error —
@@ -133,6 +133,22 @@ Secret).
   the `namespace` key — this bit us during review (a `namespace: default` value silently
   overrode `-n <ns>` on every render) and is now fixed, but if you fork this chart and add a
   default namespace value here, you will reproduce the same bug.
+- **`pytorchjobTrain` needs `spec.elasticPolicy` even though it does not autoscale.** A
+  Worker-only PyTorchJob (no `Master` replica) does NOT get `MASTER_ADDR`/`RANK`/`WORLD_SIZE`
+  injected — the Training Operator injects those only when a `Master` replica exists. Without
+  `elasticPolicy` a Worker-only job gets just `PET_NNODES`/`PET_NPROC_PER_NODE` and no
+  rendezvous endpoint, so `torchrun` cannot find its peers. The template sets `elasticPolicy`
+  with `rdzvBackend: c10d` and `minReplicas == maxReplicas == workers` purely to make the
+  operator inject `PET_RDZV_ENDPOINT=<job>-worker-0:23456` (fixed size, no scaling). This is
+  the same pattern the awsome-distributed-ai DDP sample uses (it points `rdzvBackend` at an
+  etcd Service; c10d avoids the extra etcd by electing Worker-0 as the store).
+- **`pytorchjobTrain` Workers use `restartPolicy: OnFailure`, not `Never`.** With c10d
+  rendezvous the non-host Workers connect to Worker-0's store; if Worker-0's image pull or EFS
+  mount lags (a cold 3.4 GB pull on a freshly Karpenter-provisioned node takes ~5 min), they
+  hit `RendezvousConnectionError` and exit. `Never` would leave them `Failed` and fail the
+  whole job on nothing but a startup-timing skew. `OnFailure` (capped by
+  `elasticPolicy.maxRestarts`) lets them retry until Worker-0 is up — verified: one Worker took
+  a single restart, then re-rendezvoused and completed.
 
 ## Security notes (read before copying into a shared/multi-tenant cluster)
 
@@ -154,7 +170,7 @@ Secret).
 ```
 Chart.yaml, values.yaml       chart metadata + all workload parameters (see inline comments)
 templates/_helpers.tpl        shared helpers: experiments.namespace, tolerations, sshd command, neuron env
-templates/efs-shared-pvc.yaml single efs-shared-claim PVC, shared by torchrunTrain + mpijobTrain
+templates/efs-shared-pvc.yaml single efs-shared-claim PVC, shared by torchrunTrain + pytorchjobTrain
 templates/<workload>.yaml     one file per workload; header comment has render/verify/troubleshooting steps
 files/allreduce_test.py       torch-neuronx all-reduce probe, mounted into neuronDdp via ConfigMap
 ```

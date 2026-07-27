@@ -1,29 +1,20 @@
 #!/usr/bin/env python3
 """Minimal HF Trainer fine-tune, launched under torch.distributed (gloo on CPU, nccl on GPU).
 
-mpirun (Open MPI / orted) sets OMPI_COMM_WORLD_RANK/SIZE/LOCAL_RANK on each spawned process,
-NOT the RANK/WORLD_SIZE/LOCAL_RANK/MASTER_ADDR/MASTER_PORT that torch.distributed's env://
-rendezvous (which accelerate.PartialState relies on) requires. Verified by reading
-accelerate's state.py and torch's rendezvous.py directly: neither the GPU nor the CPU init
-path in accelerate reads OMPI_* for LOCAL_RANK, and MASTER_ADDR/MASTER_PORT are never set by
-mpirun at all. Without this shim every worker silently trains as an independent rank-0/
-world-size-1 process — gradients never sync, and there is no error to notice.
-This shim MUST run before importing anything from transformers/accelerate, since
-TrainingArguments reads these at construction time (via accelerate.PartialState).
+This script is started by `torchrun`, which sets RANK / WORLD_SIZE / LOCAL_RANK /
+MASTER_ADDR / MASTER_PORT on every spawned process — exactly the env:// rendezvous variables
+that torch.distributed and accelerate.PartialState (which TrainingArguments delegates
+distributed-environment detection to) read at construction time. Under a Kubeflow PyTorchJob
+these are NOT pod-level env vars: the PyTorchJob's spec.elasticPolicy makes the operator inject
+PET_RDZV_BACKEND=c10d and PET_RDZV_ENDPOINT=<job>-worker-0:23456, torchrun performs the c10d
+rendezvous (electing Worker-0 as the store and assigning node ranks dynamically), and only then
+does torchrun export RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR / MASTER_PORT INTO each
+training process — which is what this script reads below. No manual environment shim is needed.
 """
 import os
 
-if "OMPI_COMM_WORLD_RANK" in os.environ:
-    os.environ.setdefault("RANK", os.environ["OMPI_COMM_WORLD_RANK"])
-    os.environ.setdefault("WORLD_SIZE", os.environ["OMPI_COMM_WORLD_SIZE"])
-    os.environ.setdefault("LOCAL_RANK", os.environ["OMPI_COMM_WORLD_LOCAL_RANK"])
-    # MPI has no notion of a rendezvous address/port; mpirun never sets these, so pick a
-    # fixed target ourselves. MASTER_ADDR must match the Worker-0 pod's Service DNS name,
-    # which the mpi-operator derives as "<jobname>-worker-0" inside the job's namespace.
-    os.environ.setdefault("MASTER_ADDR", os.environ.get("MPIJOB_MASTER_ADDR", "smollm-mpijob-worker-0"))
-    os.environ.setdefault("MASTER_PORT", "29500")
-
 import torch
+import torch.distributed as dist
 from datasets import load_dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -87,11 +78,6 @@ def main():
 
     tokenized = raw.map(tokenize, batched=True, remove_columns=raw.column_names)
 
-    # The RANK/WORLD_SIZE/LOCAL_RANK/MASTER_ADDR/MASTER_PORT shim above (must run before this
-    # import chain) is what makes accelerate.PartialState — which TrainingArguments delegates
-    # distributed-environment detection to — actually initialize a multi-process group instead
-    # of silently treating every worker as an independent rank-0/world-size-1 run.
-    #
     # ddp_backend is passed ONLY when world_size > 1: verified by reading accelerate's
     # PartialState.__init__ that passing a non-None backend unconditionally sets self.backend,
     # and later code treats "self.backend is not None" as "call torch.distributed.get_world_size()"
@@ -117,7 +103,18 @@ def main():
     log("starting training")
     trainer.train()
 
-    if rank == 0:
+    # Only rank 0 writes the final model. The non-zero ranks must wait at a barrier until that
+    # write finishes; otherwise they exit main() and the process group is torn down while rank 0
+    # is still mid-save, which can surface as a NCCL/gloo "connection reset" on rank 0. The
+    # barrier is only meaningful when a group was actually initialized (world_size > 1).
+    if world_size > 1 and dist.is_initialized():
+        if rank == 0:
+            log(f"saving final model to {OUTPUT_DIR}/final")
+            trainer.save_model(f"{OUTPUT_DIR}/final")
+            tokenizer.save_pretrained(f"{OUTPUT_DIR}/final")
+        dist.barrier()
+        dist.destroy_process_group()
+    elif rank == 0:
         log(f"saving final model to {OUTPUT_DIR}/final")
         trainer.save_model(f"{OUTPUT_DIR}/final")
         tokenizer.save_pretrained(f"{OUTPUT_DIR}/final")
