@@ -83,7 +83,7 @@ check "capacity_block_ready" {
     condition = alltrue([
       for k, s in local.pool_cb_state : s == "active"
     ])
-    error_message = "A Capacity Block for a reserved accelerator pool is not active yet: ${jsonencode(local.pool_cb_state)}. Wait for the CB to flip to 'active' before applying — Karpenter cannot launch nodes against a scheduled/expired reservation."
+    error_message = "A Capacity Block for a reserved accelerator pool is not active: ${jsonencode(local.pool_cb_state)}. If a CB shows state=\"\" it was not found (deleted/expired and purged) — remove it from tfvars. Otherwise wait for the CB to flip to 'active' before applying — Karpenter cannot launch nodes against a scheduled/expired reservation."
   }
   assert {
     # Only relevant when a reserved pool sets an EXPLICIT zone (p.zone != ""). With the default
