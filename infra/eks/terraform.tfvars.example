@@ -1,14 +1,24 @@
 # Copy this file to terraform.tfvars and fill in the values.
 # Do NOT commit terraform.tfvars — it may contain environment-specific values.
+#
+# For a basic cluster you only set two things: region and cluster_name. The AZ list and
+# every subnet CIDR are DERIVED from region + vpc_cidr (see az.tf); accelerator pools are
+# added later (Basic04+). Everything below region/cluster_name is optional — shown here with
+# its default so you can see what is tunable, not because you must set it.
 
-# AWS region. Must contain the AZ of your Capacity Block offering.
+# AWS region. The VPC auto-spans EVERY standard AZ in it, so a Capacity Block landing in any
+# AZ of this region always has a matching subnet.
 region = "us-east-2"
-
-# Availability zones for the VPC and EKS control plane. EKS requires >= 2 AZs.
-azs = ["us-east-2a", "us-east-2b"]
 
 # EKS cluster name.
 cluster_name = "distai-eks"
+
+# Availability zones. LEAVE UNSET (the default) to auto-derive every standard AZ in region —
+# this is what makes the cluster resilient to a Capacity Block's AZ changing between
+# reservations (you never edit this file when the CB moves). Uncomment to pin an explicit set
+# (>= 2 AZs) only to exclude an AZ that lacks EKS/your instance type, or to fix the index
+# order used by fsx_subnet_index / openzfs_subnet_index below.
+# azs = ["us-east-2a", "us-east-2b"]
 
 # Kubernetes version.
 kubernetes_version = "1.35"
@@ -19,46 +29,47 @@ kubernetes_version = "1.35"
 # add-on is installed automatically, and the EFA layout is DERIVED from the instance type
 # (leave efa_interface_count/efa_multi_card unset unless you must override).
 #
-# Every pool pins to a single AZ (`zone`): EFA/RDMA is intra-AZ only, and Capacity Block is
-# single-AZ. capacity_type is per-pool, so on-demand / spot / reserved can be MIXED in one
+# Every pool pins to a single AZ, but you do NOT write it: `zone` is derived (reserved → the
+# Capacity Block's AZ, on-demand/spot → the first cluster AZ). Set zone explicitly only to
+# override. capacity_type is per-pool, so on-demand / spot / reserved can be MIXED in one
 # cluster. The map key becomes Kubernetes resource names (must be RFC1123: [a-z0-9-]).
+#
+# Leave empty {} for a basic cluster; add pools in Basic04+.
 accelerator_pools = {
   # GPU on-demand pool: g6e.12xlarge (L40S x4, single-card EFA derived). Steady dev/verify.
   gpu-dev = {
     instance_types = ["g6e.12xlarge"]
-    device_plugin = "nvidia"
-    capacity_type = "on-demand"
-    zone          = "us-east-2a"
+    device_plugin  = "nvidia"
+    capacity_type  = "on-demand"
+    # zone omitted → derived to the first cluster AZ (local.azs[0]).
     # efa_interface_count / efa_multi_card omitted → derived (g6e = 1, single-card).
   }
 
   # GPU spot pool: cheapest, interruptible. Same shape, capacity_type = "spot".
   # gpu-spot = {
   #   instance_types = ["g6e.12xlarge"]
-  #   device_plugin = "nvidia"
-  #   capacity_type = "spot"
-  #   zone          = "us-east-2a"
+  #   device_plugin  = "nvidia"
+  #   capacity_type  = "spot"
   # }
 
   # GPU Capacity Block pool: p5en.48xlarge (H200 x8, EFA x16 multi-card, derived).
   # A Pod may request at most 15 EFA (card 0 carries the node IP) — see
-  # `terraform output accelerator_pool_efa_schedulable`.
+  # `terraform output accelerator_pool_efa_schedulable`. zone is derived from the reservation.
   # gpu-p5en = {
   #   instance_types    = ["p5en.48xlarge"]
   #   device_plugin     = "nvidia"
   #   capacity_type     = "reserved"
-  #   zone              = "us-east-2a"
   #   cb_reservation_id = "cr-REPLACE_ME"
   #   cb_end_date       = "2026-01-01T12:00:00Z"  # optional: pre-expiry SNS alert for this pool
   #   volume_size       = "500Gi"
   # }
 
   # Trainium2 serving pool: trn2.48xlarge (16 Trainium2, EFA x16 multi-card, derived).
+  # zone is derived from the reservation.
   # trn2-serving = {
   #   instance_types    = ["trn2.48xlarge"]
   #   device_plugin     = "neuron"
   #   capacity_type     = "reserved"
-  #   zone              = "us-east-2b"
   #   cb_reservation_id = "cr-REPLACE_ME"
   #   ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
   #   volume_size       = "500Gi"
@@ -89,15 +100,13 @@ accelerator_pools = {
 # but the CNI warm pool alone can exhaust a small subnet. Matches awslabs/awsome-distributed-ai.
 vpc_cidr = "10.0.0.0/16"
 
-# Private subnets (one per AZ). Node workloads run here — make them huge (/18 = 16,384 IPs
-# each). NOTE: leave headroom for the small public subnets carved from the TOP of the VPC.
-# Do NOT size these /17 — two /17s consume the entire /16 and collide with the public /24s
-# (InvalidSubnet.Conflict at apply). /18 x2 leaves 10.0.128.0/17 free for public + growth.
-private_subnet_cidrs = ["10.0.0.0/18", "10.0.64.0/18"]
-
-# Public subnets (one per AZ). NAT gateways + load balancers only — keep small (/24), carved
-# from the top of the VPC so they do not eat into the private ranges.
-public_subnet_cidrs = ["10.0.254.0/24", "10.0.255.0/24"]
+# Subnet CIDRs are DERIVED from vpc_cidr and the resolved AZ list (az.tf): one large private
+# subnet per AZ (the low half of the VPC, split evenly — e.g. /18 for 2 AZs, /19 for 4) and
+# one small public /24 per AZ carved from the top. You do NOT set these. Uncomment to override
+# with an explicit layout (must be one entry per resolved AZ, and private+public must not
+# overlap). The commented values below reproduce the auto-derived 2-AZ layout for reference.
+# private_subnet_cidrs = ["10.0.0.0/18", "10.0.64.0/18"]
+# public_subnet_cidrs  = ["10.0.128.0/24", "10.0.129.0/24"]
 
 # Deployment environment label (used in resource tags).
 environment = "dev"
@@ -128,12 +137,14 @@ cpu_instance_categories = ["c", "m", "r"]
 fsx_enabled                     = true
 fsx_per_unit_storage_throughput = 250
 fsx_storage_capacity_gib        = 4800
-# Must match the AZ (var.azs index) of the accelerator pool that will use this filesystem.
+# Index into the resolved AZ list (local.azs) picking which AZ this filesystem lives in.
+# 0 = the first cluster AZ, which is also where on-demand/spot pools default — so the default
+# keeps compute and storage co-located. Must be < the number of resolved AZs.
 fsx_subnet_index = 0
 #
 # FSx for OpenZFS: single-AZ NFS home/general-shared layer (many small files). ON by default.
 # throughput valid values for SINGLE_AZ_1 (non-HA): 64/128/256/512/1024/2048/3072/4096 MB/s.
-openzfs_enabled             = true
+openzfs_enabled              = true
 openzfs_storage_capacity_gib = 256
 openzfs_throughput_capacity  = 256
 openzfs_subnet_index         = 0
@@ -156,7 +167,6 @@ cb_alert_email_addresses = []
 karpenter_chart_version         = "1.13.0"
 gpu_operator_chart_version      = "v25.10.1"
 efa_device_plugin_chart_version = "v0.5.29"
-mpi_operator_version            = "v0.6.0"
 neuron_helm_chart_version       = "1.9.0"
 # Only used when enable_demo_app = true. alb_controller_app_version is a separate
 # variable from the chart version because the two are independent release series.
