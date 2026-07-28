@@ -225,6 +225,26 @@ variable "aws_profile" {
   default     = null
 }
 
+variable "expected_account_id" {
+  description = <<-EOT
+    Guardrail against applying to the wrong account. When set to a 12-digit account ID,
+    a precondition (az.tf) fails the PLAN if the resolved credentials point at a different
+    account, before any resource is touched. This is the primary defense against a profile
+    mix-up silently re-creating the whole cluster in another account (or duplicate-billing
+    filesystems that have no name uniqueness). Leave unset (null, the default) to skip the
+    check — but pinning it is strongly recommended for any long-lived cluster. Note the
+    value is descriptive, not a credential: it only asserts "these creds had better resolve
+    to THIS account".
+  EOT
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.expected_account_id == null || can(regex("^[0-9]{12}$", var.expected_account_id))
+    error_message = "expected_account_id must be a 12-digit AWS account ID (or null to skip the check)."
+  }
+}
+
 variable "vpc_cidr" {
   description = <<-EOT
     CIDR block for the VPC. /16 (65,536 addresses) because accelerated ML nodes consume IPs

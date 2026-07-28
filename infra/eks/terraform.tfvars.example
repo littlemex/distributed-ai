@@ -95,6 +95,13 @@ accelerator_pools = {
 # --profile ...` step.
 # aws_profile = "my-profile"
 
+# Guardrail: the 12-digit account you INTEND to deploy into. When set, Terraform fails the
+# PLAN (before creating anything) if the resolved credentials point at a different account,
+# so a profile mix-up can no longer silently re-create the cluster in the wrong account or
+# duplicate-bill FSx filesystems. STRONGLY recommended to pin this for any real cluster.
+# Find yours with: aws sts get-caller-identity --query Account --output text
+# expected_account_id = "123456789012"
+
 # VPC CIDR. Use a /16 — accelerated ML nodes consume IPs heavily via VPC CNI secondary IPs
 # (prefix delegation reserves /28 = 16 IPs per slot). EFA-only interfaces do NOT consume IPs,
 # but the CNI warm pool alone can exhaust a small subnet. Matches awslabs/awsome-distributed-ai.

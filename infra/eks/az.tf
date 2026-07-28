@@ -79,6 +79,14 @@ locals {
 resource "terraform_data" "az_invariants" {
   lifecycle {
     precondition {
+      # Guardrail against a profile mix-up applying to the wrong account. If var.expected_account_id
+      # is set and the resolved credentials point elsewhere, fail the PLAN before any resource is
+      # created — this is what stops a silent full re-creation (and duplicate FSx billing) in the
+      # wrong account. Skipped entirely when var.expected_account_id is null.
+      condition     = var.expected_account_id == null || data.aws_caller_identity.current.account_id == var.expected_account_id
+      error_message = "Credentials resolve to account ${data.aws_caller_identity.current.account_id}, but expected_account_id is ${coalesce(var.expected_account_id, "null")}. You are almost certainly applying with the wrong AWS profile. Fix the profile (or var.expected_account_id) before applying — proceeding would re-create the cluster in the wrong account."
+    }
+    precondition {
       condition     = local.num_azs >= 2
       error_message = "The cluster resolved to fewer than 2 AZs (${local.num_azs}). The EKS control plane requires subnets in at least two AZs. Set var.azs explicitly or use a region with >= 2 standard AZs."
     }
