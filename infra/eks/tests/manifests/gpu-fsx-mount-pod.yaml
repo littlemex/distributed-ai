@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-fsx-mount-test
+  namespace: ${NAMESPACE}
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    karpenter.sh/nodepool: gpu-dev
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: test
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          TOKEN=$(date +%s)-gpu-$$
+          echo "gpu-fsx-$TOKEN" > /mnt/fsx/smoke-test/test-$TOKEN.txt
+          echo "gpu-openzfs-$TOKEN" > /mnt/openzfs/smoke-test/test-$TOKEN.txt
+          [ "$(cat /mnt/fsx/smoke-test/test-$TOKEN.txt)" = "gpu-fsx-$TOKEN" ]
+          [ "$(cat /mnt/openzfs/smoke-test/test-$TOKEN.txt)" = "gpu-openzfs-$TOKEN" ]
+          rm -f /mnt/fsx/smoke-test/test-$TOKEN.txt /mnt/openzfs/smoke-test/test-$TOKEN.txt
+          echo "gpu fsx mount test passed"
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+      volumeMounts:
+        - name: fsx
+          mountPath: /mnt/fsx/smoke-test
+          subPath: smoke-test
+        - name: openzfs
+          mountPath: /mnt/openzfs/smoke-test
+          subPath: smoke-test
+  volumes:
+    - name: fsx
+      persistentVolumeClaim:
+        claimName: fsx-claim-test
+    - name: openzfs
+      persistentVolumeClaim:
+        claimName: openzfs-claim-test

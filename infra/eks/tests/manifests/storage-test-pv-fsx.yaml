@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: fsx-training-test
+spec:
+  capacity:
+    storage: 4800Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  claimRef:
+    namespace: ${NAMESPACE}
+    name: fsx-claim-test
+  csi:
+    driver: fsx.csi.aws.com
+    volumeHandle: ${FSX_VOLUME_HANDLE}-test
+    volumeAttributes:
+      dnsname: ${FSX_DNS_NAME}
+      mountname: ${FSX_MOUNT_NAME}

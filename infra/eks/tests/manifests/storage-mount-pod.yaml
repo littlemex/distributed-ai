@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-mount-test
+  namespace: ${NAMESPACE}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          TOKEN=$(date +%s)-$$
+          echo "fsx-write-$TOKEN" > /mnt/fsx/smoke-test/test-$TOKEN.txt
+          echo "openzfs-write-$TOKEN" > /mnt/openzfs/smoke-test/test-$TOKEN.txt
+          [ "$(cat /mnt/fsx/smoke-test/test-$TOKEN.txt)" = "fsx-write-$TOKEN" ]
+          [ "$(cat /mnt/openzfs/smoke-test/test-$TOKEN.txt)" = "openzfs-write-$TOKEN" ]
+          rm -f /mnt/fsx/smoke-test/test-$TOKEN.txt /mnt/openzfs/smoke-test/test-$TOKEN.txt
+          echo "storage mount test passed"
+      volumeMounts:
+        - name: fsx
+          mountPath: /mnt/fsx/smoke-test
+          subPath: smoke-test
+        - name: openzfs
+          mountPath: /mnt/openzfs/smoke-test
+          subPath: smoke-test
+  volumes:
+    - name: fsx
+      persistentVolumeClaim:
+        claimName: fsx-claim-test
+    - name: openzfs
+      persistentVolumeClaim:
+        claimName: openzfs-claim-test
