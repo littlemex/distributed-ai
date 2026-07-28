@@ -302,17 +302,16 @@ resource "kubectl_manifest" "accelerator_nodepool" {
               # (NCCL falls back to TCP or fails) and cross-AZ FSx/traffic. If an AZ is
               # capacity-exhausted, prefer changing `zone` or using a Capacity Block.
               #
-              # RESERVED pools: `zone` MUST equal the AZ where the Capacity Block was granted
-              # (a CB cannot choose its AZ). If they disagree, this zone requirement and the
-              # NodeClass's capacityReservationSelectorTerms contradict and NO node is ever
-              # launched — the only signal is a Karpenter event. Check the reservation's AZ
-              # with: aws ec2 describe-capacity-reservations --capacity-reservation-ids <id>
-              # --query 'CapacityReservations[0].AvailabilityZone'. (The AWS Terraform provider
-              # has no capacity-reservation data source, so this cannot be enforced at plan
-              # time; it is a hard operational requirement.)
+              # RESERVED pools: the resolved zone (local.pool_zone) is READ FROM the Capacity
+              # Block reservation (capacity-block.tf → local.pool_cb_zone), so it can never
+              # disagree with the AZ where the CB was granted — a CB moving AZ only needs its
+              # new cb_reservation_id, no zone edit. on-demand/spot pools resolve to azs[0]
+              # unless pool.zone is set explicitly. az.tf asserts the resolved zone is one of
+              # the cluster AZs, so this requirement can never point Karpenter at a
+              # subnet-less zone.
               key      = "topology.kubernetes.io/zone"
               operator = "In"
-              values   = [each.value.zone]
+              values   = [local.pool_zone[each.key]]
             },
             {
               key      = "kubernetes.io/arch"

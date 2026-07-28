@@ -36,8 +36,18 @@ without editing resource blocks. You add a workload by adding a map entry.
 - **EFA topology is derived, not hand-entered.** The interface count and
   multi-card layout come from an instance-type lookup table; the module also
   outputs the *schedulable* EFA count a Pod may request (see the p5en gotcha).
-- **Single-AZ accelerator placement.** Every accelerator pool pins to one AZ so
-  EFA/RDMA collectives stay intra-AZ (they are not routable across subnets).
+- **AZ config is derived from the region, not hand-maintained.** Set only
+  `region`: the VPC auto-spans every standard AZ in it, and one private + one
+  public subnet CIDR per AZ is auto-carved from `vpc_cidr` (`az.tf`). Because the
+  VPC covers the whole region, a Capacity Block landing in *any* AZ always has a
+  matching subnet — so a CB moving between AZs (which happens routinely across
+  reservations) needs no edit here. `azs` / the subnet-CIDR lists remain optional
+  escape hatches for pinning a specific AZ set or layout.
+- **Single-AZ accelerator placement, auto-pinned.** Every accelerator pool pins
+  to one AZ so EFA/RDMA collectives stay intra-AZ (they are not routable across
+  subnets), but you don't write the AZ: a `reserved` pool derives it from its
+  Capacity Block reservation, and an `on-demand`/`spot` pool defaults to the
+  first cluster AZ. Set `zone` explicitly only to override.
 - **Two-layer single-AZ shared storage, on by default.** FSx for OpenZFS
   (single-AZ NFS home/shared `/shared`) and FSx for Lustre (single-AZ,
   high-throughput scratch) — the awsome-distributed-ai two-layer design. Both
@@ -118,7 +128,7 @@ topology.
 | `instance_types` | List of EC2 types Karpenter may launch, e.g. `["g6e.12xlarge"]` or `["g6e.12xlarge","g6e.24xlarge"]`. All types in a pool must share one EFA topology (validated). The first entry drives EFA derivation. |
 | `device_plugin` | `nvidia` or `neuron`. Selects the device-plugin add-on and the resource pods request (`nvidia.com/gpu` vs `aws.amazon.com/neuron`). |
 | `capacity_type` | `reserved` (Capacity Block), `on-demand`, or `spot`. |
-| `zone` | Single AZ (one of `var.azs`). All pools pin here — EFA is intra-AZ only and Capacity Block is single-AZ. There is no cross-AZ fallback. |
+| `zone` | Single AZ the pool pins to. **Leave unset** — it is derived: `reserved` → the Capacity Block's AZ (read from the reservation at plan time); `on-demand`/`spot` → the first cluster AZ. All pools pin to one AZ (EFA is intra-AZ only, a Capacity Block is single-AZ); there is no cross-AZ fallback. Set an explicit AZ (one of the resolved cluster AZs) only to override the default. |
 | `efa_interface_count` | `-1` (default) derives from the instance type; set to override; `0` disables EFA. |
 | `efa_multi_card` | `null` (default) derives; `true` = one EFA per card (p5/p5en/trn2); `false` = single card (g6e). |
 | `cb_reservation_id` | `cr-…` — required when `capacity_type = "reserved"`. |
@@ -128,8 +138,9 @@ topology.
 
 Validations enforce: RFC1123 pool keys, non-empty `instance_types`,
 `device_plugin ∈ {nvidia, neuron}`, `capacity_type ∈ {reserved, on-demand, spot}`,
-`zone ∈ var.azs`, and `reserved ⇒ cb_reservation_id`. A precondition additionally
-rejects a pool whose `instance_types` mix EFA topologies.
+and `reserved ⇒ cb_reservation_id`. Preconditions in `az.tf` additionally enforce
+that every pool's *resolved* `zone` is one of the cluster AZs and reject a pool
+whose `instance_types` mix EFA topologies.
 
 ### Schedulable EFA (important)
 
@@ -152,8 +163,7 @@ accelerator_pools = {
     instance_types = ["g6e.12xlarge"]
     device_plugin  = "nvidia"
     capacity_type  = "on-demand"
-    zone           = "us-east-2a"
-    # EFA derived: 1 interface, single-card.
+    # zone omitted → first cluster AZ. EFA derived: 1 interface, single-card.
   }
 
   # Capacity Block GPU pool — H200 for a scheduled multi-node campaign.
@@ -161,8 +171,7 @@ accelerator_pools = {
     instance_types    = ["p5en.48xlarge"]
     device_plugin     = "nvidia"
     capacity_type     = "reserved"
-    zone              = "us-east-2a"
-    cb_reservation_id = "cr-REPLACE_ME"
+    cb_reservation_id = "cr-REPLACE_ME"        # zone comes from this reservation
     cb_end_date       = "2026-01-01T12:00:00Z" # optional pre-expiry alert
     volume_size       = "500Gi"
     # EFA derived: 16 interfaces, multi-card (15 schedulable).
@@ -173,8 +182,7 @@ accelerator_pools = {
     instance_types    = ["trn2.48xlarge"]
     device_plugin     = "neuron"
     capacity_type     = "reserved"
-    zone              = "us-east-2b"
-    cb_reservation_id = "cr-REPLACE_ME"
+    cb_reservation_id = "cr-REPLACE_ME"        # zone comes from this reservation
     ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
     volume_size       = "500Gi"
   }
@@ -249,7 +257,7 @@ On-Demand GPU pool in `terraform.tfvars`:
 
 ```bash
 cd infra/eks
-cp terraform.tfvars.example terraform.tfvars   # edit region, azs, and one pool
+cp terraform.tfvars.example terraform.tfvars   # set region + one pool (AZs/CIDRs auto-derive)
 terraform init
 terraform apply                                # ~15 min
 

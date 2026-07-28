@@ -7,16 +7,20 @@
 #
 # Usage:
 #   ./02-post-purchase.sh --cr-id cr-0123456789abcdef0 --end-date 2026-07-11T12:00:00Z \
-#       [--instance-type p5en.48xlarge] [--zone us-east-2a] [--pool gpu-p5en]
+#       [--instance-type p5en.48xlarge] [--pool gpu-p5en] [--zone us-east-2a]
 #
 # The CR-ID and end-date are printed by 01-purchase-cb.sh.
+#
+# A reserved pool's zone is DERIVED from the reservation (az.tf reads the CB's AZ), so the
+# emitted block does NOT set `zone` by default — a CB moving AZ then needs only its new
+# cb_reservation_id. Pass --zone only to pin an explicit override into the block.
 
 set -euo pipefail
 
 CR_ID=""
 END_DATE=""
 INSTANCE_TYPE="p5en.48xlarge"
-ZONE="us-east-2a"
+ZONE=""
 POOL="gpu-cb"
 
 while [[ $# -gt 0 ]]; do
@@ -54,11 +58,15 @@ Add this reserved pool to accelerator_pools in terraform.tfvars, then apply:
     instance_types    = ["${INSTANCE_TYPE}"]
     device_plugin     = "${DEVICE_PLUGIN}"
     capacity_type     = "reserved"
-    zone              = "${ZONE}"
-    cb_reservation_id = "${CR_ID}"
+    cb_reservation_id = "${CR_ID}"           # zone is derived from this reservation
     cb_end_date       = "${END_DATE}"   # optional: schedules a pre-expiry SNS alert
     volume_size       = "500Gi"
 EOF
+if [[ -n "$ZONE" ]]; then
+  cat <<EOF
+    zone              = "${ZONE}"           # explicit override of the derived CB AZ
+EOF
+fi
 if [[ "$DEVICE_PLUGIN" == "neuron" ]]; then
   cat <<EOF
     ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"

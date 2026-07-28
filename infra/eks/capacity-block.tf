@@ -10,8 +10,10 @@
 #
 # Derived per reserved pool:
 #   - end_date          : feeds the pre-expiry SNS alert (eventbridge-cb-alarm.tf).
-#   - availability_zone : validated against the pool's hand-set zone (catch a CR/zone mismatch
-#                         before Karpenter pins a NodePool to the wrong AZ and can't launch).
+#   - availability_zone : the AZ a reserved pool pins to. az.tf's local.pool_zone READS this
+#                         (a reserved pool with zone="" inherits it), so the pool can never
+#                         disagree with its CB. If a pool ALSO sets an explicit zone, the check
+#                         block below warns when that explicit zone contradicts the CB's AZ.
 #   - state             : gated to "active" so a plan/apply against a still-"scheduled" CB
 #                         surfaces a loud WARNING at plan time (via the check block below),
 #                         instead of Karpenter silently failing to launch nodes. NOTE: a
@@ -84,10 +86,15 @@ check "capacity_block_ready" {
     error_message = "A Capacity Block for a reserved accelerator pool is not active yet: ${jsonencode(local.pool_cb_state)}. Wait for the CB to flip to 'active' before applying — Karpenter cannot launch nodes against a scheduled/expired reservation."
   }
   assert {
+    # Only relevant when a reserved pool sets an EXPLICIT zone (p.zone != ""). With the default
+    # (zone == ""), local.pool_zone READS the CB's AZ, so there is nothing to mismatch. A
+    # non-empty p.zone that contradicts the CB means the operator is trying to override the
+    # derived AZ with a wrong one — warn (a live plan continues, but Karpenter would never
+    # launch a node because the zone requirement and capacityReservationSelectorTerms conflict).
     condition = alltrue([
       for k, p in local.cb_reserved_pools :
-      local.pool_cb_zone[k] == "" || local.pool_cb_zone[k] == p.zone
+      p.zone == "" || local.pool_cb_zone[k] == "" || local.pool_cb_zone[k] == p.zone
     ])
-    error_message = "A reserved pool's zone does not match its Capacity Block's AZ. Pools: ${jsonencode({ for k, p in local.cb_reserved_pools : k => { pool_zone = p.zone, cb_zone = local.pool_cb_zone[k] } })}. Fix the pool's zone (or the reservation id) so Karpenter pins the NodePool to the CB's AZ."
+    error_message = "A reserved pool sets an explicit zone that does not match its Capacity Block's AZ. Pools: ${jsonencode({ for k, p in local.cb_reserved_pools : k => { pool_zone = p.zone, cb_zone = local.pool_cb_zone[k] } })}. Clear the pool's zone (leave it \"\") to inherit the CB's AZ automatically, or fix it to match."
   }
 }

@@ -6,24 +6,23 @@ variable "region" {
 
 variable "azs" {
   description = <<-EOT
-    Availability zones for the VPC and EKS control plane. EKS requires subnets in at least
-    two AZs. Each accelerator pool pins to a single AZ (its `zone`, one of these) so that
-    EFA/RDMA collectives stay intra-AZ and Capacity Block placement (single-AZ) is honored,
-    while the control plane still spans multiple AZs.
+    Availability zones for the VPC and EKS control plane. LEAVE UNSET (null, the default) to
+    auto-derive EVERY standard AZ in var.region: the VPC then spans the whole region, so a
+    Capacity Block landing in ANY AZ always has a matching subnet. This is the property that
+    makes the cluster resilient to a CB's AZ changing between reservations — you never touch
+    this file when the CB moves. Set an explicit list only to pin a specific AZ set/order
+    (e.g. to exclude an AZ that lacks EKS or your instance type, or to control the subnet
+    index order used by var.fsx_subnet_index / var.openzfs_subnet_index). When set it must be
+    >= 2 AZs (the EKS control plane requires subnets in at least two AZs). The resolved list
+    lives in local.azs (see vpc.tf); subnet CIDRs are auto-derived from it and var.vpc_cidr.
   EOT
   type        = list(string)
-  default     = ["us-east-2a", "us-east-2b"]
+  default     = null
 
-  # vpc.tf creates one private + one public subnet PER AZ by index, zipping var.azs against
-  # these two CIDR lists. If the lengths disagree, the extra AZs get NO subnet — and because
-  # accelerator_pools only validates `contains(var.azs, p.zone)`, a pool pinned to that AZ
-  # passes validation and applies cleanly, then Karpenter can never place a node (no matching
-  # subnet for the zone requirement) and the failure surfaces only in Karpenter's event log.
-  # This is the exact trap of Capacity Block operations: a CB lands in a new AZ, the operator
-  # appends it to var.azs, but forgets to grow the CIDR lists. Fail at plan time instead.
   validation {
-    condition     = length(var.azs) == length(var.private_subnet_cidrs) && length(var.azs) == length(var.public_subnet_cidrs)
-    error_message = "azs, private_subnet_cidrs, and public_subnet_cidrs must all have the same length (one subnet CIDR per AZ). vpc.tf zips them by index, so a mismatch silently leaves an AZ with no subnet and any pool pinned there stuck Pending."
+    # Ternary (not ||) so length() is never called on a null list.
+    condition     = var.azs == null ? true : length(var.azs) >= 2
+    error_message = "azs must be null (auto-derive all standard region AZs) or an explicit list of at least 2 AZs — the EKS control plane requires subnets in at least two AZs."
   }
 }
 
@@ -54,11 +53,18 @@ variable "kubernetes_version" {
 #                        the accelerator and which resource name pods request
 #                        (nvidia.com/gpu vs aws.amazon.com/neuron).
 #   capacity_type        "reserved" (Capacity Block) | "on-demand" | "spot".
-#   zone                 Single AZ for the pool (must be one of var.azs). ALL pools pin to
-#                        this AZ: EFA/RDMA traffic is not routable across subnets, so every
-#                        rank of a multi-node collective must share one AZ; Capacity Block is
-#                        single-AZ anyway. (There is no cross-AZ fallback — that would break
-#                        multi-node EFA. Use var.azs[0] if you have no preference.)
+#   zone                 Single AZ this pool pins to. LEAVE UNSET (""): the resolved zone is
+#                        derived automatically (local.pool_zone) —
+#                          reserved            → the AZ of the pool's Capacity Block, read from
+#                                                the reservation at plan time (local.pool_cb_zone).
+#                                                A CB cannot choose its AZ, so deriving it here
+#                                                means a CB moving AZ needs only its new
+#                                                cb_reservation_id, never a zone edit.
+#                          on-demand / spot     → the first resolved AZ (local.azs[0]).
+#                        ALL pools pin to a single AZ: EFA/RDMA is not routable across subnets,
+#                        so every rank of a multi-node collective must share one AZ. Set an
+#                        explicit AZ only to override the default (e.g. spread two on-demand
+#                        pools across AZs); it must be one of the resolved local.azs.
 #   efa_interface_count  EFA interfaces for the instance. Default -1 = derive from the
 #                        instance type (locals.efa_capability). Set explicitly to override;
 #                        0 disables EFA. NOTE: with the multi-card layout the SCHEDULABLE EFA
@@ -90,7 +96,9 @@ variable "accelerator_pools" {
     instance_types = list(string)
     device_plugin  = string # "nvidia" | "neuron"
     capacity_type  = string # "reserved" | "on-demand" | "spot"
-    zone           = string
+    # Single AZ to pin to. "" (default) = derive: reserved → CB's AZ, on-demand/spot → azs[0].
+    # Set an explicit AZ (one of local.azs) only to override that default.
+    zone = optional(string, "")
     # EFA topology is derived from the instance type (locals.efa_capability) unless
     # set explicitly. Leave efa_interface_count = -1 (default) and efa_multi_card = null
     # to auto-derive; set a value to override. 0 disables EFA.
@@ -144,10 +152,9 @@ variable "accelerator_pools" {
     condition     = alltrue([for k, p in var.accelerator_pools : contains(["reserved", "on-demand", "spot"], p.capacity_type)])
     error_message = "Each accelerator pool's capacity_type must be \"reserved\", \"on-demand\", or \"spot\"."
   }
-  validation {
-    condition     = alltrue([for k, p in var.accelerator_pools : contains(var.azs, p.zone)])
-    error_message = "Each accelerator pool's zone must be one of the AZs listed in var.azs."
-  }
+  # NOTE: "zone must be one of the resolved AZs" is NOT validated here — the resolved AZ list
+  # (local.azs) comes from a data source, which a variable validation block cannot reference.
+  # It is enforced as a precondition in az.tf (terraform_data.az_invariants) instead.
   validation {
     condition     = alltrue([for k, p in var.accelerator_pools : p.capacity_type != "reserved" || p.cb_reservation_id != ""])
     error_message = "A pool with capacity_type \"reserved\" must set cb_reservation_id (cr-...)."
@@ -233,28 +240,32 @@ variable "vpc_cidr" {
 
 variable "private_subnet_cidrs" {
   description = <<-EOT
-    CIDR blocks for private subnets (one per AZ). Node workloads run here, so these are made
-    large: the default /18 = 16,384 addresses per subnet. Two /18s plus the small /24 public
-    subnets fit inside the /16 VPC without overlap and leave 10.0.128.0/17 free for growth.
-    This follows AWS's awslabs/awsome-distributed-ai HyperPod-EKS reference principle of
-    "public small, private huge" (its VPC is 10.192.0.0/16 with tiny /24 public subnets),
-    because every GPU/Neuron node holds dozens of Pod ENIs plus EFA-only ENIs. Do NOT use /24
-    — a single trn2/p5 node's ENIs can exhaust it. Do NOT use two /17s either: they consume
-    the entire /16 and collide with the public /24s (InvalidSubnet.Conflict at apply).
+    CIDR blocks for private subnets (one per AZ). LEAVE UNSET (null, the default) to
+    auto-derive one large private subnet per resolved AZ from var.vpc_cidr (az.tf carves a /18
+    per AZ — 16,384 addresses — from the low half of the VPC via cidrsubnets). Auto-derivation
+    always produces exactly one CIDR per AZ, so it can never desync from the AZ list the way a
+    hand-maintained list can. Node workloads run here, hence the large /18: this follows AWS's
+    awslabs/awsome-distributed-ai HyperPod-EKS "public small, private huge" principle, because
+    every GPU/Neuron node holds dozens of Pod ENIs plus EFA-only ENIs. Set an explicit list
+    only to override the layout — then it MUST have exactly length(local.azs) entries (a
+    precondition in az.tf enforces this) and must not overlap the public subnets. Do NOT use
+    /24 — a single trn2/p5 node's ENIs can exhaust it.
   EOT
   type        = list(string)
-  default     = ["10.0.0.0/18", "10.0.64.0/18"]
+  default     = null
 }
 
 variable "public_subnet_cidrs" {
   description = <<-EOT
-    CIDR blocks for public subnets (one per AZ). NAT gateways and load balancers only, so
-    these are kept small (/24 = 251 usable), matching the awslabs/awsome-distributed-ai reference
-    (10.192.10.0/24, 10.192.11.0/24). Carved from the top of the VPC so they do not eat into
-    the large private ranges.
+    CIDR blocks for public subnets (one per AZ). LEAVE UNSET (null, the default) to auto-derive
+    one small public subnet per resolved AZ from var.vpc_cidr (az.tf carves a /24 per AZ from
+    the TOP of the VPC, so it never eats into the large private ranges). NAT gateways and load
+    balancers only, hence the small /24 (251 usable), matching the awslabs/awsome-distributed-ai
+    reference. Set an explicit list only to override — then it MUST have exactly
+    length(local.azs) entries (a precondition in az.tf enforces this).
   EOT
   type        = list(string)
-  default     = ["10.0.254.0/24", "10.0.255.0/24"]
+  default     = null
 }
 
 variable "environment" {
@@ -423,17 +434,19 @@ variable "fsx_storage_capacity_gib" {
 
 variable "fsx_subnet_index" {
   description = <<-EOT
-    Index into module.vpc.private_subnets (i.e. into var.azs) for the single-AZ FSx
+    Index into module.vpc.private_subnets (i.e. into local.azs) for the single-AZ FSx
     filesystem. FSx Lustre is single-AZ; mounting from a pod in a DIFFERENT AZ works within
-    the VPC but adds cross-AZ data-transfer cost and latency, so set this to match the `zone`
-    of whichever accelerator pool will use it for best performance (0 = var.azs[0], 1 = var.azs[1]).
+    the VPC but adds cross-AZ data-transfer cost and latency, so set this to match the AZ
+    of whichever accelerator pool will use it for best performance (0 = local.azs[0]).
   EOT
   type        = number
   default     = 0
+  # The upper bound (index < number of resolved AZs) is enforced in az.tf's precondition,
+  # because the resolved AZ count (local.azs) comes from a data source that a variable
+  # validation block cannot reference. Here we only reject a negative index.
   validation {
-    # Out of range would otherwise fail deep in vpc.private_subnets[...] with an opaque index error.
-    condition     = var.fsx_subnet_index >= 0 && var.fsx_subnet_index < length(var.azs)
-    error_message = "fsx_subnet_index must be between 0 and length(azs)-1 (it indexes into the per-AZ private subnets)."
+    condition     = var.fsx_subnet_index >= 0
+    error_message = "fsx_subnet_index must be >= 0 (it indexes into the per-AZ private subnets)."
   }
 }
 
@@ -460,9 +473,9 @@ variable "openzfs_enabled" {
 }
 
 variable "openzfs_csi_driver_chart_version" {
-  description = "Version of the aws-fsx-openzfs-csi-driver Helm chart (kubernetes-sigs). Not an EKS managed add-on."
+  description = "Version of the aws-fsx-openzfs-csi-driver Helm chart (kubernetes-sigs). Not an EKS managed add-on. 1.2.0 is the latest published chart in the kubernetes-sigs index (1.3.0 does not exist)."
   type        = string
-  default     = "1.3.0"
+  default     = "1.2.0"
 }
 
 variable "openzfs_storage_capacity_gib" {
@@ -491,16 +504,17 @@ variable "openzfs_throughput_capacity" {
 
 variable "openzfs_subnet_index" {
   description = <<-EOT
-    Index into module.vpc.private_subnets (i.e. into var.azs) for the single-AZ FSx OpenZFS
+    Index into module.vpc.private_subnets (i.e. into local.azs) for the single-AZ FSx OpenZFS
     filesystem. Access is over NFS within the VPC; mounting from a pod in a DIFFERENT AZ works
-    but adds cross-AZ data-transfer cost, so set this to match the `zone` of the accelerator
-    pool that uses it (0 = var.azs[0], 1 = var.azs[1]).
+    but adds cross-AZ data-transfer cost, so set this to match the AZ of the accelerator
+    pool that uses it (0 = local.azs[0]).
   EOT
   type        = number
   default     = 0
+  # Upper bound (index < resolved AZ count) enforced in az.tf's precondition; see fsx_subnet_index.
   validation {
-    condition     = var.openzfs_subnet_index >= 0 && var.openzfs_subnet_index < length(var.azs)
-    error_message = "openzfs_subnet_index must be between 0 and length(azs)-1 (it indexes into the per-AZ private subnets)."
+    condition     = var.openzfs_subnet_index >= 0
+    error_message = "openzfs_subnet_index must be >= 0 (it indexes into the per-AZ private subnets)."
   }
 }
 

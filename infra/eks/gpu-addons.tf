@@ -161,8 +161,31 @@ data "kubectl_file_documents" "training_operator" {
   content = file("${path.module}/manifests/training-operator-${var.training_operator_version}.yaml")
 }
 
+locals {
+  training_operator_docs = var.training_operator_enabled ? data.kubectl_file_documents.training_operator[0].manifests : {}
+
+  # Split the manifest into the Deployment vs everything it needs first. The upstream YAML is
+  # one flat list, and kubectl_file_documents hands it to a single for_each with NO ordering
+  # between members. The Deployment carries wait_for_rollout (the kubectl provider blocks its
+  # apply until the Pods are Ready), but the Pods cannot start until the Namespace, the
+  # ServiceAccount they run as, and the webhook-cert Secret they mount already exist. Applied
+  # unordered, the Deployment can win the race and then its rollout wait DEADLOCKS the whole
+  # apply — Pods report "serviceaccount not found" / "namespace not found" forever, and the
+  # sibling SA/Namespace/Secret Create RPCs sit queued behind the blocking wait. Ordering the
+  # Deployment after its prerequisites (via depends_on below) makes the apply converge.
+  training_operator_deployment_docs = {
+    for k, v in local.training_operator_docs : k => v if can(regex("/deployments/", k))
+  }
+  training_operator_prereq_docs = {
+    for k, v in local.training_operator_docs : k => v if !can(regex("/deployments/", k))
+  }
+}
+
+# Prerequisites: Namespace, ServiceAccount, webhook-cert Secret, RBAC, CRDs, Service, webhook
+# config — everything the operator Pod needs before it can start. (Resource name kept as
+# "training_operator" so existing state addresses for these docs are preserved.)
 resource "kubectl_manifest" "training_operator" {
-  for_each  = var.training_operator_enabled ? data.kubectl_file_documents.training_operator[0].manifests : {}
+  for_each  = local.training_operator_prereq_docs
   yaml_body = each.value
 
   # The PyTorchJob (and sibling) CRDs are large; a client-side apply stores the whole schema
@@ -184,4 +207,25 @@ resource "kubectl_manifest" "training_operator" {
   # The Training Operator runs on system nodes and does not depend on the GPU stack; it only
   # needs the cluster API to be reachable (the kubectl provider already targets module.eks).
   depends_on = [module.eks]
+}
+
+# The Deployment, applied only AFTER every prerequisite above exists, so its wait_for_rollout
+# can actually succeed instead of deadlocking on a missing Namespace/ServiceAccount/Secret.
+resource "kubectl_manifest" "training_operator_deployment" {
+  for_each  = local.training_operator_deployment_docs
+  yaml_body = each.value
+
+  server_side_apply = true
+  force_conflicts   = true
+  ignore_fields     = ["metadata.annotations", "webhooks"]
+
+  depends_on = [kubectl_manifest.training_operator]
+}
+
+# The Deployment doc previously lived in the single unordered kubectl_manifest.training_operator
+# for_each. Relocate its state to the new dedicated resource so Terraform adopts the running
+# Deployment in place instead of destroying and recreating it.
+moved {
+  from = kubectl_manifest.training_operator["/apis/apps/v1/namespaces/kubeflow/deployments/training-operator"]
+  to   = kubectl_manifest.training_operator_deployment["/apis/apps/v1/namespaces/kubeflow/deployments/training-operator"]
 }
