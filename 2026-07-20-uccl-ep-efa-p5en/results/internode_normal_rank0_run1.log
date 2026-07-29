@@ -1,0 +1,524 @@
+[init] uccl.ep sanity (expect can_reg=True, host_allocated=False)
+uccl: /fsx/uccl-dmabuf/uccl/__init__.py
+can_reg: True
+[init] EFA devices
+    device          	   node GUID
+    ------          	----------------
+libibverbs: Warning: couldn't open config directory '/tmp/rdma-core/build/etc/libibverbs.d'.
+[init] rank=0 world_size=2 master=rank0.uccl-bench.default.svc.cluster.local:12355
+[init] launching torchrun (nnodes=2, node_rank=0)
+NCCL version 2.25.1+cuda12.8
+[buffer] num_nvlink_bytes=0.97 GB, num_rdma_bytes=0.48 GB
+[DEBUG] IP distribution across 16 ranks:
+[DEBUG]   10.0.x.x: 8 ranks
+[DEBUG]   10.0.x.x: 8 ranks
+Registered proxies for device 7 (high-throughput mode)
+Registered proxies for device 5 (high-throughput mode)
+Registered proxies for device 3 (high-throughput mode)
+Registered proxies for device 6 (high-throughput mode)
+Registered proxies for device 1 (high-throughput mode)
+Registered proxies for device 2 (high-throughput mode)
+Registered proxies for device 4 (high-throughput mode)
+Registered proxies for device 0 (high-throughput mode)
+[RDMA] Selected NIC rdmap86s0 (index 1) for affinity rank 1, CUDA device 1, NUMA node 0
+[RDMA] Selected NIC rdmap85s0 (index 0) for affinity rank 0, CUDA device 0, NUMA node 0
+[RDMA] Selected NIC rdmap110s0 (index 3) for affinity rank 2, CUDA device 2, NUMA node 0
+[RDMA] DMA-BUF: gpu_buf=0x7f915e000000 bytes=483895808 export_size=484442112 (0.5 GiB)
+[RDMA] DMA-BUF: gpu_buf=0x7f59e6000000 bytes=483895808 export_size=484442112 (0.5 GiB)
+[RDMA] DMA-BUF: gpu_buf=0x7f082e000000 bytes=483895808 export_size=484442112 (0.5 GiB)
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f915e000000, len=483895808, rkey=0x22) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 0 sharing NIC rdmap85s0 context with 1 other thread(s) for affinity rank 0
+[RDMA] Thread 3 sharing NIC rdmap85s0 context with 2 other thread(s) for affinity rank 0
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f59e6000000, len=483895808, rkey=0x22) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 1 sharing NIC rdmap86s0 context with 1 other thread(s) for affinity rank 1
+Pinned to NUMA node 0, thread_idx: 1, local_rank: 0, running on CPU 1.
+[RDMA] Thread 2 sharing NIC rdmap86s0 context with 2 other thread(s) for affinity rank 1
+Pinned to NUMA node 0, thread_idx: 3, local_rank: 0, running on CPU 3.
+Local CPU thread pinned to NUMA node 0, thread_idx: 3, local_rank: 0, running on CPU 3.
+Local CPU thread pinned to NUMA node 0, thread_idx: 1, local_rank: 0, running on CPU 1.
+Pinned to NUMA node 0, thread_idx: 0, local_rank: 0, running on CPU 0.
+Local CPU thread pinned to NUMA node 0, thread_idx: 0, local_rank: 0, running on CPU 0.
+Pinned to NUMA node 0, thread_idx: 0, local_rank: 1, running on CPU 4.
+Local CPU thread pinned to NUMA node 0, thread_idx: 0, local_rank: 1, running on CPU 4.
+Pinned to NUMA node 0, thread_idx: 2, local_rank: 1, running on CPU 6.
+[RDMA] Thread 2 sharing NIC rdmap85s0 context with 3 other thread(s) for affinity rank 0
+Pinned to NUMA node 0, thread_idx: 1, local_rank: 1, running on CPU 5.
+Local CPU thread pinned to NUMA node 0, thread_idx: 2, local_rank: 1, running on CPU 6.
+Local CPU thread pinned to NUMA node 0, thread_idx: 1, local_rank: 1, running on CPU 5.
+[RDMA] Thread 3 sharing NIC rdmap110s0 context with 1 other thread(s) for affinity rank 2
+[RDMA] Selected NIC rdmap111s0 (index 4) for affinity rank 3, CUDA device 3, NUMA node 0
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f082e000000, len=483895808, rkey=0x22) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 2 sharing NIC rdmap110s0 context with 2 other thread(s) for affinity rank 2
+Pinned to NUMA node 0, thread_idx: 2, local_rank: 0, running on CPU 2.
+[RDMA] Thread 1 sharing NIC rdmap110s0 context with 3 other thread(s) for affinity rank 2
+Local CPU thread pinned to NUMA node 0, thread_idx: 2, local_rank: 0, running on CPU 2.
+Pinned to NUMA node 0, thread_idx: 3, local_rank: 2, running on CPU 11.
+Pinned to NUMA node 0, thread_idx: 2, local_rank: 2, running on CPU 10.
+Pinned to NUMA node 0, thread_idx: 0, local_rank: 2, running on CPU 8.
+Local CPU thread pinned to NUMA node 0, thread_idx: 3, local_rank: 2, running on CPU 11.
+Local CPU thread pinned to NUMA node 0, thread_idx: 2, local_rank: 2, running on CPU 10.
+Pinned to NUMA node 0, thread_idx: 1, local_rank: 2, running on CPU 9.
+Local CPU thread pinned to NUMA node 0, thread_idx: 0, local_rank: 2, running on CPU 8.
+Local CPU thread pinned to NUMA node 0, thread_idx: 1, local_rank: 2, running on CPU 9.
+[RDMA] Thread 3 sharing NIC rdmap86s0 context with 3 other thread(s) for affinity rank 1
+Pinned to NUMA node 0, thread_idx: 3, local_rank: 1, running on CPU 7.
+Local CPU thread pinned to NUMA node 0, thread_idx: 3, local_rank: 1, running on CPU 7.
+[RDMA] DMA-BUF: gpu_buf=0x7fd1de000000 bytes=483895808 export_size=484442112 (0.5 GiB)
+[RDMA] Selected NIC rdmap161s0 (index 12) for affinity rank 7, CUDA device 7, NUMA node 1
+[RDMA] DMA-BUF: gpu_buf=0x7f19ae000000 bytes=483895808 export_size=484442112 (0.5 GiB)
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7fd1de000000, len=483895808, rkey=0x22) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 3 sharing NIC rdmap111s0 context with 1 other thread(s) for affinity rank 3
+[RDMA] Thread 0 sharing NIC rdmap111s0 context with 2 other thread(s) for affinity rank 3
+[RDMA] Thread 2 sharing NIC rdmap111s0 context with 3 other thread(s) for affinity rank 3
+Pinned to NUMA node 0, thread_idx: 1, local_rank: 3, running on CPU 13.
+Local CPU thread pinned to NUMA node 0, thread_idx: 1, local_rank: 3, running on CPU 13.
+[RDMA] Selected NIC rdmap160s0 (index 11) for affinity rank 6, CUDA device 6, NUMA node 1
+Pinned to NUMA node 0, thread_idx: 0, local_rank: 3, running on CPU 12.
+Pinned to NUMA node 0, thread_idx: 2, local_rank: 3, running on CPU 14.
+Local CPU thread pinned to NUMA node 0, thread_idx: 0, local_rank: 3, running on CPU 12.
+Pinned to NUMA node 0, thread_idx: 3, local_rank: 3, running on CPU 15.
+Local CPU thread pinned to NUMA node 0, thread_idx: 2, local_rank: 3, running on CPU 14.
+Local CPU thread pinned to NUMA node 0, thread_idx: 3, local_rank: 3, running on CPU 15.
+[RDMA] Selected NIC rdmap135s0 (index 7) for affinity rank 4, CUDA device 4, NUMA node 1
+[RDMA] Selected NIC rdmap136s0 (index 8) for affinity rank 5, CUDA device 5, NUMA node 1
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x23
+[Proxy] Registered atomic_buffer_ptr MR: addr=0xa1be00000, len=81960, rkey=0x23
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f19ae000000, len=483895808, rkey=0x22) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 1 sharing NIC rdmap161s0 context with 1 other thread(s) for affinity rank 7
+[RDMA] Thread 2 sharing NIC rdmap161s0 context with 2 other thread(s) for affinity rank 7
+[RDMA] Thread 3 sharing NIC rdmap161s0 context with 3 other thread(s) for affinity rank 7
+[RDMA] DMA-BUF: gpu_buf=0x7fbbee000000 bytes=483895808 export_size=484442112 (0.5 GiB)
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x23
+Pinned to NUMA node 1, thread_idx: 1, local_rank: 7, running on CPU 77.
+Pinned to NUMA node 1, thread_idx: 2, local_rank: 7, running on CPU 78.
+Pinned to NUMA node 1, thread_idx: 0, local_rank: 7, running on CPU 76.
+[RDMA] DMA-BUF: gpu_buf=0x7f2112000000 bytes=483895808 export_size=484442112 (0.5 GiB)
+[RDMA] DMA-BUF: gpu_buf=0x7f0a9a000000 bytes=483895808 export_size=484442112 (0.5 GiB)
+Pinned to NUMA node 1, thread_idx: 3, local_rank: 7, running on CPU 79.
+Local CPU thread pinned to NUMA node 1, thread_idx: 1, local_rank: 7, running on CPU 77.
+Local CPU thread pinned to NUMA node 1, thread_idx: 2, local_rank: 7, running on CPU 78.
+Local CPU thread pinned to NUMA node 1, thread_idx: 0, local_rank: 7, running on CPU 76.
+Local CPU thread pinned to NUMA node 1, thread_idx: 3, local_rank: 7, running on CPU 79.
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x24
+[Proxy] Registered atomic_buffer_ptr MR: addr=0xa1be00000, len=81960, rkey=0x24
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x24
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x25
+[Proxy] Registered atomic_buffer_ptr MR: addr=0xa1be00000, len=81960, rkey=0x25
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x25
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7fbbee000000, len=483895808, rkey=0x22) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 2 sharing NIC rdmap160s0 context with 1 other thread(s) for affinity rank 6
+[RDMA] Thread 3 sharing NIC rdmap160s0 context with 2 other thread(s) for affinity rank 6
+[RDMA] Thread 0 sharing NIC rdmap160s0 context with 3 other thread(s) for affinity rank 6
+Pinned to NUMA node 1, thread_idx: 1, local_rank: 6, running on CPU 73.
+Local CPU thread pinned to NUMA node 1, thread_idx: 1, local_rank: 6, running on CPU 73.
+Pinned to NUMA node 1, thread_idx: 2, local_rank: 6, running on CPU 74.
+Local CPU thread pinned to NUMA node 1, thread_idx: 2, local_rank: 6, running on CPU 74.
+[RDMA] Thread 2 sharing NIC rdmap135s0 context with 1 other thread(s) for affinity rank 4
+[RDMA] Thread 3 sharing NIC rdmap135s0 context with 2 other thread(s) for affinity rank 4
+[RDMA] Thread 1 sharing NIC rdmap135s0 context with 3 other thread(s) for affinity rank 4
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f2112000000, len=483895808, rkey=0x22) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x26
+[Proxy] Registered atomic_buffer_ptr MR: addr=0xa1be00000, len=81960, rkey=0x26
+[RDMA] Registered GPU memory via DMA-BUF (addr=0x7f0a9a000000, len=483895808, rkey=0x22) — no peermem needed (e.g. no nvidia_peermem for NVIDIA GPU)
+[RDMA] Thread 1 sharing NIC rdmap136s0 context with 1 other thread(s) for affinity rank 5
+Pinned to NUMA node 1, thread_idx: 0, local_rank: 6, running on CPU 72.
+[RDMA] Thread 3 sharing NIC rdmap136s0 context with 2 other thread(s) for affinity rank 5
+Local CPU thread pinned to NUMA node 1, thread_idx: 0, local_rank: 6, running on CPU 72.
+Pinned to NUMA node 1, thread_idx: 2, local_rank: 4, running on CPU 66.
+Pinned to NUMA node 1, thread_idx: 0, local_rank: 4, running on CPU 64.
+Pinned to NUMA node 1, thread_idx: 3, local_rank: 6, running on CPU 75.
+[RDMA] Thread 2 sharing NIC rdmap136s0 context with 3 other thread(s) for affinity rank 5
+Local CPU thread pinned to NUMA node 1, thread_idx: 3, local_rank: 6, running on CPU 75.
+Pinned to NUMA node 1, thread_idx: 3, local_rank: 4, running on CPU 67.
+Pinned to NUMA node 1, thread_idx: 1, local_rank: 4, running on CPU 65.
+Local CPU thread pinned to NUMA node 1, thread_idx: 3, local_rank: 4, running on CPU 67.
+Local CPU thread pinned to NUMA node 1, thread_idx: 2, local_rank: 4, running on CPU 66.
+Pinned to NUMA node 1, thread_idx: 0, local_rank: 5, running on CPU 68.
+Local CPU thread pinned to NUMA node 1, thread_idx: 0, local_rank: 4, running on CPU 64.
+Pinned to NUMA node 1, thread_idx: 1, local_rank: 5, running on CPU 69.
+Local CPU thread pinned to NUMA node 1, thread_idx: 1, local_rank: 4, running on CPU 65.
+Local CPU thread pinned to NUMA node 1, thread_idx: 1, local_rank: 5, running on CPU 69.
+Local CPU thread pinned to NUMA node 1, thread_idx: 0, local_rank: 5, running on CPU 68.
+Pinned to NUMA node 1, thread_idx: 2, local_rank: 5, running on CPU 70.
+Local CPU thread pinned to NUMA node 1, thread_idx: 2, local_rank: 5, running on CPU 70.
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632e00000, len=81960, rkey=0x26
+Pinned to NUMA node 1, thread_idx: 3, local_rank: 5, running on CPU 71.
+Local CPU thread pinned to NUMA node 1, thread_idx: 3, local_rank: 5, running on CPU 71.
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x23
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x24
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x962de00000, len=81960, rkey=0x23
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x25
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x962de00000, len=81960, rkey=0x24
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x26
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632c00000, len=81960, rkey=0x23
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x962de00000, len=81960, rkey=0x25
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631a00000, len=81960, rkey=0x23
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x23
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632c00000, len=81960, rkey=0x24
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x962de00000, len=81960, rkey=0x26
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631a00000, len=81960, rkey=0x24
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x24
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632c00000, len=81960, rkey=0x25
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631a00000, len=81960, rkey=0x25
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x25
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9632c00000, len=81960, rkey=0x26
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9631a00000, len=81960, rkey=0x26
+[Proxy] Registered atomic_buffer_ptr MR: addr=0x9633a00000, len=81960, rkey=0x26
+[RDMA] Auto-detected GID index 0 for rdmap85s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0xa1be00000, len=81960, rkey=0x23
+[RDMA] Auto-detected GID index 0 for rdmap86s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x23
+[RDMA] Auto-detected GID index 0 for rdmap110s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x23
+[RDMA] Auto-detected GID index 0 for rdmap85s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0xa1be00000, len=81960, rkey=0x24
+[RDMA] Auto-detected GID index 0 for rdmap86s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x24
+[RDMA] Auto-detected GID index 0 for rdmap110s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x24
+[RDMA] Auto-detected GID index 0 for rdmap85s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0xa1be00000, len=81960, rkey=0x25
+[RDMA] Auto-detected GID index 0 for rdmap86s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x25
+[RDMA] Auto-detected GID index 0 for rdmap110s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x25
+[RDMA] Auto-detected GID index 0 for rdmap85s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0xa1be00000, len=81960, rkey=0x26
+[RDMA] Auto-detected GID index 0 for rdmap86s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x26
+[RDMA] Auto-detected GID index 0 for rdmap110s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632e00000, len=81960, rkey=0x26
+[RDMA] Auto-detected GID index 0 for rdmap111s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x23
+[RDMA] Auto-detected GID index 0 for rdmap111s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x24
+[RDMA] Auto-detected GID index 0 for rdmap111s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x25
+[RDMA] Auto-detected GID index 0 for rdmap111s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x26
+[RDMA] Auto-detected GID index 0 for rdmap161s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x962de00000, len=81960, rkey=0x23
+[RDMA] Auto-detected GID index 0 for rdmap161s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x962de00000, len=81960, rkey=0x24
+[RDMA] Auto-detected GID index 0 for rdmap161s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x962de00000, len=81960, rkey=0x25
+[RDMA] Auto-detected GID index 0 for rdmap161s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x962de00000, len=81960, rkey=0x26
+[RDMA] Auto-detected GID index 0 for rdmap160s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632c00000, len=81960, rkey=0x23
+[RDMA] Auto-detected GID index 0 for rdmap160s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632c00000, len=81960, rkey=0x24
+[RDMA] Auto-detected GID index 0 for rdmap160s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632c00000, len=81960, rkey=0x25
+[RDMA] Auto-detected GID index 0 for rdmap135s0 (set UCCL_IB_GID_INDEX to override)
+[RDMA] Auto-detected GID index 0 for rdmap136s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631a00000, len=81960, rkey=0x23
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x23
+[RDMA] Auto-detected GID index 0 for rdmap160s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9632c00000, len=81960, rkey=0x26
+[RDMA] Auto-detected GID index 0 for rdmap135s0 (set UCCL_IB_GID_INDEX to override)
+[RDMA] Auto-detected GID index 0 for rdmap136s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631a00000, len=81960, rkey=0x24
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x24
+[RDMA] Auto-detected GID index 0 for rdmap135s0 (set UCCL_IB_GID_INDEX to override)
+[RDMA] Auto-detected GID index 0 for rdmap136s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631a00000, len=81960, rkey=0x25
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x25
+[RDMA] Auto-detected GID index 0 for rdmap135s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9631a00000, len=81960, rkey=0x26
+[RDMA] Auto-detected GID index 0 for rdmap136s0 (set UCCL_IB_GID_INDEX to override)
+[create_per_thread_qp] Populated atomic buffer info: addr=0x9633a00000, len=81960, rkey=0x26
+[Proxy] Peer 9 has num_mr_chunks=0 (single MR: rkey=0x22)
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x25
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x24
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x29
+[Proxy] Remote atomic buffer info for peer 9: addr=0x9632e00000, len=81960, rkey=0x23
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9632e00000, len=81960, rkey=0x24
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9632e00000, len=81960, rkey=0x23
+[Proxy] Peer 10 has num_mr_chunks=0 (single MR: rkey=0x22)
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9632e00000, len=81960, rkey=0x27
+[Proxy] Peer 11 has num_mr_chunks=0 (single MR: rkey=0x22)
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x23
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x24
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x25
+[Proxy] Remote atomic buffer info for peer 10: addr=0x9632e00000, len=81960, rkey=0x28
+[Proxy] Remote atomic buffer info for peer 11: addr=0x9632e00000, len=81960, rkey=0x26
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962de00000, len=81960, rkey=0x25
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962de00000, len=81960, rkey=0x23
+[Proxy] Remote atomic buffer info for peer 8: addr=0xa1be00000, len=81960, rkey=0x24
+[Proxy] Peer 15 has num_mr_chunks=0 (single MR: rkey=0x22)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9632c00000, len=81960, rkey=0x25
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962de00000, len=81960, rkey=0x24
+[Proxy] Remote atomic buffer info for peer 8: addr=0xa1be00000, len=81960, rkey=0x25
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9632c00000, len=81960, rkey=0x24
+[Proxy] Peer 8 has num_mr_chunks=0 (single MR: rkey=0x22)
+[Proxy] Remote atomic buffer info for peer 15: addr=0x962de00000, len=81960, rkey=0x26
+[Proxy] Remote atomic buffer info for peer 8: addr=0xa1be00000, len=81960, rkey=0x26
+[Proxy] Peer 13 has num_mr_chunks=0 (single MR: rkey=0x22)
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9631a00000, len=81960, rkey=0x23
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9631a00000, len=81960, rkey=0x25
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9631a00000, len=81960, rkey=0x25
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9632c00000, len=81960, rkey=0x27
+[Proxy] Peer 12 has num_mr_chunks=0 (single MR: rkey=0x22)
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9631a00000, len=81960, rkey=0x23
+[Proxy] Peer 14 has num_mr_chunks=0 (single MR: rkey=0x22)
+[Proxy] Remote atomic buffer info for peer 14: addr=0x9632c00000, len=81960, rkey=0x23
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9631a00000, len=81960, rkey=0x26
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9631a00000, len=81960, rkey=0x27
+[Proxy] Remote atomic buffer info for peer 12: addr=0x9631a00000, len=81960, rkey=0x26
+[Proxy] Remote atomic buffer info for peer 13: addr=0x9631a00000, len=81960, rkey=0x24
+[Proxy] Remote atomic buffer info for peer 8: addr=0xa1be00000, len=81960, rkey=0x23
+Testing with seed 0 ...
+[config] num_tokens=4096, hidden=7168, num_topk_groups=2, num_topk=8
+[layout] Kernel performance: 0.084 ms
+
+[testing] Running with BF16, without top-k (async=False, previous=False) ...
+[testing] Running with BF16, with top-k (async=False, previous=False) ...
+[testing] Running with BF16, without top-k (async=False, previous=False) ...
+[testing] Running with BF16, with top-k (async=False, previous=False) ...
+[testing] Running with FP8, without top-k (async=False, previous=False) ...
+[testing] Running with FP8, with top-k (async=False, previous=False) ...
+[testing] Running with BF16, without top-k (async=True, previous=False) ...
+[testing] Running with BF16, with top-k (async=True, previous=False) ...
+[testing] Running with BF16, without top-k (async=True, previous=False) ...
+[testing] Running with BF16, with top-k (async=True, previous=False) ...
+[testing] Running with FP8, without top-k (async=True, previous=False) ...
+[testing] Running with FP8, with top-k (async=True, previous=False) ...
+[testing] Running with BF16, without top-k (async=False, previous=True) ...
+[testing] Running with BF16, with top-k (async=False, previous=True) ...
+[testing] Running with BF16, without top-k (async=False, previous=True) ...
+[testing] Running with BF16, with top-k (async=False, previous=True) ...
+[testing] Running with FP8, without top-k (async=False, previous=True) ...
+[testing] Running with FP8, with top-k (async=False, previous=True) ...
+[testing] Running with BF16, without top-k (async=True, previous=True) ...
+[testing] Running with BF16, with top-k (async=True, previous=True) ...
+[testing] Running with BF16, without top-k (async=True, previous=True) ...
+[testing] Running with BF16, with top-k (async=True, previous=True) ...
+[testing] Running with FP8, without top-k (async=True, previous=True) ...
+[testing] Running with FP8, with top-k (async=True, previous=True) ...
+
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 4, transmit: 4547.00 us, notify: 76.42 us, BW: 13.28 GB/s (RDMA), 43.33 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 8, transmit: 2235.00 us, notify: 66.15 us, BW: 27.01 GB/s (RDMA), 88.15 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 12, transmit: 1575.00 us, notify: 79.21 us, BW: 38.33 GB/s (RDMA), 125.10 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 16, transmit: 1555.00 us, notify: 71.44 us, BW: 38.82 GB/s (RDMA), 126.71 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 20, transmit: 1570.00 us, notify: 67.99 us, BW: 38.45 GB/s (RDMA), 125.49 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 24, transmit: 1581.00 us, notify: 74.98 us, BW: 38.18 GB/s (RDMA), 124.62 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 28, transmit: 1598.00 us, notify: 71.68 us, BW: 37.77 GB/s (RDMA), 123.30 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 32, transmit: 1615.00 us, notify: 78.09 us, BW: 37.38 GB/s (RDMA), 122.00 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 4, transmit: 4547.00 us, notify: 64.27 us, BW: 13.28 GB/s (RDMA), 43.33 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 8, transmit: 2247.00 us, notify: 65.41 us, BW: 26.86 GB/s (RDMA), 87.68 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 12, transmit: 1574.00 us, notify: 77.26 us, BW: 38.35 GB/s (RDMA), 125.18 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 16, transmit: 1556.00 us, notify: 77.84 us, BW: 38.79 GB/s (RDMA), 126.62 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 20, transmit: 1575.00 us, notify: 67.89 us, BW: 38.33 GB/s (RDMA), 125.10 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 24, transmit: 1583.00 us, notify: 75.13 us, BW: 38.13 GB/s (RDMA), 124.46 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 28, transmit: 1602.00 us, notify: 69.34 us, BW: 37.68 GB/s (RDMA), 122.99 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 32, transmit: 1619.00 us, notify: 73.46 us, BW: 37.28 GB/s (RDMA), 121.70 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 4, transmit: 4566.00 us, notify: 62.86 us, BW: 13.22 GB/s (RDMA), 43.15 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 8, transmit: 2240.00 us, notify: 68.22 us, BW: 26.95 GB/s (RDMA), 87.96 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 12, transmit: 1573.00 us, notify: 77.64 us, BW: 38.37 GB/s (RDMA), 125.26 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 16, transmit: 1559.00 us, notify: 73.66 us, BW: 38.72 GB/s (RDMA), 126.38 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 20, transmit: 1574.00 us, notify: 68.00 us, BW: 38.35 GB/s (RDMA), 125.18 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 24, transmit: 1586.00 us, notify: 77.38 us, BW: 38.06 GB/s (RDMA), 124.23 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 28, transmit: 1597.00 us, notify: 73.29 us, BW: 37.80 GB/s (RDMA), 123.37 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 32, transmit: 1621.00 us, notify: 72.85 us, BW: 37.24 GB/s (RDMA), 121.55 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 4, transmit: 4561.00 us, notify: 65.35 us, BW: 13.23 GB/s (RDMA), 43.20 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 8, transmit: 2244.00 us, notify: 67.14 us, BW: 26.90 GB/s (RDMA), 87.80 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 12, transmit: 1569.00 us, notify: 80.96 us, BW: 38.47 GB/s (RDMA), 125.57 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 16, transmit: 1560.00 us, notify: 72.60 us, BW: 38.69 GB/s (RDMA), 126.30 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 20, transmit: 1572.00 us, notify: 67.14 us, BW: 38.40 GB/s (RDMA), 125.33 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 24, transmit: 1589.00 us, notify: 73.13 us, BW: 37.99 GB/s (RDMA), 123.99 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 28, transmit: 1596.00 us, notify: 72.22 us, BW: 37.82 GB/s (RDMA), 123.45 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 32, transmit: 1617.00 us, notify: 76.27 us, BW: 37.33 GB/s (RDMA), 121.85 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 4, transmit: 4565.00 us, notify: 64.89 us, BW: 13.22 GB/s (RDMA), 43.16 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 8, transmit: 2244.00 us, notify: 65.90 us, BW: 26.90 GB/s (RDMA), 87.80 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 12, transmit: 1569.00 us, notify: 78.41 us, BW: 38.47 GB/s (RDMA), 125.57 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 16, transmit: 1557.00 us, notify: 73.77 us, BW: 38.77 GB/s (RDMA), 126.54 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 20, transmit: 1572.00 us, notify: 67.52 us, BW: 38.40 GB/s (RDMA), 125.33 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 24, transmit: 1585.00 us, notify: 71.92 us, BW: 38.08 GB/s (RDMA), 124.31 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 28, transmit: 1595.00 us, notify: 74.61 us, BW: 37.85 GB/s (RDMA), 123.53 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 32, transmit: 1615.00 us, notify: 78.72 us, BW: 37.38 GB/s (RDMA), 122.00 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 4, transmit: 4555.00 us, notify: 65.54 us, BW: 13.25 GB/s (RDMA), 43.25 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 8, transmit: 2257.00 us, notify: 67.25 us, BW: 26.74 GB/s (RDMA), 87.30 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 12, transmit: 1566.00 us, notify: 83.51 us, BW: 38.55 GB/s (RDMA), 125.82 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 16, transmit: 1554.00 us, notify: 72.17 us, BW: 38.84 GB/s (RDMA), 126.79 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 20, transmit: 1577.00 us, notify: 69.11 us, BW: 38.28 GB/s (RDMA), 124.94 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 24, transmit: 1586.00 us, notify: 74.42 us, BW: 38.06 GB/s (RDMA), 124.23 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 28, transmit: 1600.00 us, notify: 68.59 us, BW: 37.73 GB/s (RDMA), 123.14 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 32, transmit: 1619.00 us, notify: 75.37 us, BW: 37.28 GB/s (RDMA), 121.70 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 4, transmit: 4559.00 us, notify: 66.09 us, BW: 13.24 GB/s (RDMA), 43.22 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 8, transmit: 2247.00 us, notify: 67.13 us, BW: 26.86 GB/s (RDMA), 87.68 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 12, transmit: 1571.00 us, notify: 79.05 us, BW: 38.42 GB/s (RDMA), 125.41 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 16, transmit: 1553.00 us, notify: 69.89 us, BW: 38.87 GB/s (RDMA), 126.87 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 20, transmit: 1575.00 us, notify: 69.13 us, BW: 38.33 GB/s (RDMA), 125.10 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 24, transmit: 1599.00 us, notify: 71.62 us, BW: 37.75 GB/s (RDMA), 123.22 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 28, transmit: 1599.00 us, notify: 73.23 us, BW: 37.75 GB/s (RDMA), 123.22 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 32, transmit: 1623.00 us, notify: 75.96 us, BW: 37.19 GB/s (RDMA), 121.40 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 4, transmit: 4567.00 us, notify: 65.02 us, BW: 13.22 GB/s (RDMA), 43.14 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 8, transmit: 2253.00 us, notify: 65.61 us, BW: 26.79 GB/s (RDMA), 87.45 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 12, transmit: 1569.00 us, notify: 84.44 us, BW: 38.47 GB/s (RDMA), 125.57 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 16, transmit: 1558.00 us, notify: 69.49 us, BW: 38.74 GB/s (RDMA), 126.46 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 20, transmit: 1576.00 us, notify: 67.55 us, BW: 38.30 GB/s (RDMA), 125.02 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 24, transmit: 1586.00 us, notify: 72.62 us, BW: 38.06 GB/s (RDMA), 124.23 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 28, transmit: 1597.00 us, notify: 70.81 us, BW: 37.80 GB/s (RDMA), 123.37 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 32, transmit: 1617.00 us, notify: 77.10 us, BW: 37.33 GB/s (RDMA), 121.85 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 4, transmit: 4571.00 us, notify: 64.86 us, BW: 13.21 GB/s (RDMA), 43.10 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 8, transmit: 2253.00 us, notify: 63.93 us, BW: 26.79 GB/s (RDMA), 87.45 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 12, transmit: 1570.00 us, notify: 81.29 us, BW: 38.45 GB/s (RDMA), 125.49 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 16, transmit: 1556.00 us, notify: 72.77 us, BW: 38.79 GB/s (RDMA), 126.62 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 20, transmit: 1575.00 us, notify: 69.92 us, BW: 38.33 GB/s (RDMA), 125.10 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 24, transmit: 1589.00 us, notify: 70.99 us, BW: 37.99 GB/s (RDMA), 123.99 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 28, transmit: 1598.00 us, notify: 71.58 us, BW: 37.77 GB/s (RDMA), 123.30 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 32, transmit: 1621.00 us, notify: 77.86 us, BW: 37.24 GB/s (RDMA), 121.55 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 4, transmit: 4556.00 us, notify: 64.23 us, BW: 13.25 GB/s (RDMA), 43.25 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 8, transmit: 2246.00 us, notify: 66.13 us, BW: 26.88 GB/s (RDMA), 87.72 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 12, transmit: 1571.00 us, notify: 80.02 us, BW: 38.42 GB/s (RDMA), 125.41 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 16, transmit: 1554.00 us, notify: 72.38 us, BW: 38.84 GB/s (RDMA), 126.79 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 20, transmit: 1575.00 us, notify: 67.32 us, BW: 38.33 GB/s (RDMA), 125.10 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 24, transmit: 1583.00 us, notify: 79.18 us, BW: 38.13 GB/s (RDMA), 124.46 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 28, transmit: 1603.00 us, notify: 65.95 us, BW: 37.66 GB/s (RDMA), 122.91 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 32, transmit: 1616.00 us, notify: 74.43 us, BW: 37.35 GB/s (RDMA), 121.92 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 4, transmit: 4547.00 us, notify: 69.53 us, BW: 13.28 GB/s (RDMA), 43.33 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 8, transmit: 2251.00 us, notify: 63.11 us, BW: 26.82 GB/s (RDMA), 87.53 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 12, transmit: 1571.00 us, notify: 78.26 us, BW: 38.42 GB/s (RDMA), 125.41 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 16, transmit: 1556.00 us, notify: 69.80 us, BW: 38.79 GB/s (RDMA), 126.62 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 20, transmit: 1566.00 us, notify: 67.59 us, BW: 38.55 GB/s (RDMA), 125.82 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 24, transmit: 1587.00 us, notify: 76.19 us, BW: 38.04 GB/s (RDMA), 124.15 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 28, transmit: 1597.00 us, notify: 69.49 us, BW: 37.80 GB/s (RDMA), 123.37 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 32, transmit: 1625.00 us, notify: 75.70 us, BW: 37.15 GB/s (RDMA), 121.25 GB/s (NVL) 
+[tuning] Best dispatch (FP8): SMs 24, NVL chunk 28, RDMA chunk 16, transmit: 1553.00 us, notify: 69.89 us, BW: 38.87 GB/s (RDMA), 126.87 GB/s (NVL)
+
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 4, transmit: 4666.00 us, notify: 70.32 us, BW: 25.09 GB/s (RDMA), 81.89 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 8, transmit: 2918.00 us, notify: 84.48 us, BW: 40.12 GB/s (RDMA), 130.95 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 12, transmit: 2889.00 us, notify: 78.91 us, BW: 40.52 GB/s (RDMA), 132.26 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 16, transmit: 2869.00 us, notify: 72.36 us, BW: 40.80 GB/s (RDMA), 133.19 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 20, transmit: 2858.00 us, notify: 75.72 us, BW: 40.96 GB/s (RDMA), 133.70 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 24, transmit: 2867.00 us, notify: 82.08 us, BW: 40.83 GB/s (RDMA), 133.28 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 28, transmit: 2861.00 us, notify: 94.32 us, BW: 40.92 GB/s (RDMA), 133.56 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 32, transmit: 2844.00 us, notify: 103.21 us, BW: 41.16 GB/s (RDMA), 134.36 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 4, transmit: 4660.00 us, notify: 72.88 us, BW: 25.12 GB/s (RDMA), 82.00 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 8, transmit: 2913.00 us, notify: 91.63 us, BW: 40.19 GB/s (RDMA), 131.17 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 12, transmit: 2892.00 us, notify: 85.19 us, BW: 40.48 GB/s (RDMA), 132.13 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 16, transmit: 2860.00 us, notify: 74.17 us, BW: 40.93 GB/s (RDMA), 133.61 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 20, transmit: 2859.00 us, notify: 80.14 us, BW: 40.95 GB/s (RDMA), 133.65 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 24, transmit: 2871.00 us, notify: 87.13 us, BW: 40.78 GB/s (RDMA), 133.09 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 28, transmit: 2861.00 us, notify: 94.80 us, BW: 40.92 GB/s (RDMA), 133.56 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 8, RDMA chunk 32, transmit: 2842.00 us, notify: 104.47 us, BW: 41.19 GB/s (RDMA), 134.45 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 4, transmit: 4665.00 us, notify: 69.71 us, BW: 25.09 GB/s (RDMA), 81.91 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 8, transmit: 2917.00 us, notify: 87.81 us, BW: 40.13 GB/s (RDMA), 130.99 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 12, transmit: 2882.00 us, notify: 84.18 us, BW: 40.62 GB/s (RDMA), 132.59 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 16, transmit: 2863.00 us, notify: 74.66 us, BW: 40.89 GB/s (RDMA), 133.47 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 20, transmit: 2857.00 us, notify: 79.80 us, BW: 40.98 GB/s (RDMA), 133.75 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 24, transmit: 2871.00 us, notify: 80.77 us, BW: 40.78 GB/s (RDMA), 133.09 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 28, transmit: 2874.00 us, notify: 92.50 us, BW: 40.73 GB/s (RDMA), 132.95 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 12, RDMA chunk 32, transmit: 2836.00 us, notify: 113.19 us, BW: 41.28 GB/s (RDMA), 134.74 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 4, transmit: 4664.00 us, notify: 74.06 us, BW: 25.10 GB/s (RDMA), 81.93 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 8, transmit: 2923.00 us, notify: 86.08 us, BW: 40.05 GB/s (RDMA), 130.73 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 12, transmit: 2889.00 us, notify: 82.31 us, BW: 40.52 GB/s (RDMA), 132.26 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 16, transmit: 2859.00 us, notify: 75.04 us, BW: 40.95 GB/s (RDMA), 133.65 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 20, transmit: 2861.00 us, notify: 75.51 us, BW: 40.92 GB/s (RDMA), 133.56 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 24, transmit: 2866.00 us, notify: 84.00 us, BW: 40.85 GB/s (RDMA), 133.33 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 28, transmit: 2870.00 us, notify: 88.87 us, BW: 40.79 GB/s (RDMA), 133.14 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 16, RDMA chunk 32, transmit: 2850.00 us, notify: 99.90 us, BW: 41.08 GB/s (RDMA), 134.07 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 4, transmit: 4657.00 us, notify: 76.68 us, BW: 25.14 GB/s (RDMA), 82.05 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 8, transmit: 2913.00 us, notify: 86.69 us, BW: 40.19 GB/s (RDMA), 131.17 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 12, transmit: 2884.00 us, notify: 87.70 us, BW: 40.59 GB/s (RDMA), 132.49 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 16, transmit: 2868.00 us, notify: 74.87 us, BW: 40.82 GB/s (RDMA), 133.23 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 20, transmit: 2850.00 us, notify: 77.56 us, BW: 41.08 GB/s (RDMA), 134.07 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 24, transmit: 2873.00 us, notify: 82.69 us, BW: 40.75 GB/s (RDMA), 133.00 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 28, transmit: 2855.00 us, notify: 101.17 us, BW: 41.00 GB/s (RDMA), 133.84 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 20, RDMA chunk 32, transmit: 2844.00 us, notify: 110.48 us, BW: 41.16 GB/s (RDMA), 134.36 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 4, transmit: 4653.00 us, notify: 77.50 us, BW: 25.16 GB/s (RDMA), 82.12 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 8, transmit: 2911.00 us, notify: 86.47 us, BW: 40.22 GB/s (RDMA), 131.26 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 12, transmit: 2894.00 us, notify: 85.42 us, BW: 40.45 GB/s (RDMA), 132.04 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 16, transmit: 2861.00 us, notify: 77.51 us, BW: 40.92 GB/s (RDMA), 133.56 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 20, transmit: 2855.00 us, notify: 83.84 us, BW: 41.00 GB/s (RDMA), 133.84 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 24, transmit: 2868.00 us, notify: 83.45 us, BW: 40.82 GB/s (RDMA), 133.23 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 28, transmit: 2859.00 us, notify: 98.14 us, BW: 40.95 GB/s (RDMA), 133.65 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 24, RDMA chunk 32, transmit: 2842.00 us, notify: 100.62 us, BW: 41.19 GB/s (RDMA), 134.45 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 4, transmit: 4655.00 us, notify: 72.88 us, BW: 25.15 GB/s (RDMA), 82.09 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 8, transmit: 2912.00 us, notify: 90.88 us, BW: 40.20 GB/s (RDMA), 131.22 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 12, transmit: 2889.00 us, notify: 82.15 us, BW: 40.52 GB/s (RDMA), 132.26 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 16, transmit: 2860.00 us, notify: 78.54 us, BW: 40.93 GB/s (RDMA), 133.61 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 20, transmit: 2850.00 us, notify: 80.01 us, BW: 41.08 GB/s (RDMA), 134.07 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 24, transmit: 2867.00 us, notify: 78.64 us, BW: 40.83 GB/s (RDMA), 133.28 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 28, transmit: 2861.00 us, notify: 102.53 us, BW: 40.92 GB/s (RDMA), 133.56 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 28, RDMA chunk 32, transmit: 2852.00 us, notify: 98.47 us, BW: 41.05 GB/s (RDMA), 133.98 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 4, transmit: 4648.00 us, notify: 72.48 us, BW: 25.19 GB/s (RDMA), 82.21 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 8, transmit: 2930.00 us, notify: 80.27 us, BW: 39.95 GB/s (RDMA), 130.41 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 12, transmit: 2886.00 us, notify: 82.94 us, BW: 40.56 GB/s (RDMA), 132.40 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 16, transmit: 2863.00 us, notify: 78.75 us, BW: 40.89 GB/s (RDMA), 133.47 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 20, transmit: 2863.00 us, notify: 78.58 us, BW: 40.89 GB/s (RDMA), 133.47 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 24, transmit: 2868.00 us, notify: 88.45 us, BW: 40.82 GB/s (RDMA), 133.23 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 28, transmit: 2861.00 us, notify: 94.37 us, BW: 40.92 GB/s (RDMA), 133.56 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 32, RDMA chunk 32, transmit: 2839.00 us, notify: 106.13 us, BW: 41.24 GB/s (RDMA), 134.59 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 4, transmit: 4635.00 us, notify: 69.82 us, BW: 25.26 GB/s (RDMA), 82.44 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 8, transmit: 2920.00 us, notify: 86.47 us, BW: 40.09 GB/s (RDMA), 130.86 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 12, transmit: 2892.00 us, notify: 83.96 us, BW: 40.48 GB/s (RDMA), 132.13 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 16, transmit: 2860.00 us, notify: 85.74 us, BW: 40.93 GB/s (RDMA), 133.61 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 20, transmit: 2857.00 us, notify: 90.74 us, BW: 40.98 GB/s (RDMA), 133.75 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 24, transmit: 2863.00 us, notify: 87.50 us, BW: 40.89 GB/s (RDMA), 133.47 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 28, transmit: 2858.00 us, notify: 92.49 us, BW: 40.96 GB/s (RDMA), 133.70 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 36, RDMA chunk 32, transmit: 2849.00 us, notify: 99.50 us, BW: 41.09 GB/s (RDMA), 134.12 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 4, transmit: 4651.00 us, notify: 72.36 us, BW: 25.17 GB/s (RDMA), 82.16 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 8, transmit: 2926.00 us, notify: 83.15 us, BW: 40.01 GB/s (RDMA), 130.59 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 12, transmit: 2888.00 us, notify: 83.28 us, BW: 40.54 GB/s (RDMA), 132.31 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 16, transmit: 2860.00 us, notify: 77.03 us, BW: 40.93 GB/s (RDMA), 133.61 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 20, transmit: 2857.00 us, notify: 79.58 us, BW: 40.98 GB/s (RDMA), 133.75 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 24, transmit: 2870.00 us, notify: 82.89 us, BW: 40.79 GB/s (RDMA), 133.14 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 28, transmit: 2856.00 us, notify: 101.82 us, BW: 40.99 GB/s (RDMA), 133.79 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 40, RDMA chunk 32, transmit: 2852.00 us, notify: 95.19 us, BW: 41.05 GB/s (RDMA), 133.98 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 4, transmit: 4664.00 us, notify: 72.50 us, BW: 25.10 GB/s (RDMA), 81.93 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 8, transmit: 2921.00 us, notify: 86.74 us, BW: 40.08 GB/s (RDMA), 130.82 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 12, transmit: 2890.00 us, notify: 81.17 us, BW: 40.51 GB/s (RDMA), 132.22 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 16, transmit: 2860.00 us, notify: 72.14 us, BW: 40.93 GB/s (RDMA), 133.61 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 20, transmit: 2862.00 us, notify: 82.57 us, BW: 40.90 GB/s (RDMA), 133.51 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 24, transmit: 2866.00 us, notify: 80.35 us, BW: 40.85 GB/s (RDMA), 133.33 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 28, transmit: 2857.00 us, notify: 96.03 us, BW: 40.98 GB/s (RDMA), 133.75 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 44, RDMA chunk 32, transmit: 2833.00 us, notify: 106.60 us, BW: 41.32 GB/s (RDMA), 134.88 GB/s (NVL) 
+[tuning] Best dispatch (BF16): SMs 24, NVL chunk 44, RDMA chunk 32, transmit: 2833.00 us, notify: 106.60 us, BW: 41.32 GB/s (RDMA), 134.88 GB/s (NVL)
+
+[tuning] SMs 24, NVL chunk 1, RDMA chunk 12, transmit: 12562.00 us, notify: 62.43 us, BW: 9.32 GB/s (RDMA), 30.42 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 1, RDMA chunk 16, transmit: 12687.00 us, notify: 61.61 us, BW: 9.23 GB/s (RDMA), 30.12 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 1, RDMA chunk 20, transmit: 12616.00 us, notify: 67.34 us, BW: 9.28 GB/s (RDMA), 30.29 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 1, RDMA chunk 24, transmit: 12727.00 us, notify: 60.54 us, BW: 9.20 GB/s (RDMA), 30.02 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 1, RDMA chunk 28, transmit: 12857.00 us, notify: 60.88 us, BW: 9.11 GB/s (RDMA), 29.72 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 1, RDMA chunk 32, transmit: 12900.00 us, notify: 63.13 us, BW: 9.08 GB/s (RDMA), 29.62 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 2, RDMA chunk 12, transmit: 9477.00 us, notify: 322.95 us, BW: 12.35 GB/s (RDMA), 40.32 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 2, RDMA chunk 16, transmit: 9557.00 us, notify: 80.57 us, BW: 12.25 GB/s (RDMA), 39.98 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 2, RDMA chunk 20, transmit: 9537.00 us, notify: 79.99 us, BW: 12.28 GB/s (RDMA), 40.07 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 2, RDMA chunk 24, transmit: 9646.00 us, notify: 66.13 us, BW: 12.14 GB/s (RDMA), 39.61 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 2, RDMA chunk 28, transmit: 9589.00 us, notify: 60.77 us, BW: 12.21 GB/s (RDMA), 39.85 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 2, RDMA chunk 32, transmit: 9598.00 us, notify: 77.90 us, BW: 12.20 GB/s (RDMA), 39.81 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 3, RDMA chunk 12, transmit: 8718.00 us, notify: 504.49 us, BW: 13.43 GB/s (RDMA), 43.83 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 3, RDMA chunk 16, transmit: 8298.00 us, notify: 272.02 us, BW: 14.11 GB/s (RDMA), 46.05 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 3, RDMA chunk 20, transmit: 8269.00 us, notify: 281.46 us, BW: 14.16 GB/s (RDMA), 46.21 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 3, RDMA chunk 24, transmit: 8341.00 us, notify: 124.66 us, BW: 14.04 GB/s (RDMA), 45.81 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 3, RDMA chunk 28, transmit: 8278.00 us, notify: 155.49 us, BW: 14.14 GB/s (RDMA), 46.16 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 3, RDMA chunk 32, transmit: 8304.00 us, notify: 99.65 us, BW: 14.10 GB/s (RDMA), 46.02 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 12, transmit: 8528.00 us, notify: 415.49 us, BW: 13.73 GB/s (RDMA), 44.81 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 16, transmit: 7694.00 us, notify: 458.67 us, BW: 15.22 GB/s (RDMA), 49.66 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 20, transmit: 7680.00 us, notify: 519.24 us, BW: 15.24 GB/s (RDMA), 49.75 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 24, transmit: 7609.00 us, notify: 338.84 us, BW: 15.39 GB/s (RDMA), 50.22 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 28, transmit: 7555.00 us, notify: 365.45 us, BW: 15.50 GB/s (RDMA), 50.58 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 4, RDMA chunk 32, transmit: 7646.00 us, notify: 250.14 us, BW: 15.31 GB/s (RDMA), 49.98 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 5, RDMA chunk 12, transmit: 8486.00 us, notify: 357.59 us, BW: 13.80 GB/s (RDMA), 45.03 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 5, RDMA chunk 16, transmit: 7439.00 us, notify: 520.38 us, BW: 15.74 GB/s (RDMA), 51.37 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 5, RDMA chunk 20, transmit: 7432.00 us, notify: 538.02 us, BW: 15.75 GB/s (RDMA), 51.41 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 5, RDMA chunk 24, transmit: 7308.00 us, notify: 364.42 us, BW: 16.02 GB/s (RDMA), 52.29 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 5, RDMA chunk 28, transmit: 7248.00 us, notify: 435.61 us, BW: 16.15 GB/s (RDMA), 52.72 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 5, RDMA chunk 32, transmit: 7186.00 us, notify: 380.11 us, BW: 16.29 GB/s (RDMA), 53.17 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 6, RDMA chunk 12, transmit: 8449.00 us, notify: 369.36 us, BW: 13.86 GB/s (RDMA), 45.23 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 6, RDMA chunk 16, transmit: 7332.00 us, notify: 521.60 us, BW: 15.97 GB/s (RDMA), 52.12 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 6, RDMA chunk 20, transmit: 7283.00 us, notify: 543.61 us, BW: 16.07 GB/s (RDMA), 52.47 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 6, RDMA chunk 24, transmit: 7079.00 us, notify: 469.27 us, BW: 16.54 GB/s (RDMA), 53.98 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 6, RDMA chunk 28, transmit: 7050.00 us, notify: 460.87 us, BW: 16.61 GB/s (RDMA), 54.20 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 6, RDMA chunk 32, transmit: 7048.00 us, notify: 332.96 us, BW: 16.61 GB/s (RDMA), 54.22 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 7, RDMA chunk 12, transmit: 8464.00 us, notify: 347.97 us, BW: 13.83 GB/s (RDMA), 45.15 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 7, RDMA chunk 16, transmit: 7207.00 us, notify: 511.81 us, BW: 16.24 GB/s (RDMA), 53.02 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 7, RDMA chunk 20, transmit: 7239.00 us, notify: 470.47 us, BW: 16.17 GB/s (RDMA), 52.79 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 7, RDMA chunk 24, transmit: 6929.00 us, notify: 489.43 us, BW: 16.90 GB/s (RDMA), 55.15 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 7, RDMA chunk 28, transmit: 6935.00 us, notify: 485.85 us, BW: 16.88 GB/s (RDMA), 55.10 GB/s (NVL) 
+[tuning] SMs 24, NVL chunk 7, RDMA chunk 32, transmit: 6783.00 us, notify: 429.67 us, BW: 17.26 GB/s (RDMA), 56.33 GB/s (NVL) 
+[tuning] Best combine: SMs 24, NVL chunk 7, RDMA chunk 32, transmit: 6783.00 us, notify: 429.67 us, BW: 17.26 GB/s (RDMA), 56.33 GB/s (NVL)
+
+

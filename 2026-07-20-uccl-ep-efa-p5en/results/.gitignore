@@ -1,0 +1,2 @@
+# Keep the captured benchmark logs as evidence, overriding the repo-root *.log rule.
+!*.log

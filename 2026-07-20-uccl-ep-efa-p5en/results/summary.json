@@ -1,0 +1,45 @@
+{
+  "environment": {
+    "instances": "2x p5en.48xlarge (H200 x8 x2 = 16 GPU)",
+    "interconnect": "intra-node NVLink, inter-node EFA (per-GPU 400 Gbps)",
+    "os_kernel": "Amazon Linux 2023 / 6.12.94",
+    "gpu_driver": "NVIDIA 580.159.03 (Open Kernel Module)",
+    "efa_driver": "3.1.0g",
+    "nvidia_peermem": "not loaded",
+    "container": "nvcr.io/nvidia/pytorch:25.01-py3 (Python 3.12 / CUDA 12.8 / torch 2.6)",
+    "uccl_build": "github main, USE_DMABUF=1 TORCH_CUDA_ARCH_LIST=9.0",
+    "rdma_core": ">= v56 (for newer efadv.h)",
+    "ep_config": "EP16",
+    "gpu_mem_registration": "dma-buf (ibv_reg_dmabuf_mr), no nvidia_peermem"
+  },
+  "runs": {
+    "note": "3 fresh runs on 2026-07-28 (run1/2/3) plus 1 earlier run on 2026-07-20 (prev). All figures are rank 0, GB/s. normal RDMA = inter-node EFA path.",
+    "prev_date": "2026-07-20",
+    "runs_date": "2026-07-28"
+  },
+  "normal_mode": {
+    "bench": "ep/bench/test_internode.py",
+    "args": "--num-tokens=4096 --hidden=7168 --num-topk=8 --num-experts=256",
+    "dispatch_bf16_rdma_gb_s": { "prev": 41.28, "run1": 41.32, "run2": 41.75, "run3": 42.88 },
+    "dispatch_bf16_nvl_gb_s":  { "prev": 134.74, "run1": 134.88, "run2": 136.27, "run3": 139.97 },
+    "dispatch_fp8_rdma_gb_s":  { "prev": 38.94, "run1": 38.87, "run2": 39.17, "run3": 39.22 },
+    "dispatch_fp8_nvl_gb_s":   { "prev": 127.11, "run1": 126.87, "run2": 127.86, "run3": 128.02 },
+    "combine_rdma_gb_s":       { "prev": 18.04, "run1": 17.26, "run2": 18.36, "run3": 18.68 },
+    "combine_nvl_gb_s":        { "prev": 58.89, "run1": 56.33, "run2": 59.92, "run3": 60.98 },
+    "note": "Repeatable to ~2% across all four runs. per-GPU EFA 400 Gbps ~= 50 GB/s; dispatch reaches ~82-86% of per-GPU line rate."
+  },
+  "low_latency_mode": {
+    "bench": "ep/bench/test_low_latency.py",
+    "args": "--num-tokens=128 --hidden=7168 --num-topk=8 --num-experts=256",
+    "settings": "return_recv_hook=False dispatch_use_fp8=False",
+    "end_to_end_gb_s":  { "prev": 16.64, "run1": 16.78, "run2": 16.52, "run3": 16.99 },
+    "end_to_end_avg_us": { "prev": 1324.76, "run1": 1313.82, "run2": 1334.59, "run3": 1297.89 },
+    "dispatch_alone_gb_s": { "prev": 20.21, "run1": 7.58, "run2": 8.73, "run3": 19.20 },
+    "combine_alone_gb_s":  { "prev": 30.80, "run1": 57.63, "run2": 50.48, "run3": 31.97 },
+    "note": "Only end_to_end is representative (stable to ~1.4%). The standalone dispatch/combine split swings inversely run-to-run because the LL kernel overlaps the two phases; dispatch-low runs are combine-high and vice-versa. The 07-20 split (dispatch 20.21/combine 30.80) matches run3's shape and was one end of this variance, not an outlier. Do NOT quote a single-run standalone dispatch/combine LL number."
+  },
+  "reference_official_blog_NOT_comparable": {
+    "note": "UCCL blog reports p5en EP32: dispatch 54 GB/s, combine 43 GB/s. Different EP size, NOT directly comparable to our EP16.",
+    "source": "https://uccl-project.github.io/posts/uccl-ep-full/"
+  }
+}

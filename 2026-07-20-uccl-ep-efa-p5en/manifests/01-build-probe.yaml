@@ -1,0 +1,46 @@
+# 01-build-probe.yaml
+# Single-node probe used to build UCCL-EP from source with USE_DMABUF=1.
+#
+# The PyPI wheel (uccl==0.1.1) is built WITHOUT the DMA-BUF GPU-memory
+# registration path, so on a node without nvidia_peermem it falls back to
+# ibv_reg_mr_iova2 and fails GPU-memory MR registration (errno=95 EOPNOTSUPP).
+# UCCL 'main' adds a USE_DMABUF=1 build path (setup.py / Makefile) that registers
+# GPU memory via ibv_reg_dmabuf_mr, avoiding nvidia_peermem entirely — which
+# suits AL2023 + NVIDIA Open Kernel Module 580 + EFA 3.1 (all dma-buf capable).
+#
+# NGC PyTorch 25.01 already ships rdma-core dev headers (/usr/include/infiniband/
+# efadv.h) and the /opt/amazon EFA stack, so no hostPath mount is needed — we let
+# the image provide the EFA userspace. IPC_LOCK is needed to pin RDMA memory.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: uccl-build
+  namespace: default
+  labels:
+    app: uccl-ep-build
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    node-role: gpu-p5en
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    - { key: vpc.amazonaws.com/efa, operator: Exists, effect: NoSchedule }
+    - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+  containers:
+    - name: build
+      image: nvcr.io/nvidia/pytorch:25.01-py3
+      command: ["sleep", "infinity"]
+      resources:
+        limits: { nvidia.com/gpu: 1, vpc.amazonaws.com/efa: 1, memory: 64Gi }
+        requests: { nvidia.com/gpu: 1, vpc.amazonaws.com/efa: 1, memory: 64Gi }
+      volumeMounts:
+        - { name: shm, mountPath: /dev/shm }
+        - { name: fsx, mountPath: /fsx }
+      securityContext:
+        capabilities: { add: ["IPC_LOCK"] }
+  volumes:
+    - { name: shm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+    # FSx (RWX) lets us persist the built wheel so the 2-node bench can reuse it.
+    - name: fsx
+      persistentVolumeClaim:
+        claimName: fsx-claim

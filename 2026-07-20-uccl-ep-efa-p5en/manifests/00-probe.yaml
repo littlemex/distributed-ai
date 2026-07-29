@@ -1,0 +1,63 @@
+# 00-probe.yaml
+# Single-node probe pod on a p5en (H200 x8, EFA) node.
+# Purpose: confirm the runtime prerequisites for building/running UCCL-EP:
+#   - /opt/amazon/efa present (UCCL's setup.py/Makefile auto-detects this to enable the EFA RDMA path)
+#   - EFA devices visible via ibv_devices / fi_info
+#   - NVIDIA driver + CUDA runtime present
+#   - can pip-install the prebuilt uccl wheel and import uccl
+#
+# This creates only kubectl resources (read-only from an AWS standpoint).
+# The pod sleeps so we can exec into it for interactive probing, then delete it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: uccl-probe
+  namespace: default
+  labels:
+    app: uccl-ep-probe
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    node-role: gpu-p5en
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    - key: vpc.amazonaws.com/efa
+      operator: Exists
+      effect: NoSchedule
+    - key: capacity-reservation
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: probe
+      # NGC PyTorch ships CUDA + PyTorch + EFA/OFI userspace bits and is the base
+      # UCCL itself tests against. We only probe here; the real bench image is pinned later.
+      image: nvcr.io/nvidia/pytorch:25.01-py3
+      command: ["sleep", "infinity"]
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+          vpc.amazonaws.com/efa: 1
+        requests:
+          nvidia.com/gpu: 1
+          vpc.amazonaws.com/efa: 1
+      volumeMounts:
+        - name: efa
+          mountPath: /opt/amazon/efa
+          readOnly: true
+        - name: shm
+          mountPath: /dev/shm
+      securityContext:
+        capabilities:
+          add: ["IPC_LOCK"]
+  volumes:
+    # Mount the host EFA userspace install so ibv_/fi_ tools and libfabric are available.
+    - name: efa
+      hostPath:
+        path: /opt/amazon/efa
+        type: DirectoryOrCreate
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 16Gi

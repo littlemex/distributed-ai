@@ -1,0 +1,21 @@
+# 02-fsx-claim.yaml
+# Binds the FSx-for-Lustre RWX PV (provisioned by infra/eks Terraform) to a
+# PVC named `fsx-claim`, which every build/bench pod here mounts at /fsx to
+# stage and share the USE_DMABUF UCCL-EP build across the two p5en nodes.
+#
+# NOTE: `volumeName` is environment-specific. Terraform creates the static PV
+# under a fixed name (here `fsx-training`); confirm with `kubectl get pv` and
+# adjust if your cluster names it differently. storageClassName is left "" to
+# bind to a pre-provisioned (static) PV rather than dynamically provision one.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fsx-claim
+  namespace: default
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: ""
+  volumeName: fsx-training
+  resources:
+    requests:
+      storage: 2400Gi
