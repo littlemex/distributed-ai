@@ -1,0 +1,92 @@
+{{- /*
+image-build-ddp-sample — build the ddp-sample image INSIDE the cluster with Kaniko and push
+to ECR, so the workshop needs no local docker/finch. This is the "execution" half of the
+in-cluster builder; the "mechanism" half (ECR repo, IAM role, Pod Identity, namespace, SA) is
+Terraform (image-builder.tf, image_builder_enabled=true by default).
+
+Auth is settings-free: the image-builder ServiceAccount has a Pod Identity association, so EKS
+injects container-credentials env into this Pod; Kaniko's bundled amazon-ecr-credential-helper
+(ecr-login) resolves the ECR login through the AWS SDK. No config.json, no docker login.
+
+Kaniko pulls the build context straight from the public Git repo (no init container, no local
+files) and builds the Dockerfile under infra/eks/manifests/ddp-sample.
+
+Render + apply (repository from `terraform output -raw ddp_sample_ecr_url`):
+  helm template exp ./charts/experiments \
+    -s templates/image-build-ddp-sample.yaml \
+    --set imageBuild.enabled=true \
+    --set imageBuild.repository=$ECR_URL --set imageBuild.tag=v1 | kubectl apply -f -
+  kubectl -n image-builder wait --for=condition=complete job/build-ddp-sample-v1 --timeout=30m
+  kubectl -n image-builder logs -f job/build-ddp-sample-v1   # on failure
+
+Re-building the SAME tag: delete the completed Job first
+  kubectl -n image-builder delete job build-ddp-sample-{{ .Values.imageBuild.tag }} --ignore-not-found
+(or just bump the tag — recommended, avoids the :latest/kubelet-cache trap).
+*/ -}}
+{{- if .Values.imageBuild.enabled }}
+{{- $ib := .Values.imageBuild }}
+{{- if not $ib.repository }}{{ fail "imageBuild.repository is required (terraform output -raw ddp_sample_ecr_url)" }}{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Tag is part of the name: a new tag is a new Job; re-running the same tag needs an explicit
+  # delete (kubectl apply on a Complete Job of the same name is a harmless no-op).
+  name: build-ddp-sample-{{ $ib.tag }}
+  namespace: {{ $ib.namespace | default "image-builder" }}
+spec:
+  backoffLimit: 1
+  # Reap the finished Job after a day so repeated workshop runs don't pile up.
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      serviceAccountName: {{ $ib.serviceAccountName | default "image-builder" }}
+      restartPolicy: Never
+      nodeSelector:
+        # Kaniko does NOT cross-build: the image is baked for the node's arch. Pin amd64 so a
+        # Graviton node can't produce an arm64 image that fails `exec format error` on the
+        # amd64 GPU/CPU nodes that run it.
+        kubernetes.io/arch: amd64
+        {{- if $ib.dedicatedPool.enabled }}
+        # Large-image builds land on the dedicated NVMe-RAID0 builder pool (image-builder.tf,
+        # image_builder_dedicated_pool=true), whose big local disk fits a tens-of-GB build.
+        node-role: image-builder
+        {{- else }}
+        # Small images (e.g. ddp-sample, ~15Gi peak) build on the shared CPU pool.
+        node-role: cpu
+        {{- end }}
+      {{- if $ib.dedicatedPool.enabled }}
+      tolerations:
+        - { key: workload, value: image-build, operator: Equal, effect: NoSchedule }
+      {{- end }}
+      containers:
+        - name: kaniko
+          # Kaniko is an archived project — pin by digest for reproducibility. v1.24.0 bundles
+          # amazon-ecr-credential-helper new enough to resolve Pod Identity container creds.
+          # The builder is a swappable part: to migrate off Kaniko, replace this image + args
+          # with moby/buildkit:rootless (buildctl-daemonless.sh); the Job shape stays the same.
+          image: {{ $ib.kanikoImage | default "gcr.io/kaniko-project/executor:v1.24.0@sha256:4e7a52dd1f14872430652bb3b027405b8dfd17c4538751c620ac005741ef9698" }}
+          args:
+            # Public repo → git context, so there is no init container and no local files.
+            - --context=git://{{ $ib.gitRepo | default "github.com/littlemex/distributed-ai.git" }}#refs/heads/{{ $ib.gitRef | default "main" }}
+            - --context-sub-path=infra/eks/manifests/ddp-sample
+            - --dockerfile=Dockerfile
+            - --destination={{ $ib.repository }}:{{ $ib.tag }}
+            # Snapshot/memory tuning for the large PyTorch base image.
+            - --snapshot-mode=redo
+            - --compressed-caching=false
+            - --single-snapshot
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              # Peak build disk ~= pushed image size x4-5 (base unpacked + snapshot tar, both
+              # uncompressed). Default 30Gi fits ddp-sample (~3.3GB pushed → ~15Gi peak) on the
+              # shared CPU pool's 50Gi root. For a large image, raise imageBuild.ephemeralStorage
+              # AND set dedicatedPool.enabled=true (its NVMe-RAID0 node has the disk for it);
+              # otherwise the Job either stays Pending (request > node) or gets Evicted on
+              # DiskPressure mid-build.
+              ephemeral-storage: {{ $ib.ephemeralStorage | default "30Gi" }}
+            limits:
+              memory: 8Gi
+              ephemeral-storage: {{ $ib.ephemeralStorage | default "30Gi" }}
+{{- end }}

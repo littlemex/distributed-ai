@@ -20,6 +20,31 @@
 namespace: ""
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 0) imageBuild — build ddp-sample IN-CLUSTER with Kaniko and push to ECR (no local
+#    docker/finch). The ECR repo + IAM + Pod Identity are provisioned by Terraform
+#    (image-builder.tf, image_builder_enabled=true by default). This renders a one-shot
+#    Kaniko Job in the "image-builder" namespace; auth is via Pod Identity (settings-free).
+#    Set repository from `terraform output -raw ddp_sample_ecr_url`.
+# ─────────────────────────────────────────────────────────────────────────────
+imageBuild:
+  enabled: false          # like every catalog workload, opt in with --set
+  repository: ""          # REQUIRED: terraform output -raw ddp_sample_ecr_url
+  tag: v1                 # bump (v1→v2) to rebuild instead of deleting the Job
+  gitRepo: github.com/littlemex/distributed-ai.git
+  gitRef: main            # pin to a release tag/sha for reproducibility; main is for iteration
+  namespace: image-builder
+  serviceAccountName: image-builder
+  # Peak build disk ~= pushed image size x4-5. Guide: 3GB→30Gi (default), 10GB→60Gi,
+  # 25GB→150Gi (+ dedicatedPool). Must be <= the target node's allocatable ephemeral-storage.
+  ephemeralStorage: 30Gi
+  dedicatedPool:
+    # true → schedule onto the tainted NVMe-RAID0 builder pool (needs Terraform
+    # image_builder_dedicated_pool=true). Use for large images the 50Gi CPU root can't hold.
+    enabled: false
+  # kanikoImage: override only to swap the builder (e.g. moby/buildkit:rootless). Pinned by
+  # digest in the template.
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 1) neuronProbe — single-node Neuron (Trainium/Inferentia) sanity probe.
 #    Confirms the pod lands on a Neuron node, the device plugin advertises
 #    aws.amazon.com/neuron, and neuron-ls enumerates the devices.
