@@ -33,6 +33,14 @@ render time rather than binding to nothing.
 {{- end -}}
 
 {{/*
+Shared-storage PVC name. If sharedStorage.existingClaimName is set, use it directly
+(no shared-pvc.yaml is rendered). Otherwise use the chart-created "shared-claim".
+*/}}
+{{- define "experiments.sharedClaimName" -}}
+{{- .Values.sharedStorage.existingClaimName | default "shared-claim" -}}
+{{- end -}}
+
+{{/*
 Neuron accelerator tolerations: the device-plugin taint, the EFA taint, and the
 Capacity Block taint (value rotates per reservation, so Exists). Indented under a
 `tolerations:` key by the caller; include with the correct indent, e.g.

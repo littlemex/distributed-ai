@@ -129,6 +129,10 @@ ncclSshd:
 sharedStorage:
   backend: openzfs      # openzfs | fsx | efs
   requestSize: 256Gi    # PVC request; must be <= the backing PV's capacity
+  # If a PVC already exists in the target namespace (e.g. Basic01's openzfs-claim), set its
+  # name here to reuse it instead of creating a new shared-claim PVC. This avoids the
+  # "static PV can only bind one PVC at a time" limitation.
+  existingClaimName: ""  # e.g. "openzfs-claim"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5) torchrunTrain — single-node MNIST MLP DDP via `torchrun` (batch/v1 Job).

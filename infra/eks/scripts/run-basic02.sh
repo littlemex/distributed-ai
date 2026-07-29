@@ -30,13 +30,22 @@ done
 
 # --- Auto-detect account, region, container runtime ---
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-REGION=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' | grep -oP '(?<=\.)[a-z]+-[a-z]+-[0-9]+(?=\.)')
-if [ -z "$REGION" ]; then
+REGION=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' | sed -E 's|.*\.([a-z]+-[a-z]+-[0-9]+)\..*|\1|')
+if [ -z "$REGION" ] || [[ "$REGION" == http* ]]; then
   REGION=$(aws configure get region 2>/dev/null || echo "us-west-2")
 fi
 ECR_URI="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/ddp-sample"
 TAG=$(git -C "$REPO_ROOT" rev-parse --short HEAD)
 IMAGE="${ECR_URI}:${TAG}"
+
+# When --skip-build, use the latest tag actually in ECR (local HEAD may differ from pushed tag)
+if [ "$SKIP_BUILD" = true ]; then
+  ECR_TAG=$(aws ecr describe-images --repository-name ddp-sample --region "$REGION" \
+    --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageTags[0]' --output text 2>/dev/null || echo "")
+  if [ -n "$ECR_TAG" ] && [ "$ECR_TAG" != "None" ]; then
+    IMAGE="${ECR_URI}:${ECR_TAG}"
+  fi
+fi
 
 if command -v docker &>/dev/null; then
   CTR=docker
@@ -88,6 +97,7 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 if [ "$MULTI_NODE_ONLY" = false ]; then
   echo "[INFO] Step 3: Single-node torchrun (2 procs, gloo)"
   helm template exp "$CHART_DIR" -n "$NAMESPACE" \
+    --set sharedStorage.existingClaimName=openzfs-claim \
     --set torchrunTrain.enabled=true \
     --set torchrunTrain.image="$IMAGE" \
     --set torchrunTrain.backend=gloo \
@@ -107,6 +117,7 @@ fi
 # --- Step 4: Multi-node PyTorchJob (2 workers, etcd rendezvous) ---
 echo "[INFO] Step 4: Multi-node PyTorchJob (2 workers, gloo, etcd)"
 helm template exp "$CHART_DIR" -n "$NAMESPACE" \
+  --set sharedStorage.existingClaimName=openzfs-claim \
   --set pytorchjobTrain.enabled=true \
   --set pytorchjobTrain.image="$IMAGE" \
   --set pytorchjobTrain.backend=gloo \
@@ -127,9 +138,9 @@ while true; do
 done
 echo "[OK] PyTorchJob completed"
 echo "--- Worker-0 logs ---"
-kubectl logs ddp-pytorchjob-worker-0 -n "$NAMESPACE" --tail=10
+kubectl logs ddp-pytorchjob-worker-0 -n "$NAMESPACE" --tail=10 2>/dev/null || echo "(pod already cleaned up by operator)"
 echo "--- Worker-1 logs ---"
-kubectl logs ddp-pytorchjob-worker-1 -n "$NAMESPACE" --tail=10
+kubectl logs ddp-pytorchjob-worker-1 -n "$NAMESPACE" --tail=10 2>/dev/null || echo "(pod already cleaned up by operator)"
 echo ""
 
 # --- Cleanup ---

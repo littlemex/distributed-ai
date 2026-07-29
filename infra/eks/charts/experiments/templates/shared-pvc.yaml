@@ -16,7 +16,7 @@ Applying this into a second namespace while the first PVC is still Bound leaves 
 permanently Pending. Delete the first namespace's PVC first, or provision a second static PV
 before running the same workload elsewhere.
 */ -}}
-{{- if or .Values.torchrunTrain.enabled .Values.pytorchjobTrain.enabled }}
+{{- if and (or .Values.torchrunTrain.enabled .Values.pytorchjobTrain.enabled) (not .Values.sharedStorage.existingClaimName) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

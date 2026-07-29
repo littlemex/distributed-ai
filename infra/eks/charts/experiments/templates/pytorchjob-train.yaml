@@ -123,6 +123,6 @@ spec:
           # (efs.tf). ddp.py creates the MNIST data / output / snapshot dirs on first write
           # (os.makedirs), so there is nothing to pre-provision.
           volumes:
-            - { name: shared, persistentVolumeClaim: { claimName: shared-claim } }
+            - { name: shared, persistentVolumeClaim: { claimName: {{ include "experiments.sharedClaimName" $ }} } }
             - { name: shm, emptyDir: { medium: Memory, sizeLimit: 4Gi } }
 {{- end }}
