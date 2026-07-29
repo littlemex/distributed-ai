@@ -160,6 +160,15 @@ variable "accelerator_pools" {
     error_message = "A pool with capacity_type \"reserved\" must set cb_reservation_id (cr-...)."
   }
   validation {
+    # Enforce the reservation-id shape at plan time. The CB metadata helper LISTS all
+    # reservations and matches ids client-side, so a deleted OR mistyped id degrades quietly to
+    # found=false (a WARN) instead of a LOUD AWS error. That is the desired behavior for a
+    # rotated-out CB, but it would also swallow a genuine typo — so we catch malformed ids here,
+    # before the helper runs. A reservation id is "cr-" + 17 lowercase hex chars.
+    condition     = alltrue([for k, p in var.accelerator_pools : p.cb_reservation_id == "" || can(regex("^cr-[0-9a-f]{17}$", p.cb_reservation_id))])
+    error_message = "cb_reservation_id must look like a Capacity Reservation id: \"cr-\" followed by 17 lowercase hex characters (e.g. \"cr-0123456789abcdef0\")."
+  }
+  validation {
     # coalesce(...) avoids passing null to contains() (HCL contains errors on a null value).
     condition     = alltrue([for k, p in var.accelerator_pools : contains(["cluster", "partition", "spread", "none"], coalesce(p.placement_group_strategy, "none"))])
     error_message = "placement_group_strategy must be null or one of \"cluster\", \"partition\", \"spread\"."
@@ -383,20 +392,32 @@ variable "system_node_desired_size" {
   default     = 2
 }
 
+variable "system_node_volume_size" {
+  # The default AL2023 MNG root volume (~20 GiB) leaves little headroom once
+  # kube-system images + logs land, and any pod that slips onto this tier can push
+  # it into ephemeral-storage eviction. 50 GiB gives the sanctuary comfortable slack
+  # without hosting workload images (those belong on the cpu pool). Changing this
+  # rolls (replaces) the system nodes — apply in a calm window (migration step 6 in
+  # docs/node-role-separation.md).
+  description = "Root EBS volume size (GiB) for the system managed node group."
+  type        = number
+  default     = 50
+}
+
 # ── CPU node disk and lifecycle ───────────────────────────────────────────────
 # (GPU/Neuron node disk, lifetime, and limits are per-pool in var.accelerator_pools.)
 
 variable "cpu_node_volume_size" {
-  # For controllers and light non-GPU workloads the 50Gi default is fine. If you
-  # schedule a KubeRay head (or any pod pulling a large RL training image, e.g.
-  # the ~18GB slime/miles images) onto the CPU pool, raise this to 150Gi+: an
-  # 18GB image needs ~40GB during pull (compressed + extracted layers) plus head
-  # logs / GCS / object spilling, and 50Gi will Evict the pod mid-pull. This is a
-  # per-cluster override, not a default bump, so the shared CPU pool's EBS cost is
-  # not inflated for every user.
-  description = "Root EBS volume size for CPU nodes (e.g. \"50Gi\"; use \"150Gi\"+ if a KubeRay head or other large-image pod lands here)."
+  # The cpu pool is where operators (gpu/mpi/kuberay) and large-image workloads
+  # (a KubeRay head pulling the ~14-18GB slime/miles images) land. Such an image
+  # needs ~40GB during pull (compressed + extracted layers) plus head logs / GCS /
+  # object spilling; the old 50Gi default evicted the head mid-pull. 150Gi (gp3,
+  # ~$12/node/mo — noise vs a p5en cluster) is a SAFE default: "unsafe default +
+  # documented warning" demonstrably failed to prevent that incident. Lower it only
+  # on cost-sensitive clusters that never schedule a large-image pod on the cpu pool.
+  description = "Root EBS volume size for CPU nodes (e.g. \"150Gi\"; safe for a KubeRay head / large RL images. Lower only if no large-image pod targets the cpu pool)."
   type        = string
-  default     = "50Gi"
+  default     = "150Gi"
 }
 
 variable "cpu_nodepool_cpu_limit" {
