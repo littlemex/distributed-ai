@@ -13,5 +13,7 @@
 # ddp.py imports it lazily and only when USE_MLFLOW=1, degrading to no-tracking otherwise.
 FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
+RUN pip install --no-cache-dir python-etcd
+
 COPY ddp.py /workspace/ddp.py
 WORKDIR /workspace

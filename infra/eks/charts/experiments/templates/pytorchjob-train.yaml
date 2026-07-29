@@ -4,16 +4,13 @@ PyTorchJob (Worker-only). Uses the Kubeflow Training Operator (installed by gpu-
 and the ddp-sample image (ddp.py baked in; see manifests/ddp-sample/).
 
 This is the idiomatic operator for PyTorch DDP, the same one the awsome-distributed-ai DDP
-sample uses (ddp.py is adapted from it; we swap that sample's etcd rendezvous for c10d). It is
-Worker-only (no Master/Launcher, no sshd, no Open MPI). Rendezvous is handled by torchrun's
-c10d backend: spec.elasticPolicy makes the operator inject PET_RDZV_BACKEND=c10d and
-PET_RDZV_ENDPOINT=<job>-worker-0:23456 into every Worker, and torchrun reads those to elect
-Worker-0 as the rendezvous host and assign node ranks dynamically. A Worker-only PyTorchJob
-WITHOUT elasticPolicy gets only PET_NNODES / PET_NPROC_PER_NODE and no rendezvous endpoint (the
-operator injects MASTER_ADDR / RANK / WORLD_SIZE only when a Master replica exists), so torchrun
-cannot find its peers. That is why elasticPolicy is present even though we do not want
-autoscaling — minReplicas==maxReplicas==workers pins the size, and elasticPolicy is used purely
-to supply the rendezvous endpoint.
+sample uses (ddp.py is adapted from it). Rendezvous matches the awsome reference: an etcd
+Deployment+Service (templates/etcd.yaml) acts as the rendezvous store, and spec.elasticPolicy
+points torchrun at it (rdzvBackend: etcd, rdzvHost: etcd, rdzvPort: 2379). torchrun uses etcd
+to assign node ranks dynamically, then exports RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR /
+MASTER_PORT into each training process. Worker-only (no Master/Launcher, no sshd, no Open MPI).
+minReplicas==maxReplicas==workers pins the size (no autoscaling in this workshop); the etcd
+rendezvous still provides value for Worker restart tolerance (maxRestarts > 0).
 
 Backend gloo (CPU) or nccl (GPU). --nnodes and --nproc_per_node are set on the command from
 Helm values (known at render time), so no $(VAR) env expansion is involved; torchrun spawns
@@ -54,24 +51,22 @@ spec:
   # job as a whole is deleted (on Succeeded the operator still garbage-collects the pods).
   runPolicy:
     cleanPodPolicy: Running
-  # elasticPolicy supplies the torchrun rendezvous endpoint (see the header). We are NOT
-  # autoscaling: min==max==workers pins the size to a fixed count. rdzvBackend c10d elects
-  # Worker-0 as the rendezvous host (the operator sets PET_RDZV_ENDPOINT=<job>-worker-0:23456),
-  # so no external etcd is needed. maxRestarts lets a transient Worker failure re-rendezvous
-  # instead of failing the whole job.
+  # elasticPolicy: matches the awsome-distributed-ai reference (etcd rendezvous). The etcd
+  # Deployment+Service is rendered by templates/etcd.yaml in the same namespace. min==max
+  # pins the worker count (no autoscaling); etcd still provides restart tolerance via
+  # maxRestarts (a restarted Worker re-rendezvouses without failing the whole job).
   elasticPolicy:
-    rdzvBackend: c10d
+    rdzvBackend: etcd
+    rdzvHost: etcd
+    rdzvPort: 2379
     minReplicas: {{ $v.workers | default 2 | int }}
     maxReplicas: {{ $v.workers | default 2 | int }}
-    maxRestarts: 3
+    maxRestarts: 100
   pytorchReplicaSpecs:
     Worker:
       replicas: {{ $v.workers | default 2 | int }}
-      # OnFailure, NOT Never: with c10d rendezvous the non-host Workers connect to Worker-0's
-      # store, and if Worker-0's image pull / EFS mount lags, they hit RendezvousConnectionError
-      # and exit. restartPolicy: Never would leave them Failed forever and fail the whole job on
-      # nothing but a startup-timing skew; OnFailure lets them retry until Worker-0 is up (capped
-      # by elasticPolicy.maxRestarts). This matches the awsome-distributed-ai DDP sample.
+      # OnFailure matches the awsome-distributed-ai DDP sample. With etcd rendezvous, a
+      # restarted Worker re-joins via etcd (capped by elasticPolicy.maxRestarts=100).
       restartPolicy: OnFailure
       template:
         metadata:
@@ -98,16 +93,11 @@ spec:
           containers:
             - name: pytorch
               image: {{ $v.image }}
-              # torchrun args are fully static (known at Helm render time): --nnodes = Worker
-              # replicas, --nproc_per_node = local processes per Worker (== gpu.count on nccl).
-              # We deliberately do NOT pass --node_rank / --master_addr / --rdzv_endpoint: the
-              # rendezvous is discovered from the PET_RDZV_BACKEND=c10d and
-              # PET_RDZV_ENDPOINT=<job>-worker-0:23456 that spec.elasticPolicy makes the
-              # operator inject, and torchrun assigns node ranks dynamically. torchrun then
-              # re-exports RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR / MASTER_PORT INTO each
-              # spawned training process — that is where ddp.py reads them. (They are NOT present
-              # in this container's top-level env, which is why $(RANK)-style k8s expansion cannot
-              # work here.) No sshd / mpirun anywhere.
+              # torchrun args are fully static (known at Helm render time). The operator
+              # injects PET_RDZV_BACKEND=etcd and PET_RDZV_ENDPOINT=etcd:2379 from
+              # spec.elasticPolicy; torchrun uses etcd to assign node ranks dynamically,
+              # then exports RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR / MASTER_PORT
+              # into each spawned training process (where ddp.py reads them).
               command:
                 - torchrun
                 - --nnodes={{ $v.workers | default 2 | int }}

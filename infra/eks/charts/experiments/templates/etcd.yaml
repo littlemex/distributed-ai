@@ -1,0 +1,63 @@
+{{- if or .Values.pytorchjobTrain.enabled .Values.torchrunTrain.enabled }}
+# etcd for torch.distributed elastic rendezvous (matches awsome-distributed-ai DDP sample).
+# Worker Pods connect to etcd:2379 as the rdzvBackend; torchrun uses it to assign ranks
+# dynamically and tolerate Worker restarts (elastic training). A single replica suffices
+# for this cluster's scale — etcd is stateless from the training perspective (rendezvous
+# state is ephemeral and rebuilt on each job start).
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  namespace: {{ include "experiments.namespace" . }}
+spec:
+  ports:
+    - name: etcd-client-port
+      port: 2379
+      protocol: TCP
+      targetPort: 2379
+  selector:
+    app: etcd
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etcd
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: etcd
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: etcd
+  template:
+    metadata:
+      labels:
+        app: etcd
+    spec:
+      containers:
+        - name: etcd
+          image: quay.io/coreos/etcd:v3.5.19
+          command: ["/usr/local/bin/etcd"]
+          args:
+            - "--data-dir"
+            - "/var/lib/etcd"
+            - "--enable-v2"
+            - "--listen-client-urls"
+            - "http://0.0.0.0:2379"
+            - "--advertise-client-urls"
+            - "http://0.0.0.0:2379"
+            - "--initial-cluster-state"
+            - "new"
+          ports:
+            - containerPort: 2379
+              name: client
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      restartPolicy: Always
+{{- end }}

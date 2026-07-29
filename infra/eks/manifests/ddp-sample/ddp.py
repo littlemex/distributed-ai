@@ -3,24 +3,21 @@
 (gloo on CPU, nccl on GPU).
 
 Adapted from awsome-distributed-ai's `3.test_cases/pytorch/ddp/ddp.py` (itself derived from
-pytorch/examples multigpu_torchrun.py). Three deliberate changes from that upstream sample so
-it runs on this cluster with no extra moving parts:
+pytorch/examples multigpu_torchrun.py). The rendezvous setup matches the awsome reference:
+the PyTorchJob's elasticPolicy points torchrun at an etcd Service (rdzvBackend: etcd), which
+assigns node ranks dynamically and survives individual Worker restarts. After rendezvous,
+torchrun exports RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR / MASTER_PORT into each
+training process — which is what argless init_process_group() reads below. The rendezvous
+backend (etcd vs c10d) is orthogonal to the communication backend (gloo vs nccl).
 
-  1. Rendezvous is torchrun's c10d env:// backend, NOT etcd. The upstream sample points
-     `--rdzv_backend etcd` at an etcd Deployment+Service; we elect Worker-0 as the c10d store
-     instead, so there is no external etcd to run. torchrun sets RANK / WORLD_SIZE / LOCAL_RANK
-     / MASTER_ADDR / MASTER_PORT on every process it spawns. Under a Kubeflow PyTorchJob these
-     come from spec.elasticPolicy: the operator injects PET_RDZV_BACKEND=c10d and
-     PET_RDZV_ENDPOINT=<job>-worker-0:23456, torchrun rendezvouses via Worker-0's TCP store and
-     assigns node ranks dynamically, then re-exports the env:// vars into each training process
-     — which is what init_process_group() (argless) and this script read below.
+Two changes from the upstream sample for shared-filesystem operation:
 
-  2. The MNIST data and the snapshot live on the shared PVC mount (/shared), not a per-node
+  1. The MNIST data and the snapshot live on the shared PVC mount (/shared), not a per-node
      local disk. Because every rank sees the same filesystem, only rank 0 downloads MNIST; the
      others wait at a barrier and then read the same copy. Concurrent downloads to one shared
      path race and can corrupt the extracted archive.
 
-  3. Only rank 0 writes the snapshot. The upstream Trainer._save_snapshot has no rank guard —
+  2. Only rank 0 writes the snapshot. The upstream Trainer._save_snapshot has no rank guard —
      harmless when each rank writes its own local path, but on a shared mount all ranks writing
      the same file concurrently is a corruption risk.
 

@@ -151,17 +151,20 @@ torchrunTrain:
   gpu:
     enabled: false     # set true for the nccl backend
     count: 1           # nvidia.com/gpu per pod; keep == nprocPerNode on GPU
-  image: ""            # REQUIRED: <account>.dkr.ecr.<region>.amazonaws.com/ddp-sample:<sha>
+  # REQUIRED. Build from infra/eks/manifests/ddp-sample/ and push to your ECR:
+  #   export IMG=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/ddp-sample:$(git rev-parse --short HEAD)
+  #   docker build -t $IMG infra/eks/manifests/ddp-sample/ && docker push $IMG
+  # Then pass --set torchrunTrain.image=$IMG
+  image: ""
   memory: 16Gi
   cpu: "4"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6) pytorchjobTrain — multi-node MNIST MLP DDP via kubeflow.org/v1 PyTorchJob.
-#    Worker-only (Worker-0 is the c10d rendezvous master); Workers on nodeRole (cpu for
-#    gloo, an accelerator pool for nccl). Requires the Kubeflow Training Operator (installed
-#    by gpu-addons.tf) + sharedStorage.backend enabled (default openzfs, ON). This is the
-#    idiomatic PyTorch DDP operator (same one the awsome-distributed-ai DDP sample uses) —
-#    no Launcher, no sshd, no Open MPI.
+#    Worker-only with etcd rendezvous (matches awsome-distributed-ai DDP sample).
+#    Workers on nodeRole (cpu for gloo, an accelerator pool for nccl). Requires the
+#    Kubeflow Training Operator (installed by gpu-addons.tf) + sharedStorage.backend
+#    enabled (default openzfs, ON) + etcd (auto-rendered when this is enabled).
 # ─────────────────────────────────────────────────────────────────────────────
 pytorchjobTrain:
   enabled: false
@@ -178,7 +181,7 @@ pytorchjobTrain:
   gpu:
     enabled: false     # set true for the nccl backend
     count: 1           # nvidia.com/gpu per Worker; keep == nprocPerNode on GPU
-  image: ""            # REQUIRED: the ddp-sample image
+  image: ""            # REQUIRED: same ddp-sample image as torchrunTrain
   workerMemory: 16Gi
   workerCpu: "4"
 
