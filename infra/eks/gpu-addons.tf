@@ -61,6 +61,12 @@ locals {
       # gdrcopy-validation blocks forever and the device plugin never advertises GPUs.
       # Off by default; gdrcopy is a GPUDirect latency optimization, not required for NCCL.
       gdrcopy = { enabled = var.gpu_operator_enable_gdrcopy }
+      # Emit a ServiceMonitor for the DCGM exporter so kube-prometheus-stack (Basic08) can
+      # scrape GPU metrics. The chart default is false; without it the Prometheus
+      # serviceMonitorSelector has nothing to match and no GPU metrics are collected.
+      dcgmExporter = {
+        serviceMonitor = { enabled = true }
+      }
     }
   )
 
