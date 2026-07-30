@@ -58,10 +58,13 @@ echo ""
 
 # ── Step 1: Delete GPU workloads ──────────────────────────────────────────────
 echo "Step 1 — Delete GPU pods and workloads in namespace: $NAMESPACE"
-if confirm "  Delete all Deployments, StatefulSets, Jobs, and MPIJobs in $NAMESPACE?"; then
+if confirm "  Delete all Deployments, StatefulSets, Jobs, PyTorchJobs, and MPIJobs in $NAMESPACE?"; then
   kubectl -n "$NAMESPACE" delete deployment  --all --ignore-not-found=true
   kubectl -n "$NAMESPACE" delete statefulset --all --ignore-not-found=true
   kubectl -n "$NAMESPACE" delete job         --all --ignore-not-found=true
+  # PyTorchJob is the book's primary training workload (Kubeflow Training Operator, etcd
+  # rendezvous). Delete it too, or its Worker pods linger and stall NodeClaim drain.
+  kubectl -n "$NAMESPACE" delete pytorchjob  --all --ignore-not-found=true 2>/dev/null || true
   kubectl -n "$NAMESPACE" delete mpijob      --all --ignore-not-found=true 2>/dev/null || true
 
   echo "  Waiting for pods to terminate..."
