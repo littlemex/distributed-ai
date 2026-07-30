@@ -78,9 +78,13 @@ fi
 
 # --- Step 1: Build & Push ---
 if [ "$SKIP_BUILD" = false ]; then
-  echo "[INFO] Step 1: ECR repo + build + push"
-  aws ecr describe-repositories --repository-names ddp-sample --region "$REGION" >/dev/null 2>&1 || \
-    aws ecr create-repository --repository-name ddp-sample --region "$REGION" --query 'repository.repositoryUri' --output text
+  echo "[INFO] Step 1: build + push"
+  # The ddp-sample ECR repo is created by Terraform (image_builder_enabled). Do not create it
+  # here — that would duplicate ownership and drift from the IaC. Fail with guidance if absent.
+  aws ecr describe-repositories --repository-names ddp-sample --region "$REGION" >/dev/null 2>&1 || {
+    echo "[NG] ECR repo 'ddp-sample' not found. It is provisioned by 'terraform apply' (image_builder_enabled=true). Run the Basic01 apply first." >&2
+    exit 1
+  }
   aws ecr get-login-password --region "$REGION" | $CTR login --username AWS --password-stdin "${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com"
   $CTR build --platform linux/amd64 -t "$IMAGE" "$DOCKERFILE_DIR"
   $CTR push "$IMAGE" || true
