@@ -126,9 +126,18 @@ test_karpenter() {
   [ "$nc_count" -gt 0 ] && [ "$nc_ready" -eq "$nc_count" ] || return 1
 }
 
-test_training_operator() {
-  kubectl get pods -n kubeflow -l control-plane=kubeflow-training-operator \
-    --field-selector=status.phase=Running --no-headers | grep -q .
+test_trainer() {
+  # Kubeflow Trainer v2 control plane (replaces the old Training Operator v1). Installed by
+  # trainer.tf as the "kubeflow-trainer" Helm release into kubeflow-system, with JobSet as a
+  # bundled subchart. Assert BOTH the Trainer manager and the JobSet controller have a Running
+  # pod — the manager alone would accept a TrainJob but the JobSet controller is what actually
+  # creates the worker pods, so a missing JobSet controller is a silent "TrainJob never schedules".
+  kubectl get pods -n kubeflow-system -l app.kubernetes.io/instance=kubeflow-trainer \
+    --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q . || return 1
+  # JobSet is a bundled subchart, so its instance label differs from the parent release; match on
+  # the pod name (fullnameOverride: jobset) to stay robust across chart-label changes.
+  kubectl get pods -n kubeflow-system --field-selector=status.phase=Running --no-headers 2>/dev/null \
+    | grep -q jobset
 }
 
 test_csi_drivers() {
@@ -204,7 +213,7 @@ main() {
   run_test "control-plane" "$TIMEOUT_BASE" test_control_plane || true
   run_test "system-nodes" "$TIMEOUT_BASE" test_system_nodes || true
   run_test "karpenter" "$TIMEOUT_BASE" test_karpenter || true
-  run_test "training-operator" "$TIMEOUT_BASE" test_training_operator || true
+  run_test "trainer" "$TIMEOUT_BASE" test_trainer || true
   run_test "csi-drivers" "$TIMEOUT_BASE" test_csi_drivers || true
   run_test "storage-mount" 120 test_storage_mount || true
 

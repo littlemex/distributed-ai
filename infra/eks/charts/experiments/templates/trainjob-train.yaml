@@ -1,0 +1,68 @@
+{{- /*
+trainjob-train — two-node MNIST MLP DistributedDataParallel run via Kubeflow Trainer v2
+(TrainJob, trainer.kubeflow.org/v1alpha1). The v2 replacement for pytorchjob-train.yaml: the
+elasticPolicy + self-hosted etcd rendezvous store both collapse into a runtimeRef one-liner.
+Uses the ddp-sample image (ddp.py baked in; see manifests/ddp-sample/) and the cluster's own
+runtime torch-distributed-eks (clustertrainingruntime-eks.yaml), which carries all the pod-spec
+scaffolding (antiAffinity, tolerations, shared PVC, /dev/shm, do-not-disrupt).
+
+HOW THE LAUNCH WORKS (verified against the Trainer torch plugin source, v2.2.1):
+  For plain torch (non-torchtune) the plugin does NOT rewrite the command. It only injects the
+  PET_* env vars — PET_NNODES / PET_NPROC_PER_NODE / PET_NODE_RANK (= JobSet completion index) /
+  PET_MASTER_ADDR (= <job>-node-0-0.<job> headless DNS) / PET_MASTER_PORT — and opens the trainer
+  port. So spec.trainer.command MUST invoke torchrun itself; torchrun reads those PET_* values as
+  CLI defaults, which is why --nnodes / --nproc-per-node / --node-rank / --master-addr are omitted.
+  Writing `command: [python, /workspace/ddp.py]` instead would bypass torchrun entirely: PET_* go
+  unread, each pod runs as world_size=1, and the job "succeeds" without ever training distributed.
+
+  numProcPerNode is set explicitly. Left unset ("auto") on a CPU node the plugin derives it from
+  the CPU request (getNumCPUPerNode) — a large request would spawn dozens of procs. One proc per
+  node (CPU) or one per GPU (nccl) is what we want, so we pin it.
+
+Render + apply (CPU, 2 nodes):
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set trainjobTrain.enabled=true --set trainjobTrain.image=$IMG | kubectl apply -f -
+Render + apply (GPU, 2 nodes x 1 GPU):
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set trainjobTrain.enabled=true --set trainjobTrain.image=$IMG \
+    --set trainjobTrain.nodeRole=gpu-g5 --set trainjobTrain.gpu.enabled=true \
+    --set trainjobTrain.gpu.count=1 --set trainjobTrain.nprocPerNode=1 | kubectl apply -f -
+Verify (JobSet-based pod naming; there is no "master"/"worker" split anymore):
+  kubectl -n $NS get trainjob ddp-trainjob
+  kubectl -n $NS logs -f -l jobset.sigs.k8s.io/jobset-name=ddp-trainjob   # rank-0 is node-0-0
+*/ -}}
+{{- if .Values.trainjobTrain.enabled }}
+{{- $v := .Values.trainjobTrain }}
+{{- if not $v.image }}{{ fail "trainjobTrain.image is required (the ddp-sample image URI)" }}{{- end }}
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: ddp-trainjob
+  namespace: {{ include "experiments.namespace" . }}
+spec:
+  runtimeRef:
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+    name: torch-distributed-eks
+  trainer:
+    numNodes: {{ $v.numNodes | default 2 | int }}
+    # Explicit — never rely on "auto" (see header). IntOrString in the CRD; keep it an int here.
+    numProcPerNode: {{ $v.nprocPerNode | default 1 | int }}
+    image: {{ $v.image | quote }}
+    # command MUST start with torchrun so the injected PET_* are honored; rendezvous args are
+    # omitted on purpose (torchrun reads them from PET_*).
+    command:
+      - torchrun
+      - /workspace/ddp.py
+    resourcesPerNode:
+      requests:
+        cpu: {{ $v.workerCpu | default "4" | quote }}
+        memory: {{ $v.workerMemory | default "16Gi" | quote }}
+      limits:
+        {{- if $v.gpu.enabled }}
+        nvidia.com/gpu: {{ $v.gpu.count | default 1 | quote }}
+        {{- end }}
+        memory: {{ $v.workerMemory | default "16Gi" | quote }}
+    env:
+      - { name: OUTPUT_DIR, value: /shared/output/trainjob }
+{{- end }}

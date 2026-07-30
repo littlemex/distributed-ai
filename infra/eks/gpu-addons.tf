@@ -3,8 +3,8 @@
 #   1. NVIDIA GPU Operator      (var.gpu_operator_chart_version) — only if a GPU pool exists
 #   2. AWS EFA k8s Device Plugin (var.efa_device_plugin_chart_version) — if any pool uses EFA
 #      (shared by GPU and Neuron pools; trn2/p5/p5en/g6e all surface EFA via this plugin)
-#   3. Kubeflow Training Operator (var.training_operator_version) — always (PyTorchJob)
-# The Neuron device plugin is a separate add-on (neuron-addons.tf).
+# The Neuron device plugin is a separate add-on (neuron-addons.tf); the multi-node training
+# launcher is Kubeflow Trainer v2 (trainer.tf), which replaced the old Training Operator v1.
 #
 # Verified facts:
 #   - gpu-operator chart from helm.ngc.nvidia.com/nvidia. Top-level values keys confirmed
@@ -14,14 +14,9 @@
 #     differs from the app/image version; p5en.48xlarge/p5.48xlarge are in the default
 #     supportedInstanceLabels list. (g6e.12xlarge is NOT — see the EFA gotcha in the
 #     README/blog; on g6e the plugin still advertises EFA once an efa-only ENI exists.)
-#   - training-operator standalone manifest is published per release tag on GitHub; it is the
-#     idiomatic operator for PyTorchJob (kubeflow.org/v1), the same one the awsome-distributed-ai
-#     DDP sample installs. A PyTorchJob needs no sshd/OpenMPI (that was the tax of the old
-#     MPIJob-on-PyTorch approach): a Worker-only job discovers its peers via torchrun's c10d
-#     rendezvous, which spec.elasticPolicy makes the operator wire up (PET_RDZV_BACKEND=c10d +
-#     PET_RDZV_ENDPOINT=<job>-worker-0:23456). The operator injects MASTER_ADDR/MASTER_PORT/
-#     WORLD_SIZE/RANK as pod env only when a Master replica exists; the charts/experiments
-#     pytorchjobTrain workload is Worker-only, so it relies on the c10d path instead.
+#   - The multi-node training launcher moved out of this file: Kubeflow Trainer v2 (TrainJob)
+#     is installed by trainer.tf, replacing the vendored Training Operator v1 manifest that
+#     used to live here.
 
 locals {
   # GPU Operator Helm values, assembled once so the release stays declarative and diffs
@@ -149,89 +144,4 @@ resource "helm_release" "aws_efa_k8s_device_plugin" {
 
   # See the identical comment on helm_release.gpu_operator above.
   depends_on = [helm_release.karpenter]
-}
-
-# ---------------------------------------------------------------------------
-# 3. Kubeflow Training Operator (optional; PyTorchJob multi-node launcher)
-#    Applied from a VENDORED manifest committed at manifests/training-operator-<version>.yaml
-#    (not fetched at plan time — an upstream tag is mutable and a plan-time HTTP dependency
-#    is fragile). Refresh it by re-rendering the release's standalone overlay when bumping the
-#    version:
-#      kubectl kustomize "github.com/kubeflow/training-operator/manifests/overlays/standalone?ref=<version>" \
-#        > manifests/training-operator-<version>.yaml
-#    Gated by var.training_operator_enabled. The gavinbunney/kubectl provider's
-#    kubectl_file_documents splits the multi-doc YAML into individual docs.
-# ---------------------------------------------------------------------------
-data "kubectl_file_documents" "training_operator" {
-  count   = var.training_operator_enabled ? 1 : 0
-  content = file("${path.module}/manifests/training-operator-${var.training_operator_version}.yaml")
-}
-
-locals {
-  training_operator_docs = var.training_operator_enabled ? data.kubectl_file_documents.training_operator[0].manifests : {}
-
-  # Split the manifest into the Deployment vs everything it needs first. The upstream YAML is
-  # one flat list, and kubectl_file_documents hands it to a single for_each with NO ordering
-  # between members. The Deployment carries wait_for_rollout (the kubectl provider blocks its
-  # apply until the Pods are Ready), but the Pods cannot start until the Namespace, the
-  # ServiceAccount they run as, and the webhook-cert Secret they mount already exist. Applied
-  # unordered, the Deployment can win the race and then its rollout wait DEADLOCKS the whole
-  # apply — Pods report "serviceaccount not found" / "namespace not found" forever, and the
-  # sibling SA/Namespace/Secret Create RPCs sit queued behind the blocking wait. Ordering the
-  # Deployment after its prerequisites (via depends_on below) makes the apply converge.
-  training_operator_deployment_docs = {
-    for k, v in local.training_operator_docs : k => v if can(regex("/deployments/", k))
-  }
-  training_operator_prereq_docs = {
-    for k, v in local.training_operator_docs : k => v if !can(regex("/deployments/", k))
-  }
-}
-
-# Prerequisites: Namespace, ServiceAccount, webhook-cert Secret, RBAC, CRDs, Service, webhook
-# config — everything the operator Pod needs before it can start. (Resource name kept as
-# "training_operator" so existing state addresses for these docs are preserved.)
-resource "kubectl_manifest" "training_operator" {
-  for_each  = local.training_operator_prereq_docs
-  yaml_body = each.value
-
-  # The PyTorchJob (and sibling) CRDs are large; a client-side apply stores the whole schema
-  # in the last-applied-configuration annotation and exceeds the 262144-byte limit.
-  # Server-side apply avoids that annotation entirely.
-  server_side_apply = true
-
-  # The aggregated ClusterRoles (kubeflow-training-admin/edit/view) have their .rules
-  # populated by the cluster's clusterrole-aggregation-controller, which then owns that
-  # field. Server-side apply conflicts with it; force ownership back to this manifest (the
-  # aggregation controller re-reconciles harmlessly). The webhook caBundle is likewise
-  # written by the operator's own cert-controller at startup, so let it own that too.
-  force_conflicts = true
-
-  # Ignore updates to fields managed by the operator's own controllers (webhook caBundle,
-  # operator-set annotations).
-  ignore_fields = ["metadata.annotations", "webhooks"]
-
-  # The Training Operator runs on system nodes and does not depend on the GPU stack; it only
-  # needs the cluster API to be reachable (the kubectl provider already targets module.eks).
-  depends_on = [module.eks]
-}
-
-# The Deployment, applied only AFTER every prerequisite above exists, so its wait_for_rollout
-# can actually succeed instead of deadlocking on a missing Namespace/ServiceAccount/Secret.
-resource "kubectl_manifest" "training_operator_deployment" {
-  for_each  = local.training_operator_deployment_docs
-  yaml_body = each.value
-
-  server_side_apply = true
-  force_conflicts   = true
-  ignore_fields     = ["metadata.annotations", "webhooks"]
-
-  depends_on = [kubectl_manifest.training_operator]
-}
-
-# The Deployment doc previously lived in the single unordered kubectl_manifest.training_operator
-# for_each. Relocate its state to the new dedicated resource so Terraform adopts the running
-# Deployment in place instead of destroying and recreating it.
-moved {
-  from = kubectl_manifest.training_operator["/apis/apps/v1/namespaces/kubeflow/deployments/training-operator"]
-  to   = kubectl_manifest.training_operator_deployment["/apis/apps/v1/namespaces/kubeflow/deployments/training-operator"]
 }

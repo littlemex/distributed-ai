@@ -160,6 +160,11 @@ resource "null_resource" "wait_for_node_drain" {
     helm_release.gpu_operator,
     helm_release.aws_efa_k8s_device_plugin,
     helm_release.neuron,
+    # Kubeflow Trainer v2 controller: a TrainJob's worker pods run on accelerator (or CPU) nodes,
+    # so on destroy the drain-wait must complete BEFORE the controller is torn down. (The v2.2.1
+    # chart keeps CRDs in crds/, so uninstall leaves them — this edge is about draining pods, not
+    # about a CRD/finalizer race.)
+    helm_release.trainer,
     aws_eks_addon.efs_csi_driver,
     aws_eks_addon.fsx_csi_driver,
     helm_release.openzfs_csi_driver,
@@ -192,6 +197,21 @@ resource "null_resource" "wait_for_node_drain" {
       aws eks update-kubeconfig --name "${self.triggers.cluster_name}" --region "${self.triggers.region}" "$${PROFILE_ARGS[@]}" --kubeconfig "$KCONF" >/dev/null 2>&1 \
         || { echo "wait_for_node_drain: cluster exists but update-kubeconfig failed — cannot verify drain. Check for orphaned EC2 instances manually." >&2; exit 1; }
       export KUBECONFIG="$KCONF"
+
+      # Delete any Kubeflow Trainer v2 TrainJobs cluster-wide BEFORE waiting on NodeClaims. The
+      # teardown script (scripts/04-teardown.sh) already does this for its namespace, but a bare
+      # `terraform destroy` skips that script — without this, a TrainJob's JobSet-managed pods
+      # keep accelerator nodes busy and the NodeClaim wait below runs to its timeout. Best-effort
+      # (|| true) and time-boxed: a wedged Trainer controller that cannot clear finalizers must
+      # not block teardown. If the CRD is already gone, `kubectl` errors harmlessly and we move on.
+      echo "wait_for_node_drain: deleting any TrainJobs before draining (best-effort)..."
+      kubectl delete trainjob --all --all-namespaces --ignore-not-found=true --timeout=120s 2>/dev/null || {
+        echo "wait_for_node_drain: TrainJob delete errored or timed out (CRD absent, or controller wedged) — continuing."
+        for tj in $(kubectl get trainjob --all-namespaces -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+          ns="$${tj%%/*}"; name="$${tj##*/}"
+          kubectl -n "$ns" patch trainjob "$name" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        done
+      }
 
       # Polls `kubectl get <resource_type> --no-headers` until it reports zero objects, or
       # until $3 attempts (10s apart) are exhausted. stdout and stderr are captured

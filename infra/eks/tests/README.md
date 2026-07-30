@@ -42,7 +42,7 @@ cd infra/eks/tests
 | control-plane | EKS クラスタが ACTIVE、Kubernetes API に到達可能 |
 | system-nodes | System ノードグループのノードが 2 台 Ready |
 | karpenter | Karpenter Pod 2/2 Running、全 NodePool と EC2NodeClass が Ready |
-| training-operator | Kubeflow Training Operator が Running |
+| trainer | Kubeflow Trainer v2 (manager + JobSet) が Running |
 | csi-drivers | EBS/EFS/FSx Lustre/OpenZFS の DaemonSet + Controller が Ready |
 | storage-mount | テスト専用 PV 経由で FSx Lustre と OpenZFS に read/write |
 
@@ -64,7 +64,7 @@ cd infra/eks/tests
 [OK]   control-plane (5s)
 [OK]   system-nodes (4s)
 [OK]   karpenter (8s)
-[OK]   training-operator (2s)
+[OK]   trainer (2s)
 [OK]   csi-drivers (33s)
 [OK]   storage-mount (47s)
 
@@ -76,7 +76,7 @@ STATUS   TEST                                DETAIL
 PASS     control-plane                       5s
 PASS     system-nodes                        4s
 PASS     karpenter                           8s
-PASS     training-operator                   2s
+PASS     trainer                             2s
 PASS     csi-drivers                         33s
 PASS     storage-mount                       47s
 --------------------------------------------------------------

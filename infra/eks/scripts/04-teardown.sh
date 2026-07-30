@@ -58,13 +58,20 @@ echo ""
 
 # ── Step 1: Delete GPU workloads ──────────────────────────────────────────────
 echo "Step 1 — Delete GPU pods and workloads in namespace: $NAMESPACE"
-if confirm "  Delete all Deployments, StatefulSets, Jobs, PyTorchJobs, and MPIJobs in $NAMESPACE?"; then
+if confirm "  Delete all Deployments, StatefulSets, Jobs, TrainJobs, and MPIJobs in $NAMESPACE?"; then
   kubectl -n "$NAMESPACE" delete deployment  --all --ignore-not-found=true
   kubectl -n "$NAMESPACE" delete statefulset --all --ignore-not-found=true
   kubectl -n "$NAMESPACE" delete job         --all --ignore-not-found=true
-  # PyTorchJob is the book's primary training workload (Kubeflow Training Operator, etcd
-  # rendezvous). Delete it too, or its Worker pods linger and stall NodeClaim drain.
-  kubectl -n "$NAMESPACE" delete pytorchjob  --all --ignore-not-found=true 2>/dev/null || true
+  # TrainJob (Kubeflow Trainer v2) is the book's primary training workload. Delete it too, or its
+  # JobSet-managed pods linger and stall NodeClaim drain. Bound the wait so a wedged Trainer
+  # controller (unable to clear finalizers) cannot block teardown forever; if the delete times
+  # out, strip the finalizers so the CR (and its pods) can go, then continue.
+  if ! kubectl -n "$NAMESPACE" delete trainjob --all --ignore-not-found=true --timeout=120s 2>/dev/null; then
+    echo "  TrainJob delete timed out — clearing finalizers so teardown can proceed."
+    for tj in $(kubectl -n "$NAMESPACE" get trainjob -o name 2>/dev/null); do
+      kubectl -n "$NAMESPACE" patch "$tj" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+    done
+  fi
   kubectl -n "$NAMESPACE" delete mpijob      --all --ignore-not-found=true 2>/dev/null || true
 
   echo "  Waiting for pods to terminate..."

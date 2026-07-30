@@ -328,6 +328,13 @@ resource "kubectl_manifest" "accelerator_nodepool" {
           # Block nodes shortly before the reservation ends, so coupling expireAfter to a
           # wall-clock window is unnecessary (and would break plan idempotency).
           expireAfter = each.value.expire_after
+          # Upper bound on graceful drain. karpenter.sh/do-not-disrupt (set on training pods to
+          # survive consolidation) also blocks the drain when a NodeClaim is finally deleted; a
+          # pod stuck Terminating (e.g. a wedged TrainJob worker) could otherwise pin the node —
+          # and its GPU/Neuron billing — indefinitely. This caps that: after the window Karpenter
+          # force-terminates regardless. Long enough (1h) for a real checkpoint-on-SIGTERM to
+          # finish, short enough that a hung pod cannot hold an accelerator node forever.
+          terminationGracePeriod = each.value.termination_grace_period
         }
       }
       disruption = {

@@ -189,30 +189,31 @@ torchrunTrain:
   cpu: "4"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6) pytorchjobTrain — multi-node MNIST MLP DDP via kubeflow.org/v1 PyTorchJob.
-#    Worker-only with etcd rendezvous (matches awsome-distributed-ai DDP sample).
-#    Workers on nodeRole (cpu for gloo, an accelerator pool for nccl). Requires the
-#    Kubeflow Training Operator (installed by gpu-addons.tf) + sharedStorage.backend
-#    enabled (default openzfs, ON) + etcd (auto-rendered when this is enabled).
+# 6) trainjobTrain — multi-node MNIST MLP DDP via Kubeflow Trainer v2 TrainJob
+#    (trainer.kubeflow.org/v1alpha1), on the cluster runtime torch-distributed-eks. The v2
+#    successor to the old kubeflow.org/v1 PyTorchJob: rendezvous is torchrun c10d on node-0
+#    (PET_* injected by the plugin), so no self-hosted etcd. Nodes on nodeRole (cpu for gloo,
+#    an accelerator pool for nccl). Requires the Trainer control plane (trainer.tf,
+#    trainer_enabled=true) + sharedStorage.backend enabled (default openzfs, ON).
 # ─────────────────────────────────────────────────────────────────────────────
-pytorchjobTrain:
+trainjobTrain:
   enabled: false
-  # "gloo" or "nccl" — LABEL ONLY, same caveat as torchrunTrain.backend: this only names the
-  # OUTPUT_DIR subfolder (/shared/output/pytorchjob-<backend>). The real backend is whatever
-  # device ddp.py finds visible, driven by gpu.enabled + the Worker's nvidia.com/gpu request
-  # below, not by this string.
-  backend: gloo
-  workers: 2           # Worker replicas = nodes; the operator injects WORLD_SIZE = this count
-  nodeRole: cpu        # Worker pool (cpu for gloo; e.g. gpu-g5 for nccl)
-  # torchrun --nproc_per_node: local processes PER Worker. MUST equal gpu.count on the nccl
-  # backend (one proc per GPU); on gloo it is the CPU process count per node (1 is fine).
+  # Kubeflow Trainer v2 TrainJob (trainer.kubeflow.org/v1alpha1) — the multi-node successor to the
+  # old pytorchjobTrain (PyTorchJob). References the cluster runtime torch-distributed-eks, which
+  # holds the antiAffinity / tolerations / shared PVC / shm / do-not-disrupt scaffolding; this
+  # block sets only the per-job knobs.
+  numNodes: 2          # training nodes; the torch plugin injects PET_NNODES = this
+  nodeRole: cpu        # node pool (cpu for gloo DDP; e.g. gpu-g5 for nccl)
+  # processes PER node. Set explicitly — never "auto" (on CPU the plugin would derive it from the
+  # CPU request). Keep == gpu.count on GPU (one proc per GPU); 1 on CPU.
   nprocPerNode: 1
   gpu:
-    enabled: false     # set true for the nccl backend
-    count: 1           # nvidia.com/gpu per Worker; keep == nprocPerNode on GPU
+    enabled: false     # set true for the nccl (GPU) backend
+    count: 1           # nvidia.com/gpu per node; keep == nprocPerNode on GPU
   image: ""            # REQUIRED: same ddp-sample image as torchrunTrain
   workerMemory: 16Gi
   workerCpu: "4"
+  shmSize: 4Gi         # /dev/shm emptyDir sizeLimit in the runtime
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7) gpuServingVllm — single-GPU vLLM OpenAI-compatible serving Deployment + Service.

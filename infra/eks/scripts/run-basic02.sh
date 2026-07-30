@@ -66,10 +66,10 @@ echo ""
 # --- Cleanup mode ---
 if [ "$CLEANUP_ONLY" = true ]; then
   echo "[INFO] cleaning up..."
-  kubectl delete pytorchjob ddp-pytorchjob -n "$NAMESPACE" 2>/dev/null || true
+  kubectl delete trainjob ddp-trainjob -n "$NAMESPACE" 2>/dev/null || true
   kubectl delete job ddp-torchrun -n "$NAMESPACE" 2>/dev/null || true
   helm template exp "$CHART_DIR" -n "$NAMESPACE" \
-    --set pytorchjobTrain.enabled=true --set pytorchjobTrain.image=x \
+    --set trainjobTrain.enabled=true --set trainjobTrain.image=x \
     --set torchrunTrain.enabled=true --set torchrunTrain.image=x \
     2>/dev/null | kubectl delete -f - 2>/dev/null || true
   echo "[OK] cleanup done"
@@ -78,9 +78,13 @@ fi
 
 # --- Step 1: Build & Push ---
 if [ "$SKIP_BUILD" = false ]; then
-  echo "[INFO] Step 1: ECR repo + build + push"
-  aws ecr describe-repositories --repository-names ddp-sample --region "$REGION" >/dev/null 2>&1 || \
-    aws ecr create-repository --repository-name ddp-sample --region "$REGION" --query 'repository.repositoryUri' --output text
+  echo "[INFO] Step 1: build + push"
+  # The ddp-sample ECR repo is created by Terraform (image_builder_enabled). Do not create it
+  # here — that would duplicate ownership and drift from the IaC. Fail with guidance if absent.
+  aws ecr describe-repositories --repository-names ddp-sample --region "$REGION" >/dev/null 2>&1 || {
+    echo "[NG] ECR repo 'ddp-sample' not found. It is provisioned by 'terraform apply' (image_builder_enabled=true). Run the Basic01 apply first." >&2
+    exit 1
+  }
   aws ecr get-login-password --region "$REGION" | $CTR login --username AWS --password-stdin "${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com"
   $CTR build --platform linux/amd64 -t "$IMAGE" "$DOCKERFILE_DIR"
   $CTR push "$IMAGE" || true
@@ -114,38 +118,39 @@ if [ "$MULTI_NODE_ONLY" = false ]; then
   kubectl delete job ddp-torchrun -n "$NAMESPACE"
 fi
 
-# --- Step 4: Multi-node PyTorchJob (2 workers, etcd rendezvous) ---
-echo "[INFO] Step 4: Multi-node PyTorchJob (2 workers, gloo, etcd)"
+# --- Step 4: Multi-node TrainJob (Kubeflow Trainer v2; 2 nodes, gloo, torchrun c10d) ---
+echo "[INFO] Step 4: Multi-node TrainJob (Kubeflow Trainer v2; 2 nodes, gloo)"
 helm template exp "$CHART_DIR" -n "$NAMESPACE" \
   --set sharedStorage.existingClaimName=openzfs-claim \
-  --set pytorchjobTrain.enabled=true \
-  --set pytorchjobTrain.image="$IMAGE" \
-  --set pytorchjobTrain.backend=gloo \
-  --set pytorchjobTrain.nodeRole=cpu \
-  --set pytorchjobTrain.workers=2 \
-  --set pytorchjobTrain.nprocPerNode=1 \
+  --set trainjobTrain.enabled=true \
+  --set trainjobTrain.image="$IMAGE" \
+  --set trainjobTrain.nodeRole=cpu \
+  --set trainjobTrain.numNodes=2 \
+  --set trainjobTrain.nprocPerNode=1 \
   | kubectl apply -f -
 
-echo "[INFO] waiting for PyTorchJob (up to 15m)..."
-DEADLINE=$(($(date +%s) + 900))
-while true; do
-  STATUS=$(kubectl get pytorchjob ddp-pytorchjob -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Succeeded")].status}' 2>/dev/null || echo "")
-  FAILED=$(kubectl get pytorchjob ddp-pytorchjob -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || echo "")
-  [ "$STATUS" = "True" ] && break
-  [ "$FAILED" = "True" ] && { echo "[NG] PyTorchJob failed"; kubectl logs ddp-pytorchjob-worker-0 -n "$NAMESPACE" --tail=20; exit 1; }
-  [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "[NG] timeout"; exit 1; }
-  sleep 10
-done
-echo "[OK] PyTorchJob completed"
-echo "--- Worker-0 logs ---"
-kubectl logs ddp-pytorchjob-worker-0 -n "$NAMESPACE" --tail=10 2>/dev/null || echo "(pod already cleaned up by operator)"
-echo "--- Worker-1 logs ---"
-kubectl logs ddp-pytorchjob-worker-1 -n "$NAMESPACE" --tail=10 2>/dev/null || echo "(pod already cleaned up by operator)"
+echo "[INFO] waiting for TrainJob (up to 15m)..."
+# TrainJob surfaces a "Complete" condition (the v2 equivalent of the v1 PyTorchJob "Succeeded").
+if ! kubectl wait --for=condition=Complete trainjob/ddp-trainjob -n "$NAMESPACE" --timeout=15m 2>/dev/null; then
+  # Distinguish a real failure from the wait timing out, and surface rank-0 logs either way.
+  if [ "$(kubectl get trainjob ddp-trainjob -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)" = "True" ]; then
+    echo "[NG] TrainJob failed"
+  else
+    echo "[NG] timeout waiting for TrainJob to complete"
+  fi
+  kubectl logs -n "$NAMESPACE" -l jobset.sigs.k8s.io/jobset-name=ddp-trainjob --tail=20 2>/dev/null || true
+  exit 1
+fi
+echo "[OK] TrainJob completed"
+# Pods are JobSet-named (<job>-node-<replica>-<index>); rank-0 is node-0-0. There is no
+# master/worker split in v2 — the job-name label selects all nodes' pods.
+echo "--- node logs (rank-0 first) ---"
+kubectl logs -n "$NAMESPACE" -l jobset.sigs.k8s.io/jobset-name=ddp-trainjob --tail=10 --prefix 2>/dev/null || echo "(pods already cleaned up)"
 echo ""
 
 # --- Cleanup ---
 echo "[INFO] Cleanup"
-kubectl delete pytorchjob ddp-pytorchjob -n "$NAMESPACE"
+kubectl delete trainjob ddp-trainjob -n "$NAMESPACE"
 echo ""
 echo "=============================="
 echo " Basic02 ALL PASSED"
