@@ -38,11 +38,12 @@ locals {
   has_cb_alert = length(local.cb_alert_pools) > 0
 
   # Per-pool at() expression: 1 hour before that pool's cb_end_date.
-  # formatdate tokens: YYYY year, MM month, DD day, HH hour, mm minute, ss second;
-  # single-quoted 'T' is a literal separator. at() takes no timezone suffix.
+  # formatdate tokens (NOTE: Terraform is the inverse of Go/strftime): YYYY year, MM month,
+  # DD day, hh = 24-hour hour (HH would be 12-hour), mm minute, ss second; single-quoted 'T'
+  # is a literal separator. at() takes no timezone suffix (schedule_expression_timezone=UTC).
   cb_alert_schedule_expr = {
     for k, p in local.cb_alert_pools :
-    k => "at(${formatdate("YYYY-MM-DD'T'HH:mm:ss", timeadd(local.pool_cb_end_date[k], "-1h"))})"
+    k => "at(${formatdate("YYYY-MM-DD'T'hh:mm:ss", timeadd(local.pool_cb_end_date[k], "-1h"))})"
   }
 }
 
