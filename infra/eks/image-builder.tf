@@ -148,9 +148,18 @@ resource "kubectl_manifest" "image_builder_namespace" {
     metadata = {
       name = local.image_builder_namespace
       labels = {
-        # Kaniko runs as root (uid 0) to snapshot the filesystem, so "restricted" is
-        # impossible; "baseline" is the tightest level it can run under.
-        "pod-security.kubernetes.io/enforce" = "baseline"
+        # The in-cluster builder is rootless BuildKit (moby/buildkit:rootless). It is NON-
+        # privileged (no CAP_SYS_ADMIN, runs as uid 1000 in a user namespace) but rootlesskit
+        # needs clone/unshare syscalls that the RuntimeDefault seccomp profile blocks, so the
+        # build container must set seccompProfile: Unconfined — and PSA "baseline" forbids that
+        # (confirmed live 2026-07-30: under baseline the build pod is rejected; with RuntimeDefault
+        # it is admitted but rootlesskit dies with "fork/exec /proc/self/exe: operation not
+        # permitted"). So enforce must be relaxed for THIS namespace only. It is dedicated to
+        # single-shot build Jobs on their own tainted/selected nodes, not general workloads.
+        # warn/audit stay at baseline so any *other* deviation is still surfaced in logs.
+        "pod-security.kubernetes.io/enforce" = "privileged"
+        "pod-security.kubernetes.io/warn"    = "baseline"
+        "pod-security.kubernetes.io/audit"   = "baseline"
       }
     }
   })

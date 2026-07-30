@@ -32,6 +32,7 @@ imageBuild:
   tag: v1                 # bump (v1→v2) to rebuild instead of deleting the Job
   gitRepo: github.com/littlemex/distributed-ai.git
   gitRef: main            # pin to a release tag/sha for reproducibility; main is for iteration
+  region: us-west-2       # ECR region for the initContainer's `aws ecr get-login-password`
   namespace: image-builder
   serviceAccountName: image-builder
   # Peak build disk ~= pushed image size x4-5. Guide: 3GB→30Gi (default), 10GB→60Gi,
@@ -41,8 +42,9 @@ imageBuild:
     # true → schedule onto the tainted NVMe-RAID0 builder pool (needs Terraform
     # image_builder_dedicated_pool=true). Use for large images the 50Gi CPU root can't hold.
     enabled: false
-  # kanikoImage: override only to swap the builder (e.g. moby/buildkit:rootless). Pinned by
-  # digest in the template.
+  # buildkitImage / awsCliImage: override only to bump the builder or the ECR-login helper image.
+  # Both are pinned by digest in the template (reproducibility). BuildKit is rootless (no
+  # privileged container); the aws-cli initContainer mints the ECR token into a config.json.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1) neuronProbe — single-node Neuron (Trainium/Inferentia) sanity probe.
