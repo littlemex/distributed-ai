@@ -3,7 +3,7 @@ name: experiments
 description: |
   Hand-run experiment workloads for the distributed-ai EKS reference cluster:
   single-/two-node accelerator sanity probes, NCCL / Neuron collective benches,
-  torchrun & PyTorchJob training samples, and vLLM serving (GPU and Neuron). Each
+  torchrun & Kubeflow Trainer v2 TrainJob training samples, and vLLM serving (GPU and Neuron). Each
   workload is toggled on independently (`--set <workload>.enabled=true`) and is
   meant to be applied by hand with `helm template ... | kubectl apply -f -`.
 

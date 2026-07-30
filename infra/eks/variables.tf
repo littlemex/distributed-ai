@@ -82,6 +82,7 @@ variable "kubernetes_version" {
 #   cb_end_date          Optional RFC3339 CB expiry; schedules a per-pool pre-expiry SNS alert.
 #   volume_size          Root EBS volume size (e.g. "200Gi").
 #   expire_after         Karpenter NodePool expireAfter ("Never" or a Go duration).
+#   termination_grace_period  NodePool terminationGracePeriod (Go duration); caps graceful drain.
 #   consolidate_after    Karpenter empty-node consolidation delay ("5m", "Never", or "" to use
 #                        the per-capacity_type default: on-demand/spot consolidate to limit idle
 #                        cost, reserved keeps nodes for the reservation window).
@@ -121,6 +122,10 @@ variable "accelerator_pools" {
     volume_size              = optional(string, "200Gi")
     # expire_after: Go duration ("24h") or "Never". Node lifetime.
     expire_after = optional(string, "Never")
+    # termination_grace_period: Go duration. Upper bound on graceful drain when a NodeClaim is
+    # deleted — caps how long a do-not-disrupt / stuck-Terminating pod can pin an accelerator node
+    # (and its billing). 1h leaves room for checkpoint-on-SIGTERM without stranding a hung pod.
+    termination_grace_period = optional(string, "1h")
     # consolidate_after: Go duration ("5m") or "Never". Karpenter scales an empty node
     # down after this idle period. Defaults per capacity_type in locals (on-demand/spot
     # consolidate to control idle cost; reserved keeps nodes for the reservation window).
@@ -333,16 +338,26 @@ variable "efa_device_plugin_chart_version" {
   default     = "v0.5.29"
 }
 
-variable "training_operator_enabled" {
-  description = "Install the Kubeflow Training Operator (PyTorchJob multi-node launcher). Disable for inference-only clusters that do not run PyTorchJobs."
+variable "trainer_enabled" {
+  description = <<-EOT
+    Install Kubeflow Trainer v2 (TrainJob, trainer.kubeflow.org/v1alpha1) — the successor to
+    the legacy Training Operator v1 (PyTorchJob). One Helm release installs the control plane,
+    the standard ClusterTrainingRuntimes, and its JobSet dependency. Disable for inference-only
+    clusters that never run a TrainJob.
+  EOT
   type        = bool
   default     = true
 }
 
-variable "training_operator_version" {
-  description = "Kubeflow Training Operator release tag. Used only for the vendored manifest filename (manifests/training-operator-<version>.yaml); the manifest is committed to the repo, not fetched at plan time."
+variable "trainer_chart_version" {
+  description = <<-EOT
+    Kubeflow Trainer Helm chart version, pulled from oci://ghcr.io/kubeflow/charts/kubeflow-trainer.
+    Pinned to a stable release (not a chart bundled in-repo — the whole point of the v2 move is
+    that the vendored-manifest machinery of the old operator disappears). The CRD apiVersion is
+    v1alpha1 regardless of this chart version.
+  EOT
   type        = string
-  default     = "v1.9.0"
+  default     = "2.2.1"
 }
 
 variable "neuron_helm_chart_version" {

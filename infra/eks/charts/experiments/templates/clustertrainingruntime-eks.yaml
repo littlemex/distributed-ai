@@ -1,0 +1,97 @@
+{{- /*
+clustertrainingruntime-eks — the cluster's own ClusterTrainingRuntime for PyTorch DDP on this
+EKS. It is the v2 replacement for the v1 PyTorchJob's spec (elasticPolicy + the etcd rendezvous
+store both collapse into the runtime + the Trainer torch plugin). A TrainJob (trainjob-train.yaml)
+references it by name and supplies only numNodes / numProcPerNode / image / args / resourcesPerNode.
+
+WHY a cluster-owned runtime instead of the stock `torch-distributed`:
+  The stock runtime carries only the node container image. Everything hardware/cluster-invariant —
+  the one-worker-per-node spread, the accelerator/Capacity-Block tolerations, the shared RWX PVC,
+  the /dev/shm mount, and the do-not-disrupt pin — belongs to the platform, not to each job. In v2
+  that platform layer IS the runtime. So we bake it here once; TrainJobs stay tiny.
+
+THE CONTRACT — what you may and may not change in this file (each rule prevents a real, silent break):
+  MUST stay fixed:
+    - replicatedJob name == "node" AND container name == "node". The Trainer torch plugin finds the
+      container named `node` to inject PET_NNODES / PET_NPROC_PER_NODE / PET_NODE_RANK /
+      PET_MASTER_ADDR / PET_MASTER_PORT and to size the Job (parallelism/completions, Indexed
+      completion). Rename either and injection silently misses: torchrun starts with no rendezvous
+      info and every pod runs as world_size=1 — a job that "succeeds" but never trained distributed.
+    - NO managed-by=runtimes-installer label. The chart's runtimes-installer hook Job reconciles
+      objects carrying that label and DELETES any it does not know about. If this runtime were
+      labeled, the next `helm upgrade` of kubeflow-trainer would quietly delete it.
+  Safe to set (pod-spec level — the stock torchtune runtime sets volumes/resources the same way):
+    - podAntiAffinity, tolerations, nodeSelector, volumes/volumeMounts, and pod annotations.
+  MUST NOT set here:
+    - Job-level completions/parallelism/completionMode/backoffLimit (owned by numNodes → double
+      management), a custom subdomain/headless Service (JobSet makes its own), or the injected
+      PET_ / MASTER_ env on the container (hand-written values merge unpredictably).
+
+Enabled whenever the TrainJob workload is on (same switch as trainjob-train.yaml). Cluster-scoped:
+in a shared cluster only one copy should exist — see the known-limitation note in the chart README.
+*/ -}}
+{{- if .Values.trainjobTrain.enabled }}
+{{- $v := .Values.trainjobTrain }}
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: torch-distributed-eks
+  labels:
+    trainer.kubeflow.org/framework: torch
+spec:
+  mlPolicy:
+    # numNodes here is only the runtime default; the TrainJob's spec.trainer.numNodes overrides it.
+    numNodes: {{ $v.numNodes | default 2 | int }}
+    torch: {}
+  template:
+    spec:
+      replicatedJobs:
+        - name: node
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              template:
+                metadata:
+                  # The CPU NodePool consolidates underutilized nodes after 30s and can evict a
+                  # worker mid-run; do-not-disrupt pins every pod. Harmless on GPU pools (WhenEmpty).
+                  annotations:
+                    karpenter.sh/do-not-disrupt: "true"
+                spec:
+                  nodeSelector:
+                    node-role: {{ $v.nodeRole }}
+                  tolerations:
+                    - { key: capacity-reservation, operator: Exists, effect: NoSchedule }
+                    {{- if $v.gpu.enabled }}
+                    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+                    {{- end }}
+                  # One worker per physical node — otherwise two workers could share a node and the
+                  # run would not exercise cross-node communication. matchLabels targets the JobSet
+                  # that Trainer generates for this TrainJob.
+                  affinity:
+                    podAntiAffinity:
+                      requiredDuringSchedulingIgnoredDuringExecution:
+                        - labelSelector:
+                            matchLabels:
+                              trainer.kubeflow.org/trainjob-ancestor-step: trainer
+                          topologyKey: kubernetes.io/hostname
+                  containers:
+                    - name: node
+                      # image is overridden by the TrainJob; this is only the runtime default.
+                      image: {{ $v.image | default "pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime" | quote }}
+                      volumeMounts:
+                        - { name: shared, mountPath: /shared }
+                        - { name: shm, mountPath: /dev/shm }
+                  volumes:
+                    # RWX shared PV (openzfs by default). A ReadWriteOnce volume (e.g. EBS) cannot
+                    # back a multi-node run: the second node's pod, forced onto another host by the
+                    # antiAffinity above, could never attach it.
+                    - name: shared
+                      persistentVolumeClaim:
+                        claimName: {{ include "experiments.sharedClaimName" . }}
+                    # medium=Memory needs an explicit sizeLimit or it counts against node memory
+                    # unbounded, on top of resourcesPerNode.
+                    - name: shm
+                      emptyDir: { medium: Memory, sizeLimit: {{ $v.shmSize | default "4Gi" }} }
+{{- end }}

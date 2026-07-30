@@ -1,5 +1,5 @@
 {{- /*
-shared-pvc — the ReadWriteMany PVC that torchrunTrain and pytorchjobTrain both bind to. It
+shared-pvc — the ReadWriteMany PVC that torchrunTrain and trainjobTrain both bind to. It
 targets whichever static PV matches .Values.sharedStorage.backend (openzfs | fsx | efs),
 resolved by the experiments.sharedVolumeName helper. Split out of both workload templates so
 there is exactly one PVC definition (rendering both workloads together used to emit two
@@ -16,7 +16,7 @@ Applying this into a second namespace while the first PVC is still Bound leaves 
 permanently Pending. Delete the first namespace's PVC first, or provision a second static PV
 before running the same workload elsewhere.
 */ -}}
-{{- if and (or .Values.torchrunTrain.enabled .Values.pytorchjobTrain.enabled) (not .Values.sharedStorage.existingClaimName) }}
+{{- if and (or .Values.torchrunTrain.enabled .Values.trainjobTrain.enabled) (not .Values.sharedStorage.existingClaimName) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

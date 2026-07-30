@@ -1,8 +1,9 @@
 {{- /*
 torchrun-train — single-node MNIST MLP DistributedDataParallel run via `torchrun`
 (batch/v1 Job, zero operator). Backend gloo (CPU) or nccl (GPU). Reuses the ddp-sample image
-(ddp.py baked in) so one image covers both this and pytorchjob-train. This is the "what can you
-do with NO operator" step; pytorchjob-train is the multi-node step above it.
+(ddp.py baked in) so one image covers both this and trainjob-train. This is the "what can you
+do with NO operator" single-node step; trainjob-train (Kubeflow Trainer v2) is the multi-node
+step above it.
 
 Requires the sharedStorage.backend filesystem enabled in Terraform (default openzfs → the
 FSx OpenZFS static PV openzfs-shared, ON by default) and torchrunTrain.image set.
@@ -26,7 +27,7 @@ Verify:
 {{- $v := .Values.torchrunTrain }}
 {{- if not $v.image }}{{ fail "torchrunTrain.image is required (the ddp-sample image URI)" }}{{- end }}
 {{- /* The shared-claim PVC is rendered once by templates/shared-pvc.yaml (shared with
-     pytorchjobTrain) so enabling both does not emit two copies of the same object. */ -}}
+     trainjobTrain) so enabling both does not emit two copies of the same object. */ -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
