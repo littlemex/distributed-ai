@@ -25,11 +25,12 @@
 #     if you bump the pin, re-check this and revisit karpenter.tf's drain ordering.)
 #   - jobset.install=true makes the chart pull and install JobSet as a subchart. Set it false only
 #     if a JobSet controller is already present cluster-wide.
-#   - runtimes.defaultEnabled=true makes a post-install/post-upgrade hook Job apply the standard
-#     runtimes (torch-distributed, etc.) with server-side apply and reconcile them by the label
-#     trainer.kubeflow.org/managed-by=runtimes-installer. The cluster's own runtime
-#     (torch-distributed-eks, in charts/experiments) deliberately does NOT carry that label, so
-#     the installer never treats it as a managed object and never deletes it on the next upgrade.
+#   - runtimes.defaultEnabled is kept FALSE: its post-install hook Job races the controller's
+#     webhook on first install and fails the release (confirmed live 2026-07-30). This cluster
+#     uses only its own torch-distributed-eks runtime (charts/experiments), applied after the
+#     controller is Ready. That runtime intentionally omits the
+#     trainer.kubeflow.org/managed-by=runtimes-installer label, so even if the stock installer is
+#     ever re-enabled it will not treat (and delete) this runtime as a managed object.
 
 # Fail fast if a workspace still sets the removed v1 variables, so the switch to v2 is explicit
 # rather than a silent behavior change on the next apply. (Terraform has no "removed variable"
@@ -56,10 +57,8 @@ resource "helm_release" "trainer" {
   namespace        = "kubeflow-system"
   create_namespace = true
 
-  # The chart's own CRD-registration + post-install runtimes-installer Job must finish before
-  # this release is considered applied; wait for them. atomic rolls the release back on failure
-  # so a half-installed control plane does not wedge the next apply. The runtimes-installer Job
-  # pulls a kubectl image and applies runtimes through the validating webhook, so give it slack.
+  # wait for the control plane to be Ready; atomic rolls back a half-installed release so it does
+  # not wedge the next apply.
   wait    = true
   atomic  = true
   timeout = 600
@@ -67,10 +66,15 @@ resource "helm_release" "trainer" {
   values = [yamlencode({
     # Install JobSet as a managed subchart (this cluster has no pre-existing JobSet controller).
     jobset = { install = true }
-    # Install the standard ClusterTrainingRuntimes (torch-distributed, etc.). The cluster's own
-    # torch-distributed-eks runtime lives in charts/experiments and is applied by the workload
-    # pipeline, not here.
-    runtimes = { defaultEnabled = true }
+    # Do NOT install the chart's standard ClusterTrainingRuntimes. Verified live on
+    # distai-eks-blog (2026-07-30): with defaultEnabled=true the chart's post-install/post-upgrade
+    # hook Job races the controller and calls the validating webhook before its Service has
+    # endpoints ("no endpoints available for service kubeflow-trainer-controller-manager"), so the
+    # runtimes apply fails and the whole release goes to `failed`. This cluster uses only its own
+    # torch-distributed-eks runtime (charts/experiments), applied by the workload pipeline AFTER
+    # the controller is up — which has no such race. Leaving the stock runtimes out also removes an
+    # ownership overlap we never rely on.
+    runtimes = { defaultEnabled = false }
   })]
 
   # Trainer only needs the cluster API reachable (the helm/kubectl providers already target

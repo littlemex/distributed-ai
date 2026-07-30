@@ -67,14 +67,19 @@ spec:
                     - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
                     {{- end }}
                   # One worker per physical node — otherwise two workers could share a node and the
-                  # run would not exercise cross-node communication. matchLabels targets the JobSet
-                  # that Trainer generates for this TrainJob.
+                  # run would not exercise cross-node communication. The selector MUST match a label
+                  # the PODS actually carry: JobSet stamps jobset.sigs.k8s.io/replicatedjob-name=node
+                  # on every pod of this replicatedJob. (An earlier version selected on
+                  # trainer.kubeflow.org/trainjob-ancestor-step, which lives on the Job, NOT the pod —
+                  # so the anti-affinity matched nothing and both pods packed onto one node. Verified
+                  # live on distai-eks-blog: with the label below they spread; with the Job-only label
+                  # they did not.) topologyKey hostname => at most one such pod per node.
                   affinity:
                     podAntiAffinity:
                       requiredDuringSchedulingIgnoredDuringExecution:
                         - labelSelector:
                             matchLabels:
-                              trainer.kubeflow.org/trainjob-ancestor-step: trainer
+                              jobset.sigs.k8s.io/replicatedjob-name: node
                           topologyKey: kubernetes.io/hostname
                   containers:
                     - name: node
