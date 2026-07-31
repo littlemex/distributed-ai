@@ -51,7 +51,7 @@ world_size = int(os.environ.get("WORLD_SIZE", "1"))
 rank = int(os.environ.get("RANK", "0"))
 local_rank = int(os.environ.get("LOCAL_RANK", "0"))
 use_cuda = torch.cuda.is_available()
-backend = "nccl" if use_cuda else "gloo"
+backend = os.environ.get("DDP_BACKEND", "nccl" if use_cuda else "gloo")
 
 
 def log(msg):
