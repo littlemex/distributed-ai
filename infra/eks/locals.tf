@@ -1,50 +1,32 @@
 locals {
-  # ── EFA capability lookup ────────────────────────────────────────────────────
-  # Maps an EC2 instance type to its EFA topology so pools never hand-enter these
-  # numbers (a common source of error — e.g. requesting 16 EFA on p5en, which
-  # advertises only 15 schedulable; see efa_schedulable below). A pool may still
-  # override efa_interface_count / efa_multi_card explicitly; when it does not
-  # (value < 0), the capability is derived from this table.
-  #
-  #   cards          = number of EFA-capable network cards on the instance
-  #   multi_card     = true when EFA spans multiple cards (p5/p5en/trn2), false for
-  #                    single-card instances (g6e) that place all EFA on card 0
-  # Extend this table as new accelerator instance types are adopted.
-  efa_capability = {
-    "p5.48xlarge"    = { cards = 32, multi_card = true }
-    "p5e.48xlarge"   = { cards = 32, multi_card = true }
-    "p5en.48xlarge"  = { cards = 16, multi_card = true }
-    "trn2.48xlarge"  = { cards = 16, multi_card = true }
-    "trn1.32xlarge"  = { cards = 8, multi_card = true }
-    "trn1n.32xlarge" = { cards = 16, multi_card = true }
-    "g6e.12xlarge"   = { cards = 1, multi_card = false }
-    "g6e.24xlarge"   = { cards = 1, multi_card = false }
-    "g6e.48xlarge"   = { cards = 1, multi_card = false }
-    # EFA-less GPU types are listed explicitly with cards = 0 so a pool using them is a KNOWN
-    # "no EFA" case (Guard 3 in karpenter-resources.tf passes) rather than a silent
-    # unknown-type fallback. g5 (A10G) has no EFA at any size.
-    "g5.12xlarge" = { cards = 0, multi_card = false }
-    "g5.24xlarge" = { cards = 0, multi_card = false }
-    "g5.48xlarge" = { cards = 0, multi_card = false }
-  }
+  # ── EFA capability (dynamic, from AWS API) ───────────────────────────────────
+  # EFA topology per pool is resolved at plan time from the EC2 DescribeInstanceTypes API via
+  # data.aws_ec2_instance_type (one lookup per pool's representative type). No static table to
+  # maintain — new instance generations (g8e, p6, etc.) are automatically correct without any
+  # code change. A pool may still override efa_interface_count / efa_multi_card explicitly; when
+  # it does not (value < 0 / null), the data source provides the ground truth.
 
   # Representative instance type per pool (drives EFA derivation). All types in a pool must
   # share EFA topology (see the precondition in karpenter-resources.tf), so the first is safe.
   pool_rep_instance_type = { for k, p in var.accelerator_pools : k => p.instance_types[0] }
 
-  # Resolved EFA topology per pool: use the explicit pool value when provided
-  # (efa_interface_count >= 0), else fall back to the lookup table, else 0 (no EFA).
+  # Resolved EFA topology per pool: explicit pool override wins, else the data source value.
+  # efa_supported=false → cards=0. maximum_network_cards is the physical card count that
+  # determines the multi-card EFA layout (cards > 1 → one EFA-only interface per card).
   pool_efa = {
     for k, p in var.accelerator_pools : k => {
       count = (
         p.efa_interface_count >= 0
         ? p.efa_interface_count
-        : try(local.efa_capability[local.pool_rep_instance_type[k]].cards, 0)
+        : (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_supported
+          ? data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].maximum_network_cards
+          : 0)
       )
       multi_card = (
         p.efa_multi_card != null
         ? p.efa_multi_card
-        : try(local.efa_capability[local.pool_rep_instance_type[k]].multi_card, false)
+        : (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_supported &&
+           data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].maximum_network_cards > 1)
       )
     }
   }
@@ -98,4 +80,43 @@ locals {
     "karpenter.sh/discovery" = var.cluster_name
     "Environment"            = var.environment
   })
+
+  # ── Pool normalization layer (ADR 0001) ───────────────────────────────────────
+  # Normalizes legacy/new fields into a single effective view per pool. Legacy tfvars produce
+  # byte-identical plans (CI-gated). See docs/adr-0001-*.md for field precedence.
+  pool_effective = {
+    for k, p in var.accelerator_pools : k => {
+      capacity_types = (
+        p.capacity_types != null ? p.capacity_types :
+        p.capacity_type != null ? [p.capacity_type] :
+        ["on-demand"]
+      )
+      has_reserved = (
+        p.capacity_types != null
+        ? contains(p.capacity_types, "reserved")
+        : p.capacity_type == "reserved"
+      )
+      reservation_ids = distinct(concat(
+        try(p.capacity_reservations.ids, []),
+        (p.cb_reservation_id != null && p.cb_reservation_id != "") ? [p.cb_reservation_id] : []
+      ))
+      reservation_tags = try(p.capacity_reservations.tags, {})
+      zones = (
+        p.zones != null ? p.zones :
+        p.zone != "" ? [p.zone] :
+        []
+      )
+    }
+  }
+
+  # Disruption preset per pool (ADR D6 precedence: raw field > preset > interruptible > derived).
+  # Separated from pool_effective so it can reference n.has_reserved directly (HCL cannot reference
+  # sibling keys within the same object literal).
+  pool_disruption_preset = {
+    for k, p in var.accelerator_pools : k => (
+      p.disruption != null ? p.disruption :
+      p.interruptible != null ? (p.interruptible ? "reclaim" : "protect") :
+      (local.pool_efa[k].count > 0 || local.pool_effective[k].has_reserved) ? "protect" : "reclaim"
+    )
+  }
 }

@@ -66,7 +66,7 @@ variable "kubernetes_version" {
 #                        explicit AZ only to override the default (e.g. spread two on-demand
 #                        pools across AZs); it must be one of the resolved local.azs.
 #   efa_interface_count  EFA interfaces for the instance. Default -1 = derive from the
-#                        instance type (locals.efa_capability). Set explicitly to override;
+#                        instance type (EC2 API at plan time). Set explicitly to override;
 #                        0 disables EFA. NOTE: with the multi-card layout the SCHEDULABLE EFA
 #                        a pod may request is (count - 1) — card 0 carries the node IP. The
 #                        module surfaces the schedulable number in `terraform output`.
@@ -96,19 +96,45 @@ variable "accelerator_pools" {
     # capacity flexibility. The first entry is the representative used for EFA derivation.
     instance_types = list(string)
     device_plugin  = string # "nvidia" | "neuron"
-    capacity_type  = string # "reserved" | "on-demand" | "spot"
+    # capacity_type (LEGACY, single value): "reserved" | "on-demand" | "spot". Retained for
+    # backward compatibility and mapped to [capacity_type]. Use capacity_types (plural) for new
+    # pools. Setting both is a validation error. See docs/adr-0001-accelerator-pools-mixing.md.
+    capacity_type = optional(string)
+    # capacity_types (NEW, list): any subset of ["reserved","on-demand","spot"]. Karpenter
+    # natively prioritises reserved → spot → on-demand and falls back to meet the node count
+    # (Intent F). Deliberate simultaneous coexistence (Intent M) is expressed by pinning pods to
+    # a capacity-type via nodeSelector — NOT by a schema field (ADR D2). Unset → derived from the
+    # legacy capacity_type, else ["on-demand"]. (Phase 1: normalized in locals, not yet rendered.)
+    capacity_types = optional(list(string))
     # Single AZ to pin to. "" (default) = derive: reserved → CB's AZ, on-demand/spot → azs[0].
-    # Set an explicit AZ (one of local.azs) only to override that default.
+    # Set an explicit AZ (one of local.azs) only to override that default. (LEGACY single-AZ knob;
+    # zones (plural) is the new first-class axis — see below.)
     zone = optional(string, "")
-    # EFA topology is derived from the instance type (locals.efa_capability) unless
+    # zones (NEW, list): [] / unset → derive [azs[0]] (single AZ, co-located with FSx). One element
+    # = single AZ; several = spread across listed AZs; ["*"] = all cluster AZs (multi-AZ opt-in,
+    # ADR D4). Fallback (capacity_types) does NOT imply AZ spread — orthogonal axes. EFA/reserved
+    # pools are forced single-AZ (validated in Phase 2). (Phase 1: normalized in locals, not yet rendered.)
+    zones = optional(list(string))
+    # EFA topology is derived from the instance type (EC2 API at plan time) unless
     # set explicitly. Leave efa_interface_count = -1 (default) and efa_multi_card = null
     # to auto-derive; set a value to override. 0 disables EFA.
     efa_interface_count = optional(number, -1)
     efa_multi_card      = optional(bool, null)
     # Capacity Block: cb_reservation_id (cr-...) is required for capacity_type "reserved".
     # cb_end_date (RFC3339) optionally schedules a pre-expiry alert for THIS pool.
+    # (LEGACY single reservation; capacity_reservations (below) is the new multi-reservation form.)
     cb_reservation_id = optional(string, "")
     cb_end_date       = optional(string, "")
+    # capacity_reservations (NEW): select MULTIPLE reservations (Capacity Blocks / ODCRs) by id
+    # list and/or tag map. Rendered into capacityReservationSelectorTerms only when the pool
+    # includes "reserved". Karpenter does NOT auto-discover open reservations — every reservation
+    # used must be listed here (ADR D3). ids each become one selector term; tags (max 20 keys)
+    # become one term; terms are OR-combined. Legacy cb_reservation_id normalizes into ids.
+    # (Phase 1: normalized in locals, not yet rendered.)
+    capacity_reservations = optional(object({
+      ids  = optional(list(string), [])
+      tags = optional(map(string), {})
+    }))
     # EC2 placement group for tight multi-node placement. null = none. "cluster" packs nodes
     # onto one low-latency spine (best for multi-node NCCL on on-demand/spot); "spread" /
     # "partition" reduce correlated failure. DO NOT set on a Capacity Block pool: a CB already
@@ -127,11 +153,37 @@ variable "accelerator_pools" {
     # (and its billing). 1h leaves room for checkpoint-on-SIGTERM without stranding a hung pod.
     termination_grace_period = optional(string, "1h")
     # consolidate_after: Go duration ("5m") or "Never". Karpenter scales an empty node
-    # down after this idle period. Defaults per capacity_type in locals (on-demand/spot
-    # consolidate to control idle cost; reserved keeps nodes for the reservation window).
+    # down after this idle period. OVERRIDE knob: when set (non-"") it wins over the disruption
+    # preset and the per-capacity_type default (ADR D6 precedence: raw field > disruption preset >
+    # interruptible > derived). Unset ("") → preset/derived.
     consolidate_after = optional(string, "")
-    cpu_limit         = optional(string, "10000")
-    memory_limit      = optional(string, "100000Gi")
+    # disruption (NEW preset, ADR D6): "protect" | "reclaim" | unset.
+    #   protect = WhenEmpty + consolidateAfter "Never" + budget "0" (running jobs never voluntarily
+    #             disrupted — training / reserved).
+    #   reclaim = WhenEmptyOrUnderutilized + "30s"/"5m" + budget "10%" (idle nodes reclaimed —
+    #             inference / verification).
+    # Unset → derived: efa_interface_count > 0 OR capacity_reservations non-empty → protect, else
+    # reclaim. Per-pod exceptions use karpenter.sh/do-not-disrupt. (Phase 1: normalized, not rendered.)
+    disruption = optional(string)
+    # disruption_budget_nodes (NEW override): NodePool disruption budget nodes value (e.g. "10%",
+    # "0"). Non-null overrides the disruption preset (ADR D6). Unset → preset/derived.
+    disruption_budget_nodes = optional(string)
+    # interruptible (DEPRECATED, ADR D6): bool mapped to disruption (true → reclaim, false →
+    # protect). Setting it together with disruption is a validation error. Prefer disruption.
+    interruptible = optional(bool)
+    cpu_limit     = optional(string, "10000")
+    memory_limit  = optional(string, "100000Gi")
+    # labels: extra node labels merged onto this pool's nodes (team/workload routing). Pods target
+    # a pool by node-role=<pool-name> (the stable API, ADR D11); these are for finer routing.
+    # (Phase 1: passthrough field, not yet rendered.)
+    labels = optional(map(string), {})
+    # taints: extra node taints. GPU/Neuron device-plugin taints are applied automatically; use
+    # this for additional pool-dedication taints. (Phase 1: passthrough field, not yet rendered.)
+    taints = optional(list(object({
+      key    = string
+      value  = optional(string)
+      effect = string
+    })), [])
     # CPU architecture of the node host. Defaults to amd64. Set "arm64" for Grace-based
     # accelerator hosts (e.g. GB200 / p6e-gb200); an amd64-only requirement would otherwise
     # leave an arm64 instance type stuck Pending with a requirements mismatch.
@@ -153,16 +205,227 @@ variable "accelerator_pools" {
     condition     = alltrue([for k, p in var.accelerator_pools : contains(["nvidia", "neuron"], p.device_plugin)])
     error_message = "Each accelerator pool's device_plugin must be \"nvidia\" or \"neuron\"."
   }
+  # capacity_type (legacy single) and capacity_types (new list) are mutually exclusive; set one.
   validation {
-    condition     = alltrue([for k, p in var.accelerator_pools : contains(["reserved", "on-demand", "spot"], p.capacity_type)])
-    error_message = "Each accelerator pool's capacity_type must be \"reserved\", \"on-demand\", or \"spot\"."
+    condition = alltrue([for k, p in var.accelerator_pools :
+      !(p.capacity_type != null && p.capacity_types != null)
+    ])
+    error_message = "Set either capacity_type (legacy single) OR capacity_types (list), not both. Prefer capacity_types for new pools."
+  }
+  # zone (legacy single) and zones (new list) are mutually exclusive — the SAME asymmetry the
+  # capacity_type/capacity_types check above prevents. pool_effective derives zones with `p.zones != null
+  # ? p.zones : p.zone != "" ? [p.zone] : []`, so if BOTH are set the new zones SILENTLY WINS and the
+  # legacy zone is dropped — the "I edited zone but the AZ didn't change" trap. Fail loudly instead.
+  # zone defaults to "" (unset) and zones to null (unset); a collision is zone != "" AND zones != null.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      !(p.zone != "" && p.zones != null)
+    ])
+    error_message = "Set either zone (legacy single AZ) OR zones (list), not both — the new zones list would silently override the legacy zone. Prefer zones for new pools; use zone only in the legacy single-AZ form."
+  }
+  # Legacy capacity_type, when set, must be one of the three values.
+  # NULL-SAFETY via ternary (NOT coalesce): the earlier coalesce(p.capacity_type, "on-demand")
+  # SILENTLY ADMITTED capacity_type = "" — coalesce treats "" as an empty/invalid value and skips
+  # to the "on-demand" sentinel, so the membership check passed, yet pool_effective (which gates on
+  # `!= null`, and "" is not null) then rendered capacity_types = [""] into the NodePool's
+  # capacity-type requirement values, breaking scheduling only AFTER apply. The ternary admits a
+  # genuine unset (null) but forces a set-but-empty "" to fail the membership check at plan time.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      p.capacity_type == null ? true : contains(["reserved", "on-demand", "spot"], p.capacity_type)
+    ])
+    error_message = "Each accelerator pool's capacity_type must be \"reserved\", \"on-demand\", or \"spot\" (an empty string is not valid — leave it unset to default to on-demand)."
+  }
+  # capacity_types, when set, must be a non-empty subset of the three values with no duplicates.
+  # NULL-SAFETY: a ternary (which DOES short-circuit) gates the length()/distinct()/alltrue() calls.
+  # `p.capacity_types == null || (...)` would NOT short-circuit — HCL evaluates both sides of ||, so
+  # length(null) would error for every legacy/unset pool.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      p.capacity_types == null ? true : (
+        length(p.capacity_types) > 0 &&
+        length(p.capacity_types) == length(distinct(p.capacity_types)) &&
+        alltrue([for ct in p.capacity_types : contains(["reserved", "on-demand", "spot"], ct)])
+      )
+    ])
+    error_message = "capacity_types must be a non-empty list of distinct values drawn from \"reserved\", \"on-demand\", \"spot\"."
   }
   # NOTE: "zone must be one of the resolved AZs" is NOT validated here — the resolved AZ list
   # (local.azs) comes from a data source, which a variable validation block cannot reference.
   # It is enforced as a precondition in az.tf (terraform_data.az_invariants) instead.
+  # A pool that includes "reserved" (via legacy capacity_type OR new capacity_types) must name at
+  # least one reservation, since Karpenter does not auto-discover open reservations (ADR D3). The
+  # reservation may come from legacy cb_reservation_id OR new capacity_reservations{ids|tags}.
+  # NULL-SAFETY: == / != are null-safe (null == "reserved" is false), so legacy capacity_type and
+  # cb_reservation_id are compared directly — NO coalesce (coalesce REJECTS "" as a fallback, so
+  # coalesce(p.capacity_type, "") errors when both are null/empty). The capacity_types membership
+  # is guarded by a ternary (which DOES short-circuit) so contains() never receives null. try(...)
+  # reads attributes off capacity_reservations only when it is non-null.
   validation {
-    condition     = alltrue([for k, p in var.accelerator_pools : p.capacity_type != "reserved" || p.cb_reservation_id != ""])
-    error_message = "A pool with capacity_type \"reserved\" must set cb_reservation_id (cr-...)."
+    condition = alltrue([for k, p in var.accelerator_pools :
+      !(p.capacity_type == "reserved" || (p.capacity_types != null ? contains(p.capacity_types, "reserved") : false)) ||
+      (p.cb_reservation_id != null && p.cb_reservation_id != "") ||
+      length(try(p.capacity_reservations.ids, [])) > 0 ||
+      length(try(p.capacity_reservations.tags, {})) > 0
+    ])
+    error_message = "A pool that includes \"reserved\" must name a reservation: set capacity_reservations = { ids = [...] } (or tags), or the legacy cb_reservation_id (cr-...)."
+  }
+  # Every reservation id (legacy cb_reservation_id ∪ new capacity_reservations.ids) must look like a
+  # real reservation id ("cr-" + hex). Karpenter's capacityReservationSelectorTerms does NOT validate
+  # the id shape: a typo, an empty string, or an ODCR-style "cr_" underscore is accepted into the CRD
+  # and then simply matches no offering — the reserved node never launches and the pod Pends forever,
+  # visible only in the Karpenter event log. Catch it at plan time. A non-"reserved" pool cannot reach
+  # here with a reservation set (the two validations above forbid that), and an empty cb_reservation_id
+  # on a non-reserved pool is the unset default, so filter it out before the regex.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      alltrue([
+        for id in concat(
+          try(p.capacity_reservations.ids, []),
+          (p.cb_reservation_id != null && p.cb_reservation_id != "") ? [p.cb_reservation_id] : []
+        ) : can(regex("^cr-[0-9a-f]+$", id))
+      ])
+    ])
+    error_message = "A reservation id must be a Capacity Block / ODCR id of the form \"cr-\" followed by hex (e.g. \"cr-0123456789abcdef0\"). Check capacity_reservations.ids and cb_reservation_id for typos, empty strings, or wrong separators."
+  }
+  # capacity_reservations / cb_reservation_id must NOT be set on a pool that does not include
+  # "reserved" — otherwise the reservation is silently ignored and the pool bills on-demand/spot.
+  # NULL-SAFETY: same rules as above — direct == for null-safe fields, ternary-guarded contains for
+  # the capacity_types list, and cb_reservation_id (which defaults to "") tested with a plain ==.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      (p.capacity_type == "reserved" || (p.capacity_types != null ? contains(p.capacity_types, "reserved") : false)) ||
+      ((p.cb_reservation_id == null || p.cb_reservation_id == "") && p.capacity_reservations == null)
+    ])
+    error_message = "A pool sets a reservation (capacity_reservations or cb_reservation_id) but does not include \"reserved\" in its capacity type(s); the reservation would be ignored. Add \"reserved\", or clear the reservation."
+  }
+  # A NEW-form reserved pool (capacity_types includes "reserved", as opposed to the legacy scalar
+  # capacity_type = "reserved") MUST name its zone explicitly. Capacity Block AZ auto-resolution
+  # (capacity-block.tf → local.pool_cb_zone → az.tf local.pool_zone) keys off the LEGACY
+  # capacity_type == "reserved" path ONLY, so a new-form reserved pool that omits zones falls back to
+  # azs[0]; if its CB is in another AZ the NodePool's zone requirement contradicts the reservation's
+  # AZ and Karpenter can never launch a node (silent, Karpenter-event-log-only Pending). ADR D4 says
+  # "new-form reserved must set zones explicitly (capacity_reservations are NOT zone-auto-resolved)";
+  # this enforces it. Legacy reserved (capacity_type == "reserved" + cb_reservation_id) is exempt —
+  # it auto-resolves the AZ from the reservation. The `? : false` guards contains() against a null
+  # capacity_types (|| does not short-circuit); == "" / == null are null-safe.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      !(
+        (p.capacity_types != null ? contains(p.capacity_types, "reserved") : false) &&
+        p.zones == null &&
+        p.zone == ""
+      )
+    ])
+    error_message = "A pool that includes \"reserved\" via capacity_types must set zones explicitly (e.g. zones = [\"us-west-2a\"]) so its single AZ matches the Capacity Block — capacity_reservations are NOT zone-auto-resolved. Set zones, or use the legacy capacity_type = \"reserved\" + cb_reservation_id form (which reads the AZ from the reservation)."
+  }
+  # interruptible (deprecated) and disruption (preset) are mutually exclusive — no implicit winner.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      !(p.interruptible != null && p.disruption != null)
+    ])
+    error_message = "Set either disruption (\"protect\"/\"reclaim\") OR the deprecated interruptible bool, not both."
+  }
+  # disruption, when set, must be a known preset. NULL-SAFETY via ternary (NOT coalesce): the earlier
+  # coalesce(p.disruption, "reclaim") SILENTLY ADMITTED disruption = "" (coalesce skips "" to the
+  # sentinel), yet locals gates disruption_preset on `p.disruption != null` — and "" is not null — so
+  # the preset would resolve to "" and local.disruption_presets[""] raises "Invalid index" at plan
+  # time (or worse, a future non-table consumer silently mis-defaults). The ternary admits a genuine
+  # unset (null → derived) but forces a set-but-empty "" to fail here.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      p.disruption == null ? true : contains(["protect", "reclaim"], p.disruption)
+    ])
+    error_message = "disruption must be \"protect\", \"reclaim\", or unset (derived) — an empty string is not valid."
+  }
+  # capacity_reservations.tags is limited to 20 keys (EC2 capacityReservationSelectorTerms limit).
+  # try(...) reads .tags only when capacity_reservations is non-null.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      length(try(p.capacity_reservations.tags, {})) <= 20
+    ])
+    error_message = "capacity_reservations.tags is limited to 20 keys (EC2 selector-term limit)."
+  }
+  # A user taint's effect must be one of the three Kubernetes values, or the NodePool is rejected at
+  # apply time by Karpenter admission (a plan-time-catchable error otherwise surfacing only mid-apply).
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      alltrue([for t in p.taints : contains(["NoSchedule", "PreferNoSchedule", "NoExecute"], t.effect)])
+    ])
+    error_message = "Each taint effect must be \"NoSchedule\", \"PreferNoSchedule\", or \"NoExecute\"."
+  }
+  # A user taint must not reuse the module-owned device-plugin taint key (nvidia.com/gpu for an
+  # nvidia pool, aws.amazon.com/neuron for a neuron pool). karpenter-resources.tf ALWAYS renders that
+  # taint first; a user taint with the same key produces two taints sharing a key+effect, which the
+  # kubelet rejects on node registration — Karpenter then loops launching-and-failing and every pod
+  # targeting the pool Pends forever. The device plugin's own toleration already covers the module
+  # taint, so re-declaring it is never needed.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      alltrue([for t in p.taints :
+        t.key != (p.device_plugin == "neuron" ? "aws.amazon.com/neuron" : "nvidia.com/gpu")
+      ])
+    ])
+    error_message = "A pool taint reuses the module-owned device-plugin taint key (nvidia.com/gpu or aws.amazon.com/neuron). That taint is applied automatically; remove it from taints — a duplicate key+effect makes the kubelet reject node registration and pods Pend forever."
+  }
+  # User labels must not collide with the two module-owned labels (node-role = pool name, the stable
+  # pod-selection API per ADR D11; distributed-ai/device = which device plugin tolerates the node).
+  # merge() renders module labels LAST so a collision is silently overridden, but silently dropping a
+  # user's label is worse than telling them — a user who sets node-role expecting it to take effect
+  # would be confused when pods still select the pool name. Fail loudly instead.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      !contains(keys(p.labels), "node-role") && !contains(keys(p.labels), "distributed-ai/device")
+    ])
+    error_message = "A pool's labels set a module-owned key (node-role or distributed-ai/device). node-role is the pool name (the stable pod-selection API) and distributed-ai/device is set from device_plugin; both are applied automatically. Remove them from labels."
+  }
+  # User labels must not live in a Karpenter/Kubernetes RESTRICTED label domain. Karpenter's NodePool
+  # admission webhook rejects spec.template.metadata.labels whose key is (or is under) kubernetes.io,
+  # k8s.io, karpenter.sh, or karpenter.k8s.aws — these are reserved for well-known labels Karpenter and
+  # the kubelet own (e.g. topology.kubernetes.io/zone, karpenter.sh/capacity-type). A label like
+  # "karpenter.sh/capacity-type" = "spot" here does NOT pin the pool — it makes the whole NodePool
+  # apply fail admission, AFTER plan, mid-apply. Catch it at plan time. A key equals the domain (e.g.
+  # "kubernetes.io") or has it as a "<domain>/..."-prefixed subdomain; a bare key like "workload" or a
+  # non-reserved domain like "team.example.com/tier" passes.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      alltrue([for key in keys(p.labels) :
+        !anytrue([for d in ["kubernetes.io", "k8s.io", "karpenter.sh", "karpenter.k8s.aws"] :
+          key == d || startswith(key, "${d}/") || endswith(split("/", key)[0], ".${d}")
+        ])
+      ])
+    ])
+    error_message = "A pool label uses a restricted domain (kubernetes.io, k8s.io, karpenter.sh, or karpenter.k8s.aws, including subdomains like topology.kubernetes.io). Karpenter's NodePool admission rejects these, failing the apply mid-way. Use an unreserved key (e.g. \"workload\", \"team.example.com/tier\") for pod routing; well-known labels like capacity-type/zone are set by the module's requirements, not here."
+  }
+  # EFA and multi-AZ are mutually exclusive: EFA/RDMA is not routable across subnets, so an
+  # EFA-enabled pool must pin to a single AZ. A pool that explicitly enables EFA
+  # (efa_interface_count > 0) must not request multiple zones (ADR D4/D5). NOTE: this checks the
+  # EXPLICIT efa_interface_count only; derived-EFA (-1) + zones is caught by the az.tf precondition
+  # once rendering is wired (Phase 3), where the resolved topology (local.pool_efa) is available.
+  # length(coalesce(p.zones, [])) is null-safe: unset zones → [] → length 0 → passes.
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      p.efa_interface_count <= 0 || length(coalesce(p.zones, [])) <= 1
+    ])
+    error_message = "An EFA-enabled pool (efa_interface_count > 0) must pin to a single AZ — EFA/RDMA is not routable across subnets. Set zones to one AZ (or [] to derive azs[0]), or set efa_interface_count = 0."
+  }
+  # A reserved pool must pin to a SINGLE AZ. A Capacity Block lives in exactly one AZ, so a
+  # multi-AZ zones list (several entries, or the "*" all-AZs wildcard) would make Karpenter try to
+  # launch reserved nodes in an AZ the reservation does not cover — permanent Pending in every AZ
+  # but the CB's. Applies to reserved via legacy capacity_type OR new capacity_types. Single-element
+  # zones and unset zones (null → derive) pass; "*" is rejected because it expands to all cluster AZs.
+  # NULL-SAFETY: two guards, because || does NOT short-circuit in HCL. (1) The `? : false` guards
+  # contains() against a null capacity_types. (2) The `p.zones == null ? true : (...)` ternary guards
+  # length()/contains() against a null zones. The earlier `p.zones == null || (length(p.zones)...)` was
+  # WRONG: || still evaluated length(null)/contains(null,...) on every zones-unset pool — including the
+  # legacy on-demand gpu-dev — raising "argument must not be null" at plan time (it slipped past because
+  # `terraform validate` runs with the empty-map default, and the isolated console tests all set zones).
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      !(p.capacity_type == "reserved" || (p.capacity_types != null ? contains(p.capacity_types, "reserved") : false)) ||
+      (p.zones == null ? true : (length(p.zones) <= 1 && !contains(p.zones, "*")))
+    ])
+    error_message = "A reserved pool must pin to a single AZ — a Capacity Block lives in one AZ, so multi-AZ zones (several entries or \"*\") would leave reserved nodes permanently Pending outside the CB's AZ. Set zones to exactly one AZ (e.g. zones = [\"us-west-2a\"])."
   }
   validation {
     # coalesce(...) avoids passing null to contains() (HCL contains errors on a null value).
@@ -172,7 +435,11 @@ variable "accelerator_pools" {
   validation {
     # A Capacity Block already places its nodes in one UltraCluster; a self-made placement
     # group can conflict with that fixed placement (capacity reserved but PG-unsatisfiable).
-    condition     = alltrue([for k, p in var.accelerator_pools : p.placement_group_strategy == null || p.capacity_type != "reserved"])
+    # Applies to a pool that includes "reserved" via legacy capacity_type OR new capacity_types.
+    condition = alltrue([for k, p in var.accelerator_pools :
+      p.placement_group_strategy == null ||
+      !(p.capacity_type == "reserved" || (p.capacity_types != null ? contains(p.capacity_types, "reserved") : false))
+    ])
     error_message = "Do not set placement_group_strategy on a reserved (Capacity Block) pool — the CB already colocates its nodes in one UltraCluster, and a self-made placement group risks 'capacity reserved but placement-group-unsatisfiable'."
   }
   validation {
@@ -190,13 +457,8 @@ variable "accelerator_pools" {
     condition     = alltrue([for k, p in var.accelerator_pools : contains(["amd64", "arm64"], p.arch)])
     error_message = "Each accelerator pool's arch must be \"amd64\" or \"arm64\"."
   }
-  validation {
-    # A cb_reservation_id set on a non-reserved pool is silently ignored: the NodeClass omits
-    # capacityReservationSelectorTerms, so the operator thinks they are drawing on a paid
-    # reservation but Karpenter launches on-demand/spot instead (double billing). Flag it.
-    condition     = alltrue([for k, p in var.accelerator_pools : p.cb_reservation_id == "" || p.capacity_type == "reserved"])
-    error_message = "A pool sets cb_reservation_id but capacity_type is not \"reserved\"; the reservation would be ignored and the pool billed on-demand/spot. Set capacity_type = \"reserved\" or clear cb_reservation_id."
-  }
+  # (The former "cb_reservation_id on a non-reserved pool" check is now folded into the
+  # reservation-requires-reserved validation above, which also covers capacity_reservations.)
 }
 
 variable "cpu_nodepool_enabled" {
