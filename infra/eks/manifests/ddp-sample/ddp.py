@@ -166,12 +166,12 @@ def _maybe_start_mlflow(enabled, tracking_uri, max_epochs, optimizer):
 
 def load_train_objs():
     transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
-    # Shared filesystem: rank 0 downloads MNIST once, the rest wait then read the same copy.
-    if rank == 0:
-        log(f"downloading MNIST to {DATA_DIR}")
-        datasets.MNIST(root=DATA_DIR, train=True, download=True)
-    if dist.is_initialized():
-        dist.barrier()
+    # Each rank downloads MNIST to its own DATA_DIR. When DATA_DIR is a shared filesystem only
+    # rank 0 needs to download (download=True is idempotent), but when DATA_DIR is node-local
+    # (/tmp) every rank must fetch its own copy. Always downloading is safe and avoids a barrier
+    # that would deadlock if the download takes longer than NCCL's init timeout.
+    log(f"downloading MNIST to {DATA_DIR}")
+    datasets.MNIST(root=DATA_DIR, train=True, download=True)
     train_set = datasets.MNIST(root=DATA_DIR, train=True, download=False, transform=transform)
     model = MLP()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)

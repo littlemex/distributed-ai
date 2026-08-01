@@ -75,8 +75,13 @@ module "eks" {
   }
 
   ################################################################################
-  # Karpenter discovery tag on the node security group
-  # Karpenter uses this tag to find the SG for EC2NodeClass securityGroupSelectorTerms.
+  # Karpenter discovery tag on security groups
+  # EC2NodeClass securityGroupSelectorTerms matches on karpenter.sh/discovery.
+  # BOTH the node SG AND the cluster SG must carry this tag: the cluster SG is the
+  # one VPC CNI evaluates for Pod-to-Pod traffic (Pod packets are sourced from the
+  # cluster SG, not the node SG). Without it, NCCL/gloo inter-node socket connections
+  # fail with "Software caused connection abort" because the cluster SG's self-referencing
+  # all-traffic rule only applies to members of that SG — and nodes that lack it are not members.
   ################################################################################
   node_security_group_tags = merge(local.cluster_tags, {
     "karpenter.sh/discovery" = var.cluster_name
@@ -84,3 +89,15 @@ module "eks" {
 
   tags = local.cluster_tags
 }
+
+# The EKS-managed cluster security group must also carry the Karpenter discovery tag so
+# EC2NodeClass securityGroupSelectorTerms picks it up. Without it, Karpenter nodes get only the
+# node SG — but VPC CNI evaluates Pod-to-Pod traffic against the cluster SG, so inter-node NCCL/
+# gloo socket connections fail ("Software caused connection abort"). terraform-aws-eks does not
+# expose cluster_security_group_tags, so we tag it directly.
+resource "aws_ec2_tag" "cluster_sg_karpenter_discovery" {
+  resource_id = module.eks.cluster_security_group_id
+  key         = "karpenter.sh/discovery"
+  value       = var.cluster_name
+}
+
