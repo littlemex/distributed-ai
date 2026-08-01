@@ -3,19 +3,21 @@
 (gloo on CPU, nccl on GPU).
 
 Adapted from awsome-distributed-ai's `3.test_cases/pytorch/ddp/ddp.py` (itself derived from
-pytorch/examples multigpu_torchrun.py). The rendezvous setup matches the awsome reference:
-the PyTorchJob's elasticPolicy points torchrun at an etcd Service (rdzvBackend: etcd), which
-assigns node ranks dynamically and survives individual Worker restarts. After rendezvous,
-torchrun exports RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR / MASTER_PORT into each
-training process — which is what argless init_process_group() reads below. The rendezvous
-backend (etcd vs c10d) is orthogonal to the communication backend (gloo vs nccl).
+pytorch/examples multigpu_torchrun.py). Launched under Kubeflow Trainer v2: the TrainJob's
+torch plugin points torchrun at node-0 for c10d rendezvous (no self-hosted etcd Service) and
+injects PET_NNODES / PET_NPROC_PER_NODE / PET_MASTER_ADDR etc. torchrun then exports
+RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR / MASTER_PORT into each training process, which is
+what init_process_group(backend=...) reads below (rendezvous info comes from the environment,
+not from arguments). The rendezvous backend (c10d) is orthogonal to the communication backend
+(gloo on CPU, nccl on GPU).
 
 Two changes from the upstream sample for shared-filesystem operation:
 
-  1. The MNIST data and the snapshot live on the shared PVC mount (/shared), not a per-node
-     local disk. Because every rank sees the same filesystem, only rank 0 downloads MNIST; the
-     others wait at a barrier and then read the same copy. Concurrent downloads to one shared
-     path race and can corrupt the extracted archive.
+  1. Every rank downloads MNIST independently (download=True is idempotent). When DATA_DIR is a
+     shared filesystem only rank 0 strictly needs to fetch it, but downloading on every rank is
+     safe and avoids a rank-0-only + barrier pattern that would deadlock if the download outlasts
+     NCCL's init timeout. When DATA_DIR is node-local (/tmp) every rank must fetch its own copy
+     anyway, so unconditional download is correct in both layouts.
 
   2. Only rank 0 writes the snapshot. The upstream Trainer._save_snapshot has no rank guard —
      harmless when each rank writes its own local path, but on a shared mount all ranks writing

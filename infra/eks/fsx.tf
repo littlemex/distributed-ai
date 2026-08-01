@@ -29,8 +29,9 @@
 resource "aws_fsx_lustre_file_system" "training" {
   count = var.fsx_enabled ? 1 : 0
   # Single-AZ placement — must match var.fsx_subnet_index (default 0 = private_subnets[0]).
-  # Keep this aligned with whichever accelerator pool's `zone` will use this filesystem;
-  # FSx Lustre mounts are only routable from the same AZ.
+  # Keep this aligned with whichever accelerator pool's `zone` will use this filesystem: a
+  # cross-AZ mount within the same VPC works but incurs inter-AZ data-transfer charges and
+  # added latency, so co-locating the pool and the filesystem in one AZ is preferred.
   subnet_ids = [module.vpc.private_subnets[var.fsx_subnet_index]]
 
   security_group_ids = [aws_security_group.fsx[0].id]
