@@ -261,8 +261,8 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
       condition = length(distinct([
         for t in each.value.instance_types :
         format("%d/%s",
-          data.aws_ec2_instance_type.pool_rep[t].efa_supported ? data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces : 0,
-          data.aws_ec2_instance_type.pool_rep[t].efa_supported && data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces > 1)
+          data.aws_ec2_instance_type.pool_rep[t].efa_supported ? coalesce(data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces, 0) : 0,
+          data.aws_ec2_instance_type.pool_rep[t].efa_supported && coalesce(data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces, 0) > 1)
       ])) == 1
       error_message = "Pool ${each.key} mixes instance types with different EFA topologies (${join(", ", each.value.instance_types)}). All instance_types in a pool must share the same EFA card count and multi-card layout."
     }
@@ -272,7 +272,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
         local.pool_efa[each.key].count == 0 ||
         !(
           (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_supported &&
-           data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces > 1) &&
+           coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces, 0) > 1) &&
           (local.pool_efa[each.key].count <= 1 || !local.pool_efa[each.key].multi_card)
         )
       )
@@ -286,9 +286,9 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
     precondition {
       condition = (
         each.value.efa_interface_count < 0 ||
-        each.value.efa_interface_count <= data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces
+        each.value.efa_interface_count <= coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces, 0)
       )
-      error_message = "Pool ${each.key} sets efa_interface_count = ${each.value.efa_interface_count}, but ${local.pool_rep_instance_type[each.key]} has only ${data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces} network card(s). Reduce efa_interface_count to at most the card count, or leave it unset to auto-derive."
+      error_message = "Pool ${each.key} sets efa_interface_count = ${each.value.efa_interface_count}, but ${local.pool_rep_instance_type[each.key]} has only ${coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces, 0)} network card(s). Reduce efa_interface_count to at most the card count, or leave it unset to auto-derive."
     }
   }
 
