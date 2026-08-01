@@ -302,7 +302,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
   # forever. depends_on the same resource the NodePool manifests do, for the same reason: it
   # forces this destroy to be issued before the drain-wait resource, and the drain-wait
   # resource is destroyed before Karpenter — see karpenter.tf.
-  depends_on = [helm_release.karpenter, null_resource.wait_for_node_drain]
+  depends_on = [helm_release.karpenter, null_resource.wait_for_node_drain, aws_ec2_tag.cluster_sg_karpenter_discovery]
 }
 
 # ── Accelerated NodePools (one per accelerator pool) ───────────────────────────
