@@ -128,15 +128,30 @@ the Ray head (see Infra note below); models/data staged on FSx.
 > Verification Status table.
 
 ```bash
-# 0. Configure env FIRST (defines NAMESPACE/FSX_CLAIM), then create the HF Secret
-#    in that namespace so the pods can mount it.
-cp env_vars.colocated.example env_vars && vim env_vars   # set paths, NAMESPACE, FSX_CLAIM
+# 0. Configure env FIRST, then create the HF Secret in that namespace so the pods
+#    can mount it. Besides NAMESPACE/FSX_CLAIM, set GPU_NODE_ROLE to your GPU
+#    NodePool's `node-role` label (p5en=gpu-p5en, p5/H100=gpu-p5, B300=gpu-b300)
+#    and EFA_PER_NODE to the EFA cards to request per worker -- raycluster.yaml
+#    substitutes both via envsubst, so the manifest is not pinned to one GPU type.
+cp env_vars.colocated.example env_vars && vim env_vars   # NAMESPACE/FSX_CLAIM/GPU_NODE_ROLE/EFA_PER_NODE
 source env_vars
 kubectl create secret generic hf-token --from-literal=HF_TOKEN=hf_xxx -n "${NAMESPACE}"
 
-# 1. Build + push the miles image (GPU not needed; runs on a large-disk node)
+# 1. Build + push the miles image (GPU not needed; runs on a large-disk node).
+#    The pinned ECR tag must be built FROM THIS miles.Dockerfile (it deletes the
+#    forward-compat libcuda that otherwise shadows the host driver -> torch.cuda
+#    Error 803; see miles-specific requirement #1). buildkit-job.yaml needs two
+#    prerequisites in the namespace first, or the Job fails ConfigMap/Secret-not-found:
+#      kubectl create configmap miles-build-context \
+#        --from-file=Dockerfile=miles.Dockerfile -n "${NAMESPACE}"
+#      kubectl create secret docker-registry ecr-miles-push \
+#        --docker-server="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" \
+#        --docker-username=AWS --docker-password="$(aws ecr get-login-password --region ${AWS_REGION})" \
+#        -n "${NAMESPACE}"
 #    Edit kubernetes/buildkit-job.yaml nodeSelector to a node with >=120GB ephemeral.
-kubectl apply -f kubernetes/buildkit-job.yaml
+#    (If the pinned tag is already in ECR and built from the current Dockerfile,
+#    skip this step -- the RayCluster pulls the tag directly.)
+envsubst < kubernetes/buildkit-job.yaml | kubectl apply -f -   # ${FULL_IMAGE} from env_vars
 
 # 2. Stage mismatch configs on FSx
 #    configs/{mis.yaml,mis_metrics_only.yaml,mis_nocap.yaml} -> /fsx/configs/
