@@ -676,6 +676,23 @@ variable "cpu_node_volume_size" {
   default     = "50Gi"
 }
 
+variable "cpu_node_volume_throughput" {
+  description = <<-EOT
+    gp3 throughput (MiB/s) for CPU node root volumes. CPU nodes have no NVMe instance store, so
+    the root gp3 IS the image filesystem; gp3's 125 MiB/s baseline throttles multi-GB image
+    pulls (download + extract both write here). 500 is a cheap, effective default (gp3 bills
+    throughput separately and CPU nodes are short-lived). Range 125-1000.
+  EOT
+  type        = number
+  default     = 500
+}
+
+variable "cpu_node_volume_iops" {
+  description = "gp3 IOPS for CPU node root volumes. Raised from the 3000 baseline to match the higher throughput during image extract. Range 3000-16000."
+  type        = number
+  default     = 6000
+}
+
 variable "cpu_nodepool_cpu_limit" {
   description = "Karpenter CPU NodePool spec.limits.cpu."
   type        = string

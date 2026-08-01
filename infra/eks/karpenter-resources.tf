@@ -166,20 +166,61 @@ locals {
     tags            = local.nodeclass_tags
   }
 
+  # Image-pull tuning shared by ALL pools (Phase 0 of the image-cache strategy — see the
+  # Advanced "image cache" chapter). These are stateless, node-local, and degrade to plain
+  # cold-pull if they do nothing: nothing here adds a shared cache service that could wedge.
+  #   containerd max_concurrent_downloads (default 3) → 8 so a big multi-layer image's layers
+  #     fetch in parallel; merged into the default containerd TOML. discard_unpacked_layers=false
+  #     keeps compressed blobs so a future P2P mirror could serve them (harmless otherwise).
+  #   kubelet serializeImagePulls=false + maxParallelImagePulls: distinct images pull concurrently.
+  #   imageMaximumGCAge: cap how long an unused image lingers so prewarmed/old-digest images do
+  #     not accumulate forever, WITHOUT the aggressive default disk-threshold GC evicting a live
+  #     training image. (imagefs is the NVMe RAID0 on accelerator nodes, so the 85/80 thresholds
+  #     are effectively never hit there; this bounds age instead of space.)
+
   # AL2023 nodeadm config shared by accelerated nodes. localStorage Raid0 stripes instance
   # store (NVMe) when present; systemReserved keeps the kubelet stable under heavy memory.
+  # The image-pull tuning above is folded in via kubelet.config / containerd.config.
   accelerator_user_data = <<-EOT
     ---
     apiVersion: node.eks.aws/v1alpha1
     kind: NodeConfig
     spec:
+      containerd:
+        config: |
+          [plugins."io.containerd.cri.v1.images"]
+            discard_unpacked_layers = false
+            max_concurrent_downloads = 8
       kubelet:
         config:
           systemReserved:
             memory: "2Gi"
+          serializeImagePulls: false
+          maxParallelImagePulls: 8
+          imageMaximumGCAge: "168h"
       instance:
         localStorage:
           strategy: Raid0
+  EOT
+
+  # CPU pool nodeadm: same image-pull tuning, but NO localStorage Raid0 (m5a-class has no NVMe
+  # instance store; imagefs = nodefs = the gp3 root). systemReserved is lighter (no accelerator
+  # memory pressure). Paired with a higher gp3 throughput on the CPU NodeClass below.
+  cpu_user_data = <<-EOT
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      containerd:
+        config: |
+          [plugins."io.containerd.cri.v1.images"]
+            discard_unpacked_layers = false
+            max_concurrent_downloads = 8
+      kubelet:
+        config:
+          serializeImagePulls: false
+          maxParallelImagePulls: 8
+          imageMaximumGCAge: "168h"
   EOT
 }
 
@@ -484,15 +525,22 @@ resource "kubectl_manifest" "ec2nodeclass_cpu" {
     metadata   = { name = "cpu" }
     spec = merge(local.nodeclass_common, {
       amiSelectorTerms = [{ alias = "al2023@latest" }]
+      # CPU nodes have no NVMe instance store, so imagefs = the gp3 root. gp3's 125MiB/s baseline
+      # throughput is the real bottleneck for a multi-GB image pull (download + extract both write
+      # here). Raise it (throughput is cheap and node lifetime is short). IOPS bumped to match.
       blockDeviceMappings = [{
         deviceName = "/dev/xvda"
         ebs = {
           volumeSize          = var.cpu_node_volume_size
           volumeType          = "gp3"
+          throughput          = var.cpu_node_volume_throughput
+          iops                = var.cpu_node_volume_iops
           deleteOnTermination = true
           encrypted           = true
         }
       }]
+      # Image-pull tuning (containerd parallel download + kubelet parallel pull + GC age bound).
+      userData = local.cpu_user_data
     })
   })
 
