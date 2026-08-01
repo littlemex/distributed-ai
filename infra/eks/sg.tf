@@ -65,3 +65,20 @@ resource "aws_security_group_rule" "efa_node_egress_self" {
   to_port                  = 0
   source_security_group_id = aws_security_group.efa_node.id
 }
+
+# ── Cluster SG → Node SG: Pod-to-Pod inter-node traffic ───────────────────────
+# VPC CNI sources Pod traffic from the cluster security group. Without this rule,
+# NCCL/gloo socket connections between Pods on different Karpenter nodes fail with
+# "Software caused connection abort" — the node SG's self-referencing rule only admits
+# traffic sourced from the node SG itself, not from the cluster SG. Managed node group
+# nodes do not hit this because EKS attaches the cluster SG directly to them; Karpenter
+# nodes get it only when securityGroupSelectorTerms picks it up (see eks.tf aws_ec2_tag).
+resource "aws_security_group_rule" "node_ingress_from_cluster_sg" {
+  security_group_id        = module.eks.node_security_group_id
+  type                     = "ingress"
+  protocol                 = "-1"
+  from_port                = 0
+  to_port                  = 0
+  source_security_group_id = module.eks.cluster_primary_security_group_id
+  description              = "All traffic from cluster SG (Pod-to-Pod via VPC CNI)"
+}

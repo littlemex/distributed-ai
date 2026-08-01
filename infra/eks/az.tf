@@ -103,8 +103,35 @@ resource "terraform_data" "az_invariants" {
       error_message = "An accelerator pool resolved to a zone that is not one of the cluster AZs. Resolved zones: ${jsonencode(local.pool_zone)}; cluster AZs: ${jsonencode(local.azs)}. A reserved pool whose CB is in an AZ outside var.azs, or an explicit pool.zone typo, causes this — clear var.azs to span the whole region, or fix the zone."
     }
     precondition {
+      # NEW zones list (ADR D4): every AZ named in a pool's `zones` must be a real cluster AZ,
+      # except the "*" wildcard (= all cluster AZs). Checked here (not in a variable validation)
+      # because it needs local.azs from a data source. Pools that leave zones unset are exempt
+      # (they derive azs[0] via local.pool_effective[*].zones = []); this keeps existing tfvars valid.
+      condition = alltrue([
+        for k, n in local.pool_effective :
+        alltrue([for z in n.zones : z == "*" || contains(local.azs, z)])
+      ])
+      error_message = "An accelerator pool's zones list names an AZ that is not one of the cluster AZs. Per-pool zones: ${jsonencode({ for k, n in local.pool_effective : k => n.zones })}; cluster AZs: ${jsonencode(local.azs)}. Use \"*\" for all AZs, or one of the cluster AZs; leave zones unset to derive azs[0]."
+    }
+    precondition {
       condition     = var.fsx_subnet_index < local.num_azs && var.openzfs_subnet_index < local.num_azs
       error_message = "fsx_subnet_index / openzfs_subnet_index must be < the AZ count (${local.num_azs}); they index into the per-AZ private subnets."
+    }
+    precondition {
+      # DERIVED-EFA × multi-AZ guard (ADR D5). The variable validation catches only an EXPLICIT
+      # efa_interface_count > 0 + multi-AZ; it cannot see a pool that leaves efa_interface_count = -1
+      # (derive) and sets zones = ["*"] on an EFA instance type, because the resolved topology
+      # (local.pool_efa, which reads the EC2 API via data.aws_ec2_instance_type) is a local, not available to a
+      # variable validation. Check it HERE against the fully-resolved values: pool_efa[k].count is
+      # the effective EFA card count and pool_zone_requirement_values[k] is the final AZ list Karpenter pins to.
+      # An EFA pool (count > 0) spread over more than one AZ would silently break multi-node NCCL
+      # (EFA/RDMA is not routable across subnets — ranks hang or fall back to slow TCP), with no
+      # plan/apply error. Non-EFA pools (count <= 0) and single-AZ EFA pools pass.
+      condition = alltrue([
+        for k, e in local.pool_efa :
+        e.count <= 0 || length(local.pool_zone_requirement_values[k]) <= 1
+      ])
+      error_message = "An EFA-enabled accelerator pool resolved to more than one AZ. Effective EFA cards / resolved zones per pool: ${jsonencode({ for k, e in local.pool_efa : k => { efa = e.count, zones = local.pool_zone_requirement_values[k] } })}. EFA/RDMA cannot cross subnets, so an EFA pool must pin to ONE AZ — set zones to a single AZ, or set efa_interface_count = 0 to disable EFA on that pool."
     }
   }
 }

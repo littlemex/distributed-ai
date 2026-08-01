@@ -11,6 +11,16 @@
 #   - trn2.48xlarge = 16 network cards / EFA x16; p5en = 16; p5 = 32; g6e = 1 (single card)
 #   - Neuron AL2023 AMI ships aws-neuronx-dkms + tools + EFA; device plugin is separate
 
+# ── EFA capability lookup (dynamic, from EC2 API) ─────────────────────────────
+# One data source per DISTINCT instance type across all pools. Replaces the former static
+# efa_capability table: new instance generations are automatically correct without any code
+# change. The two fields consumed by locals.tf pool_efa are efa_supported (bool) and
+# efa_maximum_interfaces (number). Plan time only — no state stored, no cost.
+data "aws_ec2_instance_type" "pool_rep" {
+  for_each      = toset(flatten([for p in var.accelerator_pools : p.instance_types]))
+  instance_type = each.value
+}
+
 # Resolve a pinned AMI id from SSM for any pool that specifies ami_ssm_parameter. Used to
 # make Neuron/GPU AMI selection deterministic instead of relying on alias family inference.
 data "aws_ssm_parameter" "pool_ami" {
@@ -55,13 +65,75 @@ locals {
     )
   }
 
-  # Per-pool consolidation default (overridable via pool.consolidate_after). Reserved
-  # (Capacity Block) nodes are kept for the reservation window; on-demand/spot empty nodes
-  # consolidate after a short idle to limit cost. "Never" disables idle consolidation.
+  # ── ADR D6: disruption preset → concrete knobs ───────────────────────────────
+  # A single table maps each preset to the two NodePool disruption knobs, so the D6 precedence (raw
+  # override > preset > interruptible > derived) resolves to ONE lookup per knob. The pre-table code
+  # let pool_consolidate_after key off has_reserved while pool_disruption_budget keyed off the preset
+  # — the two DISAGREED for an EFA-derived on-demand pool (preset=protect but consolidate=5m). Both
+  # now read this table, so they can never diverge. accelerator pools keep consolidationPolicy
+  # "WhenEmpty" in BOTH presets (NOT WhenEmptyOrUnderutilized): a half-idle multi-GPU node is still
+  # working, so only a truly EMPTY node may scale down — "underutilized" consolidation would evict
+  # live training nodes (this is why ADR D6's generic reclaim="WhenEmptyOrUnderutilized"/"30s" does
+  # NOT apply to accelerator pools; that value is for the CPU pool, see docs/adr-0001 D6).
+  # Legacy parity: protect == the old reserved branch ("Never"/"0"), reclaim == the old
+  # on-demand/spot branch ("5m"/"10%"). ONE intentional legacy change: an EFA-enabled ON-DEMAND pool
+  # now derives protect (efa>0 → protect, ADR D6), moving its budget/consolidate 10%/5m → 0/Never —
+  # correct for an EFA collective (any voluntary disruption kills every rank) and inert for the
+  # current tfvars (gpu-dev has efa=0 → reclaim, unchanged).
+  disruption_presets = {
+    protect = { consolidate_after = "Never", budget_nodes = "0" }
+    reclaim = { consolidate_after = "5m", budget_nodes = "10%" }
+  }
+
+  # Per-pool consolidateAfter: an explicit pool.consolidate_after override wins, else the preset.
   pool_consolidate_after = {
     for k, p in var.accelerator_pools : k => (
       p.consolidate_after != "" ? p.consolidate_after :
-      (p.capacity_type == "reserved" ? "Never" : "5m")
+      local.disruption_presets[local.pool_disruption_preset[k]].consolidate_after
+    )
+  }
+
+  # ── Rendered capacity-mix values (ADR 0001, Phase 3) ─────────────────────────
+  # These translate the normalized pool_effective view (locals.tf) into the exact shapes the
+  # NodePool/EC2NodeClass bodies below embed. Each is written so a LEGACY-form pool (single
+  # capacity_type / cb_reservation_id / zone) renders byte-for-byte what the pre-Phase-3 code did,
+  # while a NEW-form pool gains the list/multi-reservation/multi-AZ/preset behavior.
+
+  # capacityReservationSelectorTerms: one {id=...} term per reservation id, plus a single {tags=...}
+  # term when tag-based selection is used. Only consumed when has_reserved is true (a validation in
+  # variables.tf guarantees has_reserved ⇒ at least one id or a non-empty tags map, so this is never
+  # the empty list the Karpenter v1 CRD rejects). Legacy reserved pool → [{id = cb_reservation_id}].
+  pool_capacity_reservation_terms = {
+    for k, n in local.pool_effective : k => concat(
+      [for id in n.reservation_ids : { id = id }],
+      length(n.reservation_tags) > 0 ? [{ tags = n.reservation_tags }] : []
+    )
+  }
+
+  # Zone requirement values (topology.kubernetes.io/zone In [...]). When a pool sets an explicit
+  # zones list (ADR D4), "*" expands to every cluster AZ and any other list is used verbatim
+  # (multi-AZ inference). When zones is unset (the legacy case), fall back to the single
+  # local.pool_zone[k] derivation (explicit pool.zone → reserved CB AZ → azs[0]) so existing tfvars
+  # render an identical one-element list. NOTE: new-form reserved pools that need the CB's AZ
+  # auto-resolved must use the legacy cb_reservation_id (which capacity-block.tf describes) or set
+  # zones explicitly — capacity_reservations{ids,tags} are NOT zone-resolved (see docs/adr-0001).
+  pool_zone_requirement_values = {
+    for k, n in local.pool_effective : k => (
+      length(n.zones) > 0
+      ? (contains(n.zones, "*") ? local.azs : n.zones)
+      : [local.pool_zone[k]]
+    )
+  }
+
+  # Per-pool disruption budget nodes value: an explicit disruption_budget_nodes override wins, else
+  # the SAME preset table pool_consolidate_after uses (so budget and consolidateAfter can never
+  # disagree). protect → "0" (nothing voluntarily disrupted — protects a reservation window or an EFA
+  # collective from Drift/consolidation mid-run); reclaim → "10%" (idle scaledown and AMI patching
+  # still work). Legacy reserved → protect → "0"; legacy on-demand (efa=0) → reclaim → "10%".
+  pool_disruption_budget_nodes = {
+    for k, p in var.accelerator_pools : k => (
+      p.disruption_budget_nodes != null ? p.disruption_budget_nodes :
+      local.disruption_presets[local.pool_disruption_preset[k]].budget_nodes
     )
   }
 
@@ -152,8 +224,13 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
     spec = merge(
       local.nodeclass_common,
       { amiSelectorTerms = local.pool_ami_selector_terms[each.key] },
-      each.value.capacity_type == "reserved" ? {
-        capacityReservationSelectorTerms = [{ id = each.value.cb_reservation_id }]
+      # Reserved pools name their Capacity Block(s) here. Keyed on the normalized has_reserved so a
+      # mixed reserved+spot pool (Intent M) still gets the selector; the terms come from
+      # pool_capacity_reservation_terms (one {id} per reservation id ∪ a {tags} term), which for a
+      # legacy pool is exactly [{id = cb_reservation_id}]. Omitted entirely for a pure on-demand/spot
+      # pool — the Karpenter v1 CRD rejects an empty [] ("'id' is mutually exclusive").
+      local.pool_effective[each.key].has_reserved ? {
+        capacityReservationSelectorTerms = local.pool_capacity_reservation_terms[each.key]
       } : {},
       each.value.placement_group_strategy != null ? {
         placementGroupSelector = { name = aws_placement_group.accelerator[each.key].name }
@@ -178,58 +255,40 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
 
   lifecycle {
     # Guard 1: every instance type in the pool must share one EFA topology, because a single
-    # networkInterfaces layout is rendered for the whole pool. Types absent from the lookup
-    # table default to {cards=0, multi_card=false}; mixing (e.g. g6e + p5en) is rejected here.
+    # networkInterfaces layout is rendered for the whole pool. EFA topology is resolved from the
+    # EC2 API (data.aws_ec2_instance_type.pool_rep) at plan time — no static table to maintain.
     precondition {
       condition = length(distinct([
         for t in each.value.instance_types :
-        format("%d/%t", try(local.efa_capability[t].cards, 0), try(local.efa_capability[t].multi_card, false))
+        format("%d/%s",
+          data.aws_ec2_instance_type.pool_rep[t].efa_supported ? coalesce(data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces, 0) : 0,
+          data.aws_ec2_instance_type.pool_rep[t].efa_supported && coalesce(data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces, 0) > 1)
       ])) == 1
       error_message = "Pool ${each.key} mixes instance types with different EFA topologies (${join(", ", each.value.instance_types)}). All instance_types in a pool must share the same EFA card count and multi-card layout."
     }
-    # Guard 2: a known multi-card EFA instance must not resolve to a single-card layout.
-    # Checks the RESOLVED topology (local.pool_efa) using the representative type, so it fires
-    # only on a genuine override mistake — not on single-NIC/non-EFA types (trn1.2xlarge, inf2).
-    # count == 0 is exempt: that is an explicit "disable EFA on this pool" override, not a
-    # misconfiguration.
+    # Guard 2: a multi-card EFA instance must not resolve to a single-card layout via override.
     precondition {
       condition = (
         local.pool_efa[each.key].count == 0 ||
         !(
-          try(local.efa_capability[local.pool_rep_instance_type[each.key]].multi_card, false) &&
+          (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_supported &&
+           coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces, 0) > 1) &&
           (local.pool_efa[each.key].count <= 1 || !local.pool_efa[each.key].multi_card)
         )
       )
       error_message = "Pool ${each.key} (${local.pool_rep_instance_type[each.key]}) is a multi-card EFA instance but resolved to a single-card layout. Leave efa_interface_count/efa_multi_card unset to auto-derive, set efa_multi_card = true with the correct count, or set efa_interface_count = 0 to disable EFA."
     }
-    # Guard 3: never silently fall back to EFA=0 for an unknown instance type. If the
-    # representative type is absent from local.efa_capability AND the pool did not set
-    # efa_interface_count explicitly, the derivation would quietly yield 0 — producing a
-    # single-ENA node (no EFA) that "works but runs multi-node NCCL over TCP at a fraction of
-    # the bandwidth", or a pod that Pends forever if it requests vpc.amazonaws.com/efa. Force
-    # an explicit decision: add the type to the table, or set efa_interface_count (0 to opt
-    # out of EFA on purpose, or the real card count).
-    precondition {
-      condition = (
-        contains(keys(local.efa_capability), local.pool_rep_instance_type[each.key]) ||
-        each.value.efa_interface_count >= 0
-      )
-      error_message = "Pool ${each.key} uses instance type ${local.pool_rep_instance_type[each.key]}, which is not in the EFA capability table (locals.tf), and does not set efa_interface_count. Add the type to the table, or set efa_interface_count explicitly (0 to disable EFA, or the instance's EFA card count) so EFA is never silently disabled."
-    }
+    # (Guard 3 removed: with the EC2 API data source, there is no "unknown type" — every type
+    # the pool lists is queried at plan time and its EFA capability is always known.)
     # Guard 4: a manual efa_interface_count override must not exceed the instance's physical
-    # card count when the type is known. Over-counting (e.g. 32 on p5en's 16 cards) makes
-    # Karpenter render networkInterfaces with cards that do not exist; RunInstances fails and
-    # Karpenter retries in a loop with the failure only in its event log.
+    # card count. Over-counting makes Karpenter render networkInterfaces with cards that do not
+    # exist; RunInstances fails and Karpenter retries in a loop.
     precondition {
-      # try() is required: Terraform evaluates local.efa_capability[type] even when the
-      # contains() guard is false (no short-circuit for index errors), so an unknown type
-      # would raise "Invalid index" instead of passing. try(..., big) makes an unknown type
-      # skip this check (Guard 3 already handles unknown types).
       condition = (
         each.value.efa_interface_count < 0 ||
-        each.value.efa_interface_count <= try(local.efa_capability[local.pool_rep_instance_type[each.key]].cards, 999999)
+        each.value.efa_interface_count <= coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces, 0)
       )
-      error_message = "Pool ${each.key} sets efa_interface_count = ${each.value.efa_interface_count}, but ${local.pool_rep_instance_type[each.key]} has only ${try(local.efa_capability[local.pool_rep_instance_type[each.key]].cards, 0)} EFA card(s). Reduce efa_interface_count to at most the card count, or leave it unset to auto-derive."
+      error_message = "Pool ${each.key} sets efa_interface_count = ${each.value.efa_interface_count}, but ${local.pool_rep_instance_type[each.key]} has only ${coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces, 0)} network card(s). Reduce efa_interface_count to at most the card count, or leave it unset to auto-derive."
     }
   }
 
@@ -243,7 +302,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
   # forever. depends_on the same resource the NodePool manifests do, for the same reason: it
   # forces this destroy to be issued before the drain-wait resource, and the drain-wait
   # resource is destroyed before Karpenter — see karpenter.tf.
-  depends_on = [helm_release.karpenter, null_resource.wait_for_node_drain]
+  depends_on = [helm_release.karpenter, null_resource.wait_for_node_drain, aws_ec2_tag.cluster_sg_karpenter_discovery]
 }
 
 # ── Accelerated NodePools (one per accelerator pool) ───────────────────────────
@@ -257,10 +316,15 @@ resource "kubectl_manifest" "accelerator_nodepool" {
     spec = {
       template = {
         metadata = {
-          labels = {
+          # The two module-owned labels are the stable API pods select on (node-role = pool name,
+          # per ADR D11; device = which device plugin tolerates this node). User-supplied labels
+          # (pool.labels, default {}) merge ON TOP for finer placement (e.g. workload=training).
+          # An empty map leaves this byte-identical to the pre-Phase-3 output. Module labels are
+          # listed last so a pool cannot accidentally override node-role / distributed-ai/device.
+          labels = merge(each.value.labels, {
             "node-role"             = each.key
             "distributed-ai/device" = each.value.device_plugin # "nvidia" | "neuron"
-          }
+          })
         }
         spec = {
           nodeClassRef = {
@@ -278,16 +342,35 @@ resource "kubectl_manifest" "accelerator_nodepool" {
           # matching toleration, and the workload manifests already tolerate nvidia.com/gpu.
           # (Capacity Block nodes ALSO carry a per-reservation `capacity-reservation` taint;
           # pods tolerate that with operator: Exists separately.)
-          taints = [{
-            key    = each.value.device_plugin == "neuron" ? "aws.amazon.com/neuron" : "nvidia.com/gpu"
-            effect = "NoSchedule"
-          }]
+          #
+          # The module-owned device-plugin taint always comes first; user-supplied taints
+          # (pool.taints, default []) are appended for extra isolation (e.g. a dedicated team taint).
+          # A taint's `value` is optional — omit the key entirely when unset rather than emitting
+          # value: null, which yamlencode would render as `value: null` and change the manifest.
+          # An empty user list leaves this byte-identical to the pre-Phase-3 single-taint output.
+          taints = concat(
+            [{
+              key    = each.value.device_plugin == "neuron" ? "aws.amazon.com/neuron" : "nvidia.com/gpu"
+              effect = "NoSchedule"
+            }],
+            [for t in each.value.taints : merge(
+              { key = t.key, effect = t.effect },
+              t.value != null ? { value = t.value } : {}
+            )]
+          )
           requirements = [
             {
-              # reserved (Capacity Block) | on-demand | spot
+              # reserved (Capacity Block) | on-demand | spot — one or more. Karpenter's native
+              # priority orders reserved → spot → on-demand within this set (Intent F, fallback to
+              # meet node count). A legacy single capacity_type renders a one-element list identical
+              # to the pre-Phase-3 output. NOTE (Intent M — deliberate reserved+spot coexistence):
+              # listing both here lets Karpenter run baseline reserved + burst spot concurrently, but
+              # because reserved is price=0 Karpenter would consolidate spot ONTO reserved; a pod that
+              # must stay on spot pins itself with nodeSelector karpenter.sh/capacity-type: spot (see
+              # docs/adr-0001 D2 and the book's Intent F/M chapter). The pool only supplies the set.
               key      = "karpenter.sh/capacity-type"
               operator = "In"
-              values   = [each.value.capacity_type]
+              values   = local.pool_effective[each.key].capacity_types
             },
             {
               key      = "node.kubernetes.io/instance-type"
@@ -309,9 +392,16 @@ resource "kubectl_manifest" "accelerator_nodepool" {
               # unless pool.zone is set explicitly. az.tf asserts the resolved zone is one of
               # the cluster AZs, so this requirement can never point Karpenter at a
               # subnet-less zone.
+              #
+              # MULTI-AZ (ADR D4): pool_zone_requirement_values expands an explicit `zones` list ("*" → all
+              # cluster AZs) so a loosely-coupled inference pool can spread g6 across AZs (the pod
+              # adds topologySpreadConstraints). A pool that leaves zones unset renders exactly
+              # [local.pool_zone[k]] — one element, byte-identical to the pre-Phase-3 output. A
+              # variable validation (variables.tf) forbids EFA + multi-AZ, so an EFA/RDMA pool can
+              # never reach here with more than one zone (EFA is not routable across subnets).
               key      = "topology.kubernetes.io/zone"
               operator = "In"
-              values   = [local.pool_zone[each.key]]
+              values   = local.pool_zone_requirement_values[each.key]
             },
             {
               key      = "kubernetes.io/arch"
@@ -354,7 +444,14 @@ resource "kubectl_manifest" "accelerator_nodepool" {
         # spot pools keep the default 10% budget so idle-scaledown and AMI patching still work; a
         # long training job on those pools should set karpenter.sh/do-not-disrupt on its pods
         # (see README) since this module cannot know which on-demand pools run long jobs.
-        budgets = each.value.capacity_type == "reserved" ? [{ nodes = "0" }] : [{ nodes = "10%" }]
+        #
+        # Phase 3: the "0" vs "10%" choice now comes from pool_disruption_budget, which resolves
+        # the 2-layer disruption preset (ADR D6): an explicit disruption_budget_nodes wins, else the
+        # preset ("protect" → "0", "reclaim" → "10%"), where the preset itself defaults to "protect"
+        # for a reserved-or-EFA pool and "reclaim" otherwise. A legacy reserved pool → "0" and a
+        # legacy on-demand pool (efa=0) → "10%", byte-identical to the previous
+        # `capacity_type == "reserved" ? "0" : "10%"`.
+        budgets = [{ nodes = local.pool_disruption_budget_nodes[each.key] }]
       }
       limits = {
         cpu    = each.value.cpu_limit
@@ -466,4 +563,25 @@ resource "kubectl_manifest" "nodepool_cpu" {
     kubectl_manifest.ec2nodeclass_cpu,
     null_resource.wait_for_node_drain,
   ]
+}
+
+# ── WARN: reserved+spot in one pool is a synchronous-collective footgun (ADR D2/D11, R9) ──────
+# A pool that lists BOTH "reserved" and "spot" is a deliberately supported shape (Intent M — a
+# reserved baseline with spot burst, ADR D1). It is NOT an error, so this is a `check` WARNING, not a
+# validation: it warns on every plan/apply but never blocks one. The hazard it surfaces: if a single
+# tightly-coupled job (multi-node NCCL/all-reduce training — one world where every rank must stay up)
+# is scheduled across such a pool, a single spot reclaim tears down a rank and the entire collective
+# dies, wasting the reserved capacity too (and the work since the last checkpoint). The module cannot
+# see which workloads land on a pool, so it cannot gate this — it can only remind the operator that a
+# synchronous collective on a reserved+spot pool MUST pin its ranks to the reserved capacity via
+# nodeSelector karpenter.sh/capacity-type: reserved (see the book's Intent F/M chapter and ADR D2),
+# leaving spot for restart-tolerant work (inference, data prep, async RL rollouts).
+check "reserved_spot_mix_is_collective_footgun" {
+  assert {
+    condition = alltrue([
+      for k, n in local.pool_effective :
+      !(contains(n.capacity_types, "reserved") && contains(n.capacity_types, "spot"))
+    ])
+    error_message = "Pool(s) mix \"reserved\" and \"spot\" in one capacity_types list: ${jsonencode({ for k, n in local.pool_effective : k => n.capacity_types if contains(n.capacity_types, "reserved") && contains(n.capacity_types, "spot") })}. This is supported (Intent M: reserved baseline + spot burst), but a SYNCHRONOUS collective (multi-node NCCL training) placed here will lose the whole world when a single spot node is reclaimed. Pin such a job's ranks with nodeSelector karpenter.sh/capacity-type: reserved, and leave spot for restart-tolerant work. Ignore this warning if the pool only runs interruptible workloads."
+  }
 }
