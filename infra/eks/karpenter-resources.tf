@@ -15,7 +15,7 @@
 # One data source per DISTINCT instance type across all pools. Replaces the former static
 # efa_capability table: new instance generations are automatically correct without any code
 # change. The two fields consumed by locals.tf pool_efa are efa_supported (bool) and
-# maximum_network_cards (number). Plan time only — no state stored, no cost.
+# efa_maximum_interfaces (number). Plan time only — no state stored, no cost.
 data "aws_ec2_instance_type" "pool_rep" {
   for_each      = toset(flatten([for p in var.accelerator_pools : p.instance_types]))
   instance_type = each.value
@@ -261,8 +261,8 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
       condition = length(distinct([
         for t in each.value.instance_types :
         format("%d/%s",
-          data.aws_ec2_instance_type.pool_rep[t].efa_supported ? data.aws_ec2_instance_type.pool_rep[t].maximum_network_cards : 0,
-          data.aws_ec2_instance_type.pool_rep[t].efa_supported && data.aws_ec2_instance_type.pool_rep[t].maximum_network_cards > 1)
+          data.aws_ec2_instance_type.pool_rep[t].efa_supported ? data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces : 0,
+          data.aws_ec2_instance_type.pool_rep[t].efa_supported && data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces > 1)
       ])) == 1
       error_message = "Pool ${each.key} mixes instance types with different EFA topologies (${join(", ", each.value.instance_types)}). All instance_types in a pool must share the same EFA card count and multi-card layout."
     }
@@ -272,7 +272,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
         local.pool_efa[each.key].count == 0 ||
         !(
           (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_supported &&
-           data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].maximum_network_cards > 1) &&
+           data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces > 1) &&
           (local.pool_efa[each.key].count <= 1 || !local.pool_efa[each.key].multi_card)
         )
       )
@@ -286,9 +286,9 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
     precondition {
       condition = (
         each.value.efa_interface_count < 0 ||
-        each.value.efa_interface_count <= data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].maximum_network_cards
+        each.value.efa_interface_count <= data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces
       )
-      error_message = "Pool ${each.key} sets efa_interface_count = ${each.value.efa_interface_count}, but ${local.pool_rep_instance_type[each.key]} has only ${data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].maximum_network_cards} network card(s). Reduce efa_interface_count to at most the card count, or leave it unset to auto-derive."
+      error_message = "Pool ${each.key} sets efa_interface_count = ${each.value.efa_interface_count}, but ${local.pool_rep_instance_type[each.key]} has only ${data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces} network card(s). Reduce efa_interface_count to at most the card count, or leave it unset to auto-derive."
     }
   }
 

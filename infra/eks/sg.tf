@@ -79,6 +79,6 @@ resource "aws_security_group_rule" "node_ingress_from_cluster_sg" {
   protocol                 = "-1"
   from_port                = 0
   to_port                  = 0
-  source_security_group_id = module.eks.cluster_security_group_id
+  source_security_group_id = module.eks.cluster_primary_security_group_id
   description              = "All traffic from cluster SG (Pod-to-Pod via VPC CNI)"
 }

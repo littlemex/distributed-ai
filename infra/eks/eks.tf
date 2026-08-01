@@ -96,7 +96,7 @@ module "eks" {
 # gloo socket connections fail ("Software caused connection abort"). terraform-aws-eks does not
 # expose cluster_security_group_tags, so we tag it directly.
 resource "aws_ec2_tag" "cluster_sg_karpenter_discovery" {
-  resource_id = module.eks.cluster_security_group_id
+  resource_id = module.eks.cluster_primary_security_group_id
   key         = "karpenter.sh/discovery"
   value       = var.cluster_name
 }

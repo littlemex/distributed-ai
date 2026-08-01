@@ -19,14 +19,14 @@ locals {
         p.efa_interface_count >= 0
         ? p.efa_interface_count
         : (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_supported
-          ? data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].maximum_network_cards
+          ? data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_maximum_interfaces
           : 0)
       )
       multi_card = (
         p.efa_multi_card != null
         ? p.efa_multi_card
         : (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_supported &&
-           data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].maximum_network_cards > 1)
+           data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_maximum_interfaces > 1)
       )
     }
   }
