@@ -20,6 +20,40 @@
 namespace: ""
 
 # ─────────────────────────────────────────────────────────────────────────────
+# dlc — AWS Deep Learning Containers registry, factored out of the per-workload image URIs.
+# The DLC ECR account ID is REGION-SPECIFIC (a table AWS publishes; 763104351884 serves
+# us-east-2 among others), so a full image URI hardcodes region+account knowledge in every
+# workload. Defining the registry once here means a cross-region user changes ONE line, and
+# the Neuron workloads below build their image as "{dlc.registry}/{repo}:{tag}".
+# Confirm your region's account ID and the tag with:
+#   aws ecr describe-images --registry-id <id> --repository-name <repo> --region <region>
+# See https://github.com/aws/deep-learning-containers/blob/master/available_images.md
+dlc:
+  registry: 763104351884.dkr.ecr.us-east-2.amazonaws.com
+
+# ─────────────────────────────────────────────────────────────────────────────
+# topologyPresets — per-instance-type physical topology, as STRUCTURED DATA rather than a
+# table buried in a comment (a commented table is never validated and rots). These are the
+# reference values for setting the accelerator workloads' per-instance knobs; copy the row
+# for your instance type into the workload's fields (neuronDdp / ncclSshd / neuronServingVllm).
+# ALWAYS confirm on a live node before trusting a row — these are physical facts, not spec-sheet
+# promises:
+#   neuronDevices: `neuron-ls` row count             gpuCount: nvidia-smi -L count
+#   efaCount     : allocatable vpc.amazonaws.com/efa (schedulable = physical cards - 1; card 0 = node IP)
+#   lnc          : Neuron logical-core config (trn2=2, trn1/inf2=1)
+#   nprocPerNode : (neuronDevices x cores/device) / lnc
+# "verified" = confirmed end-to-end on this project's clusters; "untested" = reference only.
+neuronTopologyPresets:
+  trn2.48xlarge: { neuronDevices: 16, efaCount: 15, lnc: 2, nprocPerNode: 32, status: verified }
+  trn1.32xlarge: { neuronDevices: 16, efaCount: 8,  lnc: 1, nprocPerNode: 32, status: untested }
+  inf2.48xlarge: { neuronDevices: 12, efaCount: 1,  lnc: 1, nprocPerNode: 24, status: untested }
+gpuTopologyPresets:
+  # gpuProduct is the nvidia.com/gpu.product node label; efaCount is the full multi-card count
+  # for an inter-node NCCL bench (not schedulable-minus-1, which only applies to EFA requests).
+  g5.24xlarge:   { gpuProduct: NVIDIA-A10G,          gpuCount: 4, efaCount: 0,  status: verified }
+  p5en.48xlarge: { gpuProduct: NVIDIA-B300-SXM6-AC,  gpuCount: 8, efaCount: 16, status: untested }
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 0) imageBuild — build ddp-sample IN-CLUSTER with Kaniko and push to ECR (no local
 #    docker/finch). The ECR repo + IAM + Pod Identity are provisioned by Terraform
 #    (image-builder.tf, image_builder_enabled=true by default). This renders a one-shot
@@ -55,10 +89,12 @@ neuronProbe:
   enabled: false
   # Karpenter labels each node node-role=<accelerator_pools key>; set this to that key.
   nodeRole: trn2
-  # DLC with neuron-ls / aws-neuronx-tools. Confirm tag/region with:
-  #   aws ecr describe-images --registry-id 763104351884 \
+  # DLC image = {dlc.registry}/{dlcRepoTag}. Set `image` to a full URI to override entirely.
+  # Confirm the tag with:
+  #   aws ecr describe-images --registry-id <dlc account> \
   #     --repository-name pytorch-inference-neuronx --region <region>
-  image: 763104351884.dkr.ecr.us-east-2.amazonaws.com/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04
+  dlcRepoTag: pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04
+  image: ""
   # Minimal claim: one device + one EFA is enough to prove scheduling + enumeration.
   # (Do NOT request hugepages on a probe that triggers Karpenter provisioning — Karpenter
   # does not size new nodes against hugepages and reports "no instance type has enough
@@ -76,17 +112,12 @@ neuronProbe:
 neuronDdp:
   enabled: false
   nodeRole: trn2
-  image: 763104351884.dkr.ecr.us-east-2.amazonaws.com/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04
-  # Per-instance topology. CONFIRM on a live node — do not trust the spec sheet:
-  #   neuronDevices: neuron-ls row count (aws.amazon.com/neuron the pod requests)
-  #   efaCount     : kubectl get node <n> -o jsonpath='{.status.allocatable.vpc\.amazonaws\.com/efa}'
-  #                  (schedulable EFA = physical cards - 1; card 0 carries the node IP)
-  #   nprocPerNode : (devices x physical cores/device) / lnc.
-  #                  trn2 LNC=2: 16 x 4 / 2 = 32. Change lnc and nprocPerNode together.
-  #   type            neuronDevices  efaCount  lnc  nprocPerNode   status
-  #   trn2.48xlarge   16             15        2    32             verified
-  #   trn1.32xlarge   16             8         1    32             untested
-  #   inf2.48xlarge   12             1         1    24             untested
+  # DLC image = {dlc.registry}/{dlcRepoTag}; set `image` to a full URI to override.
+  dlcRepoTag: pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04
+  image: ""
+  # Per-instance topology. Defaults below are the trn2.48xlarge row of neuronTopologyPresets
+  # (top of this file); for another instance type copy that type's row here. CONFIRM on a live
+  # node before trusting any row (neuron-ls / allocatable efa) — these are physical facts.
   neuronDevices: 16
   efaCount: 15
   lnc: 2
@@ -121,8 +152,10 @@ ncclProbe:
   # left here as an example of the label FORMAT, not a working default. Read the real
   # value from a live node before relying on it:
   #   kubectl get node <n> -o jsonpath='{.metadata.labels.nvidia\.com/gpu\.product}'
-  # A selector mismatch does not error — the pod just stays Pending forever.
-  gpuProduct: NVIDIA-B300-SXM6-AC
+  # A selector mismatch does not error — the pod just stays Pending forever. REQUIRED (no
+  # default): the template fails the render if this is empty, rather than shipping an UNTESTED
+  # B300 SKU that would silently never schedule. Set it for your GPU, e.g. NVIDIA-A10G.
+  gpuProduct: ""
   image: public.ecr.aws/hpc-cloud/nccl-tests:latest
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -134,8 +167,12 @@ ncclProbe:
 # ─────────────────────────────────────────────────────────────────────────────
 ncclSshd:
   enabled: false
-  gpuProduct: NVIDIA-B300-SXM6-AC
+  # REQUIRED (no default): the template fails the render if empty. B300 was an UNTESTED
+  # carry-over that would silently never schedule; set it for your GPU (read from a live node).
+  gpuProduct: ""
   image: public.ecr.aws/hpc-cloud/nccl-tests:latest
+  # gpuCount/efaCount below are the p5en.48xlarge row of gpuTopologyPresets (top of file);
+  # copy your instance type's row. efaCount is the full multi-card count for the bench.
   gpuCount: 8       # GPUs per node (p5en/B300 = 8)
   efaCount: 16      # EFA ENIs per node (full multi-card count for the NCCL bench)
   hugepages: 8Gi
@@ -224,9 +261,33 @@ gpuServingVllm:
   enabled: false
   nodeRole: gpu-g5
   model: NousResearch/Meta-Llama-3-8B-Instruct
-  image: vllm/vllm-openai:latest
+  # Pin to a released tag (or digest) for reproducibility; :latest changes under you between
+  # runs. vllmRay below pins v0.6.3.post1 — pick a tag you have verified for your model.
+  image: vllm/vllm-openai:v0.6.3.post1
   gpuCount: 1
   memory: 48Gi
+  # CPU request. Keep well below the pool's smallest node's allocatable so the pod
+  # schedules: a g6.2xlarge/g5.2xlarge (8 vCPU) has ~7.9 allocatable after kube/system
+  # reserved, so a hard cpu=8 request never fits. Small ungated models (Qwen2.5-0.5B)
+  # run fine on 2 vCPU. Override per pool as needed.
+  cpu: "2"
+  # Serving knobs. Defaults match the previously hardcoded template values, so leaving them
+  # unset renders identically; override per model/instance.
+  #   maxModelLen: context window vLLM allocates KV cache for. Larger models/longer contexts
+  #     need more; too large for the GPU's memory makes vLLM fail to start.
+  #   gpuMemoryUtilization: fraction of GPU memory vLLM may claim (0-1). Lower it if the node
+  #     runs other GPU work; raise toward 0.9 to fit a bigger model.
+  #   port: container + service port. Single knob so the arg and the Service can't drift.
+  #   readiness*: a large model's weights can take minutes to load; the defaults tolerate
+  #     ~15 min (initialDelay 60 + period 10 x failureThreshold 90). Shrink for small models.
+  #   shmSize: /dev/shm for NCCL/vLLM; raise for tensor-parallel across many GPUs.
+  maxModelLen: 4096
+  gpuMemoryUtilization: "0.85"
+  port: 8000
+  readinessInitialDelaySeconds: 60
+  readinessPeriodSeconds: 10
+  readinessFailureThreshold: 90
+  shmSize: 8Gi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 8) neuronServingVllm — Neuron vLLM serving Deployment + Service (whole trn2 node).
@@ -235,7 +296,9 @@ neuronServingVllm:
   enabled: false
   nodeRole: trn2
   model: NousResearch/Meta-Llama-3-8B-Instruct
-  image: 763104351884.dkr.ecr.us-east-2.amazonaws.com/huggingface-vllm-inference-neuronx:0.11.0-optimum0.4.5-neuronx-py310-sdk2.26.1-ubuntu22.04
+  # DLC image = {dlc.registry}/{dlcRepoTag}; set `image` to a full URI to override.
+  dlcRepoTag: huggingface-vllm-inference-neuronx:0.11.0-optimum0.4.5-neuronx-py310-sdk2.26.1-ubuntu22.04
+  image: ""
   neuronDevices: 16
   # tensor-parallel-size = logical NeuronCores. trn2: 16 devices x LNC=2 = 32.
   tpSize: 32

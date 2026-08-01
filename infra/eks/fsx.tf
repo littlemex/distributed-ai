@@ -23,6 +23,16 @@
 #   - aws-fsx-csi-driver EKS addon: var.fsx_csi_driver_version (default v1.9.0-eksbuild.1)
 #   - region and account are taken from the configured AWS provider
 
+# Lustre LNET ports (AWS-fixed protocol values, not tunable). Defined once here so the six
+# SG rules below reference them instead of repeating the literals — a mistyped port in one of
+# six rules would silently break the bidirectional requirement CreateFileSystem validates.
+# See https://docs.aws.amazon.com/fsx/latest/LustreGuide/limit-access-security-groups.html
+locals {
+  fsx_lustre_port           = 988
+  fsx_lustre_high_port_from = 1018
+  fsx_lustre_high_port_to   = 1023
+}
+
 # ---------------------------------------------------------------------------
 # FSx for Lustre file system
 # ---------------------------------------------------------------------------
@@ -100,8 +110,8 @@ resource "aws_vpc_security_group_ingress_rule" "fsx_self_988" {
   count                        = var.fsx_enabled ? 1 : 0
   security_group_id            = aws_security_group.fsx[0].id
   description                  = "Lustre port 988 within the FSx security group (self-referencing)"
-  from_port                    = 988
-  to_port                      = 988
+  from_port                    = local.fsx_lustre_port
+  to_port                      = local.fsx_lustre_port
   ip_protocol                  = "tcp"
   referenced_security_group_id = aws_security_group.fsx[0].id
 }
@@ -110,8 +120,8 @@ resource "aws_vpc_security_group_ingress_rule" "fsx_self_high_ports" {
   count                        = var.fsx_enabled ? 1 : 0
   security_group_id            = aws_security_group.fsx[0].id
   description                  = "Lustre high ports 1018-1023 within the FSx security group (self-referencing)"
-  from_port                    = 1018
-  to_port                      = 1023
+  from_port                    = local.fsx_lustre_high_port_from
+  to_port                      = local.fsx_lustre_high_port_to
   ip_protocol                  = "tcp"
   referenced_security_group_id = aws_security_group.fsx[0].id
 }
@@ -120,8 +130,8 @@ resource "aws_vpc_security_group_ingress_rule" "fsx_from_nodes_988" {
   count                        = var.fsx_enabled ? 1 : 0
   security_group_id            = aws_security_group.fsx[0].id
   description                  = "Lustre port 988 from EKS nodes"
-  from_port                    = 988
-  to_port                      = 988
+  from_port                    = local.fsx_lustre_port
+  to_port                      = local.fsx_lustre_port
   ip_protocol                  = "tcp"
   referenced_security_group_id = module.eks.node_security_group_id
 }
@@ -130,8 +140,8 @@ resource "aws_vpc_security_group_ingress_rule" "fsx_from_nodes_high_ports" {
   count                        = var.fsx_enabled ? 1 : 0
   security_group_id            = aws_security_group.fsx[0].id
   description                  = "Lustre high ports 1018-1023 from EKS nodes"
-  from_port                    = 1018
-  to_port                      = 1023
+  from_port                    = local.fsx_lustre_high_port_from
+  to_port                      = local.fsx_lustre_high_port_to
   ip_protocol                  = "tcp"
   referenced_security_group_id = module.eks.node_security_group_id
 }
@@ -167,8 +177,8 @@ resource "aws_vpc_security_group_ingress_rule" "nodes_from_fsx_988" {
   count                        = var.fsx_enabled ? 1 : 0
   security_group_id            = module.eks.node_security_group_id
   description                  = "Lustre port 988 from the FSx file system"
-  from_port                    = 988
-  to_port                      = 988
+  from_port                    = local.fsx_lustre_port
+  to_port                      = local.fsx_lustre_port
   ip_protocol                  = "tcp"
   referenced_security_group_id = aws_security_group.fsx[0].id
 }
@@ -177,8 +187,8 @@ resource "aws_vpc_security_group_ingress_rule" "nodes_from_fsx_high_ports" {
   count                        = var.fsx_enabled ? 1 : 0
   security_group_id            = module.eks.node_security_group_id
   description                  = "Lustre high ports 1018-1023 from the FSx file system"
-  from_port                    = 1018
-  to_port                      = 1023
+  from_port                    = local.fsx_lustre_high_port_from
+  to_port                      = local.fsx_lustre_high_port_to
   ip_protocol                  = "tcp"
   referenced_security_group_id = aws_security_group.fsx[0].id
 }

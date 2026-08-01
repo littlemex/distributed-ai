@@ -45,9 +45,9 @@ spec:
           args:
             - --model={{ $v.model }}
             - --tensor-parallel-size={{ $v.gpuCount }}
-            - --max-model-len=4096
-            - --gpu-memory-utilization=0.85
-            - --port=8000
+            - --max-model-len={{ $v.maxModelLen | default 4096 }}
+            - --gpu-memory-utilization={{ $v.gpuMemoryUtilization | default "0.85" }}
+            - --port={{ $v.port | default 8000 }}
           env:
             # HF token for gated models (optional; ungated models need no token).
             - name: HF_TOKEN
@@ -57,24 +57,24 @@ spec:
                   key: token
                   optional: true
           ports:
-            - { name: http, containerPort: 8000 }
+            - { name: http, containerPort: {{ $v.port | default 8000 }} }
           resources:
             limits:
               nvidia.com/gpu: {{ $v.gpuCount | quote }}
               memory: {{ $v.memory }}
             requests:
-              cpu: "8"
+              cpu: {{ $v.cpu | default "8" | quote }}
               memory: {{ $v.memory }}
           readinessProbe:
-            httpGet: { path: /health, port: 8000 }
-            initialDelaySeconds: 60
-            periodSeconds: 10
-            failureThreshold: 90
+            httpGet: { path: /health, port: {{ $v.port | default 8000 }} }
+            initialDelaySeconds: {{ $v.readinessInitialDelaySeconds | default 60 }}
+            periodSeconds: {{ $v.readinessPeriodSeconds | default 10 }}
+            failureThreshold: {{ $v.readinessFailureThreshold | default 90 }}
           volumeMounts:
             - { name: shm, mountPath: /dev/shm }
       volumes:
         - name: shm
-          emptyDir: { medium: Memory, sizeLimit: 8Gi }
+          emptyDir: { medium: Memory, sizeLimit: {{ $v.shmSize | default "8Gi" }} }
 ---
 apiVersion: v1
 kind: Service
@@ -87,5 +87,5 @@ spec:
   selector:
     app: gpu-vllm
   ports:
-    - { name: http, port: 8000, targetPort: 8000 }
+    - { name: http, port: {{ $v.port | default 8000 }}, targetPort: {{ $v.port | default 8000 }} }
 {{- end }}

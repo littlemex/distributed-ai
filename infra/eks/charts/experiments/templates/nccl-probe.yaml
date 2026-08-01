@@ -13,6 +13,7 @@ Verify:
 */ -}}
 {{- if .Values.ncclProbe.enabled }}
 {{- $v := .Values.ncclProbe }}
+{{- if not $v.gpuProduct }}{{ fail "ncclProbe.gpuProduct is required — set it to the target node's nvidia.com/gpu.product label (read it from a live node: kubectl get node <n> -o jsonpath='{.metadata.labels.nvidia\\.com/gpu\\.product}'). No default: a wrong SKU selector leaves the pod Pending forever with no error." }}{{- end }}
 apiVersion: v1
 kind: Pod
 metadata:

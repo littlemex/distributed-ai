@@ -80,9 +80,14 @@ locals {
   # now derives protect (efa>0 → protect, ADR D6), moving its budget/consolidate 10%/5m → 0/Never —
   # correct for an EFA collective (any voluntary disruption kills every rank) and inert for the
   # current tfvars (gpu-dev has efa=0 → reclaim, unchanged).
+  # protect/reclaim gate the accelerator pools (see pool_disruption_preset). generic is the
+  # CPU NodePool's preset (ADR D6): reclaim an idle CPU node quickly since it holds no
+  # collective. Kept in this one table so "everything disruption lives here" holds — the CPU
+  # NodePool body references local.disruption_presets.generic instead of an inline literal.
   disruption_presets = {
     protect = { consolidate_after = "Never", budget_nodes = "0" }
     reclaim = { consolidate_after = "5m", budget_nodes = "10%" }
+    generic = { consolidate_after = "30s", budget_nodes = "10%" }
   }
 
   # Per-pool consolidateAfter: an explicit pool.consolidate_after override wins, else the preset.
@@ -169,6 +174,8 @@ locals {
   # Image-pull tuning shared by ALL pools (Phase 0 of the image-cache strategy — see the
   # Advanced "image cache" chapter). These are stateless, node-local, and degrade to plain
   # cold-pull if they do nothing: nothing here adds a shared cache service that could wedge.
+  # Defined once here and interpolated into BOTH nodeadm heredocs below so the accelerator and
+  # CPU user_data can never drift apart (a mistyped value in one heredoc is a silent skew).
   #   containerd max_concurrent_downloads (default 3) → 8 so a big multi-layer image's layers
   #     fetch in parallel; merged into the default containerd TOML. discard_unpacked_layers=false
   #     keeps compressed blobs so a future P2P mirror could serve them (harmless otherwise).
@@ -177,6 +184,12 @@ locals {
   #     not accumulate forever, WITHOUT the aggressive default disk-threshold GC evicting a live
   #     training image. (imagefs is the NVMe RAID0 on accelerator nodes, so the 85/80 thresholds
   #     are effectively never hit there; this bounds age instead of space.)
+  image_pull_max_concurrent_downloads = 8
+  image_pull_max_parallel             = 8
+  image_maximum_gc_age                = "168h"
+  # systemReserved memory for accelerator nodes only (keeps the kubelet stable under heavy
+  # training memory pressure); the CPU pool omits it.
+  accelerator_system_reserved_memory = "2Gi"
 
   # AL2023 nodeadm config shared by accelerated nodes. localStorage Raid0 stripes instance
   # store (NVMe) when present; systemReserved keeps the kubelet stable under heavy memory.
@@ -190,14 +203,14 @@ locals {
         config: |
           [plugins."io.containerd.cri.v1.images"]
             discard_unpacked_layers = false
-            max_concurrent_downloads = 8
+            max_concurrent_downloads = ${local.image_pull_max_concurrent_downloads}
       kubelet:
         config:
           systemReserved:
-            memory: "2Gi"
+            memory: "${local.accelerator_system_reserved_memory}"
           serializeImagePulls: false
-          maxParallelImagePulls: 8
-          imageMaximumGCAge: "168h"
+          maxParallelImagePulls: ${local.image_pull_max_parallel}
+          imageMaximumGCAge: "${local.image_maximum_gc_age}"
       instance:
         localStorage:
           strategy: Raid0
@@ -215,12 +228,12 @@ locals {
         config: |
           [plugins."io.containerd.cri.v1.images"]
             discard_unpacked_layers = false
-            max_concurrent_downloads = 8
+            max_concurrent_downloads = ${local.image_pull_max_concurrent_downloads}
       kubelet:
         config:
           serializeImagePulls: false
-          maxParallelImagePulls: 8
-          imageMaximumGCAge: "168h"
+          maxParallelImagePulls: ${local.image_pull_max_parallel}
+          imageMaximumGCAge: "${local.image_maximum_gc_age}"
   EOT
 }
 
@@ -595,9 +608,11 @@ resource "kubectl_manifest" "nodepool_cpu" {
         }
       }
       disruption = {
-        # CPU nodes can be reclaimed promptly when idle.
+        # CPU nodes can be reclaimed promptly when idle. consolidateAfter comes from the
+        # shared disruption_presets.generic entry (ADR D6) so no disruption value lives
+        # outside that one table.
         consolidationPolicy = "WhenEmptyOrUnderutilized"
-        consolidateAfter    = "30s"
+        consolidateAfter    = local.disruption_presets.generic.consolidate_after
       }
       limits = {
         cpu = var.cpu_nodepool_cpu_limit

@@ -16,6 +16,7 @@ when the NCCL log shows "NET/OFI Selected provider is efa ... transport protocol
 */ -}}
 {{- if .Values.ncclSshd.enabled }}
 {{- $v := .Values.ncclSshd }}
+{{- if not $v.gpuProduct }}{{ fail "ncclSshd.gpuProduct is required — set it to the target node's nvidia.com/gpu.product label (read it from a live node: kubectl get node <n> -o jsonpath='{.metadata.labels.nvidia\\.com/gpu\\.product}'). No default: a wrong SKU selector leaves the pods Pending forever with no error." }}{{- end }}
 {{- range $role := (list "server" "client") }}
 {{- if ne $role "server" }}
 ---

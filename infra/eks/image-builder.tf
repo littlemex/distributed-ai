@@ -67,6 +67,18 @@ variable "image_builder_instance_families" {
   default     = ["m6id", "c6id", "m7id", "c7id"]
 }
 
+variable "image_builder_fallback_volume_size" {
+  description = "Root gp3 volume size for the dedicated builder pool's fallback (non-NVMe) case. The NodePool requirement normally pins an NVMe instance, so this only backs the rare instance without instance store. Kept consistent with the other node-volume variables (cpu_node_volume_*)."
+  type        = string
+  default     = "200Gi"
+}
+
+variable "image_builder_fallback_volume_throughput" {
+  description = "gp3 throughput (MiB/s) for the dedicated builder pool's fallback root volume. Range 125-1000."
+  type        = number
+  default     = 500
+}
+
 locals {
   image_builder_namespace = "image-builder"
   image_builder_sa        = "image-builder"
@@ -223,9 +235,9 @@ resource "kubectl_manifest" "ec2nodeclass_image_builder" {
       blockDeviceMappings = [{
         deviceName = "/dev/xvda"
         ebs = {
-          volumeSize          = "200Gi"
+          volumeSize          = var.image_builder_fallback_volume_size
           volumeType          = "gp3"
-          throughput          = 500
+          throughput          = var.image_builder_fallback_volume_throughput
           deleteOnTermination = true
           encrypted           = true
         }
