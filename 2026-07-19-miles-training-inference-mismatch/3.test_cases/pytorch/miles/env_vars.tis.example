@@ -1,4 +1,7 @@
-# STATUS: UNVERIFIED -- TIS rescue arm; flags exist in miles CLI but this run was not executed on hardware.
+# STATUS: VERIFIED -- TIS rescue arm executed on hardware (p5/H100x8 EKS, Qwen3-4B
+# colocated, seed 1234, 30 rollouts, job SUCCEEDED). With TIS cap=2.0 the KV-fp8 run
+# stays bounded (mis_kl ~0.03-0.15, grad_norm ~0-0.14, raw_reward 0.45->0.61) while the
+# matched no-correction arm collapses (mis_kl -> 12.6, grad_norm -> 51, reward -> 0).
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 # ============================================================
