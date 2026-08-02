@@ -21,6 +21,11 @@ So the harness runs:
 
 `run_seeds.sh` chains both phases per seed.
 
+The reversed direction swaps the roles to check the metric is symmetric in the pair:
+`vllm_generate_reversed.py` (venv) samples and `sglang_rescore_reversed.py` (image python)
+teacher-forces the same sequences. SGLang scores an existing sequence by generating zero new
+tokens with `return_logprob=True` and reading `meta_info["input_token_logprobs"]`.
+
 ## Setup
 
 ```bash
@@ -39,13 +44,21 @@ mkdir -p /tmp/e5 && cd /tmp/e5
 cp <this dir>/*.py <this dir>/run_seeds.sh .
 export CUDA_VISIBLE_DEVICES=0
 bash run_seeds.sh                     # seeds 42 and 123
-# or a single seed:
-python3 sglang_generate.py 1234 /tmp/e5/sgl_records.json
+
+# single seed, forward direction (SGLang rollout vs vLLM train-side).
+# E5_N_PROMPTS defaults to 32; the published figures use 128 (32768 response tokens),
+# which drops k3_kl's coefficient of variation from 13% to 2.5%.
+E5_N_PROMPTS=128 python3 sglang_generate.py 1234 /tmp/e5/sgl_records.json
 /tmp/e5/vllm-venv/bin/python vllm_rescore.py 1234 /tmp/e5/sgl_records.json /tmp/e5/summary.json
+
+# reversed direction (vLLM rollout vs SGLang train-side)
+/tmp/e5/vllm-venv/bin/python vllm_generate_reversed.py 1234 /tmp/e5/rev.json
+pkill -9 -f "VLLM::EngineCore"        # see the HBM note below
+python3 sglang_rescore_reversed.py 1234 /tmp/e5/rev.json /tmp/e5/rev_summary.json
 ```
 
-Each seed writes `summary_s<seed>.json` with `mean_kl_sgl_minus_vllm`, `mean_abs_diff` and
-`k3_kl_vllm_train_side`.
+Forward runs write `mean_kl_sgl_minus_vllm`, `mean_abs_diff` and `k3_kl_vllm_train_side`;
+reversed runs write `mean_kl_rollout_minus_trainside`, `mean_abs_diff` and `k3_kl`.
 
 ## Environment gotchas hit on p5 (H100, CUDA 13.1 driver)
 
@@ -63,3 +76,8 @@ Each seed writes `summary_s<seed>.json` with `mean_kl_sgl_minus_vllm`, `mean_abs
   RESULTS.md.
 - **vLLM 0.11 dropped `LLM.generate(prompt_token_ids=...)`.** Pass
   `[TokensPrompt(prompt_token_ids=seq), ...]` as the first positional argument instead.
+- **vLLM's `EngineCore` subprocess outlives the parent script.** Offline `LLM` in 0.11 has
+  no explicit shutdown, so after the parent exits a `VLLM::EngineCore` process keeps holding
+  ~41GB of HBM and the next engine (SGLang) fails to allocate. When chaining phases, kill it
+  between them (`pkill -9 -f "VLLM::EngineCore"`) and verify with `nvidia-smi` before
+  starting the second engine. SGLang, by contrast, releases cleanly via `engine.shutdown()`.

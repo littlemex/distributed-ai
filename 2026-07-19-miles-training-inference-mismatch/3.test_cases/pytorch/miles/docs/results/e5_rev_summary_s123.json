@@ -1,0 +1,9 @@
+{
+  "n_tokens": 8192,
+  "n_sequences": 32,
+  "direction": "vllm_rollout_vs_sglang_trainside",
+  "mean_kl_rollout_minus_trainside": 0.0006808002019485079,
+  "mean_abs_diff": 0.012345953894401348,
+  "k3_kl": 0.0008318587695418959,
+  "seed": 123
+}

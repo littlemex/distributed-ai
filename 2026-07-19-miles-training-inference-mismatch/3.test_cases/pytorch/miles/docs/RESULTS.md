@@ -163,12 +163,48 @@ the same Qwen3-4B weights were scored by **two inference engines** with no train
    `exp(r) - r - 1` with `r = logprob_train - logprob_rollout`, here with SGLang in the
    rollout role and vLLM in the train-side role.
 
+At 32 prompts (8192 response tokens) per seed:
+
 | seed | mean kl (SGLang - vLLM) | mean abs diff | k3_kl |
 | --- | --- | --- | --- |
 | 42 | 0.000329 | 0.01170 | 0.000800 |
 | 123 | 0.001233 | 0.01167 | 0.000749 |
 | 1234 | 0.001383 | 0.01281 | 0.000955 |
 | **mean +/- sd** | **0.000982 +/- 0.000570** | **0.01206 +/- 0.00065** | **0.000835 +/- 0.000107** |
+
+Repeated at **128 prompts (32768 response tokens) per seed** to check the estimate is not
+sample-size limited. It tightens sharply and lands on the same value:
+
+| seed | mean kl (SGLang - vLLM) | mean abs diff | k3_kl |
+| --- | --- | --- | --- |
+| 42 | 0.000667 | 0.01162 | 0.000783 |
+| 123 | 0.000918 | 0.01188 | 0.000822 |
+| 1234 | 0.000869 | 0.01202 | 0.000814 |
+| **mean +/- sd** | **0.000818 +/- 0.000133** | **0.01184 +/- 0.00020** | **0.000806 +/- 0.000020** |
+
+k3_kl's coefficient of variation drops from 13% (32 prompts) to **2.5%** (128 prompts) while
+the mean barely moves (8.35e-4 -> 8.06e-4), so the 32-prompt spread was sampling noise, not
+a real seed effect. The cross-engine gap is a stable property of this engine pair at this
+model, and it is a far tighter quantity than either the collapse magnitude or the
+fork-concordance ratio.
+
+### The metric is symmetric in the two engines
+
+A concordance number measured with SGLang in the rollout role could in principle be an
+artefact of *that* role assignment -- e.g. of SGLang's sampling path specifically, rather
+than of the gap between the two engines. So the direction was reversed: **vLLM generates**
+(`logprobs=0` on the sampled tokens) and **SGLang teacher-forces** the identical sequences
+(`max_new_tokens=0`, `return_logprob`, reading `input_token_logprobs`), with the same
+estimator applied to the swapped pair.
+
+| direction | rollout role | train-side role | k3_kl (3 seeds) |
+| --- | --- | --- | --- |
+| forward (128 prompts) | SGLang | vLLM | 0.000806 +/- 0.000020 |
+| reversed (32 prompts) | vLLM | SGLang | 0.000792 +/- 0.000061 |
+
+The two agree well inside each other's spread. Whichever engine plays the rollout role, the
+measured gap is ~8e-4, so the metric is capturing the symmetric numerical-path difference
+between the pair rather than a quirk of one engine's sampling loop.
 
 The engine-vs-engine gap (k3_kl 8.35e-4 +/- 1.07e-4) is **the same order as the
 SGLang-vs-Megatron baseline** (mis_kl ~6.2e-4 on miles, ~5.3e-4 on slime), and it is far
@@ -355,11 +391,13 @@ only. The fork-concordance ratios (54x vs 49x) likewise remain single-seed.
   isolation. KV quantisation drives essentially all of the amplification and is monotone in
   precision (e4m3 ~12x, e5m2 ~45x); attention backend and CUDA graph do nothing alone.
   Single run per cell.
-- Verified: **cross-engine concordance (SGLang vs vLLM, 3 seeds)** -- k3_kl 8.35e-4 +/-
-  1.07e-4 on identical token sequences with no trainer involved, the same order as the
-  SGLang-vs-Megatron baseline. Shows the benign baseline mismatch is not SGLang-specific
-  and sets the noise floor that the KV-fp8 amplification clears by ~40x. vLLM ran in eager
-  mode (driver/triton constraint), so this is a conservative comparison.
+- Verified: **cross-engine concordance (SGLang vs vLLM, 3 seeds, both directions)** -- k3_kl
+  8.06e-4 +/- 0.20e-4 at 128 prompts (32768 tokens) per seed on identical token sequences
+  with no trainer involved, the same order as the SGLang-vs-Megatron baseline. Reversing the
+  roles (vLLM generates, SGLang re-scores) gives 7.92e-4 +/- 0.61e-4, so the metric is
+  symmetric in the pair. Shows the benign baseline mismatch is not SGLang-specific and sets
+  the noise floor that the KV-fp8 amplification clears by ~40x. vLLM ran in eager mode
+  (driver/triton constraint), so this is a conservative comparison.
 - Untested (UNVERIFIED): multi-seed variance on the **baseline and 30B MoE** tables (those
   remain single-run point estimates, as does the 54x-vs-49x fork ratio), Qwen3-30B-A3B MoE
   *disaggregated* (verified only as colocated; disaggregated needs B300 HBM), and the

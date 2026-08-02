@@ -28,7 +28,7 @@ def main():
     OUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/e5/sgl_records.json"
     MODEL = "/fsx/models/Qwen3-4B"
     DATA = "/fsx/data/dapo-math-17k/dapo-math-17k.jsonl"
-    N_PROMPTS = 32
+    N_PROMPTS = int(__import__("os").environ.get("E5_N_PROMPTS", "32"))
     MAX_NEW_TOKENS = 256
     TEMPERATURE = 1.0
     SEED = SEED_ARG
