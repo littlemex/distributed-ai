@@ -101,7 +101,6 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 if [ "$MULTI_NODE_ONLY" = false ]; then
   echo "[INFO] Step 3: Single-node torchrun (2 procs, gloo)"
   helm template exp "$CHART_DIR" -n "$NAMESPACE" \
-    --set sharedStorage.existingClaimName=openzfs-claim \
     --set torchrunTrain.enabled=true \
     --set torchrunTrain.image="$IMAGE" \
     --set torchrunTrain.backend=gloo \
@@ -121,7 +120,6 @@ fi
 # --- Step 4: Multi-node TrainJob (Kubeflow Trainer v2; 2 nodes, gloo, torchrun c10d) ---
 echo "[INFO] Step 4: Multi-node TrainJob (Kubeflow Trainer v2; 2 nodes, gloo)"
 helm template exp "$CHART_DIR" -n "$NAMESPACE" \
-  --set sharedStorage.existingClaimName=openzfs-claim \
   --set trainjobTrain.enabled=true \
   --set trainjobTrain.image="$IMAGE" \
   --set trainjobTrain.nodeRole=cpu \

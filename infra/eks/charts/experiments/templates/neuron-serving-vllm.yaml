@@ -38,9 +38,7 @@ spec:
       nodeSelector:
         node-role: {{ $v.nodeRole }}
       tolerations:
-        - { key: aws.amazon.com/neuron,  operator: Exists, effect: NoSchedule }
-        - { key: vpc.amazonaws.com/efa,  operator: Exists, effect: NoSchedule }
-        - { key: capacity-reservation,   operator: Exists, effect: NoSchedule }
+        {{- include "experiments.neuronTolerations" . | nindent 8 }}
       containers:
         - name: vllm
           image: {{ include "experiments.dlcImage" (dict "image" $v.image "repoTag" $v.dlcRepoTag "root" $) }}

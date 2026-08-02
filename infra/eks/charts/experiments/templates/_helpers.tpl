@@ -66,6 +66,24 @@ Capacity Block taint (value rotates per reservation, so Exists). Indented under 
 {{- end -}}
 
 {{/*
+NVIDIA/EFA bench-pool tolerations, shared by the nccl-probe and nccl-sshd workloads (the
+GPU counterpart of neuronTolerations). Beyond the GPU + EFA + Capacity Block taints it also
+tolerates the workload=bench pool taint and the SageMaker node-health taint. Caller supplies
+indentation, e.g.
+  tolerations:
+    {{- include "experiments.gpuBenchTolerations" . | nindent 4 }}
+Do NOT use this for gpu-serving-vllm / vllm-ray: those pools are not bench-tainted and only
+need the 3-taint set.
+*/}}
+{{- define "experiments.gpuBenchTolerations" -}}
+- { key: nvidia.com/gpu,                             operator: Exists, effect: NoSchedule }
+- { key: vpc.amazonaws.com/efa,                      operator: Exists, effect: NoSchedule }
+- { key: workload,                                   operator: Equal,  value: bench, effect: NoSchedule }
+- { key: capacity-reservation,                       operator: Exists, effect: NoSchedule }
+- { key: sagemaker.amazonaws.com/node-health-status, operator: Equal,  value: Schedulable, effect: NoSchedule }
+{{- end -}}
+
+{{/*
 The bash command that runs sshd as PID-1 subordinate on port 2222. Neuron/CPU DLCs
 do not all ship openssh-server, so install it idempotently. StrictHostKeyChecking off
 avoids interactive mpirun/torchrun prompts. hostNetwork=true means port 22 is the
