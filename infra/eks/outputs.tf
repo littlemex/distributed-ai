@@ -90,3 +90,12 @@ output "accelerator_pool_efa_schedulable" {
   EOT
   value       = local.pool_efa_schedulable
 }
+
+output "region" {
+  description = <<-EOT
+    AWS region this cluster was created in. Surfaced so helper scripts (tests/run-tests.sh) can
+    target the right region without the caller repeating it, and without a hardcoded default that
+    silently points somewhere else.
+  EOT
+  value       = var.region
+}
