@@ -90,10 +90,20 @@ neuronProbe:
   # Karpenter labels each node node-role=<accelerator_pools key>; set this to that key.
   nodeRole: trn2
   # DLC image = {dlc.registry}/{dlcRepoTag}. Set `image` to a full URI to override entirely.
-  # Confirm the tag with:
+  #
+  # The SDK in the tag must NOT be newer than the Neuron driver in the node AMI. sdk2.30 ships
+  # runtime 2.32.31, and against the driver 2.29 in the EKS Neuron AL2023 AMI
+  # (amazon-eks-node-al2023-x86_64-neuron-1.35-v20260728) nrt_init gets through HBM
+  # initialization and then fails in dmem_buf_copyin — a zerocopy ioctl ABI mismatch, not a
+  # resource shortage. Confirmed on trn2.3xlarge, 2026-08-02: sdk2.30 fails with NRT_FAILURE,
+  # sdk2.29.1 runs a matmul correctly with no optimization disabled. Check the AMI's driver
+  # before bumping this:
+  #   NEURON_RT_LOG_LEVEL=INFO python -c 'import torch_xla.core.xla_model as xm; xm.xla_device()' \
+  #     2>&1 | grep -i "neuron driver"
+  # Confirm available tags with:
   #   aws ecr describe-images --registry-id <dlc account> \
   #     --repository-name pytorch-inference-neuronx --region <region>
-  dlcRepoTag: pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04
+  dlcRepoTag: pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.29.1-ubuntu24.04
   image: ""
   # Minimal claim: one device + one EFA is enough to prove scheduling + enumeration.
   # (Do NOT request hugepages on a probe that triggers Karpenter provisioning — Karpenter
@@ -113,7 +123,7 @@ neuronDdp:
   enabled: false
   nodeRole: trn2
   # DLC image = {dlc.registry}/{dlcRepoTag}; set `image` to a full URI to override.
-  dlcRepoTag: pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04
+  dlcRepoTag: pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.29.1-ubuntu24.04
   image: ""
   # Per-instance topology. Defaults below are the trn2.48xlarge row of neuronTopologyPresets
   # (top of this file); for another instance type copy that type's row here. CONFIRM on a live
@@ -145,40 +155,56 @@ neuronDdp:
 # ─────────────────────────────────────────────────────────────────────────────
 ncclProbe:
   enabled: false
-  # GPU probe pins by the NVIDIA product label (set by the GPU operator / node), not
-  # node-role, to match a specific GPU SKU. THIS DEFAULT IS UNTESTED ON THIS MODULE: this
-  # chart's own verified GPU run was g5.24xlarge (A10G), whose product label is
-  # "NVIDIA-A10G" — not B300. B300 was carried over from another cluster's reference and
-  # left here as an example of the label FORMAT, not a working default. Read the real
-  # value from a live node before relying on it:
-  #   kubectl get node <n> -o jsonpath='{.metadata.labels.nvidia\.com/gpu\.product}'
-  # A selector mismatch does not error — the pod just stays Pending forever. REQUIRED (no
-  # default): the template fails the render if this is empty, rather than shipping an UNTESTED
-  # B300 SKU that would silently never schedule. Set it for your GPU, e.g. NVIDIA-A10G.
-  gpuProduct: ""
+  # REQUIRED (no default): the accelerator_pools key of the target GPU pool. Karpenter labels
+  # its nodes node-role=<key> AT LAUNCH, so this is a selector Karpenter can satisfy by
+  # provisioning. This probe used to pin on nvidia.com/gpu.product to match a GPU SKU, which
+  # cannot work: that label is applied by the GPU Operator only after a node is already running,
+  # so Karpenter rejects the pod ("label nvidia.com/gpu.product does not have known values")
+  # and it stays Pending forever. Confirmed on p4d.24xlarge, 2026-08-02.
+  nodeRole: ""
   image: public.ecr.aws/hpc-cloud/nccl-tests:latest
+  # Mount /dev/gdrdrv. Requires the gdrcopy kernel module, which the GPU Operator installs only
+  # under gpu_operator_enable_gdrcopy=true (OFF by default in gpu-addons.tf). Leave false unless
+  # that is enabled: a hostPath for a missing device node blocks the pod on
+  # "hostPath type check failed" indefinitely.
+  gdrcopy: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4) ncclSshd — two-node NVIDIA NCCL all_reduce bench over EFA (sshd + mpirun).
-#    UNTESTED on this module (no B300/p5en-class 2-node capacity available at review time;
-#    this cluster's verified GPU run was single-node g5.24xlarge/A10G, no EFA). Defaults
-#    below (gpuProduct/gpuCount/efaCount/hugepages) are carried over from a B300 reference
-#    and are a starting point, not a confirmed-working configuration.
+#    VERIFIED on p4d.24xlarge x2 (Capacity Block, us-west-2d, 2026-08-02): 2-node/16-rank
+#    all_reduce_perf reported "NET/OFI Selected provider is efa (found 3 nics)" and 58.0 GB/s
+#    busbw at 1 GB, against 227.1 GB/s single-node NVLink. gpuCount/efaCount below are that
+#    run's values — they are per-instance-type facts, so read them off a live node of YOUR pool
+#    rather than trusting the defaults (the schedulable EFA count is physical cards minus one:
+#    p4d 3, p5en 15, p5 31).
 # ─────────────────────────────────────────────────────────────────────────────
 ncclSshd:
   enabled: false
-  # REQUIRED (no default): the template fails the render if empty. B300 was an UNTESTED
-  # carry-over that would silently never schedule; set it for your GPU (read from a live node).
-  gpuProduct: ""
+  # REQUIRED (no default): the accelerator_pools key of the target GPU pool. Karpenter labels
+  # its nodes node-role=<key> AT LAUNCH, so this is a selector Karpenter can satisfy by
+  # provisioning. Do NOT select on nvidia.com/gpu.product: that label appears only after the
+  # GPU Operator labels an already-running node, so Karpenter cannot use it to pick an instance
+  # type and leaves the pods Pending forever.
+  nodeRole: ""
   image: public.ecr.aws/hpc-cloud/nccl-tests:latest
-  # gpuCount/efaCount below are the p5en.48xlarge row of gpuTopologyPresets (top of file);
-  # copy your instance type's row. efaCount is the full multi-card count for the bench.
-  gpuCount: 8       # GPUs per node (p5en/B300 = 8)
-  efaCount: 16      # EFA ENIs per node (full multi-card count for the NCCL bench)
+  # gpuCount/efaCount are per-instance-type physical facts — there is no safe default across
+  # families (EFA schedulable is cards-1: p4d 3, p5en 15, p5 31). Read them off a live node of
+  # the target pool rather than copying a row:
+  #   kubectl get nodes -l node-role=<pool> -o jsonpath=\
+  #     "{.items[0].status.allocatable['nvidia\.com/gpu']}/{.items[0].status.allocatable['vpc\.amazonaws\.com/efa']}"
+  # or: terraform output accelerator_pool_efa_schedulable
+  gpuCount: 8       # GPUs per node
+  efaCount: 3       # EFA ENIs per node (schedulable count = physical cards - 1; p4d.24xlarge)
   hugepages: 8Gi
   memory: 128Gi
   cpu: "16"
   shmSize: 16Gi
+  # Mount /dev/gdrdrv into the bench pods. Requires the gdrdrv kernel module, which the GPU
+  # Operator installs only when gpu_operator_enable_gdrcopy=true (OFF by default in
+  # gpu-addons.tf — gdrcopy is a GPUDirect latency optimization, not needed for NCCL). Leave
+  # false unless that is enabled: a hostPath for a device node that does not exist makes the
+  # kubelet block on "hostPath type check failed" and the pods never start.
+  gdrcopy: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # sharedStorage — the /shared RWX mount for torchrunTrain + pytorchjobTrain. Selects which
