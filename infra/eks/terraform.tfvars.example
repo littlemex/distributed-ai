@@ -34,16 +34,23 @@ kubernetes_version = "1.35"
 # override. capacity_type is per-pool, so on-demand / spot / reserved can be MIXED in one
 # cluster. The map key becomes Kubernetes resource names (must be RFC1123: [a-z0-9-]).
 #
-# Leave empty {} for a basic cluster; add pools in Basic04+.
-accelerator_pools = {
+# EMPTY BY DEFAULT, deliberately. Basic01 builds the cluster scope only (VPC, control plane,
+# system nodes, Karpenter, CSI, storage); accelerator pools arrive in Basic04+. Uncommenting a
+# pool here changes what Basic01 itself installs — a pool with device_plugin = "nvidia" flips
+# local.has_gpu_pool, which pulls in the GPU Operator on the very first apply. Copy the shape you
+# need from the commented examples below when the chapter tells you to.
+accelerator_pools = {}
+
+# ── Pool shapes to copy into the map above ───────────────────────────────────────────────────
+# accelerator_pools = {
   # GPU on-demand pool: g6e.12xlarge (L40S x4, single-card EFA derived). Steady dev/verify.
-  gpu-dev = {
-    instance_types = ["g6e.12xlarge"]
-    device_plugin  = "nvidia"
-    capacity_type  = "on-demand"
-    # zone omitted → derived to the first cluster AZ (local.azs[0]).
-    # efa_interface_count / efa_multi_card omitted → derived (g6e = 1, single-card).
-  }
+  # gpu-dev = {
+  #   instance_types = ["g6e.12xlarge"]
+  #   device_plugin  = "nvidia"
+  #   capacity_type  = "on-demand"
+  #   # zone omitted → derived to the first cluster AZ (local.azs[0]).
+  #   # efa_interface_count / efa_multi_card omitted → derived (g6e = 1, single-card).
+  # }
 
   # GPU spot pool: cheapest, interruptible. Same shape, capacity_type = "spot".
   # gpu-spot = {
@@ -74,7 +81,8 @@ accelerator_pools = {
   #   ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
   #   volume_size       = "500Gi"
   # }
-}
+# }
+# ─────────────────────────────────────────────────────────────────────────────────────────────
 
 # Named AWS profile for Terraform provider authentication. The account ID is derived
 # from these credentials automatically (no aws_account_id input needed).
