@@ -16,7 +16,7 @@ when the NCCL log shows "NET/OFI Selected provider is efa ... transport protocol
 */ -}}
 {{- if .Values.ncclSshd.enabled }}
 {{- $v := .Values.ncclSshd }}
-{{- if not $v.gpuProduct }}{{ fail "ncclSshd.gpuProduct is required — set it to the target node's nvidia.com/gpu.product label (read it from a live node: kubectl get node <n> -o jsonpath='{.metadata.labels.nvidia\\.com/gpu\\.product}'). No default: a wrong SKU selector leaves the pods Pending forever with no error." }}{{- end }}
+{{- if not $v.nodeRole }}{{ fail "ncclSshd.nodeRole is required — set it to the accelerator_pools key of the target GPU pool (Karpenter labels its nodes node-role=<pool key>). Selecting on nvidia.com/gpu.product instead does NOT work: that label is applied by the GPU Operator only AFTER a node is up, so Karpenter cannot use it to decide which instance type to launch and refuses the pod with \"label nvidia.com/gpu.product does not have known values\" — the pods then stay Pending forever." }}{{- end }}
 {{- range $role := (list "server" "client") }}
 {{- if ne $role "server" }}
 ---
@@ -33,8 +33,12 @@ spec:
   hostNetwork: true
   dnsPolicy: ClusterFirstWithHostNet
   restartPolicy: Never
+  # node-role (not nvidia.com/gpu.product): Karpenter stamps node-role=<pool key> at launch
+  # (karpenter-resources.tf), so it is a requirement Karpenter can satisfy by PROVISIONING a
+  # node. nvidia.com/gpu.product only exists after the GPU Operator labels a running node, so
+  # using it here makes Karpenter reject the pod and the second node never launches.
   nodeSelector:
-    nvidia.com/gpu.product: {{ $v.gpuProduct }}
+    node-role: {{ $v.nodeRole }}
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

@@ -167,14 +167,21 @@ ncclProbe:
 # ─────────────────────────────────────────────────────────────────────────────
 ncclSshd:
   enabled: false
-  # REQUIRED (no default): the template fails the render if empty. B300 was an UNTESTED
-  # carry-over that would silently never schedule; set it for your GPU (read from a live node).
-  gpuProduct: ""
+  # REQUIRED (no default): the accelerator_pools key of the target GPU pool. Karpenter labels
+  # its nodes node-role=<key> AT LAUNCH, so this is a selector Karpenter can satisfy by
+  # provisioning. Do NOT select on nvidia.com/gpu.product: that label appears only after the
+  # GPU Operator labels an already-running node, so Karpenter cannot use it to pick an instance
+  # type and leaves the pods Pending forever.
+  nodeRole: ""
   image: public.ecr.aws/hpc-cloud/nccl-tests:latest
-  # gpuCount/efaCount below are the p5en.48xlarge row of gpuTopologyPresets (top of file);
-  # copy your instance type's row. efaCount is the full multi-card count for the bench.
-  gpuCount: 8       # GPUs per node (p5en/B300 = 8)
-  efaCount: 16      # EFA ENIs per node (full multi-card count for the NCCL bench)
+  # gpuCount/efaCount are per-instance-type physical facts — there is no safe default across
+  # families (EFA schedulable is cards-1: p4d 3, p5en 15, p5 31). Read them off a live node of
+  # the target pool rather than copying a row:
+  #   kubectl get nodes -l node-role=<pool> -o jsonpath=\
+  #     "{.items[0].status.allocatable['nvidia\.com/gpu']}/{.items[0].status.allocatable['vpc\.amazonaws\.com/efa']}"
+  # or: terraform output accelerator_pool_efa_schedulable
+  gpuCount: 8       # GPUs per node
+  efaCount: 3       # EFA ENIs per node (schedulable count = physical cards - 1; p4d.24xlarge)
   hugepages: 8Gi
   memory: 128Gi
   cpu: "16"
