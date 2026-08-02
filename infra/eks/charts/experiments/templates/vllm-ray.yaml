@@ -21,6 +21,7 @@ ray dependency that multi-node vLLM needs.
 */ -}}
 {{- if .Values.vllmRay.enabled }}
 {{- $v := .Values.vllmRay }}
+{{- if not .Values.vllmRay.nodeRole }}{{ fail "vllmRay.nodeRole is required — set it to the accelerator_pools key of the target GPU pool (Karpenter labels its nodes node-role=<pool key>). An empty or non-existent pool name leaves the pods unschedulable while Karpenter keeps launching nodes trying to satisfy them." }}{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

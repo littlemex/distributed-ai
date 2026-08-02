@@ -9,17 +9,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
 NAMESPACE="${NAMESPACE:-distai-test}"
-CLUSTER_NAME="${CLUSTER_NAME:-distai-eks-blog}"
-AWS_REGION_OPT="${AWS_REGION:-us-west-2}"
+# Cluster name, region and GPU pool are DERIVED from the Terraform state in ../ by default, not
+# hardcoded: a hardcoded cluster name made this script abort immediately for anyone whose cluster
+# is not named the same as the author's ("current kubectl context does not target ..."), and a
+# hardcoded GPU pool name pointed at a pool the module does not create. Both are resolved below,
+# after argument parsing, so an explicit --cluster-name / --region / --gpu-nodepool still wins
+# and the script still works when run without Terraform available.
+CLUSTER_NAME="${CLUSTER_NAME:-}"
+AWS_REGION_OPT="${AWS_REGION:-}"
 AWS_PROFILE_OPT="${AWS_PROFILE:-}"
 WITH_GPU=false
 KEEP_NS=false
 TIMEOUT_BASE=60
 TIMEOUT_GPU=600
 GPU_COUNT=1
-# GPU test NodePool. Defaults to gpu-dev for backward compatibility; override with
-# --gpu-nodepool to match the accelerator_pools key actually defined in tfvars (e.g. gpu-ddp).
-GPU_NODEPOOL=gpu-dev
+GPU_NODEPOOL=""
 
 # Manifest envsubst target variables (explicit list to avoid clobbering $TOKEN etc in Pod scripts)
 ENVSUBST_VARS='${NAMESPACE} ${FSX_VOLUME_HANDLE} ${FSX_DNS_NAME} ${FSX_MOUNT_NAME} ${OPENZFS_VOLUME_HANDLE} ${OPENZFS_DNS_NAME} ${GPU_COUNT} ${GPU_NODEPOOL}'
@@ -39,6 +43,44 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
+
+# ── Resolve the values not given on the command line from Terraform ───────────────────────────
+# terraform output is authoritative for the cluster this checkout manages. If Terraform is not
+# usable here (no state, no binary), fall back to whatever the current kubectl context points at
+# so the script degrades to "test the cluster I am pointed at" rather than failing outright.
+tf_out() { (cd "$SCRIPT_DIR/.." && terraform output -raw "$1" 2>/dev/null) || true; }
+
+if [ -z "$CLUSTER_NAME" ]; then
+  CLUSTER_NAME="$(tf_out cluster_name)"
+  if [ -z "$CLUSTER_NAME" ]; then
+    # Last resort: the cluster name embedded in an EKS context ARN (.../cluster/<name>).
+    CLUSTER_NAME="$(kubectl config current-context 2>/dev/null | sed -n 's|.*/cluster/||p')"
+  fi
+  [ -n "$CLUSTER_NAME" ] && log_info "cluster-name resolved to $CLUSTER_NAME"
+fi
+if [ -z "$CLUSTER_NAME" ]; then
+  echo "Error: could not determine the cluster name. Run from infra/eks/tests with Terraform" >&2
+  echo "  state present, or pass --cluster-name <name>." >&2
+  exit 1
+fi
+
+if [ -z "$AWS_REGION_OPT" ]; then
+  AWS_REGION_OPT="$(tf_out region)"
+  [ -z "$AWS_REGION_OPT" ] && AWS_REGION_OPT="${AWS_DEFAULT_REGION:-us-west-2}"
+fi
+
+# GPU pool: pick the first accelerator pool that advertises NVIDIA GPUs. Only needed for
+# --with-gpu, so a cluster with no GPU pool is not an error here.
+if [ -z "$GPU_NODEPOOL" ] && [ "$WITH_GPU" = true ]; then
+  GPU_NODEPOOL="$(kubectl get nodepool -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | grep -vx cpu | head -1 || true)"
+  if [ -z "$GPU_NODEPOOL" ]; then
+    echo "Error: --with-gpu was given but no non-cpu NodePool exists. Define an accelerator pool" >&2
+    echo "  in terraform.tfvars (Basic04) first, or pass --gpu-nodepool <name>." >&2
+    exit 1
+  fi
+  log_info "gpu-nodepool resolved to $GPU_NODEPOOL"
+fi
 
 export NAMESPACE GPU_COUNT GPU_NODEPOOL
 

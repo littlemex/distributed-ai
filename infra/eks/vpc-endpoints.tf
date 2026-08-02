@@ -27,9 +27,33 @@ locals {
   # ecr.api + ecr.dkr are required so private-subnet nodes can pull EKS-managed images
   # (VPC CNI / kube-proxy / EFA & GPU device plugins) without depending solely on NAT.
   # ecr.dkr fetches layers via the S3 gateway endpoint (defined separately below).
-  # logs = CloudWatch Logs for node/pod logging. NAT still covers non-ECR registries
-  # (nvcr.io, quay.io, registry.k8s.io) and IAM (global, no interface endpoint).
-  vpc_endpoint_services = ["ec2", "sts", "ssm", "ecr.api", "ecr.dkr", "logs"]
+  # logs = CloudWatch Logs for node/pod logging.
+  #
+  # eks-auth is what makes EKS Pod Identity work without a NAT, and its absence is a
+  # first-apply-only failure. Pod Identity does NOT authenticate through STS
+  # AssumeRoleWithWebIdentity the way IRSA does: the Pod Identity Agent calls the EKS Auth API
+  # (AssumeRoleForPodIdentity), a separate service principal from both sts and eks. Without
+  # this endpoint, a Pod Identity consumer in a private subnet can only reach that API over the
+  # NAT — and Terraform creates the NAT gateways in parallel with everything else, so on a
+  # FRESH apply the aws-ebs-csi-driver addon can start before any NAT exists.
+  #
+  # Observed live on a from-scratch build (2026-08-02): the addon sat in CREATING for 17
+  # minutes while its controller pods went CrashLoopBackOff with
+  #   "dry-run EC2 API call failed: ... get credentials: failed to refresh cached credentials"
+  # even though the IAM role, its trust policy, the Pod Identity association and the agent were
+  # all present and correct — the VPC simply had zero NAT gateways at that point. An apply
+  # against an already-built cluster never reproduces this, because the NAT is long since there.
+  #
+  # No extra ordering edge is needed once the endpoint exists: interface endpoints finish in
+  # under a minute (45-55s measured) while the EKS control plane takes ~10 minutes, and addons
+  # are created after the cluster, so eks-auth is always in place first. An earlier attempt to
+  # force the ordering by routing module.eks's subnet_ids through a computed local made the
+  # subnet ids unknown at plan time and cascaded into spurious replacements of Karpenter's IAM
+  # policy attachments — do not reintroduce that.
+  #
+  # NAT still covers non-ECR registries (nvcr.io, quay.io, registry.k8s.io) and IAM (global
+  # service, no interface endpoint — see the note above).
+  vpc_endpoint_services = ["ec2", "sts", "ssm", "ecr.api", "ecr.dkr", "logs", "eks-auth"]
 }
 
 resource "aws_security_group" "vpc_endpoints" {

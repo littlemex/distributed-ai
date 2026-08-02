@@ -6,7 +6,7 @@ Prereqs: an accelerator pool with device_plugin="nvidia"; the GPU operator (gpu-
 
 Render + apply:
   helm template exp ./charts/experiments --set namespace=$NS \
-    --set gpuServingVllm.enabled=true --set gpuServingVllm.nodeRole=gpu-g5 \
+    --set gpuServingVllm.enabled=true --set gpuServingVllm.nodeRole=<pool> \
     --set gpuServingVllm.model=Qwen/Qwen2.5-0.5B-Instruct | kubectl apply -f -
 Verify:
   kubectl -n $NS rollout status deploy/gpu-vllm --timeout=15m
@@ -15,6 +15,7 @@ Verify:
 */ -}}
 {{- if .Values.gpuServingVllm.enabled }}
 {{- $v := .Values.gpuServingVllm }}
+{{- if not .Values.gpuServingVllm.nodeRole }}{{ fail "gpuServingVllm.nodeRole is required — set it to the accelerator_pools key of the target GPU pool (Karpenter labels its nodes node-role=<pool key>). Without it the pod gets an empty selector, never schedules, and Karpenter launches node after node trying to satisfy it." }}{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
