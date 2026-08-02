@@ -159,6 +159,34 @@ test_csi_drivers() {
   done
 }
 
+# Accelerator device plugins: the NVIDIA GPU device plugin (GPU Operator), the EFA device
+# plugin, and the Neuron device plugin. Each is only present/scheduled when the matching pool
+# type exists, so this asserts "if the DaemonSet exists and wants pods, they are all Ready" and
+# treats a missing or zero-desired DaemonSet as not-applicable (a cluster with no GPU/EFA/Neuron
+# pool legitimately runs none of these). This closes the gap where a broken device plugin —
+# the mechanism that advertises nvidia.com/gpu / vpc.amazonaws.com/efa / aws.amazon.com/neuron —
+# went entirely untested even though EFA dynamic derivation and Neuron support are core features.
+test_device_plugins() {
+  # ns:name pairs. GPU device plugin lives in gpu-operator; EFA/Neuron plugins in kube-system.
+  for entry in \
+    "gpu-operator:nvidia-device-plugin-daemonset" \
+    "kube-system:aws-efa-k8s-device-plugin" \
+    "kube-system:neuron-device-plugin-daemonset" \
+    "kube-system:neuron-device-plugin"; do
+    local ns="${entry%%:*}" ds="${entry##*:}" desired ready
+    desired=$(kubectl get daemonset "$ds" -n "$ns" -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "")
+    # Absent DaemonSet (no such pool) or zero desired → not applicable, skip this one.
+    [ -z "$desired" ] && continue
+    [ "$desired" -eq 0 ] && continue
+    ready=$(kubectl get daemonset "$ds" -n "$ns" -o jsonpath='{.status.numberReady}' 2>/dev/null || echo 0)
+    if [ "$desired" != "$ready" ]; then
+      log_info "device plugin $ns/$ds: desired=$desired ready=$ready (not all pods Ready)"
+      return 1
+    fi
+  done
+  return 0
+}
+
 test_storage_mount() {
   resolve_storage_vars || return 1
   apply_manifest storage-test-pv-fsx.yaml
@@ -219,6 +247,7 @@ main() {
   run_test "karpenter" "$TIMEOUT_BASE" test_karpenter || true
   run_test "trainer" "$TIMEOUT_BASE" test_trainer || true
   run_test "csi-drivers" "$TIMEOUT_BASE" test_csi_drivers || true
+  run_test "device-plugins" "$TIMEOUT_BASE" test_device_plugins || true
   run_test "storage-mount" 120 test_storage_mount || true
 
   if [ "$WITH_GPU" = true ]; then
