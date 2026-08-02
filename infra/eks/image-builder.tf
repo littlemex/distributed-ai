@@ -34,9 +34,27 @@ variable "image_builder_enabled" {
 }
 
 variable "image_builder_repository_name" {
-  description = "ECR repository name for the built ddp-sample image."
+  description = <<-EOT
+    ECR repository name for the built ddp-sample image. Leave null (the default) to derive
+    "<cluster_name>-ddp-sample".
+
+    The name must be qualified because ECR repository names are unique per account+region,
+    while everything else this module creates is already prefixed with cluster_name. A bare
+    "ddp-sample" default meant a SECOND cluster in the same account and region failed its apply
+    with RepositoryAlreadyExistsException — hit while building a verification cluster alongside
+    an existing one (2026-08-03). Set this explicitly only if you need a specific repository
+    name; read the resulting URL from `terraform output -raw ddp_sample_ecr_url` rather than
+    reconstructing it by hand.
+  EOT
   type        = string
-  default     = "ddp-sample"
+  default     = null
+}
+
+locals {
+  image_builder_repository_name = coalesce(
+    var.image_builder_repository_name,
+    "${var.cluster_name}-ddp-sample",
+  )
 }
 
 # ── Dedicated builder NodePool (opt-in, for LARGE images) ──────────────────────
@@ -87,7 +105,7 @@ locals {
 # ── ECR repository ───────────────────────────────────────────────────────────
 resource "aws_ecr_repository" "ddp_sample" {
   count                = var.image_builder_enabled ? 1 : 0
-  name                 = var.image_builder_repository_name
+  name                 = local.image_builder_repository_name
   image_tag_mutability = "MUTABLE"
   # force_delete: a workshop cluster's `terraform destroy` must not wedge on an ECR
   # repo that still holds pushed images.
