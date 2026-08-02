@@ -146,6 +146,89 @@ the "30B disaggregated" layout the README table originally listed as the target.
 is what allows the disaggregated actor-8 layout. 30B disaggregated on H200 remains
 UNVERIFIED.
 
+## Cross-engine concordance: SGLang vs vLLM (verified -- 3 seeds)
+
+Every mismatch figure above compares one inference engine (SGLang) against the trainer
+(Megatron). That leaves an obvious question open: is the ~6e-4 baseline mismatch a property
+of *SGLang specifically*, or of "any inference engine vs any trainer"? To separate those,
+the same Qwen3-4B weights were scored by **two inference engines** with no trainer involved:
+
+1. SGLang samples 32 dapo-math-17k completions (temperature 1.0, 256 new tokens,
+   `return_logprob`), giving a per-token logprob for every response token -- 8192 tokens.
+2. The **identical token sequences** are teacher-forced through vLLM 0.11.0
+   (`prompt_logprobs`), giving vLLM's logprob for the same tokens.
+3. The same estimator slime uses for `mis_kl` is applied to that pair
+   (`examples/train_infer_mismatch_helper/mis.py:add_ppl_metrics`): signed
+   `kl = logprob_rollout - logprob_train` and the k3 estimator
+   `exp(r) - r - 1` with `r = logprob_train - logprob_rollout`, here with SGLang in the
+   rollout role and vLLM in the train-side role.
+
+| seed | mean kl (SGLang - vLLM) | mean abs diff | k3_kl |
+| --- | --- | --- | --- |
+| 42 | 0.000329 | 0.01170 | 0.000800 |
+| 123 | 0.001233 | 0.01167 | 0.000749 |
+| 1234 | 0.001383 | 0.01281 | 0.000955 |
+| **mean +/- sd** | **0.000982 +/- 0.000570** | **0.01206 +/- 0.00065** | **0.000835 +/- 0.000107** |
+
+The engine-vs-engine gap (k3_kl 8.35e-4 +/- 1.07e-4) is **the same order as the
+SGLang-vs-Megatron baseline** (mis_kl ~6.2e-4 on miles, ~5.3e-4 on slime), and it is far
+more stable run-to-run than either the collapse magnitude or the fork-concordance ratio
+(13% coefficient of variation over 3 seeds). Two consequences:
+
+1. **The benign baseline mismatch is not an SGLang artefact.** Swapping the inference
+   engine entirely moves the metric within the same order of magnitude. A ~1e-3 logprob
+   disagreement is what independent optimised inference stacks simply do to each other in
+   bf16, and it stays in the benign regime.
+2. **It sets the noise floor the KV-fp8 amplification has to clear -- and clears it by
+   ~40x.** fp8_e5m2 pushes mis_kl to 0.032, roughly 40x this cross-engine floor, which is
+   why the amplified condition is a usable model of a pathological mismatch rather than
+   measurement noise.
+
+Raw data: [`results/e5_all_seeds.json`](./results/e5_all_seeds.json) (per-seed summaries in
+the same directory). Harness and reproduction steps:
+[`../scripts/concordance/`](../scripts/concordance/).
+
+Caveats: single model (Qwen3-4B dense), 32 prompts / 8192 tokens per seed, and vLLM had to
+run with `enforce_eager=True` plus `TORCHDYNAMO_DISABLE=1` on this box (its pinned
+torch 2.8/triton 3.4 pairing cannot compile against the node's CUDA 13.1 driver). Eager
+execution changes kernel selection, so this measures "SGLang vs vLLM-in-eager-mode", which
+if anything is a *conservative* comparison for the concordance claim: the two engines still
+agree to ~1e-3 despite differing kernel paths. The two engines also live in separate Python
+environments (SGLang in the image, vLLM in an isolated venv) and were run sequentially with
+an explicit engine shutdown in between, so neither perturbs the other's GPU memory.
+
+## Per-kernel attribution: which backend flag drives the amplification (verified)
+
+The KV-fp8 amplification above changes several things at once, so each backend flag was
+toggled **in isolation** and only step-0 `mis_kl` was measured -- no training, so the
+optimizer has not yet moved the policies apart and what is left is the pure numerical-path
+difference. Cheap (one rollout + one forward per cell) and directly attributable.
+
+| condition (Qwen3-4B, step 0) | train/mis_kl | vs baseline |
+| --- | --- | --- |
+| KV cache = auto (baseline) | 0.000716 | 1x |
+| KV fp8_e5m2 | 0.0324 | ~45x |
+| KV fp8_e4m3 | 0.0087 | ~12x |
+| KV fp8_e5m2 + attention backend forced to triton | 0.0319 | ~45x (same as fp8 alone) |
+| KV auto + CUDA graph disabled | 0.000671 | 1x |
+| KV auto + attention backend forced to triton (alone) | 0.000663 | 1x |
+
+Three readings:
+
+1. **KV quantisation drives essentially all of the amplification** (auto 0.0007 ->
+   fp8_e5m2 0.032, ~45x).
+2. **The effect is monotone in quantisation precision.** e4m3 (4 mantissa bits) gives
+   0.0087 while e5m2 (2 mantissa bits) gives 0.0324 -- fewer mantissa bits, larger
+   mismatch. This is what makes KV fp8 a *physically interpretable* amplifier rather than
+   an arbitrary knob: it moves the metric in a predictable direction and magnitude.
+3. **Attention backend and CUDA graph do nothing on their own.** Forcing triton alone
+   (0.000663) or disabling CUDA graphs (0.000671) is indistinguishable from baseline, and
+   layering triton on top of fp8 (0.0319) does not move fp8's own figure (0.0324).
+
+Each cell is a **single run point estimate**; per-condition variance was not measured. The
+`env_e4_c*` env files used for these cells are the amplified config with exactly one flag
+changed per cell.
+
 ## Collapse arm: KV fp8 amplification driven to divergence (verified)
 
 Running the KV fp8 amplified config (LR 1e-5, dropout 0, `--sglang-kv-cache-dtype
@@ -194,12 +277,59 @@ no divergence at all. This is slime's "cap-limited importance sampling rescues t
 result reproduced on miles: same amplified condition, TIS the only difference, collapse
 present without it and absent with it.
 
-## Multi-seed variance (UNVERIFIED)
+## Multi-seed collapse/rescue variance (verified -- 3 seeds x 30 steps)
 
-A multi-seed baseline (to put an error bar on the concordance) was started but the single
-p5en GPU node went `NotReady` (EC2 status `impaired` -- a borrowed-cluster hardware fault,
-not a workload issue) partway through the first extra seed. The baseline/30B numbers above
-remain single-seed point estimates.
+The collapse and rescue arms were re-run to completion on **3 seeds (1234 / 42 / 123)**,
+30 steps each, on p5 (H100 x8) -- the "n=1" error bar the single-seed tables above lacked.
+Both arms use the amplified condition (LR 1e-5, `--sglang-kv-cache-dtype fp8_e5m2`,
+dropout 0); the only difference between them is TIS (`--use-tis` with `mis.yaml`,
+`tis_upper_bound: 2.0`). Values are mean +/- sample sd across the 3 seeds.
+
+| step | no-TIS mis_kl | TIS mis_kl | no-TIS grad_norm | TIS grad_norm |
+| --- | --- | --- | --- | --- |
+| 0 | 0.0321 +/- 0.0009 | 0.0325 +/- 0.0006 | 0.140 +/- 0.018 | 0.110 +/- 0.001 |
+| 10 | 0.0809 +/- 0.0171 | 0.0656 +/- 0.0193 | 0.532 +/- 0.097 | 0.130 +/- 0.067 |
+| 14 | 0.3774 +/- 0.2143 | 0.0771 +/- 0.0255 | 2.195 +/- 1.090 | 0.084 +/- 0.086 |
+| 19 | 1.3494 +/- 1.3525 | 0.1019 +/- 0.0315 | 8.268 +/- 8.752 | 0.053 +/- 0.061 |
+| 24 | **5.4772 +/- 4.9519** | 0.1182 +/- 0.0250 | **31.98 +/- 16.46** | 0.054 +/- 0.074 |
+| 29 | 5.3022 +/- 7.2556 | **0.0994 +/- 0.0311** | 21.83 +/- 26.83 | **0.053 +/- 0.044** |
+
+Reward tells the same story, and is the metric a practitioner actually cares about:
+
+| step | no-TIS raw_reward | TIS raw_reward |
+| --- | --- | --- |
+| 0 | 0.456 +/- 0.052 | 0.458 +/- 0.032 |
+| 14 | 0.477 +/- 0.070 | 0.537 +/- 0.066 |
+| 19 | 0.375 +/- 0.193 | 0.633 +/- 0.061 |
+| 24 | 0.227 +/- 0.166 | 0.675 +/- 0.025 |
+| 29 | **0.081 +/- 0.114** | **0.529 +/- 0.078** |
+
+Three things the error bars add over the single-seed run:
+
+1. **The direction is not seed luck.** Every one of the 3 no-TIS seeds diverges and every
+   one of the 3 TIS seeds stays bounded. At step 0 the two arms are statistically
+   indistinguishable (0.0321 vs 0.0325, sd ~0.001), so the arms start from the same
+   numerical condition and separate only as training proceeds.
+2. **Collapse magnitude is wildly seed-dependent; its occurrence is not.** The no-TIS
+   sd grows to the same order as the mean (5.48 +/- 4.95 at step 24; grad_norm 31.98 +/-
+   16.46), i.e. *when* and *how hard* it blows up varies a lot per seed. Any single-seed
+   figure for the divergence magnitude -- including the 2.097 / 14.3 in the section above --
+   is one draw from a very wide distribution and must not be quoted as "the" magnitude.
+3. **TIS does not merely delay the collapse, and does not cost reward.** Over 30 steps the
+   TIS arm holds mis_kl ~0.03-0.12 and grad_norm ~0.05-0.13 with *shrinking* spread, while
+   its reward keeps improving (0.458 -> 0.675 at step 24) exactly where the no-TIS arm
+   collapses to 0.081. The rescue is not a stability-vs-performance trade-off here.
+
+Raw per-step series: [`results/e1_seed1234.json`](./results/e1_seed1234.json),
+[`results/e1_seed42.json`](./results/e1_seed42.json),
+[`results/e1_seed123.json`](./results/e1_seed123.json) -- each keyed
+`{disease,cure} -> metric -> step -> value`.
+
+### Still single-seed
+
+The baseline (LR 1e-6 bf16) and 30B MoE concordance tables earlier in this document are
+**still single-run point estimates** -- the 3-seed work covered the collapse/rescue arms
+only. The fork-concordance ratios (54x vs 49x) likewise remain single-seed.
 
 ## Verified vs not (see README Verification Status)
 
@@ -216,6 +346,21 @@ remain single-seed point estimates.
   grad_norm ~0.11-0.22 throughout -- no divergence, where the no-TIS arm hit mis_kl 2.10 /
   grad_norm 14.3 by step 24. The collapse-vs-rescue contrast (TIS the only difference) is
   the paper's rescue result reproduced on miles.
-- Untested (UNVERIFIED): multi-seed variance, Qwen3-30B-A3B MoE *disaggregated* (verified
-  only as colocated; disaggregated needs B300 HBM), and the disaggregated reward service.
-  All mirror slime and are marked UNVERIFIED.
+- Verified: **multi-seed variance on the collapse/rescue arms** -- 3 seeds (1234/42/123) x
+  30 steps on p5 (H100 x8). All 3 no-TIS seeds diverge, all 3 TIS seeds stay bounded, and
+  the TIS arm's reward keeps improving where no-TIS collapses. The collapse *magnitude* is
+  very seed-dependent (mis_kl 5.48 +/- 4.95 at step 24), so single-seed magnitudes must not
+  be quoted as "the" figure.
+- Verified: **per-kernel attribution** -- step-0 `mis_kl` with each backend flag toggled in
+  isolation. KV quantisation drives essentially all of the amplification and is monotone in
+  precision (e4m3 ~12x, e5m2 ~45x); attention backend and CUDA graph do nothing alone.
+  Single run per cell.
+- Verified: **cross-engine concordance (SGLang vs vLLM, 3 seeds)** -- k3_kl 8.35e-4 +/-
+  1.07e-4 on identical token sequences with no trainer involved, the same order as the
+  SGLang-vs-Megatron baseline. Shows the benign baseline mismatch is not SGLang-specific
+  and sets the noise floor that the KV-fp8 amplification clears by ~40x. vLLM ran in eager
+  mode (driver/triton constraint), so this is a conservative comparison.
+- Untested (UNVERIFIED): multi-seed variance on the **baseline and 30B MoE** tables (those
+  remain single-run point estimates, as does the 54x-vs-49x fork ratio), Qwen3-30B-A3B MoE
+  *disaggregated* (verified only as colocated; disaggregated needs B300 HBM), and the
+  disaggregated reward service. All mirror slime and are marked UNVERIFIED.

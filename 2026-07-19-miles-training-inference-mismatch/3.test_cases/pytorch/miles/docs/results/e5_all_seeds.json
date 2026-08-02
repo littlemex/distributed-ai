@@ -1,0 +1,26 @@
+[
+  {
+    "n_tokens": 8192,
+    "n_sequences": 32,
+    "mean_kl_sgl_minus_vllm": 0.00032907864202743383,
+    "mean_abs_diff": 0.01169980598306384,
+    "k3_kl_vllm_train_side": 0.0008001523217017072,
+    "seed": 42
+  },
+  {
+    "n_tokens": 8192,
+    "n_sequences": 32,
+    "mean_kl_sgl_minus_vllm": 0.001233202166652245,
+    "mean_abs_diff": 0.011666477292211739,
+    "k3_kl_vllm_train_side": 0.0007494360195358543,
+    "seed": 123
+  },
+  {
+    "n_tokens": 8192,
+    "n_sequences": 32,
+    "mean_kl_sgl_minus_vllm": 0.0013830612437862478,
+    "mean_abs_diff": 0.012809269684473278,
+    "k3_kl_vllm_train_side": 0.0009554002224254247,
+    "seed": 1234
+  }
+]

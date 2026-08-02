@@ -26,10 +26,13 @@ deliberately kept outside the upstream tree and must not be part of the contribu
 
 ## Status
 
-Validated on a **single H200x8 node only**. The verified path is Qwen3-4B colocated GRPO
-(1 step); multi-node, MoE-disaggregated, TIS rescue, and the disaggregated reward service
-are mirrored from slime but marked `UNVERIFIED`. See the Verification Status table in the
-inner README.
+Validated on H200x8 (single node and 2-node/16-GPU over EFA) and on p5/H100x8. Verified:
+Qwen3-4B colocated GRPO, Qwen3-30B-A3B MoE colocated on 16 GPU, the KV-fp8 collapse arm and
+the TIS rescue arm, **3-seed variance on collapse/rescue**, per-kernel attribution of the
+amplification, and **SGLang-vs-vLLM cross-engine concordance**. Still `UNVERIFIED`: 30B MoE
+*disaggregated* (needs B300 HBM), the disaggregated reward service, and multi-seed variance
+on the baseline / 30B tables. See the Verification Status table in the inner README and
+[`docs/RESULTS.md`](./3.test_cases/pytorch/miles/docs/RESULTS.md).
 
 ## Headline result
 
