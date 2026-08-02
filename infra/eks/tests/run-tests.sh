@@ -17,9 +17,12 @@ KEEP_NS=false
 TIMEOUT_BASE=60
 TIMEOUT_GPU=600
 GPU_COUNT=1
+# GPU test NodePool. Defaults to gpu-dev for backward compatibility; override with
+# --gpu-nodepool to match the accelerator_pools key actually defined in tfvars (e.g. gpu-ddp).
+GPU_NODEPOOL=gpu-dev
 
 # Manifest envsubst target variables (explicit list to avoid clobbering $TOKEN etc in Pod scripts)
-ENVSUBST_VARS='${NAMESPACE} ${FSX_VOLUME_HANDLE} ${FSX_DNS_NAME} ${FSX_MOUNT_NAME} ${OPENZFS_VOLUME_HANDLE} ${OPENZFS_DNS_NAME} ${GPU_COUNT}'
+ENVSUBST_VARS='${NAMESPACE} ${FSX_VOLUME_HANDLE} ${FSX_DNS_NAME} ${FSX_MOUNT_NAME} ${OPENZFS_VOLUME_HANDLE} ${OPENZFS_DNS_NAME} ${GPU_COUNT} ${GPU_NODEPOOL}'
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -30,13 +33,14 @@ while [[ $# -gt 0 ]]; do
     --region)       AWS_REGION_OPT="$2"; shift 2 ;;
     --profile)      AWS_PROFILE_OPT="$2"; shift 2 ;;
     --gpu-count)    GPU_COUNT="$2"; shift 2 ;;
+    --gpu-nodepool) GPU_NODEPOOL="$2"; shift 2 ;;
     --timeout-base) TIMEOUT_BASE="$2"; shift 2 ;;
     --timeout-gpu)  TIMEOUT_GPU="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
-export NAMESPACE GPU_COUNT
+export NAMESPACE GPU_COUNT GPU_NODEPOOL
 
 aws_cmd() {
   local args=("$@")

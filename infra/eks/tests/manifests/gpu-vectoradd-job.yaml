@@ -9,7 +9,7 @@ spec:
     spec:
       restartPolicy: Never
       nodeSelector:
-        karpenter.sh/nodepool: gpu-dev
+        karpenter.sh/nodepool: ${GPU_NODEPOOL}
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists

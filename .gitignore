@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# The generic Python `lib/` rule above also matched infra/eks/tests/lib/, which silently
+# excluded the smoke-test helper (common.sh) that run-tests.sh sources — a freshly cloned repo
+# could not run the tests. Re-include that directory explicitly.
+!infra/eks/tests/lib/
+!infra/eks/tests/lib/**
