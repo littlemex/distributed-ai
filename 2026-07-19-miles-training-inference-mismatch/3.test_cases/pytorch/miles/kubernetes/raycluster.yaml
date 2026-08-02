@@ -79,7 +79,7 @@ spec:
     minReplicas: 1
     numOfHosts: 1
     rayStartParams:
-      num-gpus: '8'
+      num-gpus: '${GPUS_PER_NODE}'
       resources: '"{\"gpu_node\": 1}"'
     replicas: 1
     template:
@@ -131,20 +131,20 @@ spec:
             limits:
               cpu: '96'
               memory: 1900Gi
-              nvidia.com/gpu: '8'
-              vpc.amazonaws.com/efa: '8'
+              nvidia.com/gpu: '${GPUS_PER_NODE}'
+              vpc.amazonaws.com/efa: '${EFA_PER_NODE}'
             requests:
               cpu: '90'
               memory: 1800Gi
-              nvidia.com/gpu: '8'
-              vpc.amazonaws.com/efa: '8'
+              nvidia.com/gpu: '${GPUS_PER_NODE}'
+              vpc.amazonaws.com/efa: '${EFA_PER_NODE}'
           volumeMounts:
           - mountPath: /fsx
             name: fsx
           - mountPath: /dev/shm
             name: dshm
         nodeSelector:
-          node-role: gpu-p5en
+          node-role: ${GPU_NODE_ROLE}
         restartPolicy: Never
         terminationGracePeriodSeconds: 300
         tolerations:

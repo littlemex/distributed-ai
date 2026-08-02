@@ -24,7 +24,12 @@
 # InvalidServiceName. IAM calls (e.g. Karpenter's ListInstanceProfiles) still need the NAT
 # or a working internet path.
 locals {
-  vpc_endpoint_services = ["ec2", "sts", "ssm"]
+  # ecr.api + ecr.dkr are required so private-subnet nodes can pull EKS-managed images
+  # (VPC CNI / kube-proxy / EFA & GPU device plugins) without depending solely on NAT.
+  # ecr.dkr fetches layers via the S3 gateway endpoint (defined separately below).
+  # logs = CloudWatch Logs for node/pod logging. NAT still covers non-ECR registries
+  # (nvcr.io, quay.io, registry.k8s.io) and IAM (global, no interface endpoint).
+  vpc_endpoint_services = ["ec2", "sts", "ssm", "ecr.api", "ecr.dkr", "logs"]
 }
 
 resource "aws_security_group" "vpc_endpoints" {

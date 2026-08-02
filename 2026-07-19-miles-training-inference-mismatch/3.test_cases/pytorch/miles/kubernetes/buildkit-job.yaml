@@ -32,7 +32,7 @@ spec:
                 --frontend dockerfile.v0 \
                 --local context=/workspace \
                 --local dockerfile=/workspace \
-                --output type=image,name=<AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/miles-hyperpod:miles-dev202607182122-efa1.48,push=true \
+                --output type=image,name=${FULL_IMAGE},push=true \
                 --progress=plain
           env:
             - { name: DOCKER_CONFIG, value: /root/.docker }

@@ -20,9 +20,13 @@ module "vpc" {
   private_subnets = local.private_subnets
   public_subnets  = local.public_subnets
 
+  # One NAT per AZ (not a single shared NAT): a single NAT is an AZ-level SPOF —
+  # if that AZ degrades, every private node loses egress and all image pulls die.
+  # NAT cost ($0.045/h + data) is negligible next to p5/GPU spend, so we buy the
+  # AZ-fault isolation. Each AZ's private route table points at its own AZ's NAT.
   enable_nat_gateway     = true
-  single_nat_gateway     = true
-  one_nat_gateway_per_az = false
+  single_nat_gateway     = false
+  one_nat_gateway_per_az = true
 
   enable_dns_hostnames = true
   enable_dns_support   = true
