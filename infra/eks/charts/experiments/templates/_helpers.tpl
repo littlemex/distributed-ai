@@ -41,6 +41,18 @@ Shared-storage PVC name. If sharedStorage.existingClaimName is set, use it direc
 {{- end -}}
 
 {{/*
+Resolve a Neuron DLC image. If the workload sets an explicit `image`, use it verbatim
+(full override). Otherwise build "{dlc.registry}/{repoTag}" from the shared registry so the
+region+account ID is defined once (see values.yaml `dlc`). Call as:
+  {{ include "experiments.dlcImage" (dict "image" $v.image "repoTag" "pytorch-inference-neuronx:2.9.0-..." "root" $) }}
+*/}}
+{{- define "experiments.dlcImage" -}}
+{{- if .image -}}{{ .image }}
+{{- else -}}{{ .root.Values.dlc.registry }}/{{ .repoTag }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Neuron accelerator tolerations: the device-plugin taint, the EFA taint, and the
 Capacity Block taint (value rotates per reservation, so Exists). Indented under a
 `tolerations:` key by the caller; include with the correct indent, e.g.

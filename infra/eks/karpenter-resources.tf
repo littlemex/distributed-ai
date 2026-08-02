@@ -80,9 +80,14 @@ locals {
   # now derives protect (efa>0 → protect, ADR D6), moving its budget/consolidate 10%/5m → 0/Never —
   # correct for an EFA collective (any voluntary disruption kills every rank) and inert for the
   # current tfvars (gpu-dev has efa=0 → reclaim, unchanged).
+  # protect/reclaim gate the accelerator pools (see pool_disruption_preset). generic is the
+  # CPU NodePool's preset (ADR D6): reclaim an idle CPU node quickly since it holds no
+  # collective. Kept in this one table so "everything disruption lives here" holds — the CPU
+  # NodePool body references local.disruption_presets.generic instead of an inline literal.
   disruption_presets = {
     protect = { consolidate_after = "Never", budget_nodes = "0" }
     reclaim = { consolidate_after = "5m", budget_nodes = "10%" }
+    generic = { consolidate_after = "30s", budget_nodes = "10%" }
   }
 
   # Per-pool consolidateAfter: an explicit pool.consolidate_after override wins, else the preset.
@@ -166,20 +171,69 @@ locals {
     tags            = local.nodeclass_tags
   }
 
+  # Image-pull tuning shared by ALL pools (Phase 0 of the image-cache strategy — see the
+  # Advanced "image cache" chapter). These are stateless, node-local, and degrade to plain
+  # cold-pull if they do nothing: nothing here adds a shared cache service that could wedge.
+  # Defined once here and interpolated into BOTH nodeadm heredocs below so the accelerator and
+  # CPU user_data can never drift apart (a mistyped value in one heredoc is a silent skew).
+  #   containerd max_concurrent_downloads (default 3) → 8 so a big multi-layer image's layers
+  #     fetch in parallel; merged into the default containerd TOML. discard_unpacked_layers=false
+  #     keeps compressed blobs so a future P2P mirror could serve them (harmless otherwise).
+  #   kubelet serializeImagePulls=false + maxParallelImagePulls: distinct images pull concurrently.
+  #   imageMaximumGCAge: cap how long an unused image lingers so prewarmed/old-digest images do
+  #     not accumulate forever, WITHOUT the aggressive default disk-threshold GC evicting a live
+  #     training image. (imagefs is the NVMe RAID0 on accelerator nodes, so the 85/80 thresholds
+  #     are effectively never hit there; this bounds age instead of space.)
+  image_pull_max_concurrent_downloads = 8
+  image_pull_max_parallel             = 8
+  image_maximum_gc_age                = "168h"
+  # systemReserved memory for accelerator nodes only (keeps the kubelet stable under heavy
+  # training memory pressure); the CPU pool omits it.
+  accelerator_system_reserved_memory = "2Gi"
+
   # AL2023 nodeadm config shared by accelerated nodes. localStorage Raid0 stripes instance
   # store (NVMe) when present; systemReserved keeps the kubelet stable under heavy memory.
+  # The image-pull tuning above is folded in via kubelet.config / containerd.config.
   accelerator_user_data = <<-EOT
     ---
     apiVersion: node.eks.aws/v1alpha1
     kind: NodeConfig
     spec:
+      containerd:
+        config: |
+          [plugins."io.containerd.cri.v1.images"]
+            discard_unpacked_layers = false
+            max_concurrent_downloads = ${local.image_pull_max_concurrent_downloads}
       kubelet:
         config:
           systemReserved:
-            memory: "2Gi"
+            memory: "${local.accelerator_system_reserved_memory}"
+          serializeImagePulls: false
+          maxParallelImagePulls: ${local.image_pull_max_parallel}
+          imageMaximumGCAge: "${local.image_maximum_gc_age}"
       instance:
         localStorage:
           strategy: Raid0
+  EOT
+
+  # CPU pool nodeadm: same image-pull tuning, but NO localStorage Raid0 (m5a-class has no NVMe
+  # instance store; imagefs = nodefs = the gp3 root). systemReserved is lighter (no accelerator
+  # memory pressure). Paired with a higher gp3 throughput on the CPU NodeClass below.
+  cpu_user_data = <<-EOT
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      containerd:
+        config: |
+          [plugins."io.containerd.cri.v1.images"]
+            discard_unpacked_layers = false
+            max_concurrent_downloads = ${local.image_pull_max_concurrent_downloads}
+      kubelet:
+        config:
+          serializeImagePulls: false
+          maxParallelImagePulls: ${local.image_pull_max_parallel}
+          imageMaximumGCAge: "${local.image_maximum_gc_age}"
   EOT
 }
 
@@ -484,15 +538,22 @@ resource "kubectl_manifest" "ec2nodeclass_cpu" {
     metadata   = { name = "cpu" }
     spec = merge(local.nodeclass_common, {
       amiSelectorTerms = [{ alias = "al2023@latest" }]
+      # CPU nodes have no NVMe instance store, so imagefs = the gp3 root. gp3's 125MiB/s baseline
+      # throughput is the real bottleneck for a multi-GB image pull (download + extract both write
+      # here). Raise it (throughput is cheap and node lifetime is short). IOPS bumped to match.
       blockDeviceMappings = [{
         deviceName = "/dev/xvda"
         ebs = {
           volumeSize          = var.cpu_node_volume_size
           volumeType          = "gp3"
+          throughput          = var.cpu_node_volume_throughput
+          iops                = var.cpu_node_volume_iops
           deleteOnTermination = true
           encrypted           = true
         }
       }]
+      # Image-pull tuning (containerd parallel download + kubelet parallel pull + GC age bound).
+      userData = local.cpu_user_data
     })
   })
 
@@ -547,9 +608,11 @@ resource "kubectl_manifest" "nodepool_cpu" {
         }
       }
       disruption = {
-        # CPU nodes can be reclaimed promptly when idle.
+        # CPU nodes can be reclaimed promptly when idle. consolidateAfter comes from the
+        # shared disruption_presets.generic entry (ADR D6) so no disruption value lives
+        # outside that one table.
         consolidationPolicy = "WhenEmptyOrUnderutilized"
-        consolidateAfter    = "30s"
+        consolidateAfter    = local.disruption_presets.generic.consolidate_after
       }
       limits = {
         cpu = var.cpu_nodepool_cpu_limit

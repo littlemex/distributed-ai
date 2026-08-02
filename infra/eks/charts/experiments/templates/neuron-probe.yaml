@@ -34,7 +34,7 @@ spec:
     {{- include "experiments.neuronTolerations" . | nindent 4 }}
   containers:
     - name: probe
-      image: {{ $v.image }}
+      image: {{ include "experiments.dlcImage" (dict "image" $v.image "repoTag" $v.dlcRepoTag "root" $) }}
       command: ["sleep", "3600"]
       # No hugepages request here on purpose: Karpenter does not size a new node against
       # hugepages, so requesting them on a pod that triggers provisioning makes Karpenter

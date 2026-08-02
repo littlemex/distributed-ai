@@ -87,7 +87,7 @@ spec:
     {{- include "experiments.neuronTolerations" $ | nindent 4 }}
   containers:
     - name: neuron
-      image: {{ $v.image }}
+      image: {{ include "experiments.dlcImage" (dict "image" $v.image "repoTag" $v.dlcRepoTag "root" $) }}
       # sshd as PID-1 subordinate keeps the container alive; port 2222 avoids the node's sshd.
       command:
         {{- include "experiments.sshdCommand" $ | nindent 8 }}

@@ -43,7 +43,7 @@ spec:
         - { key: capacity-reservation,   operator: Exists, effect: NoSchedule }
       containers:
         - name: vllm
-          image: {{ $v.image }}
+          image: {{ include "experiments.dlcImage" (dict "image" $v.image "repoTag" $v.dlcRepoTag "root" $) }}
           command: ["python", "-m", "vllm.entrypoints.openai.api_server"]
           args:
             - --model={{ $v.model }}
