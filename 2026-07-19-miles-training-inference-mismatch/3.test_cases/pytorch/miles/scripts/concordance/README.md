@@ -60,6 +60,17 @@ python3 sglang_rescore_reversed.py 1234 /tmp/e5/rev.json /tmp/e5/rev_summary.jso
 Forward runs write `mean_kl_sgl_minus_vllm`, `mean_abs_diff` and `k3_kl_vllm_train_side`;
 reversed runs write `mean_kl_rollout_minus_trainside`, `mean_abs_diff` and `k3_kl`.
 
+`run_model_scale.sh` sweeps `E5_MODEL` over Qwen3-1.7B / 4B / 8B to check the figure is not
+specific to one model size. Stage the extra models first (note `hf download` needs one
+`--exclude` flag *per* pattern -- several bare patterns after a single `--exclude` are all
+consumed as excludes and nothing is downloaded):
+
+```bash
+hf download Qwen/Qwen3-1.7B --local-dir /fsx/models/Qwen3-1.7B --exclude "*.pth" --exclude "*.gguf"
+hf download Qwen/Qwen3-8B   --local-dir /fsx/models/Qwen3-8B   --exclude "*.pth" --exclude "*.gguf"
+bash run_model_scale.sh
+```
+
 ## Environment gotchas hit on p5 (H100, CUDA 13.1 driver)
 
 - **`__main__` guard is mandatory** in `sglang_generate.py`. SGLang's `Engine` spawns

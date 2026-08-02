@@ -30,7 +30,7 @@ print(f"[E5-p2] loaded {len(records)} sgl records", flush=True)
 from vllm import LLM, SamplingParams
 from vllm.inputs import TokensPrompt
 
-MODEL = "/fsx/models/Qwen3-4B"
+MODEL = os.environ.get("E5_MODEL", "/fsx/models/Qwen3-4B")
 llm = LLM(model=MODEL, tensor_parallel_size=1, gpu_memory_utilization=0.5, enforce_eager=True, seed=SEED_ARG)
 print(f"[E5-p2] vLLM loaded t={time.time()-t0:.1f}s", flush=True)
 

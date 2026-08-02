@@ -1,0 +1,29 @@
+[
+  {
+    "n_tokens": 32768,
+    "n_sequences": 128,
+    "mean_kl_sgl_minus_vllm": 0.0008572214833132287,
+    "mean_abs_diff": 0.013180393030930205,
+    "k3_kl_vllm_train_side": 0.0009586443476426619,
+    "seed": 1234,
+    "model": "Qwen3-1.7B"
+  },
+  {
+    "n_tokens": 32768,
+    "n_sequences": 128,
+    "mean_kl_sgl_minus_vllm": 0.0008693889245919026,
+    "mean_abs_diff": 0.012016052872383802,
+    "k3_kl_vllm_train_side": 0.00081380728304115,
+    "seed": 1234,
+    "model": "Qwen3-4B"
+  },
+  {
+    "n_tokens": 32768,
+    "n_sequences": 128,
+    "mean_kl_sgl_minus_vllm": 0.0006877008489376518,
+    "mean_abs_diff": 0.011743223103248865,
+    "k3_kl_vllm_train_side": 0.0007737526721706617,
+    "seed": 1234,
+    "model": "Qwen3-8B"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "n_tokens": 32768,
+  "n_sequences": 128,
+  "mean_kl_sgl_minus_vllm": 0.0006877008489376518,
+  "mean_abs_diff": 0.011743223103248865,
+  "k3_kl_vllm_train_side": 0.0007737526721706617,
+  "seed": 1234
+}

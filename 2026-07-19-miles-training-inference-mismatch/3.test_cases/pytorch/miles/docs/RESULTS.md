@@ -206,6 +206,25 @@ The two agree well inside each other's spread. Whichever engine plays the rollou
 measured gap is ~8e-4, so the metric is capturing the symmetric numerical-path difference
 between the pair rather than a quirk of one engine's sampling loop.
 
+### It barely moves across model scale
+
+Every other measurement in this study uses Qwen3-4B, so the concordance figure could in
+principle be a property of that one model. The same forward harness was therefore run on
+three dense Qwen3 sizes (seed 1234, 128 prompts / 32768 response tokens each):
+
+| model | k3_kl | mean kl (SGLang - vLLM) | mean abs diff |
+| --- | --- | --- | --- |
+| Qwen3-1.7B | 0.000959 | 0.000857 | 0.01318 |
+| Qwen3-4B | 0.000814 | 0.000869 | 0.01202 |
+| Qwen3-8B | 0.000774 | 0.000688 | 0.01174 |
+
+A **4.7x span in parameter count moves k3_kl by 1.24x** (9.59e-4 -> 7.74e-4), and the trend
+is mildly *downward* rather than upward. So the ~1e-3 cross-engine gap is not an artefact of
+the 4B model: it is roughly scale-invariant over this range, which is what one expects if it
+is set by per-op floating-point ordering differences rather than by model capacity. Single
+seed per model (the 3-seed spread at 4B was +/- 0.20e-4, well below the spread across
+models), and all three are dense models -- MoE was not covered here.
+
 The engine-vs-engine gap (k3_kl 8.35e-4 +/- 1.07e-4) is **the same order as the
 SGLang-vs-Megatron baseline** (mis_kl ~6.2e-4 on miles, ~5.3e-4 on slime), and it is far
 more stable run-to-run than either the collapse magnitude or the fork-concordance ratio
@@ -224,7 +243,7 @@ Raw data: [`results/e5_all_seeds.json`](./results/e5_all_seeds.json) (per-seed s
 the same directory). Harness and reproduction steps:
 [`../scripts/concordance/`](../scripts/concordance/).
 
-Caveats: single model (Qwen3-4B dense), 32 prompts / 8192 tokens per seed, and vLLM had to
+Caveats: dense models only (1.7B/4B/8B; no MoE), and vLLM had to
 run with `enforce_eager=True` plus `TORCHDYNAMO_DISABLE=1` on this box (its pinned
 torch 2.8/triton 3.4 pairing cannot compile against the node's CUDA 13.1 driver). Eager
 execution changes kernel selection, so this measures "SGLang vs vLLM-in-eager-mode", which
@@ -391,13 +410,14 @@ only. The fork-concordance ratios (54x vs 49x) likewise remain single-seed.
   isolation. KV quantisation drives essentially all of the amplification and is monotone in
   precision (e4m3 ~12x, e5m2 ~45x); attention backend and CUDA graph do nothing alone.
   Single run per cell.
-- Verified: **cross-engine concordance (SGLang vs vLLM, 3 seeds, both directions)** -- k3_kl
-  8.06e-4 +/- 0.20e-4 at 128 prompts (32768 tokens) per seed on identical token sequences
-  with no trainer involved, the same order as the SGLang-vs-Megatron baseline. Reversing the
-  roles (vLLM generates, SGLang re-scores) gives 7.92e-4 +/- 0.61e-4, so the metric is
-  symmetric in the pair. Shows the benign baseline mismatch is not SGLang-specific and sets
+- Verified: **cross-engine concordance (SGLang vs vLLM)** -- k3_kl 8.06e-4 +/- 0.20e-4 over
+  3 seeds at 128 prompts (32768 tokens) each, on identical token sequences with no trainer
+  involved: the same order as the SGLang-vs-Megatron baseline. Reversing the roles (vLLM
+  generates, SGLang re-scores) gives 7.92e-4 +/- 0.61e-4, so the metric is symmetric in the
+  pair. Across model scale (Qwen3-1.7B/4B/8B) it spans only 1.24x, so it is not an artefact
+  of the 4B model either. Shows the benign baseline mismatch is not SGLang-specific and sets
   the noise floor that the KV-fp8 amplification clears by ~40x. vLLM ran in eager mode
-  (driver/triton constraint), so this is a conservative comparison.
+  (driver/triton constraint), so this is a conservative comparison; dense models only.
 - Untested (UNVERIFIED): multi-seed variance on the **baseline and 30B MoE** tables (those
   remain single-run point estimates, as does the 54x-vs-49x fork ratio), Qwen3-30B-A3B MoE
   *disaggregated* (verified only as colocated; disaggregated needs B300 HBM), and the

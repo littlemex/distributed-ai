@@ -20,13 +20,13 @@ multiprocessing "spawn", which re-imports this file as __main__ in each child.
 Without the guard, module-level code (including sgl.Engine() itself) reruns
 recursively in every child process.
 """
-import json, sys, time, gc
+import json, os, sys, time, gc
 
 
 def main():
     SEED_ARG = int(sys.argv[1]) if len(sys.argv) > 1 else 1234
     OUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/e5/sgl_records.json"
-    MODEL = "/fsx/models/Qwen3-4B"
+    MODEL = os.environ.get("E5_MODEL", "/fsx/models/Qwen3-4B")
     DATA = "/fsx/data/dapo-math-17k/dapo-math-17k.jsonl"
     N_PROMPTS = int(__import__("os").environ.get("E5_N_PROMPTS", "32"))
     MAX_NEW_TOKENS = 256
