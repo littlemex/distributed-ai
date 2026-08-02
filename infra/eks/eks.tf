@@ -56,13 +56,22 @@ module "eks" {
 
   ################################################################################
   # System managed node group — m5.xlarge x2
-  # These nodes host kube-system and Karpenter itself.
-  # They are NOT managed by Karpenter (label prevents self-scheduling).
+  # These nodes host kube-system and Karpenter itself. They are NOT managed by
+  # Karpenter (label prevents self-scheduling). This tier is a SANCTUARY: only
+  # things that must already be running for the cluster to recover when Karpenter
+  # is down (kube-system + the Karpenter controller) belong here. Operators
+  # (gpu/mpi/kuberay) and workloads (e.g. a Ray head) go on the Karpenter `cpu`
+  # pool instead. See docs/node-role-separation.md.
   ################################################################################
   eks_managed_node_groups = {
     system = {
       ami_type       = var.system_node_ami_type
       instance_types = var.system_node_instance_types
+
+      # Bigger than the ~20 GB default so kube-system images + logs never crowd the
+      # disk. NOTE: changing disk_size rolls (replaces) the system nodes, so apply
+      # this in a calm window (CoreDNS >=2 replicas + PDB) — migration step 6.
+      disk_size = var.system_node_volume_size
 
       min_size     = var.system_node_desired_size
       max_size     = var.system_node_desired_size
@@ -70,7 +79,21 @@ module "eks" {
 
       labels = {
         "karpenter.sh/controller" = "true"
+        # Positive role label (same `node-role` key the Karpenter pools use — cpu
+        # pool = "cpu", accelerator pools = their name) so workloads target a tier
+        # explicitly and never fall back onto system via a negative "not-GPU" affinity.
+        "node-role" = "system"
       }
+
+      # SANCTUARY TAINT — DO NOT enable until the operators (gpu/mpi/kuberay) have
+      # been moved to the `cpu` pool (migration steps 2-3 in
+      # docs/node-role-separation.md). NoSchedule does not evict running pods, so
+      # enabling it early is a time bomb: the operators stay put until their next
+      # rollout, then Pending-bomb with nowhere to go. Verified today: kube-system
+      # + karpenter tolerate this; gpu/mpi/kuberay operators do NOT.
+      # taints = {
+      #   critical = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+      # }
     }
   }
 
