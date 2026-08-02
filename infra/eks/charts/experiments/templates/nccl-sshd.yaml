@@ -60,7 +60,7 @@ spec:
           chmod 600 /root/.ssh/config
           exec /usr/sbin/sshd -D -p 2222
       securityContext:
-        privileged: true   # Required for EFA device access and /dev/gdrdrv.
+        privileged: true   # Required for EFA device access.
       env:
         - { name: FI_PROVIDER,            value: "efa" }
         - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
@@ -78,10 +78,20 @@ spec:
           memory:        {{ $v.memory }}
           hugepages-2Mi: {{ $v.hugepages }}
       volumeMounts:
+        {{- if $v.gdrcopy }}
         - { name: gdrdrv, mountPath: /dev/gdrdrv }
+        {{- end }}
         - { name: shm,    mountPath: /dev/shm }
   volumes:
+    {{- /* gdrdrv is OPT-IN. The GPU Operator installs gdrcopy only when
+       gpu_operator_enable_gdrcopy=true (gpu-addons.tf keeps it OFF by default, since gdrcopy is
+       a GPUDirect latency optimization that NCCL does not require). Without that module there is
+       no /dev/gdrdrv, and an unconditional hostPath with type: CharDevice makes the kubelet
+       retry "hostPath type check failed: /dev/gdrdrv is not a character device" forever — the
+       pod never starts. Only mount it when the cluster actually has it. */ -}}
+    {{- if $v.gdrcopy }}
     - { name: gdrdrv, hostPath: { path: /dev/gdrdrv, type: CharDevice } }
+    {{- end }}
     - { name: shm,    emptyDir: { medium: Memory, sizeLimit: {{ $v.shmSize }} } }
 {{- end }}
 {{- end }}

@@ -61,7 +61,28 @@ done
 
 if [[ -z "$IMAGE" ]]; then
   echo "Error: --image is required." >&2
-  echo "  Example: $0 --namespace my-ns --image <ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/nccl-tests:latest" >&2
+  echo "  Example: $0 --namespace my-ns --image public.ecr.aws/hpc-cloud/nccl-tests:<tag>" >&2
+  exit 1
+fi
+
+# MPIJob is NOT part of this module's control plane. trainer.tf installs Kubeflow Trainer v2,
+# which collapsed the per-framework CRDs (PyTorchJob/TFJob/MPIJob/...) into TrainJob, so
+# mpi-operator is deliberately absent. Fail fast with the alternative rather than applying a
+# manifest whose CRD does not exist.
+if ! kubectl get crd mpijobs.kubeflow.org >/dev/null 2>&1; then
+  echo "Error: the MPIJob CRD (mpijobs.kubeflow.org) is not installed in this cluster." >&2
+  echo "  This module installs Kubeflow Trainer v2 (TrainJob), which replaced MPIJob; the" >&2
+  echo "  mpi-operator is intentionally not part of it. Two ways forward:" >&2
+  echo "" >&2
+  echo "  1. Use the sshd + mpirun bench in charts/experiments, which needs no MPI operator:" >&2
+  echo "       GPU=\$(kubectl get nodes -l node-role=<pool> -o jsonpath=\"{.items[0].status.allocatable['nvidia\\.com/gpu']}\")" >&2
+  echo "       EFA=\$(kubectl get nodes -l node-role=<pool> -o jsonpath=\"{.items[0].status.allocatable['vpc\\.amazonaws\\.com/efa']}\")" >&2
+  echo "       helm template exp charts/experiments -n <ns> --set namespace=<ns> \\" >&2
+  echo "         --set ncclSshd.enabled=true --set ncclSshd.nodeRole=<pool> \\" >&2
+  echo "         --set ncclSshd.gpuCount=\$GPU --set ncclSshd.efaCount=\$EFA \\" >&2
+  echo "         --set ncclSshd.image=$IMAGE | kubectl apply -f -" >&2
+  echo "" >&2
+  echo "  2. Install mpi-operator separately if you specifically want the MPIJob path." >&2
   exit 1
 fi
 

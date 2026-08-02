@@ -186,6 +186,12 @@ ncclSshd:
   memory: 128Gi
   cpu: "16"
   shmSize: 16Gi
+  # Mount /dev/gdrdrv into the bench pods. Requires the gdrdrv kernel module, which the GPU
+  # Operator installs only when gpu_operator_enable_gdrcopy=true (OFF by default in
+  # gpu-addons.tf — gdrcopy is a GPUDirect latency optimization, not needed for NCCL). Leave
+  # false unless that is enabled: a hostPath for a device node that does not exist makes the
+  # kubelet block on "hostPath type check failed" and the pods never start.
+  gdrcopy: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # sharedStorage — the /shared RWX mount for torchrunTrain + pytorchjobTrain. Selects which
