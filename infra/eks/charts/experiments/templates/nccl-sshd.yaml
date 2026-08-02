@@ -42,11 +42,7 @@ spec:
             matchLabels: { app: nccl-bench }
           topologyKey: kubernetes.io/hostname
   tolerations:
-    - { key: nvidia.com/gpu,                             operator: Exists, effect: NoSchedule }
-    - { key: vpc.amazonaws.com/efa,                      operator: Exists, effect: NoSchedule }
-    - { key: workload,                                   operator: Equal,  value: bench, effect: NoSchedule }
-    - { key: capacity-reservation,                       operator: Exists, effect: NoSchedule }
-    - { key: sagemaker.amazonaws.com/node-health-status, operator: Equal,  value: Schedulable, effect: NoSchedule }
+    {{- include "experiments.gpuBenchTolerations" . | nindent 4 }}
   containers:
     - name: bench
       image: {{ $v.image }}

@@ -21,16 +21,25 @@
 #                         (see the check block's own comment); it is a visibility aid, not a gate.
 
 locals {
-  # Reserved pools that carry a reservation id. Keyed by pool name.
+  # Reserved pools that carry at least one reservation id. Keyed by pool name. This reads the
+  # NORMALIZED pool_effective view (locals.tf, ADR0001) rather than the raw legacy fields, so a
+  # pool declared in EITHER form is recognized: legacy (capacity_type="reserved" +
+  # cb_reservation_id) OR new (capacity_types=["reserved"] + capacity_reservations={ids=[...]}).
+  # Keying off the raw p.capacity_type == "reserved" here would silently drop new-form reserved
+  # pools from the CB describe below — and therefore from CB end-date alerts (eventbridge-cb-alarm.tf)
+  # and zone auto-resolution — with no plan/apply error. Requires reservation_ids to be non-empty
+  # (tag-only reservations expose no id to describe; a variables.tf validation guarantees a reserved
+  # pool has ids or tags, and zone/end-date auto-resolution only applies to id-based reservations).
   cb_reserved_pools = {
     for k, p in var.accelerator_pools : k => p
-    if p.capacity_type == "reserved" && p.cb_reservation_id != ""
+    if local.pool_effective[k].has_reserved && length(local.pool_effective[k].reservation_ids) > 0
   }
 
-  # Distinct reservation ids, comma-joined for a single describe call.
-  cb_reservation_ids_csv = join(",", distinct([
-    for k, p in local.cb_reserved_pools : p.cb_reservation_id
-  ]))
+  # Distinct reservation ids across all reserved pools (new-form pools may carry several),
+  # comma-joined for a single describe call.
+  cb_reservation_ids_csv = join(",", distinct(flatten([
+    for k, p in local.cb_reserved_pools : local.pool_effective[k].reservation_ids
+  ])))
 }
 
 # One describe call for all reserved reservation ids. Config depends only on var values, so
@@ -55,21 +64,30 @@ locals {
   # Flat "<id>.<field>" result map (empty when there are no reserved pools).
   cb_meta_flat = length(local.cb_reserved_pools) > 0 ? data.external.capacity_reservations[0].result : {}
 
+  # Representative reservation id per reserved pool: the first normalized id (pool_effective
+  # merges legacy cb_reservation_id and new capacity_reservations.ids). end_date/zone/state are
+  # read for this id. A pool bundling several reservations is rare; the first reservation's AZ
+  # is the representative zone (all ids in one pool should share an AZ anyway). Using the raw
+  # legacy p.cb_reservation_id here would look up "" for a new-form pool and silently drop it.
+  pool_cb_rep_id = {
+    for k, p in local.cb_reserved_pools : k => local.pool_effective[k].reservation_ids[0]
+  }
+
   # Per-pool derived values. end_date: an explicit tfvars cb_end_date still wins (emergency
   # override); otherwise use the reservation's EndDate. zone/state are read straight from the
   # reservation for validation below.
   pool_cb_end_date = {
     for k, p in local.cb_reserved_pools : k => (
-      p.cb_end_date != "" ? p.cb_end_date : lookup(local.cb_meta_flat, "${p.cb_reservation_id}.end_date", "")
+      p.cb_end_date != "" ? p.cb_end_date : lookup(local.cb_meta_flat, "${local.pool_cb_rep_id[k]}.end_date", "")
     )
   }
   pool_cb_zone = {
     for k, p in local.cb_reserved_pools : k =>
-    lookup(local.cb_meta_flat, "${p.cb_reservation_id}.availability_zone", "")
+    lookup(local.cb_meta_flat, "${local.pool_cb_rep_id[k]}.availability_zone", "")
   }
   pool_cb_state = {
     for k, p in local.cb_reserved_pools : k =>
-    lookup(local.cb_meta_flat, "${p.cb_reservation_id}.state", "")
+    lookup(local.cb_meta_flat, "${local.pool_cb_rep_id[k]}.state", "")
   }
 }
 

@@ -18,8 +18,21 @@ run_test() {
   local start end elapsed rc
   start=$(date +%s)
   set +e
-  ( set -e; $func )
+  # Enforce timeout_sec without a sub-shell: run the test function in the background (it keeps
+  # this shell's functions/vars — aws_cmd, apply_manifest, CLUSTER_NAME, ...) and kill it if it
+  # outlives the deadline. A hung kubectl/aws (e.g. unreachable API server) is aborted with
+  # rc=124 instead of hanging forever. Before this, timeout_sec was accepted but never applied
+  # and the rc==124 branch below was dead code.
+  ( set -e; $func ) &
+  local test_pid=$!
+  ( sleep "$timeout_sec"; kill -0 "$test_pid" 2>/dev/null && kill -TERM "$test_pid" 2>/dev/null ) &
+  local watcher_pid=$!
+  wait "$test_pid" 2>/dev/null
   rc=$?
+  # Stop the watcher if the test finished first.
+  kill -TERM "$watcher_pid" 2>/dev/null; wait "$watcher_pid" 2>/dev/null
+  # A killed test returns 143 (128+SIGTERM); normalize to 124 so the timeout branch below fires.
+  [ $rc -eq 143 ] && rc=124
   set -e
   end=$(date +%s)
   elapsed=$((end - start))
