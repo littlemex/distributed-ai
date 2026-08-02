@@ -268,7 +268,7 @@ trainjobTrain:
   # holds the antiAffinity / tolerations / shared PVC / shm / do-not-disrupt scaffolding; this
   # block sets only the per-job knobs.
   numNodes: 2          # training nodes; the torch plugin injects PET_NNODES = this
-  nodeRole: cpu        # node pool (cpu for gloo DDP; e.g. gpu-g5 for nccl)
+  nodeRole: cpu        # accelerator_pools key (cpu for gloo DDP; e.g. gpu-ddp for nccl)
   # processes PER node. Set explicitly — never "auto" (on CPU the plugin would derive it from the
   # CPU request). Keep == gpu.count on GPU (one proc per GPU); 1 on CPU.
   nprocPerNode: 1
@@ -285,12 +285,26 @@ trainjobTrain:
 # ─────────────────────────────────────────────────────────────────────────────
 gpuServingVllm:
   enabled: false
-  nodeRole: gpu-g5
+  # REQUIRED: the accelerator_pools key of the target GPU pool (Karpenter labels its nodes
+  # node-role=<key>). No default that looks plausible — "gpu-g5" used to sit here and names a
+  # pool this module never creates, so the deployment stayed Pending and Karpenter kept adding
+  # nodes trying to satisfy it.
+  nodeRole: ""
   model: NousResearch/Meta-Llama-3-8B-Instruct
   # Pin to a released tag (or digest) for reproducibility; :latest changes under you between
   # runs. vllmRay below pins v0.6.3.post1 — pick a tag you have verified for your model.
   image: vllm/vllm-openai:v0.6.3.post1
   gpuCount: 1
+  # memory is used for BOTH requests and limits, and shmSize below is an
+  # emptyDir{medium: Memory} that counts against the SAME container memory limit. The pod's real
+  # demand is memory + shmSize, so both must fit the smallest node the pool can pick. Getting
+  # this wrong does not just leave the pod Pending: the scheduler reports insufficient memory,
+  # Karpenter reads that as "add a bigger node", and since no instance type in the pool is big
+  # enough it launches node after node — 11 spot nodes were observed for a single replica before
+  # the run was stopped (2026-08-03). Check with:
+  #   kubectl get nodes -l node-role=<pool> -o custom-columns=\
+  #     'TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,MEM:.status.allocatable.memory'
+  # Verified: memory=8Gi + shmSize=2Gi fits a g6.xlarge (12.6Gi allocatable).
   memory: 48Gi
   # CPU request. Keep well below the pool's smallest node's allocatable so the pod
   # schedules: a g6.2xlarge/g5.2xlarge (8 vCPU) has ~7.9 allocatable after kube/system
@@ -342,8 +356,18 @@ neuronServingVllm:
 # ─────────────────────────────────────────────────────────────────────────────
 vllmRay:
   enabled: false
-  nodeRole: gpu-g5
+  nodeRole: ""
   model: NousResearch/Meta-Llama-3-8B-Instruct
   image: vllm/vllm-openai:v0.6.3.post1
   gpuCount: 1
+  # memory is used for BOTH requests and limits, and shmSize below is an
+  # emptyDir{medium: Memory} that counts against the SAME container memory limit. The pod's real
+  # demand is memory + shmSize, so both must fit the smallest node the pool can pick. Getting
+  # this wrong does not just leave the pod Pending: the scheduler reports insufficient memory,
+  # Karpenter reads that as "add a bigger node", and since no instance type in the pool is big
+  # enough it launches node after node — 11 spot nodes were observed for a single replica before
+  # the run was stopped (2026-08-03). Check with:
+  #   kubectl get nodes -l node-role=<pool> -o custom-columns=\
+  #     'TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,MEM:.status.allocatable.memory'
+  # Verified: memory=8Gi + shmSize=2Gi fits a g6.xlarge (12.6Gi allocatable).
   memory: 48Gi
