@@ -13,7 +13,7 @@ Verify:
 */ -}}
 {{- if .Values.ncclProbe.enabled }}
 {{- $v := .Values.ncclProbe }}
-{{- if not $v.gpuProduct }}{{ fail "ncclProbe.gpuProduct is required — set it to the target node's nvidia.com/gpu.product label (read it from a live node: kubectl get node <n> -o jsonpath='{.metadata.labels.nvidia\\.com/gpu\\.product}'). No default: a wrong SKU selector leaves the pod Pending forever with no error." }}{{- end }}
+{{- if not $v.nodeRole }}{{ fail "ncclProbe.nodeRole is required — set it to the accelerator_pools key of the target GPU pool (Karpenter labels its nodes node-role=<pool key>). Selecting on nvidia.com/gpu.product does NOT work: that label only exists after the GPU Operator labels a running node, so Karpenter cannot provision against it and the pod stays Pending forever." }}{{- end }}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -25,10 +25,14 @@ spec:
   hostNetwork: true
   dnsPolicy: ClusterFirstWithHostNet
   restartPolicy: Never
-  # Pin to a specific GPU SKU via the NVIDIA product label. Swap for a hostname
-  # (kubernetes.io/hostname: ip-...) to target one node.
+  # node-role (not nvidia.com/gpu.product): Karpenter stamps node-role=<accelerator_pools key>
+  # at launch, so it is a requirement Karpenter can satisfy by PROVISIONING a node.
+  # nvidia.com/gpu.product is applied by the GPU Operator only AFTER a node is running, so
+  # Karpenter cannot use it to choose an instance type and rejects the pod with
+  # "label nvidia.com/gpu.product does not have known values" — it then stays Pending forever.
+  # To target one specific node instead, swap in kubernetes.io/hostname: ip-...
   nodeSelector:
-    nvidia.com/gpu.product: {{ $v.gpuProduct }}
+    node-role: {{ $v.nodeRole }}
   # capacity-reservation value rotates per CB, so Exists is mandatory.
   tolerations:
     {{- include "experiments.gpuBenchTolerations" . | nindent 4 }}
@@ -37,14 +41,17 @@ spec:
       image: {{ $v.image }}
       command: ["sleep", "3600"]
       securityContext:
-        privileged: true   # Required for EFA and /dev/gdrdrv access.
+        privileged: true   # Required for EFA device access.
       # NCCL_SOCKET_IFNAME uses the exclusion prefix "^" to avoid TCP fallback (~28x slower).
       env:
         - { name: FI_PROVIDER,            value: "efa" }
         - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
         - { name: FI_EFA_FORK_SAFE,       value: "1" }
         - { name: NCCL_SOCKET_IFNAME,     value: "^lo,docker,veth" }
-        - { name: NCCL_DEBUG,             value: "WARN" }
+        # INFO, not WARN: the "NET/OFI Selected provider is efa" line that proves EFA is in use
+        # rather than a silent TCP fallback is emitted at INFO only.
+        - { name: NCCL_DEBUG,             value: "INFO" }
+        - { name: NCCL_DEBUG_SUBSYS,      value: "INIT,NET" }
       resources:
         limits:
           nvidia.com/gpu:        "1"    # Minimal GPU claim; enough to open a CUDA context.
@@ -56,9 +63,18 @@ spec:
           memory:        16Gi
           hugepages-2Mi: 2Gi
       volumeMounts:
+        {{- if $v.gdrcopy }}
         - { name: gdrdrv, mountPath: /dev/gdrdrv }
+        {{- end }}
         - { name: shm,    mountPath: /dev/shm }
   volumes:
+    {{- /* OPT-IN: /dev/gdrdrv exists only when the gdrcopy kernel module is loaded, which the
+       GPU Operator installs only under gpu_operator_enable_gdrcopy=true (OFF by default in
+       gpu-addons.tf — gdrcopy is a GPUDirect latency optimization NCCL does not need). An
+       unconditional hostPath with type: CharDevice makes the kubelet retry
+       "hostPath type check failed" forever on the module's own default configuration. */ -}}
+    {{- if $v.gdrcopy }}
     - { name: gdrdrv, hostPath: { path: /dev/gdrdrv, type: CharDevice } }
+    {{- end }}
     - { name: shm,    emptyDir: { medium: Memory, sizeLimit: 8Gi } }
 {{- end }}
