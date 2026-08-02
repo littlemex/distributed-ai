@@ -298,8 +298,11 @@ is scheduled.
 terraform apply
 kubectl get nodes -l karpenter.sh/capacity-type=reserved
 
-# 4. Verify NCCL / EFA before the real run.
-./scripts/03-verify-nccl.sh --nodes 2 --gpus-per-node 8
+# 4. Verify NCCL / EFA before the real run (see USAGE.md for the full command; GPU/EFA counts
+#    come from the live node's allocatable, not a hardcoded number).
+helm template exp ./charts/experiments -n $NS --set namespace=$NS \
+  --set ncclSshd.enabled=true --set ncclSshd.nodeRole=<pool> \
+  --set ncclSshd.gpuCount=<n> --set ncclSshd.efaCount=<n> | kubectl apply -f -
 #    Expect a high busbw and "NET/OFI Selected provider is efa" in the logs.
 
 # 5. Teardown (NodePool only, or full destroy).

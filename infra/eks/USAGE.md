@@ -170,11 +170,25 @@ Set `cb_end_date` on the pool to get an SNS alert one hour before the
 reservation expires (subscribe an email via `cb_alert_email_addresses`). When
 the block ends, AWS reclaims the node — drain your workload before then.
 
-Verify the fabric before a real multi-node run:
+Verify the fabric before a real multi-node run. GPU/EFA counts are per-instance facts (the
+schedulable EFA count is physical cards minus one, since card 0 carries the node IP), so read
+them off a live node instead of hardcoding:
 
 ```bash
-./scripts/03-verify-nccl.sh --nodes 2 --gpus-per-node 8
-# Look for a high busbw and "NET/OFI Selected provider is efa" in the logs.
+POOL=<accelerator_pools key>
+GPU=$(kubectl get nodes -l node-role=$POOL -o jsonpath="{.items[0].status.allocatable['nvidia\.com/gpu']}")
+EFA=$(kubectl get nodes -l node-role=$POOL -o jsonpath="{.items[0].status.allocatable['vpc\.amazonaws\.com/efa']}")
+
+helm template exp ./charts/experiments -n $NS --set namespace=$NS \
+  --set ncclSshd.enabled=true --set ncclSshd.nodeRole=$POOL \
+  --set ncclSshd.gpuCount=$GPU --set ncclSshd.efaCount=$EFA | kubectl apply -f -
+
+# Both pods share a rendered SSH keypair, so mpirun works as soon as they are Running.
+kubectl -n $NS exec nccl-server -- mpirun --allow-run-as-root -np $((2*GPU)) \
+  -H <server-ip>:$GPU,<client-ip>:$GPU --mca plm_rsh_args '-p 2222' \
+  -x FI_PROVIDER=efa -x LD_LIBRARY_PATH -x PATH \
+  /opt/nccl-tests/build/all_reduce_perf -b 512M -e 1G -f 2 -g 1
+# Look for "NET/OFI Selected provider is efa (found $EFA nics)" and a high busbw.
 ```
 
 ---
