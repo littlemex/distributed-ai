@@ -1,0 +1,30 @@
+{
+  "base_path": "/tmp/miles-run/env_common_30b",
+  "prefix": "env_p2r_",
+  "tag_prefix": "p2r_",
+  "note": "Re-acquisition of the 30B MoE arm. The earlier P2 numbers were reported without any\nof these cells having run, so nothing from that table is reused here; these are the first\nactual measurements of KV quantisation on the MoE.\n\nThe MoE-specific question: the router picks top-k discretely, so if rollout and trainer\nnumerics differ slightly the selected expert set can flip for some tokens. A flipped set\nis not a small perturbation of the logprob, so the smooth \"quantisation precision ->\nmismatch\" relation seen on dense models could break. mis_chi2_token is recorded alongside\nmis_kl because a minority of flipped tokens would show up in the tail long before it moved\nthe mean.\n\n30B needs all 16 GPU behind the actor plus --use-distributed-optimizer (H200's 141GB\ncannot hold the static memory otherwise), so cells run strictly one at a time and this arm\nis the reason two nodes are needed.\n\nStep 0 only (NUM_ROLLOUT=1): no optimizer step, so the numerical-path gap is measured on\nits own.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "30b_bf16",
+      "note": "Baseline: no KV quantisation. The value the two fp8 cells are amplified from.",
+      "extra_args": ""
+    },
+    {
+      "name": "30b_e4m3",
+      "note": "KV cache in fp8_e4m3.",
+      "extra_args": "--sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "30b_e5m2",
+      "note": "KV cache in fp8_e5m2: fewer mantissa bits, so the coarser of the two.",
+      "extra_args": "--sglang-kv-cache-dtype fp8_e5m2"
+    }
+  ]
+}

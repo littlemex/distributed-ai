@@ -1,0 +1,45 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_pp2_",
+  "tag_prefix": "pp2_",
+  "note": "Seed replication for the position-profile slopes. The single-seed result is: bf16 slope\n-3.21e-07 (95% CI [-4.41e-07,-2.00e-07], decreasing), e4m3 +6.31e-07 (CI\n[+9.88e-08,+1.18e-06], accumulating), e5m2 +1.65e-08 (CI spans zero, flat). The bf16 and\ne4m3 intervals do not overlap, so the sign flip is supported -- but those CIs come from\nresampling sequences within one run and therefore carry no information about seed-to-seed\nvariation. If a second seed moves a slope outside its first-seed CI, the interval is\nunderstating the real uncertainty and the sign-flip claim needs weakening.\n\nThe e5m2 arm is the specific question: it came out flat despite coarser quantisation and a\n3.5x larger mis_kl, with a CI 1.8x wider than e4m3's. Either the accumulation is genuinely\nabsent there, or it is buried under a larger position-independent term. A second seed\nroughly doubles the sequences available and is the cheapest way to tell those apart.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "TP_SIZE": "1",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis_dump.compute_mis_weights_with_cp_dumping --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 42 --rollout-seed 1234 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "dump_root": "/fsx/dumps",
+  "cells": [
+    {
+      "name": "bf16_s42",
+      "note": "bf16 control, second seed.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": ""
+    },
+    {
+      "name": "e4m3_s42",
+      "note": "fp8_e4m3, second seed.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "e5m2_s42",
+      "note": "fp8_e5m2, second seed. The arm whose flat result is in question.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--sglang-kv-cache-dtype fp8_e5m2"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "base_path": "/tmp/miles-run/env_common_8b",
+  "prefix": "env_p2m_",
+  "tag_prefix": "p2m_",
+  "note": "Model-scale axis, third point. The KV-quantisation result so far rests on two model\nsizes, and with two points a matching pair of fp8 values cannot be told apart from\ncoincidence. Qwen3-8B dense sits between the 4B dense and the 30B MoE and shares the 4B's\narchitecture, so it isolates parameter count from the dense/MoE difference.\n\nWhat would falsify the claim: if fp8 pins mis_kl to a value set by the quantisation format\nrather than by the model, the three fp8_e4m3 cells should agree far more tightly than the\nthree bf16 cells differ, and the fp8 spread should stay within the seed-to-seed spread\nmeasured on 4B. A third point that lands outside that band says the earlier agreement was\ncoincidence.\n\nStep 0 only (NUM_ROLLOUT=1): no optimizer step, so what is measured is the numerical-path\ngap alone.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "TP_SIZE": "2",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "8b_bf16",
+      "note": "Baseline: no KV quantisation. This is the number the two fp8 cells are amplified from.",
+      "extra_args": ""
+    },
+    {
+      "name": "8b_e4m3",
+      "note": "KV cache in fp8_e4m3.",
+      "extra_args": "--sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "8b_e5m2",
+      "note": "KV cache in fp8_e5m2: fewer mantissa bits than e4m3, so the coarser of the two.",
+      "extra_args": "--sglang-kv-cache-dtype fp8_e5m2"
+    }
+  ]
+}

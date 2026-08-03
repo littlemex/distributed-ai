@@ -1,0 +1,65 @@
+{
+  "base_path": "/tmp/miles-run/env_common_8b",
+  "prefix": "env_8bs_",
+  "tag_prefix": "8bs_",
+  "note": "Seed replication of the 8B arm, to settle the model-scale question. The 4B-vs-8B\ndifference measured earlier (CV 7.7-16.2%, max/min 1.12-1.26) turned out to be the same size\nas this configuration's seed variance on 4B (CV 7.8-11.3%, max/min 1.19-1.27), so with one\nseed per model the two cannot be separated and the reading 'the fp8 value reached is\nmodel-dependent' had to be withdrawn.\n\nThree more seeds on 8B give that arm its own seed interval. Combined with the 4 seeds\nalready measured on 4B, the model-scale comparison becomes a comparison of two intervals\nrather than of two points, which is what deciding the question requires. A null result is\ninformative here too: overlapping intervals would mean the order-of-magnitude effect and the\nmonotonicity are all that transfers across model size, which is a cleaner practical rule\nthan a per-model multiplier.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "TP_SIZE": "2",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "bf16_s42",
+      "note": "8B bf16, train seed 42 / rollout seed 1234.",
+      "extra_args": "--seed 42 --rollout-seed 1234"
+    },
+    {
+      "name": "e4m3_s42",
+      "note": "8B e4m3, train seed 42 / rollout seed 1234.",
+      "extra_args": "--seed 42 --rollout-seed 1234 --sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "e5m2_s42",
+      "note": "8B e5m2, train seed 42 / rollout seed 1234.",
+      "extra_args": "--seed 42 --rollout-seed 1234 --sglang-kv-cache-dtype fp8_e5m2"
+    },
+    {
+      "name": "bf16_s123",
+      "note": "8B bf16, train seed 123 / rollout seed 456.",
+      "extra_args": "--seed 123 --rollout-seed 456"
+    },
+    {
+      "name": "e4m3_s123",
+      "note": "8B e4m3, train seed 123 / rollout seed 456.",
+      "extra_args": "--seed 123 --rollout-seed 456 --sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "e5m2_s123",
+      "note": "8B e5m2, train seed 123 / rollout seed 456.",
+      "extra_args": "--seed 123 --rollout-seed 456 --sglang-kv-cache-dtype fp8_e5m2"
+    },
+    {
+      "name": "bf16_s777",
+      "note": "8B bf16, train seed 777 / rollout seed 888.",
+      "extra_args": "--seed 777 --rollout-seed 888"
+    },
+    {
+      "name": "e4m3_s777",
+      "note": "8B e4m3, train seed 777 / rollout seed 888.",
+      "extra_args": "--seed 777 --rollout-seed 888 --sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "e5m2_s777",
+      "note": "8B e5m2, train seed 777 / rollout seed 888.",
+      "extra_args": "--seed 777 --rollout-seed 888 --sglang-kv-cache-dtype fp8_e5m2"
+    }
+  ]
+}

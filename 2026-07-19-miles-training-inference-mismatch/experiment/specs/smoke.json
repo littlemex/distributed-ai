@@ -1,0 +1,26 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_sm_",
+  "tag_prefix": "sm_",
+  "note": "Driver smoke test. One cheap cell (4B, TP1, step 0 only) whose purpose is not\nits mis_kl but proving the whole path end to end: env generation -> submit -> wait for a\nterminal status -> recover the job log -> extract metrics that match TensorBoard -> write\nthe per-token dump -> have the analysis read it. Every one of those links has failed\nsilently at least once, and a batch was once reported complete with no job submitted at\nall, so the links get verified on real hardware before any measurement run.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "TP_SIZE": "1",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis_dump.compute_mis_weights_with_cp_dumping --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "dump_root": "/fsx/dumps",
+  "cells": [
+    {
+      "name": "dump1",
+      "note": "CP=1, so the dump hook sees full sequences and should write npz files.",
+      "vars": {"MIS_DUMP_EVERY": "1"}
+    }
+  ]
+}

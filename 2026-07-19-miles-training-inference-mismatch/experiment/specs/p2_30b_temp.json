@@ -1,0 +1,23 @@
+{
+  "base_path": "/tmp/miles-run/env_common_30b",
+  "prefix": "env_p2x_",
+  "tag_prefix": "p2x_",
+  "note": "Tests whether the 30B MoE's repetition loops are a sampling-setting effect. Established so far: repetition_frac is 0.63-0.70 on the 30B and exactly 0.0 on both dense models at the same temperature 1.0; truncation is 0.992 regardless of the length cap; and trainer/engine weights are verified equal, so it is not a weight-sync fault. What is left is that temperature 1.0 sits above Qwen3-30B-A3B's own generation_config (0.6 / top_p 0.95 / top_k 20). If 0.6 clears the repetition, the 30B becomes measurable -- but at a temperature the 4B/8B cells did not use, so it stops being the same-conditions third point of the model-scale axis and becomes a separate finding about MoE fragility.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "ROLLOUT_MAX_RESPONSE_LEN": "8192",
+    "SGLANG_MEM_FRACTION": "0.7",
+    "ROLLOUT_TEMPERATURE": "0.6"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "30b_t06",
+      "note": "bf16 at temperature 0.6. Read rollout/repetition_frac and raw_reward first; mis_kl means nothing until repetition_frac is near 0.",
+      "extra_args": ""
+    }
+  ]
+}

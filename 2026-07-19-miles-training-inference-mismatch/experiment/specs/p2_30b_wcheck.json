@@ -1,0 +1,22 @@
+{
+  "base_path": "/tmp/miles-run/env_common_30b",
+  "prefix": "env_p2w_",
+  "tag_prefix": "p2w_",
+  "note": "Diagnostic, not a measurement. The 30B MoE truncates 99% of responses at both 8192 and 16384 tokens (identical 0.992 rate, response_lengths filling whatever cap is given) with reward 0.0 and mis_ppl_ratio 1.32-1.78. Raising the cap did not help, so the generation is degenerate rather than merely long. The remaining hypothesis is that the weights the SGLang engine serves differ from the trainer's -- the MoE online weight update is the one path that is MoE-specific and known fragile here. miles ships --check-weight-update-equal for exactly this, so ask it directly instead of inferring from downstream metrics.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "ROLLOUT_MAX_RESPONSE_LEN": "8192",
+    "SGLANG_MEM_FRACTION": "0.7"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "30b_wcheck",
+      "note": "Asserts trainer and engine weights match after the update. A failure here explains the reward-0 generation and means the 30B mismatch numbers were never measuring quantisation.",
+      "extra_args": "--check-weight-update-equal"
+    }
+  ]
+}

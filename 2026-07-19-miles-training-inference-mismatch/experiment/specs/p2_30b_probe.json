@@ -1,0 +1,22 @@
+{
+  "base_path": "/tmp/miles-run/env_common_30b",
+  "prefix": "env_p2t_",
+  "tag_prefix": "p2t_",
+  "note": "Probe cell only. The 30B MoE truncates 99% of responses at 8192 tokens (reward 0.0, mis_ppl_ratio 1.78), so mismatch cannot be measured at that limit -- see P2R_30B_INVALID.md. This raises the cap to 16384 to find out whether the truncation rate falls enough for the numbers to mean anything. If it does not, 30B is parked as 'infrastructure works, mismatch needs different conditions' rather than measured badly.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "ROLLOUT_MAX_RESPONSE_LEN": "16384",
+    "SGLANG_MEM_FRACTION": "0.7"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "30b_bf16_16k",
+      "note": "bf16 baseline at a 16384-token cap. Watch rollout/truncated and raw_reward before reading mis_kl at all.",
+      "extra_args": ""
+    }
+  ]
+}

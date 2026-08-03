@@ -1,0 +1,69 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_pp3_",
+  "tag_prefix": "pp3_",
+  "note": "Third and fourth seeds for the position-profile slopes. Two seeds established that the\nfp8 slope changes sign between them and that a within-run cluster bootstrap CI does not\ncapture that variation, which forced the withdrawal of a single-seed 'quantisation flips the\nsign' conclusion. Two seeds can show that an interval is too narrow but cannot estimate how\nwide the truth is: with n=2 the seed-level standard error is itself a one-degree-of-freedom\nquantity.\n\nFour seeds make the across-seed spread reportable, which is what the honest version of this\nresult needs: a slope with an interval that actually reflects seed variation, rather than\n'not detectable' backed by two points. The bf16 arm is included as the control that has been\nstable so far (-3.21e-07, -3.76e-07) -- if it stays stable while fp8 keeps scattering, that\ncontrast is itself the finding.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "TP_SIZE": "1",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis_dump.compute_mis_weights_with_cp_dumping --custom-config-path /fsx/configs/mis_metrics_only.yaml --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "dump_root": "/fsx/dumps",
+  "cells": [
+    {
+      "name": "bf16_s123",
+      "note": "bf16, train seed 123 / rollout seed 456.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--seed 123 --rollout-seed 456"
+    },
+    {
+      "name": "e4m3_s123",
+      "note": "e4m3, train seed 123 / rollout seed 456.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--seed 123 --rollout-seed 456 --sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "e5m2_s123",
+      "note": "e5m2, train seed 123 / rollout seed 456.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--seed 123 --rollout-seed 456 --sglang-kv-cache-dtype fp8_e5m2"
+    },
+    {
+      "name": "bf16_s777",
+      "note": "bf16, train seed 777 / rollout seed 888.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--seed 777 --rollout-seed 888"
+    },
+    {
+      "name": "e4m3_s777",
+      "note": "e4m3, train seed 777 / rollout seed 888.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--seed 777 --rollout-seed 888 --sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "e5m2_s777",
+      "note": "e5m2, train seed 777 / rollout seed 888.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--seed 777 --rollout-seed 888 --sglang-kv-cache-dtype fp8_e5m2"
+    }
+  ]
+}

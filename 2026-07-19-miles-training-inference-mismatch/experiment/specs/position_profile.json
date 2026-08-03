@@ -1,0 +1,37 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_pp_",
+  "tag_prefix": "pp_",
+  "note": "Position profile, fp8 arms. The bf16 control is already measured (sm_dump1): |r| has a\nslope of -3.21e-07 per token, 95% CI excluding zero on the DECREASING side, and\nalpha_within 1.03, i.e. flat-to-slightly-falling and effectively i.i.d. within a sequence.\n\nThe hypothesis these cells test: every token attends to a quantised KV cache, so under fp8\nthe per-token gap should GROW with absolute position and the slope should turn positive.\nThat is the direct test of the O(T^2) reading of arXiv:2602.01826 Thm 3.1 -- a flat profile\nmeans sequence error accumulates like T, a growing one like T^2. Causal attention makes the\nprofile measured at 8192 the same quantity as the first 8192 positions of a longer run, so\nno max_len sweep is needed.\n\nTP1/CP1 deliberately: the dump only writes under CP=1 (Megatron's zigzag CP shards would\nscramble positions) and only from TP rank 0 (other TP ranks hold identical logprobs and\nwould inflate n, narrowing the bootstrap CI the verdict rests on).",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "TP_SIZE": "1",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis_dump.compute_mis_weights_with_cp_dumping --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "dump_root": "/fsx/dumps",
+  "cells": [
+    {
+      "name": "e4m3",
+      "note": "KV cache in fp8_e4m3.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--sglang-kv-cache-dtype fp8_e4m3"
+    },
+    {
+      "name": "e5m2",
+      "note": "KV cache in fp8_e5m2: coarser mantissa, so the larger effect if the mechanism is real.",
+      "vars": {
+        "MIS_DUMP_EVERY": "1"
+      },
+      "extra_args": "--sglang-kv-cache-dtype fp8_e5m2"
+    }
+  ]
+}

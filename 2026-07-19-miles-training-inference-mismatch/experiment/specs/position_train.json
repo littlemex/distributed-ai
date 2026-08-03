@@ -1,0 +1,32 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_pt_",
+  "tag_prefix": "pt_",
+  "note": "Position profile DURING training, not just at step 0. Every alpha and slope measured so\nfar comes from step 0, before any optimizer step, and that is the largest remaining caveat:\nthe collapse runs reach mis_kl 0.8 to 14, roughly 250x the step-0 level, and there is no\nevidence that the position structure of the error is the same once it has grown that far.\n\nThese cells train for 14 rollouts with the fp8 e5m2 amplification that drives collapse, and\ndump per-token logprobs the whole way. That gives alpha and the slope as functions of step,\nso the step-0 result can either be shown to persist or be scoped to the pre-training state.\nEither outcome is worth having; the current claim is simply untested outside step 0.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "14",
+    "TP_SIZE": "1",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8",
+    "MIS_DUMP_EVERY": "2"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis_dump.compute_mis_weights_with_cp_dumping --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "dump_root": "/fsx/dumps",
+  "cells": [
+    {
+      "name": "e5m2_train",
+      "note": "fp8 e5m2, 14 steps, dumping throughout. The arm that collapses.",
+      "extra_args": "--sglang-kv-cache-dtype fp8_e5m2"
+    },
+    {
+      "name": "bf16_train",
+      "note": "bf16 control, same 14 steps, so any change is attributable to the amplification.",
+      "extra_args": ""
+    }
+  ]
+}
