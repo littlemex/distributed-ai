@@ -72,6 +72,12 @@ imageBuild:
   # Peak build disk ~= pushed image size x4-5. Guide: 3GB→30Gi (default), 10GB→60Gi,
   # 25GB→150Gi (+ dedicatedPool). Must be <= the target node's allocatable ephemeral-storage.
   ephemeralStorage: 30Gi
+  # zstd-compress the layers THIS build adds (the external base layers keep their original
+  # compression and digests, so sharing and cache hits survive). Off by default: it trades push
+  # time and CPU for faster decompression on the node, which only pays off when a cold pull is
+  # dominated by unpacking rather than downloading. Measure first — the image-cache chapter shows
+  # how to split a cold pull into fetch and unpack before turning this on.
+  zstd: false
   dedicatedPool:
     # true → schedule onto the tainted NVMe-RAID0 builder pool (needs Terraform
     # image_builder_dedicated_pool=true). Use for large images the 50Gi CPU root can't hold.
@@ -216,6 +222,59 @@ ncclSshd:
 # The chosen backend's var.<x>_enabled must be true in Terraform so its PV exists, else the
 # PVC stays Pending. Default openzfs matches the awsome-distributed-ai home-on-OpenZFS layout.
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 5) torchrunTrain — single-node MNIST MLP DDP via `torchrun` (batch/v1 Job).
+#    Backend gloo (CPU) or nccl (GPU). Requires sharedStorage.backend enabled (default
+#    openzfs, ON) and the ddp-sample image.
+# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# ncclTrainjob — multi-node NCCL/EFA bandwidth check via Kubeflow Trainer v2 (no ssh).
+#
+# Preferred over ncclSshd. Same question answered ("is EFA carrying the collectives, and at what
+# bandwidth"), but the rendezvous comes from TrainJob instead of mpirun-over-ssh, so there is no
+# sshd, no keypair, no privileged container, and a failure shows up as a pod/event the cluster can
+# report. See the template header for what the numbers do and do not mean.
+# ─────────────────────────────────────────────────────────────────────────────
+ncclTrainjob:
+  enabled: false
+  # REQUIRED: the accelerator_pools key of the target GPU pool (Karpenter labels its nodes
+  # node-role=<key> at launch, so it is a selector Karpenter can satisfy by provisioning).
+  nodeRole: ""
+  # REQUIRED: an image carrying BOTH torchrun and the aws-ofi-nccl plugin. Two images already in
+  # this chart look like candidates and are not:
+  #   - the nccl-tests image (used by ncclSshd) is built around Open MPI and has no torch, so the
+  #     pods fail immediately with "exec: torchrun: executable file not found in $PATH"
+  #   - the ddp-sample image is the plain pytorch base with no EFA plugin, so NCCL finds no EFA
+  #     provider and quietly uses TCP sockets — the run passes and measures the wrong fabric
+  # An AWS Deep Learning Container ships both. List the available tags with:
+  #   aws ecr describe-images --registry-id 763104351884 --repository-name pytorch-training \
+  #     --query 'sort_by(imageDetails,&imagePushedAt)[-20:].imageTags[]' --output text | tr '\t' '\n'
+  #   763104351884.dkr.ecr.<region>.amazonaws.com/pytorch-training:2.10.0-gpu-py313-cu130-ubuntu22.04-ec2-v1.11
+  image: ""
+  # REQUIRED, both of them: per-instance facts. Read them off a live node instead of hardcoding —
+  # the schedulable EFA count is the physical card count minus one (card 0 carries the node IP) and
+  # differs per family, so a fixed value silently leaves the pod Pending on another instance type.
+  #   GPU=$(kubectl get nodes -l node-role=$POOL \
+  #     -o jsonpath="{.items[0].status.allocatable['nvidia\.com/gpu']}")
+  #   EFA=$(kubectl get nodes -l node-role=$POOL \
+  #     -o jsonpath="{.items[0].status.allocatable['vpc\.amazonaws\.com/efa']}")
+  gpuCount: ""
+  efaCount: ""
+  numNodes: 2
+  cpu: "8"
+  memory: 64Gi
+  # Message sizes (MiB) and iterations. Small sizes measure latency, not fabric bandwidth; keep at
+  # least one size in the hundreds of MiB for the bandwidth figure to mean anything.
+  sizesMb: "512,1024"
+  iters: 20
+  # NCCL's own socket bootstrap interface filter. The default excludes loopback and the CNI-side
+  # interfaces. Worth being explicit on EKS: the Pod Identity agent puts an IDENTICAL link-local
+  # address on every node, so letting auto-detection choose can pick an address that resolves to
+  # the wrong host.
+  socketIfname: "^lo,docker,veth"
+  # Copies bench.py onto the shared RWX volume (the runtime mounts /shared, not ConfigMaps).
+  stageImage: public.ecr.aws/docker/library/busybox:1.36
+
 sharedStorage:
   backend: openzfs      # openzfs | fsx | efs
   requestSize: 256Gi    # PVC request; must be <= the backing PV's capacity
@@ -223,12 +282,6 @@ sharedStorage:
   # name here to reuse it instead of creating a new shared-claim PVC. This avoids the
   # "static PV can only bind one PVC at a time" limitation.
   existingClaimName: ""  # e.g. "openzfs-claim"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5) torchrunTrain — single-node MNIST MLP DDP via `torchrun` (batch/v1 Job).
-#    Backend gloo (CPU) or nccl (GPU). Requires sharedStorage.backend enabled (default
-#    openzfs, ON) and the ddp-sample image.
-# ─────────────────────────────────────────────────────────────────────────────
 torchrunTrain:
   enabled: false
   # "gloo" or "nccl" — LABEL ONLY. This value is not read by torch.distributed; it only
