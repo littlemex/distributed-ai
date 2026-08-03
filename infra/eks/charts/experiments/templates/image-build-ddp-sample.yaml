@@ -123,7 +123,14 @@ spec:
             # WITHOUT push=true the build "succeeds" but nothing lands in ECR — the classic silent
             # no-op. name is the full ECR ref.
             - --output
-            - type=image,name={{ $ib.repository }}:{{ $ib.tag }},push=true
+            # zstd (opt-in): only worth it when the measurement in the image-cache chapter shows
+            # decompression, not download, dominating a cold pull. oci-mediatypes is required —
+            # zstd layers need the OCI descriptor types, and the Docker v2 manifest cannot express
+            # them. force-compression is deliberately NOT set: it would recompress the external
+            # base layers too, changing their digests and destroying sharing and cache hits across
+            # every image built on that base. Without it only the layers this build adds are zstd,
+            # which is the mixed form that keeps both.
+            - type=image,name={{ $ib.repository }}:{{ $ib.tag }},push=true{{ if $ib.zstd }},compression=zstd,oci-mediatypes=true{{ end }}
           env:
             # In a K8s Pod the worker cannot unshare the PID namespace; without this flag buildkitd
             # fails to start. Trade-off (build shares buildkitd's PID ns) is fine for a single-shot,

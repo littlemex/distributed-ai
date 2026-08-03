@@ -1,0 +1,211 @@
+{{- /*
+nccl-trainjob — multi-node NCCL/EFA bandwidth check driven by Kubeflow Trainer v2, no ssh.
+
+This is the NCCL/EFA verification path for this module. The alternative — mpirun over ssh with
+an sshd in every pod (charts/experiments/templates/nccl-sshd.yaml) — needs a keypair distributed
+to both pods, `privileged: true`, sshd as PID 1, and a launcher that is invisible to Kubernetes:
+when it fails, the failure is inside mpirun's rsh launcher, not in any pod, event or log the
+cluster can show you. `plm_rsh` exists because Open MPI predates orchestrators and had to ship
+its own daemon to every node. Kubernetes already does that, so on EKS the ssh layer is duplicate
+machinery whose only contribution is failure modes.
+
+TrainJob supplies the rendezvous instead. The Trainer torch plugin injects PET_NNODES,
+PET_NPROC_PER_NODE, PET_NODE_RANK (the JobSet completion index) and PET_MASTER_ADDR/PORT (the
+headless DNS of node-0-0), and torchrun reads them as CLI defaults. So the same two-node,
+one-rank-per-GPU topology the mpirun version built by hand comes from the platform: no ssh, no
+sshd, no key material, no privileged container.
+
+WHAT IT MEASURES, AND WHAT IT DOES NOT
+  torch.distributed.all_reduce over the NCCL backend, timed. That exercises exactly the path a
+  real training job uses — the same NCCL, the same aws-ofi-nccl plugin, the same EFA devices —
+  so "EFA is being used" and "the fabric delivers bandwidth" are both answered. It is NOT
+  nccl-tests: the numbers are not comparable to `all_reduce_perf` busbw, because that tool
+  reports bus bandwidth with its own correction factor. Compare across runs of THIS check, not
+  against published nccl-tests figures.
+
+  EFA is confirmed from the NCCL log line, not from the bandwidth:
+    NET/OFI Selected provider is efa
+  Without the aws-ofi-nccl plugin (or with EFA devices unrequested) NCCL silently falls back to
+  its own TCP sockets and the run still completes — slower, and with no error. Bandwidth alone
+  cannot distinguish that, which is why NCCL_DEBUG=INFO is on by default here.
+
+Render + apply (read GPU/EFA off a live node — they are per-instance facts):
+  POOL=<accelerator_pools key>
+  GPU=$(kubectl get nodes -l node-role=$POOL -o jsonpath="{.items[0].status.allocatable['nvidia\.com/gpu']}")
+  EFA=$(kubectl get nodes -l node-role=$POOL -o jsonpath="{.items[0].status.allocatable['vpc\.amazonaws\.com/efa']}")
+  helm template exp ./charts/experiments -n $NS --set namespace=$NS \
+    --set ncclTrainjob.enabled=true --set ncclTrainjob.nodeRole=$POOL \
+    --set ncclTrainjob.gpuCount=$GPU --set ncclTrainjob.efaCount=$EFA \
+    --set ncclTrainjob.image=<nccl-tests or any torch+EFA image> | kubectl apply -f -
+Verify:
+  kubectl -n $NS logs -f -l jobset.sigs.k8s.io/jobset-name=nccl-trainjob | grep -E "Selected provider|GB/s"
+*/ -}}
+{{- if .Values.ncclTrainjob.enabled }}
+{{- $v := .Values.ncclTrainjob }}
+{{- if not $v.nodeRole }}{{ fail "ncclTrainjob.nodeRole is required — set it to the accelerator_pools key of the target GPU pool (Karpenter labels its nodes node-role=<key>). Selecting on nvidia.com/gpu.product does NOT work: that label only appears after the GPU Operator labels a running node, so Karpenter cannot provision against it." }}{{- end }}
+{{- if not $v.image }}{{ fail "ncclTrainjob.image is required — it must carry BOTH torchrun and the aws-ofi-nccl plugin. The nccl-tests image this chart uses for ncclSshd does NOT qualify: it is built around Open MPI and has no torch, so the pods die with 'exec: torchrun: executable file not found in $PATH'. The ddp-sample image does not qualify either: it is the plain pytorch base, so NCCL finds no EFA provider and silently falls back to TCP sockets. An AWS Deep Learning Container (763104351884.dkr.ecr.<region>.amazonaws.com/pytorch-training:<ver>-gpu-...-ec2-...) ships both." }}{{- end }}
+{{- if not $v.gpuCount }}{{ fail "ncclTrainjob.gpuCount is required — read it from a live node's allocatable nvidia.com/gpu rather than hardcoding a per-instance fact." }}{{- end }}
+{{- if not $v.efaCount }}{{ fail "ncclTrainjob.efaCount is required — read it from a live node's allocatable vpc.amazonaws.com/efa. It is the physical card count minus one (card 0 carries the node IP), and it differs per family, so a fixed value leaves the pod Pending on a different instance type." }}{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nccl-trainjob-bench
+  namespace: {{ include "experiments.namespace" . }}
+data:
+  # Deliberately plain torch.distributed: no MPI, no mpi4py, nothing that needs a launcher of its
+  # own. torchrun already told every rank its size and where the rendezvous is.
+  bench.py: |
+    import os, time, torch, torch.distributed as dist
+
+    def main():
+        # torchrun sets these; the Trainer plugin is what gave torchrun its values.
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend="nccl")
+        rank, world = dist.get_rank(), dist.get_world_size()
+
+        if rank == 0:
+            print(f"[bench] world_size={world} ranks/node={os.environ.get('LOCAL_WORLD_SIZE')}",
+                  flush=True)
+
+        # One buffer per size, reused: allocating inside the timing loop would measure the
+        # allocator. float32, so elements = bytes / 4.
+        sizes = [int(s) for s in os.environ.get("SIZES_MB", "512,1024").split(",")]
+        iters = int(os.environ.get("ITERS", "20"))
+        warmup = int(os.environ.get("WARMUP", "5"))
+
+        for mb in sizes:
+            buf = torch.ones(mb * 1024 * 1024 // 4, dtype=torch.float32, device="cuda")
+            for _ in range(warmup):
+                dist.all_reduce(buf)
+            torch.cuda.synchronize()
+            dist.barrier()
+
+            t0 = time.perf_counter()
+            for _ in range(iters):
+                dist.all_reduce(buf)
+            torch.cuda.synchronize()
+            elapsed = (time.perf_counter() - t0) / iters
+
+            if rank == 0:
+                # Ring all-reduce moves 2*(N-1)/N * size per rank. Reporting the algorithm
+                # bandwidth (size/time) as well, since that is the number a user feels.
+                nbytes = buf.numel() * buf.element_size()
+                algbw = nbytes / elapsed / 1e9
+                busbw = algbw * 2 * (world - 1) / world
+                print(f"[bench] {mb:>5} MB  {elapsed*1e3:8.2f} ms  "
+                      f"algbw {algbw:7.2f} GB/s  busbw {busbw:7.2f} GB/s", flush=True)
+
+        # Rank 0 exiting first would make the others fail on a broken pipe rather than finish.
+        dist.barrier()
+        dist.destroy_process_group()
+        if rank == 0:
+            print("[bench] done", flush=True)
+
+    if __name__ == "__main__":
+        main()
+---
+{{- /* The ClusterTrainingRuntime owns the pod spec and only mounts /shared and /dev/shm; adding a
+       ConfigMap volume would mean editing the runtime, i.e. changing the platform for one probe.
+       So the script is staged onto the shared RWX volume instead, by a Job that mounts both. The
+       TrainJob then reads it as a plain file, and the runtime stays untouched. */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nccl-trainjob-stage
+  namespace: {{ include "experiments.namespace" . }}
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      # Runs on the CPU pool: staging a file must not occupy a GPU, and must not wait for one.
+      nodeSelector:
+        node-role: cpu
+      containers:
+        - name: stage
+          image: {{ $v.stageImage | default "public.ecr.aws/docker/library/busybox:1.36" | quote }}
+          command: ["sh", "-c", "mkdir -p /shared/nccl-bench && cp /src/bench.py /shared/nccl-bench/bench.py && ls -l /shared/nccl-bench/"]
+          volumeMounts:
+            - { name: src, mountPath: /src }
+            - { name: shared, mountPath: /shared }
+      volumes:
+        - name: src
+          configMap: { name: nccl-trainjob-bench }
+        - name: shared
+          persistentVolumeClaim:
+            claimName: {{ include "experiments.sharedClaimName" . }}
+---
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: nccl-trainjob
+  namespace: {{ include "experiments.namespace" . }}
+spec:
+  runtimeRef:
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+    name: torch-distributed-eks
+  # The ClusterTrainingRuntime is cluster-scoped and shared, so its nodeSelector is pinned to the
+  # CPU pool — a runtime cannot know which accelerator pool a given job wants. spec.trainer has no
+  # nodeSelector field, so the only way to retarget is runtimePatches, which overlays the runtime's
+  # pod spec for this TrainJob alone. Without it the pods request 8 GPUs and EFA while selecting
+  # node-role=cpu, and Karpenter refuses with "incompatible requirements, key node-role" — a
+  # Pending that names the label, not the missing GPU.
+  runtimePatches:
+      # The webhook requires a domain-prefixed manager name (it rejects a bare string), because the
+      # field exists to record patch ownership across controllers and webhooks.
+    - manager: experiments.distributed-ai/nccl-trainjob
+      trainingRuntimeSpec:
+        template:
+          spec:
+            replicatedJobs:
+              # Must match the runtime's replicatedJob name, or the patch silently applies to
+              # nothing and the pods keep the CPU selector.
+              - name: node
+                template:
+                  spec:
+                    template:
+                      spec:
+                        nodeSelector:
+                          node-role: {{ $v.nodeRole }}
+  trainer:
+    numNodes: {{ $v.numNodes | default 2 | int }}
+    # One rank per GPU. Never "auto": on a GPU node the plugin derives it from the CPU request,
+    # which on a p4d would spawn dozens of ranks against 8 devices.
+    numProcPerNode: {{ $v.gpuCount | int }}
+    image: {{ $v.image | quote }}
+    # Must start with torchrun, or the injected PET_* are never read: each pod would run as
+    # world_size=1, every all_reduce would be a local no-op, and the job would "pass" without
+    # a single byte crossing the fabric.
+    command:
+      - torchrun
+      - /shared/nccl-bench/bench.py
+    resourcesPerNode:
+      requests:
+        cpu: {{ $v.cpu | default "8" | quote }}
+        memory: {{ $v.memory | default "64Gi" | quote }}
+      limits:
+        nvidia.com/gpu: {{ $v.gpuCount | quote }}
+        # Requesting EFA is what attaches the devices to the pod. Without it NCCL finds no EFA
+        # provider and quietly uses TCP sockets instead — a slower run with no error.
+        vpc.amazonaws.com/efa: {{ $v.efaCount | quote }}
+        memory: {{ $v.memory | default "64Gi" | quote }}
+    env:
+      # INFO, not WARN: "NET/OFI Selected provider is efa" is the only proof EFA is in use and it
+      # is only emitted at INFO. SUBSYS keeps the volume down to the parts that answer that.
+      - { name: NCCL_DEBUG,        value: "INFO" }
+      - { name: NCCL_DEBUG_SUBSYS, value: "INIT,NET" }
+      - { name: FI_PROVIDER,       value: "efa" }
+      - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
+      # Without FORK_SAFE a fork in the process (any subprocess, including some torch internals)
+      # can corrupt libfabric's registered memory.
+      - { name: FI_EFA_FORK_SAFE,  value: "1" }
+      # Exclude the loopback and CNI-side interfaces from NCCL's own socket bootstrap. On EKS the
+      # Pod Identity agent puts an identical link-local address on EVERY node, so leaving
+      # auto-detection to pick a "shared" address is a real hazard here.
+      - { name: NCCL_SOCKET_IFNAME, value: {{ $v.socketIfname | default "^lo,docker,veth" | quote }} }
+      - { name: SIZES_MB,          value: {{ $v.sizesMb | default "512,1024" | quote }} }
+      - { name: ITERS,             value: {{ $v.iters | default 20 | quote }} }
+{{- end }}
