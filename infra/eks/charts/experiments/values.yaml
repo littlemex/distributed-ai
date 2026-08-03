@@ -213,7 +213,7 @@ ncclSshd:
   gdrcopy: false
 
 # ─────────────────────────────────────────────────────────────────────────────
-# sharedStorage — the /shared RWX mount for torchrunTrain + pytorchjobTrain. Selects which
+# sharedStorage — the /shared RWX mount for torchrunTrain + trainjobTrain. Selects which
 # Terraform-managed static PV the shared-claim PVC binds to. The three backends map to the
 # three storage layers (see infra/eks/openzfs.tf / fsx.tf / efs.tf):
 #   openzfs → FSx OpenZFS single-AZ NFS home/general-shared (openzfs_enabled, ON by default)
