@@ -82,3 +82,31 @@ resource "aws_security_group_rule" "node_ingress_from_cluster_sg" {
   source_security_group_id = module.eks.cluster_primary_security_group_id
   description              = "All traffic from cluster SG (Pod-to-Pod via VPC CNI)"
 }
+
+# ── Node SG → Node SG: pod-to-pod on ALL ports ────────────────────────────────
+# terraform-aws-eks only admits self traffic on tcp 1025-65535, which silently breaks any pod
+# listening on a low port as soon as the client is on another node. A cross-node request to port
+# 80 is dropped, while the kubelet's own readiness probe keeps succeeding because it runs on the
+# same node with no security group in between — so the pod reports healthy and only the caller
+# sees a timeout. Found via the Basic11 CloudFront demo: the ALB returned 504 with every target
+# unhealthy/Target.Timeout, and a pod on another node could not reach echo:80 while a pod on the
+# same node got 200. Adding this rule made the cross-node request return 200 (2026-08-03).
+#
+# Declared here rather than through the module's node_security_group_additional_rules: adding a
+# rule there re-evaluates conditional data sources inside the module, which surfaces as
+# `policy_arn -> (known after apply)` and makes Terraform replace three of the Karpenter node
+# role's policy attachments for no reason. Same resulting rule, no collateral churn.
+#
+# Opening every port between nodes is the module's own documented remedy and is no weaker than
+# the EKS cluster SG, which is already self-open. Per-pod restrictions belong in NetworkPolicy:
+# enumerating ports here would mean editing Terraform for every new workload, which is exactly
+# how the port-80 gap stayed hidden.
+resource "aws_security_group_rule" "node_ingress_self_all" {
+  security_group_id        = module.eks.node_security_group_id
+  type                     = "ingress"
+  description              = "Node to node, all ports (pod-to-pod across nodes; NCCL/gloo and low ports)"
+  protocol                 = "-1"
+  from_port                = 0
+  to_port                  = 0
+  source_security_group_id = module.eks.node_security_group_id
+}

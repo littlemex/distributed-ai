@@ -7,20 +7,33 @@
 # Pass --destroy to also run `terraform destroy` (removes the entire cluster).
 #
 # Usage:
-#   ./04-teardown.sh --namespace <ns> [--destroy] [--yes]
+#   ./04-teardown.sh --namespace <ns> [--nodepool <name>...] [--destroy] [--yes]
 #
 # Flags:
 #   --namespace  Kubernetes namespace whose GPU pods to drain (required)
-#   --nodepool   Karpenter NodePool name to delete (default: gpu-training)
+#   --nodepool   Karpenter NodePool to delete. Repeatable. When omitted, every NodePool
+#                carrying an accelerator device taint is discovered from the cluster.
 #   --destroy    Also run `terraform destroy` after Kubernetes cleanup
 #   --yes        Skip interactive confirmation (use in CI with caution)
+#
+# The pools are DISCOVERED, not assumed. accelerator_pools is a map the reader defines, so there
+# is no single pool name this script could default to: a hardcoded default silently matches
+# nothing ("NodePool not found — skipping") and leaves the expensive nodes running, which is the
+# exact accident this script exists to prevent. A pool counts as an accelerator pool when its
+# template carries one of the device taints the Terraform module stamps (nvidia.com/gpu,
+# aws.amazon.com/neuron); the CPU pool has no such taint and is left to `terraform destroy`,
+# which needs somewhere to run its own final workloads.
 
 set -euo pipefail
 
 NAMESPACE=""
-NODEPOOL_NAME="gpu-training"
+NODEPOOLS=()
 RUN_DESTROY=false
 AUTO_YES=false
+
+# Device taints the Terraform module puts on accelerator pools. Extend this if a new device type
+# is added; a pool whose taint is not listed here is not treated as an accelerator pool.
+ACCELERATOR_TAINTS=("nvidia.com/gpu" "aws.amazon.com/neuron")
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -28,7 +41,7 @@ INFRA_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --namespace)   NAMESPACE="$2";        shift 2 ;;
-    --nodepool)    NODEPOOL_NAME="$2";     shift 2 ;;
+    --nodepool)    NODEPOOLS+=("$2");      shift 2 ;;
     --destroy)     RUN_DESTROY=true;       shift ;;
     --yes)         AUTO_YES=true;          shift ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
@@ -38,6 +51,35 @@ done
 if [[ -z "$NAMESPACE" ]]; then
   echo "Error: --namespace is required." >&2
   exit 1
+fi
+
+# ── Resolve which NodePools to delete ─────────────────────────────────────────
+# Ask the cluster rather than assuming a name. Every accelerator pool has to be found: leaving
+# one behind means GPU or Neuron instances keep billing after the reader believes teardown ran.
+if [[ ${#NODEPOOLS[@]} -eq 0 ]]; then
+  TAINTS_CSV=$(IFS=,; echo "${ACCELERATOR_TAINTS[*]}")
+  mapfile -t NODEPOOLS < <(
+    kubectl get nodepool -o json 2>/dev/null \
+      | TAINTS_CSV="$TAINTS_CSV" python3 -c "
+import json, os, sys
+wanted = set(os.environ['TAINTS_CSV'].split(','))
+try:
+    items = json.load(sys.stdin).get('items', [])
+except Exception:
+    sys.exit(0)
+for np in items:
+    spec = np.get('spec', {}).get('template', {}).get('spec', {})
+    keys = {t.get('key') for t in spec.get('taints', [])}
+    if keys & wanted:
+        print(np['metadata']['name'])
+"
+  )
+  if [[ ${#NODEPOOLS[@]} -eq 0 ]]; then
+    echo "No NodePool carries an accelerator device taint (${ACCELERATOR_TAINTS[*]})."
+    echo "Nothing to drain. If a pool should have matched, pass it with --nodepool <name>."
+  else
+    echo "Discovered accelerator NodePool(s): ${NODEPOOLS[*]}"
+  fi
 fi
 
 confirm() {
@@ -52,7 +94,7 @@ confirm() {
 
 echo "=== Teardown Plan ==="
 echo "  Namespace  : $NAMESPACE"
-echo "  NodePool   : $NODEPOOL_NAME"
+echo "  NodePool(s): ${NODEPOOLS[*]:-(none found)}"
 echo "  Destroy    : $RUN_DESTROY"
 echo ""
 
@@ -127,17 +169,51 @@ else:
 
 # ── Step 2: Delete NodePool ───────────────────────────────────────────────────
 echo ""
-echo "Step 2 — Delete Karpenter NodePool: $NODEPOOL_NAME"
-if kubectl get nodepool "$NODEPOOL_NAME" &>/dev/null; then
-  if confirm "  Delete NodePool '$NODEPOOL_NAME'?"; then
-    kubectl delete nodepool "$NODEPOOL_NAME" --ignore-not-found=true
-    echo "  NodePool deleted. CB nodes will be released when the reservation expires."
+echo "Step 2 — Delete Karpenter NodePool(s): ${NODEPOOLS[*]:-(none)}"
+for NODEPOOL_NAME in "${NODEPOOLS[@]:-}"; do
+  [[ -z "$NODEPOOL_NAME" ]] && continue
+  if kubectl get nodepool "$NODEPOOL_NAME" &>/dev/null; then
+    if confirm "  Delete NodePool '$NODEPOOL_NAME'?"; then
+      kubectl delete nodepool "$NODEPOOL_NAME" --ignore-not-found=true
+      echo "  NodePool '$NODEPOOL_NAME' deleted."
+    else
+      echo "  Skipped '$NODEPOOL_NAME'."
+    fi
   else
-    echo "  Skipped."
+    # Only reachable via an explicit --nodepool, since discovery reads live objects. A name the
+    # cluster does not have is a typo worth surfacing, not a no-op to pass over quietly.
+    echo "  WARNING: NodePool '$NODEPOOL_NAME' not found. If its nodes are still running," >&2
+    echo "           they will keep billing. Check: kubectl get nodepool" >&2
   fi
-else
-  echo "  NodePool '$NODEPOOL_NAME' not found — skipping."
-fi
+done
+
+# Whether or not a pool was deleted, report what accelerator nodes are still up. A reader who
+# sees "Teardown complete" with p4d nodes still listed here knows something did not take.
+echo ""
+echo "Accelerator nodes still registered:"
+kubectl get nodes -o json 2>/dev/null | python3 -c "
+import json, sys
+try:
+    items = json.load(sys.stdin).get('items', [])
+except Exception:
+    items = []
+left = []
+for n in items:
+    cap = n.get('status', {}).get('capacity', {})
+    devs = {k: v for k, v in cap.items()
+            if k in ('nvidia.com/gpu', 'aws.amazon.com/neuron')}
+    if devs:
+        labels = n['metadata'].get('labels', {})
+        left.append('  %s  %s  %s' % (
+            n['metadata']['name'],
+            labels.get('node.kubernetes.io/instance-type', '?'),
+            ' '.join('%s=%s' % kv for kv in sorted(devs.items()))))
+if left:
+    print('\n'.join(left))
+    print('  (still billing — they drain asynchronously; watch: kubectl get nodeclaims -w)')
+else:
+    print('  none')
+"
 
 # ── Step 3: Optional terraform destroy ───────────────────────────────────────
 if [[ "$RUN_DESTROY" == "true" ]]; then
