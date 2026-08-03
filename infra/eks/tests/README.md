@@ -4,7 +4,7 @@
 
 ## 前提
 
-- `kubectl` が対象クラスタ (`distai-eks-blog`) に向いている
+- `kubectl` が対象クラスタに向いている (クラスタ名は `terraform output cluster_name` で確認できます)
 - `aws` CLI が認証済み
 - `envsubst` が使える (macOS: `brew install gettext`)
 
@@ -27,8 +27,8 @@ cd infra/eks/tests
 | `--with-gpu` | false | GPU テスト (ノード起動 + nvidia-smi + CUDA + FSx) も実行 |
 | `--keep-ns` | false | テスト後に namespace/リソースを残す (失敗調査用) |
 | `--namespace NAME` | `distai-test` | テスト用 namespace 名 |
-| `--cluster-name NAME` | `distai-eks-blog` | kubectl context のクラスタ名検証に使用 |
-| `--region REGION` | `us-west-2` | AWS CLI のリージョン |
+| `--cluster-name NAME` | `terraform output cluster_name` | kubectl context のクラスタ名検証に使用。省略時は Terraform の output から解決 |
+| `--region REGION` | `terraform output region` | AWS CLI のリージョン。省略時は Terraform の output から解決 (取れなければ `AWS_DEFAULT_REGION`) |
 | `--profile PROFILE` | (ambient) | AWS CLI の名前付き profile |
 | `--gpu-count N` | `1` | nvidia-smi で確認する GPU 枚数 |
 | `--timeout-gpu SEC` | `600` | GPU テスト個別タイムアウト (秒) |
@@ -59,7 +59,7 @@ cd infra/eks/tests
 
 ```
 [INFO] === EKS Infra Smoke Tests ===
-[INFO] cluster: distai-eks-blog, namespace: distai-test, with-gpu: false, gpu-count: 1
+[INFO] cluster: <cluster_name>, namespace: distai-test, with-gpu: false, gpu-count: 1
 [INFO] --- Base Tests ---
 [OK]   control-plane (5s)
 [OK]   system-nodes (4s)
