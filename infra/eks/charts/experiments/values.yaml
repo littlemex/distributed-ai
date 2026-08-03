@@ -303,6 +303,12 @@ torchrunTrain:
   #   docker build -t $IMG infra/eks/manifests/ddp-sample/ && docker push $IMG
   # Then pass --set torchrunTrain.image=$IMG
   image: ""
+  # ddp.py's own default (3 epochs) finishes in seconds — set this for a run long enough to
+  # actually watch (e.g. 100). "" leaves ddp.py's default alone.
+  totalEpochs: ""
+  # ddp.py checkpoints every N epochs on rank 0 only. "" leaves ddp.py's default (1) alone —
+  # every epoch. Killing the Job mid-run keeps the snapshot from the last epoch that finished.
+  saveEvery: ""
   memory: 16Gi
   cpu: "4"
 

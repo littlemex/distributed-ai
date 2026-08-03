@@ -14,6 +14,10 @@ grabs one GPU; a mismatch makes procs contend for a GPU with no error.
 Render + apply (CPU):
   helm template exp ./charts/experiments --set namespace=$NS \
     --set torchrunTrain.enabled=true --set torchrunTrain.image=$IMG | kubectl apply -f -
+Render + apply (longer run, to actually watch progress — 3 default epochs finish in seconds):
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set torchrunTrain.enabled=true --set torchrunTrain.image=$IMG \
+    --set torchrunTrain.totalEpochs=100 | kubectl apply -f -
 Render + apply (GPU, 1 g5 GPU):
   helm template exp ./charts/experiments --set namespace=$NS \
     --set torchrunTrain.enabled=true --set torchrunTrain.image=$IMG \
@@ -66,6 +70,17 @@ spec:
             - /workspace/ddp.py
           env:
             - { name: OUTPUT_DIR, value: /shared/output/torchrun-{{ $v.backend }} }
+            # ddp.py's own default (3) finishes in well under a minute — too fast to watch the
+            # log or a rollout in real time. Set torchrunTrain.totalEpochs for a longer run.
+            # ddp.py checkpoints every SAVE_EVERY epochs (default 1) on rank 0 alone, so a Job
+            # killed mid-run keeps the snapshot from its last COMPLETED epoch — not from a
+            # partial one, since the write happens after _run_epoch returns.
+            {{- if $v.totalEpochs }}
+            - { name: TOTAL_EPOCHS, value: {{ $v.totalEpochs | quote }} }
+            {{- end }}
+            {{- if $v.saveEvery }}
+            - { name: SAVE_EVERY, value: {{ $v.saveEvery | quote }} }
+            {{- end }}
           resources:
             limits:
               {{- if $v.gpu.enabled }}
