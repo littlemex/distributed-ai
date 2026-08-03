@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "experiments chart values",
+  "description": "Deliberately PARTIAL. Helm runs this schema on `helm template` too, which is the only way this catalog is ever applied, so it is the one place that can catch a typo before kubectl sees the YAML. It constrains only the two DDP workloads, because those are the blocks whose knobs are duplicated by design (identical names under torchrunTrain and trainjobTrain) and therefore the blocks where a mistyped or misdirected key is easiest to make and hardest to notice: a dropped env var makes ddp.py fall back to its own defaults and the run still succeeds. Every other workload is left unconstrained on purpose — enumerating all 18 blocks here would duplicate values.yaml and rot the moment either side changes, for workloads that fail loudly (a missing image, a Pod stuck Pending) rather than silently. Cross-block misdirection (setting a knob on the workload you are NOT running) is a different failure and is caught at render time by experiments.failOnStrayDdpKnobs in _helpers.tpl.",
+  "type": "object",
+  "properties": {
+    "torchrunTrain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "backend": { "type": "string", "enum": ["gloo", "nccl"] },
+        "nodeRole": { "type": "string" },
+        "nprocPerNode": { "type": ["integer", "string"] },
+        "gpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "count": { "type": ["integer", "string"] }
+          }
+        },
+        "image": { "type": "string" },
+        "totalEpochs": {
+          "description": "int when set via --set (Helm coerces bare numbers to int64), string when left at the empty default. The template quotes it either way.",
+          "type": ["string", "integer"]
+        },
+        "saveEvery": { "type": ["string", "integer"] },
+        "extraEnv": { "$ref": "#/definitions/envList" },
+        "memory": { "type": "string" },
+        "cpu": { "type": "string" }
+      }
+    },
+    "trainjobTrain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "numNodes": { "type": ["integer", "string"] },
+        "nodeRole": { "type": "string" },
+        "nprocPerNode": { "type": ["integer", "string"] },
+        "gpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "count": { "type": ["integer", "string"] }
+          }
+        },
+        "image": { "type": "string" },
+        "totalEpochs": { "type": ["string", "integer"] },
+        "saveEvery": { "type": ["string", "integer"] },
+        "extraEnv": { "$ref": "#/definitions/envList" },
+        "outputSubdir": { "type": "string" },
+        "workerMemory": { "type": "string" },
+        "workerCpu": { "type": "string" },
+        "shmSize": { "type": "string" }
+      }
+    }
+  },
+  "definitions": {
+    "envList": {
+      "description": "A k8s-style name/value list, so it lands in the container spec verbatim and the values-to-manifest mapping stays readable.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "string" }
+        }
+      }
+    }
+  }
+}
