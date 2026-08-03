@@ -1,0 +1,27 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_pt_",
+  "tag_prefix": "pt_",
+  "note": "Position profile through the FULL COLLAPSE (30 rollout, LR 1e-5, same config as the\nkiller-chart amplified_s1234 run), not just the pre-collapse 14-step run. That earlier run\nnever exceeded mis_kl 0.032; this one is expected to reach the same 0.03->2+ trajectory as\namplified_s1234 while dumping per-token logprobs throughout, closing the one remaining gap\nin PP_POSITION_PROFILE.md: does the position structure hold once mismatch has actually blown\nup, not just in the quiet regime before it.",
+  "common": {
+    "LEARNING_RATE": "1e-5",
+    "NUM_ROLLOUT": "30",
+    "TP_SIZE": "1",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8",
+    "MIS_DUMP_EVERY": "2"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis_dump.compute_mis_weights_with_cp_dumping --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "dump_root": "/fsx/dumps",
+  "cells": [
+    {
+      "name": "e5m2_collapse_train",
+      "note": "fp8 e5m2, LR 1e-5, 30 steps -- same config as amplified_s1234 (killer chart), but with\nper-token dumping throughout instead of only aggregate metrics.",
+      "extra_args": "--sglang-kv-cache-dtype fp8_e5m2"
+    }
+  ]
+}

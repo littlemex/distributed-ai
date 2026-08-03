@@ -85,6 +85,7 @@ repetition 0.27 / reward 0.03 まで歩く。一方 30B は **optimizer step を
 | `dump1` | 0.000624546 | 位置プロファイル bf16 対照群 |
 | `e4m3` (`pp_e4m3`) | 0.00935957 | 位置プロファイル fp8_e4m3 |
 | `e5m2` (`pp_e5m2`) | 0.0329066 | 位置プロファイル fp8_e5m2 |
+| `e5m2_collapse_train` (batch `ptc_collapse2`) | 31.777252 | **崩壊領域**の位置プロファイル (30 step 完走、dump 1424) |
 
 位置プロファイルの 3 arm は per-token ダンプも保持している
 (`/fsx/dumps/{sm_dump1,pp_e4m3,pp_e5m2}/`、各 120 ファイル)。
@@ -121,6 +122,7 @@ repetition 0.27 / reward 0.03 まで歩く。一方 30B は **optimizer step を
 |---|---|
 | `h200_r1_baseline` | tb ディレクトリのみ存在、event file 無し |
 | `p2r_30b_e4m3` | 30B の原因判明後に意図的に停止 |
+| `e5m2_collapse_train` (batch `ptc_collapse`) | **投入ミスで 1 job も submit されず** (RUN_DIR をレシピの無いディレクトリに向けた)。`NOT_SUCCEEDED` として台帳に残す。実データは同名 cell の batch `ptc_collapse2` 側にある |
 | (なし) | 位置プロファイルの全 arm は完了済み。上表の VERIFIED を参照 |
 
 ## 過去に捏造された数値 (絶対に復活させない)

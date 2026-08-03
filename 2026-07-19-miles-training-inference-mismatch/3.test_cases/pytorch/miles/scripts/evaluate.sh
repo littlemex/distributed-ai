@@ -146,11 +146,10 @@ with open(EVAL_DATA, "r") as f:
 print(f"Loaded {len(prompts)} evaluation prompts")
 
 def extract_boxed(text):
-    r"""Return the content of the last \boxed{...}, honouring nested braces.
+    r"""Return the content of the last \boxed{...}, honoring nested braces.
 
-    A `[^}]*` character class stops at the first closing brace, so it reads `\boxed{\frac{1}
-    {2}}` as `\frac{1` -- silently wrong on exactly the answers a math model produces. This
-    scans forward with a brace counter instead.
+    Scanned with a brace counter rather than a regex: a character class cannot match the
+    balanced braces in answers like `\boxed{\frac{1}{2}}`.
     """
     out = []
     needle = r"\boxed{"
@@ -185,11 +184,10 @@ async def evaluate_prompt(session, prompt_item, prompt_idx, sample_idx, sem):
     }
 
     try:
-        # The semaphore bounds how many requests are in flight. Submitting every
-        # prompt x sample at once means most requests spend their timeout sitting in the
-        # server's queue rather than generating, and a timeout is indistinguishable from a
-        # wrong answer in the tally below -- accuracy would sag toward zero for a reason
-        # that has nothing to do with the model.
+        # Bound the in-flight requests. Submitting every prompt x sample at once makes most
+        # requests spend their timeout queued rather than generating, and the tally below
+        # counts a timeout as a wrong answer -- so accuracy drops for a reason unrelated to
+        # the model.
         async with sem:
             async with session.post(SERVER_URL, json=payload,
                                     timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as resp:
@@ -225,11 +223,9 @@ async def main():
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
     async with aiohttp.ClientSession() as session:
         tasks = []
-        # The prompt index comes from the loop, not from the data. AIME-2024 as prepared
-        # here has only {"prompt", "label"} -- no "idx" -- so `prompt_item.get("idx", 0)`
-        # collapsed all 30 prompts onto key 0 and pass@k became "any of the 480 samples was
-        # right", i.e. ~1.0, with nothing in the output flagging it but a "Prompts
-        # evaluated: 1" line.
+        # pass@k is keyed on the loop index, not on a field in the data: AIME-2024 as prepared
+        # here carries only {"prompt", "label"}, so keying on a missing "idx" would collapse
+        # every prompt onto one bucket and turn pass@k into "any sample anywhere was right".
         for prompt_idx, prompt_item in enumerate(prompts):
             for s in range(NUM_SAMPLES):
                 tasks.append(evaluate_prompt(session, prompt_item, prompt_idx, s, sem))
@@ -296,8 +292,6 @@ asyncio.run(main())
 EVAL_SCRIPT
 
 # ----- Step 3: Cleanup -----
-# The EXIT trap installed above does the actual killing, so this path is just the message.
-echo "[INFO] Stopping SGLang server..."
-wait ${SGLANG_PID} 2>/dev/null || true
-
-echo "[INFO] Evaluation complete."
+# Killing and reaping is the EXIT trap's job, so there is deliberately no kill/wait here: a
+# bare `wait` would block on a server that is still running and nothing would ever stop it.
+echo "[INFO] Evaluation complete; stopping SGLang server."
