@@ -4,7 +4,10 @@ Minimal DistributedDataParallel image used by the `trainjobTrain` (multi-node Ku
 TrainJob) and `torchrunTrain` (single-node, zero-operator) workloads in `charts/experiments`. It
 trains an MNIST MLP with `torch.nn.parallel.DistributedDataParallel` on top of
 `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime` — and nothing else: `torch` and `torchvision`
-both ship in that base image.
+both ship in that base image, so there is not a single pip layer. (A v1-era self-hosted etcd
+rendezvous store used to live behind this image, and the Dockerfile installed `python-etcd` for
+it; `ddp.py` never imported it, so once Trainer v2's `PET_*`/c10d mechanism below replaced etcd
+the install was dropped — verified by rebuilding and running the TrainJob to completion.)
 
 `ddp.py` is adapted from awsome-distributed-ai's `3.test_cases/pytorch/ddp/ddp.py`. The two
 deliberate differences from that upstream sample are documented at the top of `ddp.py`: MNIST

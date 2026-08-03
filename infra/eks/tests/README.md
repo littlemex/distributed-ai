@@ -44,6 +44,7 @@ cd infra/eks/tests
 | karpenter | Karpenter Pod 2/2 Running、全 NodePool と EC2NodeClass が Ready |
 | trainer | Kubeflow Trainer v2 (manager + JobSet) が Running |
 | csi-drivers | EBS/EFS/FSx Lustre/OpenZFS の DaemonSet + Controller が Ready |
+| device-plugins | GPU (gpu-operator) / EFA / Neuron の device plugin DaemonSet が Ready |
 | storage-mount | テスト専用 PV 経由で FSx Lustre と OpenZFS に read/write |
 
 ### GPU テスト (`--with-gpu`)
@@ -61,26 +62,28 @@ cd infra/eks/tests
 [INFO] === EKS Infra Smoke Tests ===
 [INFO] cluster: <cluster_name>, namespace: distai-test, with-gpu: false, gpu-count: 1
 [INFO] --- Base Tests ---
-[OK]   control-plane (5s)
+[OK]   control-plane (4s)
 [OK]   system-nodes (4s)
-[OK]   karpenter (8s)
-[OK]   trainer (2s)
-[OK]   csi-drivers (33s)
-[OK]   storage-mount (47s)
+[OK]   karpenter (7s)
+[OK]   trainer (4s)
+[OK]   csi-drivers (30s)
+[OK]   device-plugins (11s)
+[OK]   storage-mount (38s)
 
 ==============================
  Test Summary
 ==============================
 STATUS   TEST                                DETAIL
 --------------------------------------------------------------
-PASS     control-plane                       5s
+PASS     control-plane                       4s
 PASS     system-nodes                        4s
-PASS     karpenter                           8s
-PASS     trainer                             2s
-PASS     csi-drivers                         33s
-PASS     storage-mount                       47s
+PASS     karpenter                           7s
+PASS     trainer                             4s
+PASS     csi-drivers                         30s
+PASS     device-plugins                      11s
+PASS     storage-mount                       38s
 --------------------------------------------------------------
-PASS: 6  FAIL: 0  SKIP: 0  TOTAL: 6
+PASS: 7  FAIL: 0  SKIP: 0  TOTAL: 7
 ```
 
 ## 設計上の注意
