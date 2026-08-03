@@ -34,8 +34,7 @@ Verify:
 {{- if .Values.torchrunTrain.enabled }}
 {{- $v := .Values.torchrunTrain }}
 {{- if not $v.image }}{{ fail "torchrunTrain.image is required (the ddp-sample image URI)" }}{{- end }}
-{{- /* The shared-claim PVC is rendered once by templates/shared-pvc.yaml (shared with
-     trainjobTrain) so enabling both does not emit two copies of the same object. */ -}}
+{{- include "experiments.failOnStrayDdpKnobs" (dict "root" $ "enabled" "torchrunTrain" "other" "trainjobTrain") }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -73,18 +72,19 @@ spec:
             - --nproc_per_node={{ $v.nprocPerNode }}
             - /workspace/ddp.py
           env:
+            # OUTPUT_DIR stays inline: it is the one ddp.py env that is genuinely per-workload
+            # (the backend label keeps gloo and nccl runs from resuming each other's snapshot).
+            # Every other ddp.py knob comes from the shared experiments.ddpEnv helper, so
+            # torchrunTrain and trainjobTrain cannot drift apart again — see that helper's
+            # header for the drift this replaced.
+            #
+            # ddp.py's own default (3 epochs) finishes in well under a minute — too fast to
+            # watch the log or a rollout in real time. Set torchrunTrain.totalEpochs for a
+            # longer run. ddp.py checkpoints every SAVE_EVERY epochs (default 1) on rank 0
+            # alone, so a Job killed mid-run keeps the snapshot from its last COMPLETED epoch
+            # — not from a partial one, since the write happens after _run_epoch returns.
             - { name: OUTPUT_DIR, value: /shared/output/torchrun-{{ $v.backend }} }
-            # ddp.py's own default (3) finishes in well under a minute — too fast to watch the
-            # log or a rollout in real time. Set torchrunTrain.totalEpochs for a longer run.
-            # ddp.py checkpoints every SAVE_EVERY epochs (default 1) on rank 0 alone, so a Job
-            # killed mid-run keeps the snapshot from its last COMPLETED epoch — not from a
-            # partial one, since the write happens after _run_epoch returns.
-            {{- if $v.totalEpochs }}
-            - { name: TOTAL_EPOCHS, value: {{ $v.totalEpochs | quote }} }
-            {{- end }}
-            {{- if $v.saveEvery }}
-            - { name: SAVE_EVERY, value: {{ $v.saveEvery | quote }} }
-            {{- end }}
+            {{- include "experiments.ddpEnv" $v | trim | nindent 12 }}
           resources:
             limits:
               {{- if $v.gpu.enabled }}

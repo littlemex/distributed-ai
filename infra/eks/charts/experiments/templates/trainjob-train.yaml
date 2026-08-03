@@ -21,12 +21,19 @@ HOW THE LAUNCH WORKS (verified against the Trainer torch plugin source, v2.2.1):
 
 Render + apply (CPU, 2 nodes):
   helm template exp ./charts/experiments --set namespace=$NS \
-    --set trainjobTrain.enabled=true --set trainjobTrain.image=$IMG | kubectl apply -f -
-Render + apply (GPU, 2 nodes x 1 GPU):
+    --set trainjobTrain.enabled=true --set trainjobTrain.image=$IMG \
+    --set sharedStorage.existingClaimName=shared-claim | kubectl apply -f -
+Render + apply (GPU, 2 nodes x 1 GPU, long enough to watch):
   helm template exp ./charts/experiments --set namespace=$NS \
     --set trainjobTrain.enabled=true --set trainjobTrain.image=$IMG \
-    --set trainjobTrain.nodeRole=gpu-g5 --set trainjobTrain.gpu.enabled=true \
-    --set trainjobTrain.gpu.count=1 --set trainjobTrain.nprocPerNode=1 | kubectl apply -f -
+    --set trainjobTrain.nodeRole=gpu-ddp --set trainjobTrain.gpu.enabled=true \
+    --set trainjobTrain.gpu.count=1 --set trainjobTrain.nprocPerNode=1 \
+    --set trainjobTrain.totalEpochs=100 \
+    --set sharedStorage.existingClaimName=shared-claim | kubectl apply -f -
+
+  NOTE the knob is trainjobTrain.totalEpochs, NOT torchrunTrain.totalEpochs. The two workloads
+  keep symmetric ddp knobs (values.yaml explains why), and passing one to the other used to be
+  silently dropped — the render now fails instead (experiments.failOnStrayDdpKnobs).
 Verify (JobSet-based pod naming; there is no "master"/"worker" split anymore):
   kubectl -n $NS get trainjob ddp-trainjob
   kubectl -n $NS logs -f -l jobset.sigs.k8s.io/jobset-name=ddp-trainjob   # rank-0 is node-0-0
@@ -34,6 +41,8 @@ Verify (JobSet-based pod naming; there is no "master"/"worker" split anymore):
 {{- if .Values.trainjobTrain.enabled }}
 {{- $v := .Values.trainjobTrain }}
 {{- if not $v.image }}{{ fail "trainjobTrain.image is required (the ddp-sample image URI)" }}{{- end }}
+{{- include "experiments.failOnStrayDdpKnobs" (dict "root" $ "enabled" "trainjobTrain" "other" "torchrunTrain") }}
+{{- $outSubdir := $v.outputSubdir | default (printf "trainjob-%s" ($v.nodeRole | default "cpu")) }}
 apiVersion: trainer.kubeflow.org/v1alpha1
 kind: TrainJob
 metadata:
@@ -63,6 +72,21 @@ spec:
         nvidia.com/gpu: {{ $v.gpu.count | default 1 | quote }}
         {{- end }}
         memory: {{ $v.workerMemory | default "16Gi" | quote }}
+    # WHERE ddp.py's env BELONGS (verified against the Trainer torch plugin's merge, v2.2.1):
+    # spec.trainer.env is merged BY NAME into the runtime container's env, with the TrainJob
+    # side winning. So the ClusterTrainingRuntime is the place for cluster-lifetime defaults
+    # (a namespace-wide TRACKING_URI, say, if MLflow ever becomes a standing service), and THIS
+    # list is the place for per-run knobs: OUTPUT_DIR identifies the run, TOTAL_EPOCHS /
+    # SAVE_EVERY / extraEnv configure it. Never set PET_* on either side — the plugin injects
+    # those, and a hand-written copy would race the merge.
+    #
+    # OUTPUT_DIR carries a per-shape subfolder because ddp.py RESUMES from whatever snapshot it
+    # finds there. With one shared "trainjob" folder, a CPU/gloo run followed by a GPU/nccl run
+    # made the second one pick up the first one's epoch counter and stop almost immediately —
+    # which reads as "my epoch setting was ignored" rather than "it resumed". nodeRole is the
+    # closest stand-in for run shape here (cpu vs an accelerator pool); override with
+    # trainjobTrain.outputSubdir to pin a folder, or to resume another run's snapshot on purpose.
     env:
-      - { name: OUTPUT_DIR, value: /shared/output/trainjob }
+      - { name: OUTPUT_DIR, value: /shared/output/{{ $outSubdir }} }
+      {{- include "experiments.ddpEnv" $v | trim | nindent 6 }}
 {{- end }}

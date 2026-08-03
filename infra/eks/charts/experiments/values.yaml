@@ -312,12 +312,32 @@ torchrunTrain:
   #   docker build -t $IMG infra/eks/manifests/ddp-sample/ && docker push $IMG
   # Then pass --set torchrunTrain.image=$IMG
   image: ""
+  # ── ddp.py knobs ─────────────────────────────────────────────────────────────
+  # These three exist under BOTH torchrunTrain and trainjobTrain, with identical names, on
+  # purpose. They configure ddp.py (the script) rather than the launcher, so a single shared
+  # `ddp.*` block was considered and rejected: it would break the one rule this catalog
+  # otherwise keeps — everything that affects workload X lives under X — and readers would
+  # have to remember which knobs live where. The real risk of duplicating them (updating one
+  # workload's env injection and forgetting the other, which is exactly how trainjobTrain
+  # shipped with no TOTAL_EPOCHS at all and silently ignored a --set) is eliminated on the
+  # TEMPLATE side instead: both workloads render these through the single experiments.ddpEnv
+  # helper in _helpers.tpl. Keeping the names identical also lets a values file that
+  # configures both workloads DRY itself with a plain YAML anchor.
+  #
   # ddp.py's own default (3 epochs) finishes in seconds — set this for a run long enough to
   # actually watch (e.g. 100). "" leaves ddp.py's default alone.
   totalEpochs: ""
   # ddp.py checkpoints every N epochs on rank 0 only. "" leaves ddp.py's default (1) alone —
   # every epoch. Killing the Job mid-run keeps the snapshot from the last epoch that finished.
   saveEvery: ""
+  # Long-tail ddp.py env (BATCH_SIZE, USE_MLFLOW, TRACKING_URI, DATA_DIR, ...). A k8s-style
+  # name/value list rather than a map: it lands in the container spec verbatim, so the
+  # values→manifest correspondence stays readable. Only the two knobs above get dedicated
+  # fields — they are the ones every chapter tells you to touch, so they earn the
+  # discoverability; a dedicated field per env var would just re-document ddp.py here.
+  #   extraEnv:
+  #     - { name: BATCH_SIZE, value: "64" }
+  extraEnv: []
   memory: 16Gi
   cpu: "4"
 
@@ -344,6 +364,21 @@ trainjobTrain:
     enabled: false     # set true for the nccl (GPU) backend
     count: 1           # nvidia.com/gpu per node; keep == nprocPerNode on GPU
   image: ""            # REQUIRED: same ddp-sample image as torchrunTrain
+  # ── ddp.py knobs ─────────────────────────────────────────────────────────────
+  # Same three knobs as torchrunTrain, same names, same semantics — see the comment there for
+  # why they are duplicated per workload instead of shared, and how the template side keeps
+  # them from drifting. Until these existed, --set torchrunTrain.totalEpochs=100 was silently
+  # dropped on a trainjobTrain run and the job trained for ddp.py's default 3 epochs.
+  totalEpochs: ""
+  saveEvery: ""
+  extraEnv: []
+  # OUTPUT_DIR subfolder under /shared/output. Distinct per run shape because ddp.py RESUMES
+  # from whatever snapshot it finds there: a gloo (CPU) run and an nccl (GPU) run sharing one
+  # folder means the second one picks up the first one's epoch counter and stops early, which
+  # looks like the epoch setting being ignored. torchrunTrain splits on its `backend` label
+  # for the same reason; here nodeRole is the closest stand-in (cpu vs an accelerator pool).
+  # Override to pin a run to its own folder, or to deliberately resume another run's snapshot.
+  outputSubdir: ""
   workerMemory: 16Gi
   workerCpu: "4"
   shmSize: 4Gi         # /dev/shm emptyDir sizeLimit in the runtime

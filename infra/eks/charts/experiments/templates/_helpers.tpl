@@ -55,6 +55,67 @@ the data's lifecycle instead of a workload's.
 {{- end -}}
 
 {{/*
+ddp.py-facing env entries (TOTAL_EPOCHS / SAVE_EVERY / extraEnv) for ONE workload block.
+
+torchrunTrain and trainjobTrain run the SAME script through different launchers (a plain
+batch/v1 Job forking procs in one container, vs a Kubeflow TrainJob with one rank per pod).
+The values stay per-workload — symmetric blocks with identical key names, see values.yaml for
+why — but the env-assembly logic must live in exactly one place. Duplicating it is precisely
+how trainjobTrain once shipped with no TOTAL_EPOCHS injection at all: a reader passing
+--set torchrunTrain.totalEpochs=100 got no error, no env var, and a 3-epoch run. Add a new
+dedicated ddp knob HERE and it reaches both workloads at once.
+
+NOT included: OUTPUT_DIR. That one is genuinely per-workload (different subfolders so runs do
+not resume from each other's snapshots), so each template sets it itself just above its
+include of this helper.
+
+Call with the workload block as the context, and let the caller own the indentation. `trim` is
+required: every knob here is optional, so with all of them empty the helper returns whitespace
+and a bare nindent would emit a blank line into the middle of the env list.
+  {{- include "experiments.ddpEnv" $v | trim | nindent 12 }}
+*/}}
+{{- define "experiments.ddpEnv" -}}
+{{- if .totalEpochs }}
+- { name: TOTAL_EPOCHS, value: {{ .totalEpochs | quote }} }
+{{- end }}
+{{- if .saveEvery }}
+- { name: SAVE_EVERY, value: {{ .saveEvery | quote }} }
+{{- end }}
+{{- range .extraEnv }}
+- { name: {{ .name | quote }}, value: {{ .value | quote }} }
+{{- end }}
+{{- end }}
+
+{{/*
+Render-time guard against the one mistake the symmetric-blocks shape invites: setting a ddp
+knob under the workload block that is NOT the one being run.
+
+This chart is applied as `helm template | kubectl apply`, so there is no NOTES.txt and no
+install-time warning channel — a misdirected value is silently dropped and the run "succeeds"
+with ddp.py's defaults, which is worse than failing the render. fail is the only channel that
+reaches the reader, and this chart already uses it for a missing image.
+
+The condition is deliberately narrow: fail ONLY when the knob is set on the OTHER (disabled)
+block AND the enabled block leaves the same knob empty. A values file that configures both
+workloads and toggles `enabled` per run is legitimate and keeps rendering; only the "set it on
+the wrong side and nowhere else" case is an error.
+
+Call from the ENABLED workload's template:
+  {{- include "experiments.failOnStrayDdpKnobs" (dict "root" $ "enabled" "trainjobTrain" "other" "torchrunTrain") }}
+*/}}
+{{- define "experiments.failOnStrayDdpKnobs" -}}
+{{- $mine := index .root.Values .enabled -}}
+{{- $theirs := index .root.Values .other -}}
+{{- $enabledName := .enabled -}}
+{{- $otherName := .other -}}
+{{- range $k := list "totalEpochs" "saveEvery" -}}
+{{- if and (index $theirs $k) (not (index $theirs "enabled")) (not (index $mine $k)) -}}
+{{- fail (printf "%s.%s=%v is set, but %s is disabled and %s.%s is empty. Values under a disabled workload block are never read — did you mean --set %s.%s=%v ? The two workloads keep symmetric ddp knobs on purpose (see values.yaml)." $otherName $k (index $theirs $k) $otherName $enabledName $k $enabledName $k (index $theirs $k)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Resolve a Neuron DLC image. If the workload sets an explicit `image`, use it verbatim
 (full override). Otherwise build "{dlc.registry}/{repoTag}" from the shared registry so the
 region+account ID is defined once (see values.yaml `dlc`). Call as:
