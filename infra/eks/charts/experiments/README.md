@@ -51,7 +51,7 @@ Every workload's failure mode for a missing prerequisite is the same: the Pod/Jo
 
 | workload | prerequisite | how to check | symptom if missing |
 |---|---|---|---|
-| `torchrunTrain`, `trainjobTrain` | the `sharedStorage.backend` static PV bound and free — default `openzfs` → `openzfs-shared` (`openzfs_enabled=true`, ON by default); or `fsx` → `fsx-training`, `efs` → `efs-neuron-workspace` | `kubectl get pv $(helm template exp . --set ...\|grep volumeName)` — or just `kubectl get pv openzfs-shared` for the default | PVC `shared-claim` stays Pending |
+| `torchrunTrain`, `trainjobTrain` | `sharedStorage.existingClaimName` set to a PVC you already applied via `manifests/shared-pvc.yaml` (this chart does not create it) | `kubectl get pvc shared-claim` | render fails with a `required` error (`existingClaimName is required`) if unset; if set to a PVC that doesn't exist yet, the workload's Pod stays Pending |
 | `torchrunTrain`, `trainjobTrain` | `trainjobTrain.image` / `torchrunTrain.image` set to a real image (PyTorch + `ddp.py` MNIST MLP; see `manifests/ddp-sample/` in the module root for the build) | — | render itself fails with a `required` error (not a Pending — this one fails loud) |
 | `neuronServingVllm` | PVC `neuron-cache-pvc` (RWX; not created by this chart — bind it to your own EFS/FSx StorageClass or a static PV before enabling) | `kubectl get pvc neuron-cache-pvc` | Deployment's Pod stays Pending |
 | `gpuServingVllm`, `neuronServingVllm` | (optional) Secret `hf-token` with key `token`, for gated HF models | `kubectl get secret hf-token` | fine if ungated model; gated model pull fails at container start |
@@ -85,16 +85,19 @@ helm template exp . -n my-experiment --set neuronDdp.enabled=true --set neuronDd
 
 ## Teardown and the static-PV trap
 
-`torchrunTrain`/`trainjobTrain`'s PVC (`shared-claim`) binds the single static PV of the
-selected `sharedStorage.backend` (default `openzfs-shared`; or `fsx-training` / `efs-neuron-
-workspace`), which **can only be Bound to one PVC at a time**. If you delete the PVC (e.g. via
-`kubectl delete -f -` above) while its reclaim policy is `Retain`, the PV goes to `Released`
-and the *next* apply (same namespace or a different one) binds nothing — PVC Pending forever,
-no useful event. Recover by clearing the stale claimRef on whichever PV you use, e.g. for the
-default:
+`torchrunTrain`/`trainjobTrain`'s Pods and Jobs above are safe to delete-and-reapply — neither
+workload's template renders the PVC itself, so `kubectl delete -f -` on a workload's render
+never touches `shared-claim`. The trap only appears if you delete `shared-claim` directly
+(e.g. `kubectl delete pvc shared-claim`, or a namespace teardown): it binds the single static
+PV of the chosen backend, which **can only be Bound to one PVC at a time**, and with reclaim
+policy `Retain` the PV goes `Released` on delete — the *next* PVC (same name or not) binds
+nothing, PVC Pending forever, no useful event. Recover by clearing only the stale `uid` (not
+the whole `claimRef` — see `manifests/shared-pvc.yaml`'s header for why), e.g. for the
+default backend:
 
 ```bash
-kubectl patch pv openzfs-shared --type json -p '[{"op":"remove","path":"/spec/claimRef"}]'
+kubectl patch pv openzfs-shared --type json \
+  -p '[{"op":"remove","path":"/spec/claimRef/uid"},{"op":"remove","path":"/spec/claimRef/resourceVersion"}]'
 ```
 
 Bare pods (`neuronProbe`, `neuronDdp`, `ncclProbe`, `ncclSshd`) are not requeued on node
@@ -174,8 +177,12 @@ Secret).
 
 ```
 Chart.yaml, values.yaml       chart metadata + all workload parameters (see inline comments)
-templates/_helpers.tpl        shared helpers: experiments.namespace, sharedVolumeName, tolerations, sshd command, neuron env
-templates/shared-pvc.yaml     single shared-claim PVC (backend openzfs|fsx|efs), shared by torchrunTrain + trainjobTrain
+templates/_helpers.tpl        shared helpers: experiments.namespace, sharedClaimName, tolerations, sshd command, neuron env
 templates/<workload>.yaml     one file per workload; header comment has render/verify/troubleshooting steps
 files/allreduce_test.py       torch-neuronx all-reduce probe, mounted into neuronDdp via ConfigMap
+
+manifests/shared-pvc.yaml (module root, not this chart) — the shared-claim PVC itself. Apply
+it ONCE PER NAMESPACE, by hand, before enabling torchrunTrain/trainjobTrain; pass its name via
+--set sharedStorage.existingClaimName=shared-claim. See that file's header for why it lives
+outside this chart's render cycle.
 ```

@@ -33,11 +33,25 @@ render time rather than binding to nothing.
 {{- end -}}
 
 {{/*
-Shared-storage PVC name. If sharedStorage.existingClaimName is set, use it directly
-(no shared-pvc.yaml is rendered). Otherwise use the chart-created "shared-claim".
+Shared-storage PVC name. REQUIRED — sharedStorage.existingClaimName. The chart used to render
+its own "shared-claim" PVC, one per enabled workload's namespace; that PVC's lifecycle was tied
+to whatever created it (a `helm template | kubectl apply` re-run, a namespace teardown), while
+the PV it bound to is Terraform-managed and outlives all of that. A PV only ever rebinds to the
+exact PVC object (by UID, not by name) that last held it — Kubernetes does not auto-transition
+Released back to Available, on purpose, so a Retain-policy PV never hands still-referenced data
+to a new claimant without an operator saying so explicitly. So the moment that chart-owned PVC
+was deleted and recreated (same name, new UID) — which a workshop reader taking a "let me
+retry" pass at Basic02 will do — the PV got stuck Released and every future pod calling for
+"shared-claim" sat Pending, with an event that names an unbound-PVC annotation rather than the
+actual cause. Requiring the PVC to be created once, by hand, outside any workload's render
+cycle (see manifests/shared-pvc.yaml) fixes the actual mismatch: a claim's lifecycle now matches
+the data's lifecycle instead of a workload's.
 */}}
 {{- define "experiments.sharedClaimName" -}}
-{{- .Values.sharedStorage.existingClaimName | default "shared-claim" -}}
+{{- if not .Values.sharedStorage.existingClaimName -}}
+{{ fail "sharedStorage.existingClaimName is required — apply manifests/shared-pvc.yaml once (per namespace) and pass its name here. See that file's header for why the chart does not create this PVC for you." }}
+{{- end -}}
+{{- .Values.sharedStorage.existingClaimName -}}
 {{- end -}}
 
 {{/*

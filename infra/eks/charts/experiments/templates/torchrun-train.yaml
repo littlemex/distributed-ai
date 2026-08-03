@@ -5,25 +5,29 @@ torchrun-train — single-node MNIST MLP DistributedDataParallel run via `torchr
 do with NO operator" single-node step; trainjob-train (Kubeflow Trainer v2) is the multi-node
 step above it.
 
-Requires the sharedStorage.backend filesystem enabled in Terraform (default openzfs → the
-FSx OpenZFS static PV openzfs-shared, ON by default) and torchrunTrain.image set.
+Requires sharedStorage.existingClaimName (apply manifests/shared-pvc.yaml once per namespace
+first — see that file's header for why this is not created by the chart) and
+torchrunTrain.image set.
 
 GPU note: nprocPerNode MUST equal gpu.count — torchrun spawns one proc per nproc and each
 grabs one GPU; a mismatch makes procs contend for a GPU with no error.
 
 Render + apply (CPU):
   helm template exp ./charts/experiments --set namespace=$NS \
-    --set torchrunTrain.enabled=true --set torchrunTrain.image=$IMG | kubectl apply -f -
+    --set torchrunTrain.image=$IMG --set torchrunTrain.enabled=true \
+    --set sharedStorage.existingClaimName=shared-claim | kubectl apply -f -
 Render + apply (longer run, to actually watch progress — 3 default epochs finish in seconds):
   helm template exp ./charts/experiments --set namespace=$NS \
-    --set torchrunTrain.enabled=true --set torchrunTrain.image=$IMG \
+    --set torchrunTrain.image=$IMG --set torchrunTrain.enabled=true \
+    --set sharedStorage.existingClaimName=shared-claim \
     --set torchrunTrain.totalEpochs=100 | kubectl apply -f -
 Render + apply (GPU, 1 g5 GPU):
   helm template exp ./charts/experiments --set namespace=$NS \
     --set torchrunTrain.enabled=true --set torchrunTrain.image=$IMG \
     --set torchrunTrain.backend=nccl --set torchrunTrain.nodeRole=gpu-g5 \
     --set torchrunTrain.nprocPerNode=1 \
-    --set torchrunTrain.gpu.enabled=true --set torchrunTrain.gpu.count=1 | kubectl apply -f -
+    --set torchrunTrain.gpu.enabled=true --set torchrunTrain.gpu.count=1 \
+    --set sharedStorage.existingClaimName=shared-claim | kubectl apply -f -
 Verify:
   kubectl -n $NS logs -f job/ddp-torchrun
 */ -}}
