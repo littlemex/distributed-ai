@@ -11,10 +11,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: slime-reward
+  name: miles-reward
   namespace: ${NAMESPACE}
   labels:
-    app: slime-reward
+    app: miles-reward
 spec:
   replicas: ${REWARD_REPLICAS}
   # Roll new pods before tearing old ones down so reward capacity never drops to
@@ -26,11 +26,11 @@ spec:
       maxSurge: 1
   selector:
     matchLabels:
-      app: slime-reward
+      app: miles-reward
   template:
     metadata:
       labels:
-        app: slime-reward
+        app: miles-reward
     spec:
       # Pin to a specific HyperPod CPU instance group (e.g. the c5 compute pool)
       # via REWARD_NODE_GROUP, and additionally guard against GPU nodes with the
@@ -55,7 +55,7 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              app: slime-reward
+              app: miles-reward
       # The reward server is stateless; this is enough time to drain in-flight
       # /score requests when HyperPod gives a Spot interruption notice (it taints
       # the node and gracefully evicts within terminationGracePeriodSeconds).
@@ -122,13 +122,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: slime-reward
+  name: miles-reward
   namespace: ${NAMESPACE}
   labels:
-    app: slime-reward
+    app: miles-reward
 spec:
   selector:
-    app: slime-reward
+    app: miles-reward
   ports:
     - protocol: TCP
       port: 8000

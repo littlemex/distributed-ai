@@ -65,4 +65,4 @@ export REWARD_REPLICAS=4               # one per node
 # EKS. TORCH_NUM_THREADS is sized to fit alongside the pod cpu request below.
 # If you provision with ThreadsPerCore=2, raise this toward ~14.
 export REWARD_TORCH_THREADS=6
-export RM_URL="http://slime-reward.${NAMESPACE}.svc.cluster.local:8000/score"
+export RM_URL="http://miles-reward.${NAMESPACE}.svc.cluster.local:8000/score"
