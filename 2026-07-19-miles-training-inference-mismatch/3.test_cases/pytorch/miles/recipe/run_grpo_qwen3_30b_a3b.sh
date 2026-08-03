@@ -60,9 +60,13 @@ done
 
 # Validate this is the MoE configuration. The verified path is colocated on 16 GPU;
 # disaggregated (COLOCATE=false) is only viable on B300-class HBM and is UNVERIFIED here.
+# This recipe passes --colocate unconditionally below, so COLOCATE=false cannot be honoured.
+# Warning and continuing would run the colocated layout while the env said otherwise; refuse.
 if [[ "${COLOCATE:-true}" != "true" ]]; then
-    echo "[WARN] COLOCATE!=true: disaggregated 30B needs B300 288GB HBM and is UNVERIFIED on H200."
-    echo "[WARN] The hardware-verified path is COLOCATE=true (actor 2x8 + --use-distributed-optimizer)."
+    echo "[ERROR] COLOCATE=${COLOCATE} but this recipe only builds the colocated layout." >&2
+    echo "[ERROR] Disaggregated 30B needs B300 288GB HBM and is UNVERIFIED on H200; the path" >&2
+    echo "[ERROR] measured here is COLOCATE=true (actor 2x8 + --use-distributed-optimizer)." >&2
+    exit 1
 fi
 
 echo "============================================================"

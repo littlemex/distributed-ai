@@ -43,6 +43,15 @@ for var in MODEL_LOCAL MODEL_DIST PROMPT_DATA CHECKPOINT_DIR MODEL_SCRIPT RM_TYP
     fi
 done
 
+# --colocate is passed unconditionally below, so COLOCATE=false cannot be honoured by this
+# recipe. Echoing "Colocated: false" and then running the colocated layout anyway is exactly
+# the silent-disagreement failure this study is about, so refuse rather than warn.
+if [[ "${COLOCATE}" != "true" ]]; then
+    echo "[ERROR] COLOCATE=${COLOCATE} but this recipe only builds the colocated layout" >&2
+    echo "[ERROR] (actor and rollout time-share the same GPUs). Set COLOCATE=true." >&2
+    exit 1
+fi
+
 echo "============================================================"
 echo "  miles GRPO Training — Qwen3-4B (Colocated Mode)"
 echo "============================================================"

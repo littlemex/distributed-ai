@@ -77,6 +77,16 @@ python3 -m sglang.launch_server \
 
 SGLANG_PID=$!
 
+# Reap the server on ANY exit, not just the happy path. `set -e` is active, so a non-zero
+# exit from the evaluation step below (the high-error-rate abort, or any Python exception)
+# would otherwise skip the cleanup at the end of the script and leave a multi-GPU SGLang
+# server holding the whole node's memory until someone notices.
+cleanup_sglang() {
+    kill "${SGLANG_PID}" 2>/dev/null || true
+    wait "${SGLANG_PID}" 2>/dev/null || true
+}
+trap cleanup_sglang EXIT
+
 # Wait for server to be ready
 SGLANG_STARTUP_TIMEOUT=${SGLANG_STARTUP_TIMEOUT:-300}
 echo "[INFO] Waiting for SGLang server to start (timeout=${SGLANG_STARTUP_TIMEOUT}s)..."
@@ -286,8 +296,8 @@ asyncio.run(main())
 EVAL_SCRIPT
 
 # ----- Step 3: Cleanup -----
+# The EXIT trap installed above does the actual killing, so this path is just the message.
 echo "[INFO] Stopping SGLang server..."
-kill ${SGLANG_PID} 2>/dev/null || true
 wait ${SGLANG_PID} 2>/dev/null || true
 
 echo "[INFO] Evaluation complete."
