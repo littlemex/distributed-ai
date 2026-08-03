@@ -1,0 +1,138 @@
+{{- /*
+image-prewarm — keeps a pool's node-local image cache warm, per accelerator pool.
+
+Pulls are done by KUBELET, not by `ctr`. Each image to warm is a long-lived container that
+just sleeps, so the kubelet's credential provider handles ECR auth exactly as it does for a
+normal workload. That is the whole point: this adds no new prerequisite. No ServiceAccount,
+no Pod Identity, no IAM role, no `containerd.sock` hostPath (which would hand this DaemonSet
+node-root just to make pulls faster), and no separate "prewarm image" that would itself have
+to be cold-pulled before it could warm anything.
+
+The warmed images run as SLEEPING CONTAINERS, not as no-op initContainers. This matters and
+is not a style choice. An initContainer that exits leaves the image "unused" as soon as the
+kubelet drops its dead container, and an unused image is a candidate for image GC: the
+imageGCHighThresholdPercent sweep (85% by default) reclaims unused images by age regardless
+of any other setting, and imageMaximumGCAge is a DELETION mechanism (it removes images unused
+for that long), not a protection. With the image held by a running container it is genuinely
+in-use, so no GC path can reclaim it, and this template does not depend on any kubelet GC
+tuning to be correct. A sleeping container also means "pod Running" actually implies "cache
+warm" — with initContainers the pod keeps reporting Running long after the image it warmed
+was reclaimed, which is the worst kind of failure: silent.
+
+The trade is that the node cannot reclaim these images under disk pressure without evicting
+the prewarm pod. That is the correct order: prewarm is the lowest-priority thing on the node,
+so it is evicted first, and evicting it makes the images reclaimable again.
+
+Still relies on one thing from the Karpenter userData (karpenter-resources.tf):
+maxParallelImagePulls=8 / serializeImagePulls=false, so a fresh node pulls the prewarm list
+and the real workload's image concurrently rather than making the workload queue behind them.
+If that were lost the failure mode is "slower", not "broken".
+
+Benign failure: delete this DaemonSet and nothing degrades except cache hit rate. Nothing
+here can wedge a node or kill a running job, because nothing here is on the node's boot or
+the workload's start path.
+
+Render + apply (digest, not tag — enforced below):
+  DIGEST=$(aws ecr describe-images --repository-name <repo> \
+    --query 'sort_by(imageDetails[?imageTags],&imagePushedAt)[-1].imageDigest' --output text)
+  helm template exp ./charts/experiments -n $NS \
+    --set "prewarm.gpu-ddp.images[0]=$(terraform output -raw ddp_sample_ecr_url)@$DIGEST" \
+    -s templates/image-prewarm.yaml | kubectl apply -f -
+Verify:
+  kubectl -n $NS rollout status ds/image-prewarm-gpu-ddp
+  # then start a workload on a node in that pool: the event must say
+  # "already present on machine", not "Pulling"
+*/ -}}
+{{- range $pool, $cfg := .Values.prewarm }}
+{{- if $cfg.images }}
+{{- if not (kindIs "slice" $cfg.images) }}{{ fail (printf "prewarm.%s.images must be a list of image references, got %s. Use --set \"prewarm.%s.images[0]=<repo>@sha256:...\"" $pool (kindOf $cfg.images) $pool) }}{{- end }}
+{{- /* The DaemonSet name is <name>-<pool>, so the pool key has to be a legal DNS-1123 name
+       on its own. A key with an underscore or a capital is a legal node-role label value but
+       an illegal object name, and without this guard it renders fine and only fails at apply
+       time with a message that does not mention the pool key. */ -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $pool) }}{{ fail (printf "prewarm key %q must be a lowercase DNS-1123 label (it becomes the DaemonSet name image-prewarm-%s and must match the accelerator_pools key Karpenter puts in node-role)" $pool $pool) }}{{- end }}
+{{- if gt (len (printf "image-prewarm-%s" $pool)) 63 }}{{ fail (printf "prewarm key %q is too long: image-prewarm-%s exceeds the 63-character object name limit" $pool $pool) }}{{- end }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: image-prewarm-{{ $pool }}
+  namespace: {{ include "experiments.namespace" $ }}
+  labels:
+    app: image-prewarm-{{ $pool }}
+spec:
+  selector:
+    matchLabels:
+      app: image-prewarm-{{ $pool }}
+  # These pods hold no state and serve no traffic, so there is no reason to roll them one node
+  # at a time. The default maxUnavailable of 1 would serialize a digest change across the whole
+  # pool — one full image pull per node, in sequence.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 100%
+  template:
+    metadata:
+      labels:
+        app: image-prewarm-{{ $pool }}
+    spec:
+      # node-role=<accelerator_pools key>, the same label every other workload in this chart
+      # selects on. Warming per pool matters: a Neuron image on a GPU node is wasted disk and
+      # a wasted pull, and Capacity Block nodes are the ones where a cold pull hurts most
+      # because the reservation is already being billed while the image downloads.
+      nodeSelector:
+        node-role: {{ $pool }}
+      # Accelerator pools carry a device taint (nvidia.com/gpu, aws.amazon.com/neuron) and CB
+      # pools add their own, so an untolerated DaemonSet would silently skip exactly the nodes
+      # worth warming. Each device taint is named rather than using `operator: Exists`, which
+      # would also tolerate karpenter.sh/disrupted and pull gigabytes onto a node that is
+      # already draining. Add a toleration here if a pool introduces a new taint — the visible
+      # failure (DESIRED stays 0) is better than quietly warming nodes on their way out.
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+        - key: aws.amazon.com/neuron
+          operator: Exists
+        {{- with $cfg.tolerations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if $.Values.prewarmPriorityClassName }}
+      # Lowest priority on the node, so the scheduler preempts this before anything real and
+      # the kubelet evicts it first under disk pressure. Losing the pod mid-pull costs only
+      # the time already spent: completed layers stay in the containerd content store, so a
+      # restart re-fetches at most the one layer that was in flight. Do NOT raise this above a
+      # real workload to protect the pull — a cache that can displace a training job is worse
+      # than the cold pull it was avoiding.
+      priorityClassName: {{ $.Values.prewarmPriorityClassName }}
+      {{- end }}
+      containers:
+        {{- range $i, $img := $cfg.images }}
+        {{- if not (contains "@sha256:" $img) }}{{ fail (printf "prewarm.%s.images[%d] = %q must be pinned by digest (<repo>@sha256:...). A tag is mutable, so the node could hold different layers than the registry and still report a warm cache." $pool $i $img) }}{{- end }}
+        # Holds {{ $img }} in-use so no GC path can reclaim it.
+        - name: warm-{{ $i }}
+          image: {{ $img | quote }}
+          # IfNotPresent, never Always: with Always the kubelet contacts the registry on every
+          # pod start, so a registry outage would turn a warm node into a node that cannot
+          # start pods — the opposite of what a cache is for.
+          imagePullPolicy: IfNotPresent
+          # The image only has to hold still. `sleep infinity` is not portable across the
+          # BusyBox/coreutils split, so use the largest value both accept.
+          command: ["/bin/sh", "-c", "exec sleep 2147483647"]
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+          # This runs a shell out of an image chosen by whoever edits values.yaml, on every
+          # node of the pool. `sh -c exec sleep` needs none of the privileges an image's
+          # default USER might carry, so drop them. Refusing containerd.sock for prewarm and
+          # then running an unconstrained container would be inconsistent.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+        {{- end }}
+{{- end }}
+{{- end }}
