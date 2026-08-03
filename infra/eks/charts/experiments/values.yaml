@@ -276,12 +276,21 @@ ncclTrainjob:
   stageImage: public.ecr.aws/docker/library/busybox:1.36
 
 sharedStorage:
+  # backend is informational only now (see existingClaimName below) — it used to select which
+  # static PV the chart's own shared-claim PVC bound to. Kept as a comment anchor for
+  # manifests/shared-pvc.yaml's `terraform output shared_storage` lookup; not read by any
+  # template.
   backend: openzfs      # openzfs | fsx | efs
-  requestSize: 256Gi    # PVC request; must be <= the backing PV's capacity
-  # If a PVC already exists in the target namespace (e.g. Basic01's openzfs-claim), set its
-  # name here to reuse it instead of creating a new shared-claim PVC. This avoids the
-  # "static PV can only bind one PVC at a time" limitation.
-  existingClaimName: ""  # e.g. "openzfs-claim"
+  # REQUIRED. The chart does NOT create this PVC — apply manifests/shared-pvc.yaml once per
+  # namespace (by hand, outside any workload's render cycle) and pass its name here. This is
+  # not a convenience knob: a chart-rendered PVC's lifecycle would be tied to however many
+  # times a workload gets re-applied (a `helm template | kubectl apply` re-run, a namespace
+  # teardown, a `helm uninstall`), while the static PV it binds to is Terraform-managed and
+  # outlives all of that. Deleting and recreating a same-named PVC gets a NEW UID that the
+  # PV's claimRef does not recognize, and the PV gets stuck Released — see
+  # manifests/shared-pvc.yaml's header and templates/_helpers.tpl's sharedClaimName comment
+  # for the full mechanism.
+  existingClaimName: ""  # e.g. "shared-claim"
 torchrunTrain:
   enabled: false
   # "gloo" or "nccl" — LABEL ONLY. This value is not read by torch.distributed; it only

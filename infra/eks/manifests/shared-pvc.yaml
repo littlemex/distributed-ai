@@ -1,0 +1,44 @@
+# shared-claim — the ReadWriteMany PVC that torchrunTrain and trainjobTrain (and any other
+# workload in charts/experiments needing /shared) bind to.
+#
+# Apply this ONCE PER NAMESPACE, by hand, outside any workload's render cycle:
+#
+#   POOL_PV=$(terraform output -json shared_storage | jq -r '.openzfs.persistent_volume')
+#   sed "s/__VOLUME_NAME__/${POOL_PV}/" manifests/shared-pvc.yaml | kubectl apply -n "$NAMESPACE" -f -
+#
+# (swap .openzfs for .fsx_lustre or .fsx_openzfs to bind a different backend — see
+# `terraform output shared_storage` for the full map)
+#
+# Why this is not part of the Helm chart: each backend exposes exactly ONE static PV
+# (Terraform-managed, outlives every `helm template` render), and a PV only ever rebinds to the
+# specific PVC OBJECT — identified by UID, not by name — that it was last bound to. Kubernetes
+# has no Released -> Available auto-transition; that is intentional, so a Retain-policy PV never
+# hands still-referenced data to a new claimant without an operator saying so. When the chart
+# used to render this PVC itself, deleting and recreating it (a `helm template | kubectl apply`
+# re-run after `kubectl delete pvc`, a namespace teardown, retrying this chapter from scratch)
+# created a NEW object with a NEW UID, which the PV's claimRef did not recognize. The PV got
+# stuck Released, and every future pod asking for "shared-claim" sat Pending with an event that
+# names an unbound-PVC annotation rather than the actual cause.
+#
+# Creating this once, by hand, at "set up my namespace" time — not at "run a training job" time
+# — makes the PVC's lifecycle match the PV's (both infra-lifetime), instead of tying it to
+# however many times a workload gets re-applied. Pass its name to every workload via
+# --set sharedStorage.existingClaimName=shared-claim.
+#
+# If you ever DO end up with a Released PV (e.g. you deleted this PVC on purpose and are
+# recreating it), see the book's storage chapter for the recovery step — removing
+# spec.claimRef.uid (not the whole claimRef) lets Kubernetes re-bind the PV to a matching new
+# PVC without briefly exposing it to whichever unrelated PVC asks first.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-claim
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: ""
+  volumeName: __VOLUME_NAME__
+  resources:
+    requests:
+      # Purely informational once bound to a static PV — Kubernetes does not enforce a request
+      # smaller than the PV's actual capacity, and the PV's real size is whatever Terraform set.
+      storage: 256Gi
