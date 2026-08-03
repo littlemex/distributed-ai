@@ -14,7 +14,9 @@
 #   --nodepool   Karpenter NodePool to delete. Repeatable. When omitted, every NodePool
 #                carrying an accelerator device taint is discovered from the cluster.
 #   --destroy    Also run `terraform destroy` after Kubernetes cleanup
-#   --yes        Skip interactive confirmation (use in CI with caution)
+#   --yes        Skip interactive confirmation, including terraform's own destroy approval
+#                (it passes -auto-approve). Required for any non-interactive run — see the
+#                comment at the terraform destroy call for what breaks without it.
 #
 # The pools are DISCOVERED, not assumed. accelerator_pools is a map the reader defines, so there
 # is no single pool name this script could default to: a hardcoded default silently matches
@@ -230,7 +232,16 @@ if [[ "$RUN_DESTROY" == "true" ]]; then
       EXTRA_ARGS="-var-file=terraform.tfvars.local"
     fi
     cd "$INFRA_DIR"
-    terraform destroy $EXTRA_ARGS
+    # Pass -auto-approve through when --yes was given. Without this, --yes suppresses only THIS
+    # script's own prompts and terraform then asks its own "Do you really want to destroy all
+    # resources?" on stdin — which in any non-interactive context (nohup, CI, a background run)
+    # gets EOF and fails the whole destroy AFTER the Kubernetes cleanup has already happened.
+    # That is the worst possible place to stop: the NodePools are gone but the cluster is not.
+    if [[ "$AUTO_YES" == "true" ]]; then
+      terraform destroy -auto-approve $EXTRA_ARGS
+    else
+      terraform destroy $EXTRA_ARGS
+    fi
   else
     echo "  Skipped. Run manually: cd $INFRA_DIR && terraform destroy"
   fi

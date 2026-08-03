@@ -144,15 +144,64 @@ resource "aws_vpc_security_group_egress_rule" "alb_cloudfront_egress" {
 # disappear). Without a delay, destroying helm_release.alb_controller right after starting
 # the Ingress delete orphans it in Terminating forever (the controller that would remove
 # the finalizer is already gone). This resource sits between them so that, on destroy,
-# Terraform tears down demo_ingress → waits out destroy_duration here → THEN removes
-# alb_controller. Depends on alb_controller (not the reverse) specifically so destroy order
-# is its dependency's reverse: alb_controller is destroyed only after this resource, and
-# this resource only after demo_ingress (which depends on it below).
-resource "time_sleep" "demo_ingress_finalizer" {
+# Terraform tears down demo_ingress → waits here → THEN removes alb_controller. Depends on
+# alb_controller (not the reverse) specifically so destroy order is its dependency's reverse:
+# alb_controller is destroyed only after this resource, and this resource only after
+# demo_ingress (which depends on it below).
+#
+# This WAS a `time_sleep` with destroy_duration = "20s", and 20s is not enough: measured on a
+# real teardown, deleting the ALB takes minutes, so the controller was destroyed while the ALB
+# still existed. Nothing was left to finish the deletion, so the ALB stayed `active` with its
+# ENIs attached to the public subnets — which then blocked `module.vpc.aws_subnet.public` for
+# 18 minutes and failed the whole destroy with DependencyViolation, leaving a billing ALB
+# behind. Any fixed sleep is a bet on a duration AWS does not promise; poll the real state
+# instead, the same way karpenter.tf's wait_for_node_drain does.
+resource "null_resource" "demo_ingress_finalizer" {
   count      = local.demo_app_enabled
   depends_on = [helm_release.alb_controller[0]]
 
-  destroy_duration = "20s"
+  triggers = {
+    region = var.region
+    vpc_id = module.vpc.vpc_id
+    # var.aws_profile is nullable (the ambient-credential case); triggers is a map of strings, so
+    # normalise to "" the same way karpenter.tf's wait_for_node_drain does.
+    aws_profile = var.aws_profile != null ? var.aws_profile : ""
+  }
+
+  # Waits until no ALB remains in this VPC, so the controller outlives the ALB it must delete.
+  # Best-effort on timeout: 10 minutes is far beyond the observed deletion time, and failing the
+  # destroy here would leave the cluster half-torn-down. The message names the leftover
+  # explicitly so an operator can finish it by hand rather than discovering it on a bill.
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      set -uo pipefail
+      command -v aws >/dev/null 2>&1 || {
+        echo "wait_for_alb_deletion: aws CLI not on PATH — cannot confirm the demo ALB is gone. Check for a leftover load balancer in ${self.triggers.vpc_id} before assuming destroy is complete." >&2
+        exit 1
+      }
+      PROFILE_ARGS=()
+      [ -n "${self.triggers.aws_profile}" ] && PROFILE_ARGS=(--profile "${self.triggers.aws_profile}")
+
+      echo "wait_for_alb_deletion: waiting for the ALB Controller to delete the demo ALB..."
+      for i in $(seq 1 60); do
+        # A describe failure is NOT treated as "gone": a transient API error would otherwise let
+        # this pass and destroy the controller anyway, which is the exact bug being fixed.
+        if ! OUT=$(aws elbv2 describe-load-balancers --region "${self.triggers.region}" "$${PROFILE_ARGS[@]}" \
+              --query "length(LoadBalancers[?VpcId=='${self.triggers.vpc_id}'])" --output text 2>/dev/null); then
+          echo "wait_for_alb_deletion: describe-load-balancers failed (transient?) — retrying"
+        elif [ "$OUT" = "0" ]; then
+          echo "wait_for_alb_deletion: no load balancers remain in ${self.triggers.vpc_id}."
+          exit 0
+        else
+          echo "wait_for_alb_deletion: $OUT load balancer(s) still present (attempt $i/60)..."
+        fi
+        sleep 10
+      done
+      echo "wait_for_alb_deletion: a load balancer still exists in ${self.triggers.vpc_id} after 10 minutes. Its ENIs will block subnet deletion and it keeps billing. Delete it manually (aws elbv2 delete-load-balancer) and re-run destroy." >&2
+      exit 0
+    EOT
+  }
 }
 
 # ── Demo application: Namespace + Deployment + Service ────────────────────────
@@ -322,7 +371,7 @@ resource "kubectl_manifest" "demo_ingress" {
   })
   depends_on = [
     kubectl_manifest.demo_service[0],
-    time_sleep.demo_ingress_finalizer[0],
+    null_resource.demo_ingress_finalizer[0],
   ]
 }
 
