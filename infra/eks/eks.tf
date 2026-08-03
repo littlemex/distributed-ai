@@ -132,38 +132,42 @@ module "eks" {
 # objects to lives in the live account, so once the mistake exists the plan fails and the very
 # apply that would REMOVE the tag is blocked too. A check reports on every plan and apply while
 # still letting the fix through, which is what continuous verification is for.
-data "aws_security_groups" "karpenter_selected" {
-  filter {
-    name   = "tag:karpenter.sh/discovery"
-    values = [var.cluster_name]
-  }
-  filter {
-    name   = "vpc-id"
-    values = [module.vpc.vpc_id]
-  }
-}
-
-data "aws_security_group" "karpenter_selected" {
-  for_each = toset(data.aws_security_groups.karpenter_selected.ids)
-  id       = each.value
-}
-
-locals {
-  # SGs Karpenter will attach that AWS also tags kubernetes.io/cluster/<name> — the tag the AWS
-  # Load Balancer Controller resolves a pod ENI's security group by. More than one is the defect.
-  karpenter_cluster_tagged_sgs = [
-    for sg in data.aws_security_group.karpenter_selected : sg.id
-    if contains(keys(sg.tags), "kubernetes.io/cluster/${var.cluster_name}")
-  ]
-}
-
+#
+# The query is a SINGLE plural data source, deliberately. Asking for the SGs and then fanning out
+# over them with `for_each = toset(...ids)` to inspect each one's tags cannot work on a first
+# apply: the vpc-id filter below depends on a VPC that does not exist yet, so the read is deferred
+# to apply time, `ids` is unknown at plan time, and a for_each needs its keys known then —
+# "Invalid for_each argument ... known only after apply". It would plan fine against an existing
+# cluster and fail only when someone builds this stack from scratch. DescribeSecurityGroups ANDs
+# its filters and accepts `tag-key`, so the "also carries kubernetes.io/cluster/<name>" half of
+# the condition belongs in the query itself, and nothing needs to be enumerated.
+#
+# Declared inside the check block so a read failure (e.g. missing DescribeSecurityGroups) is
+# reported as a warning instead of failing the plan — continuous verification must not become a
+# new way for the apply to break.
 check "one_cluster_tagged_karpenter_sg" {
+  data "aws_security_groups" "karpenter_cluster_tagged" {
+    filter {
+      name   = "tag:karpenter.sh/discovery"
+      values = [var.cluster_name]
+    }
+    # The tag the AWS Load Balancer Controller resolves a pod ENI's security group by.
+    filter {
+      name   = "tag-key"
+      values = ["kubernetes.io/cluster/${var.cluster_name}"]
+    }
+    filter {
+      name   = "vpc-id"
+      values = [module.vpc.vpc_id]
+    }
+  }
+
   assert {
-    condition     = length(local.karpenter_cluster_tagged_sgs) <= 1
+    condition     = length(data.aws_security_groups.karpenter_cluster_tagged.ids) <= 1
     error_message = <<-EOT
-      ${length(local.karpenter_cluster_tagged_sgs)} security groups carry BOTH
+      ${length(data.aws_security_groups.karpenter_cluster_tagged.ids)} security groups carry BOTH
       karpenter.sh/discovery=${var.cluster_name} and kubernetes.io/cluster/${var.cluster_name}:
-      ${join(", ", local.karpenter_cluster_tagged_sgs)}
+      ${join(", ", data.aws_security_groups.karpenter_cluster_tagged.ids)}
       Expected only the node security group (${module.eks.node_security_group_id}).
 
       Karpenter attaches all of them to every node it launches, and the AWS Load Balancer
