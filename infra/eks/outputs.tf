@@ -99,3 +99,45 @@ output "region" {
   EOT
   value       = var.region
 }
+
+# ── Shared storage ────────────────────────────────────────────────────────────────────────────
+# Basic10 tells the reader to run `terraform output` to see which filesystems exist, so the
+# filesystems have to actually appear there. Each layer is optional (fsx_enabled /
+# openzfs_enabled / efs_enabled); a disabled one reports enabled = false with empty ids rather
+# than vanishing, so this output doubles as "is this layer on?" without reading tfvars. All three
+# branches keep the same attribute set because HCL requires both sides of a conditional to agree
+# on type.
+output "shared_storage" {
+  description = <<-EOT
+    The three shared-storage layers, their AWS ids/DNS names and the static PersistentVolume each
+    one backs. A disabled layer reports enabled = false. Pair with `kubectl get pv` to confirm the
+    PV is Bound.
+  EOT
+  value = {
+    fsx_lustre = {
+      enabled = var.fsx_enabled
+      id      = var.fsx_enabled ? aws_fsx_lustre_file_system.training[0].id : ""
+      dns_name = var.fsx_enabled ? aws_fsx_lustre_file_system.training[0].dns_name : ""
+      # mount_name is what the CSI driver needs alongside the DNS name; easy to miss otherwise.
+      mount_name        = var.fsx_enabled ? aws_fsx_lustre_file_system.training[0].mount_name : ""
+      storage_capacity  = var.fsx_enabled ? tostring(aws_fsx_lustre_file_system.training[0].storage_capacity) : ""
+      persistent_volume = "fsx-training"
+    }
+    fsx_openzfs = {
+      enabled           = var.openzfs_enabled
+      id                = var.openzfs_enabled ? aws_fsx_openzfs_file_system.shared[0].id : ""
+      dns_name          = var.openzfs_enabled ? aws_fsx_openzfs_file_system.shared[0].dns_name : ""
+      mount_name        = ""
+      storage_capacity  = var.openzfs_enabled ? tostring(aws_fsx_openzfs_file_system.shared[0].storage_capacity) : ""
+      persistent_volume = "openzfs-shared"
+    }
+    efs = {
+      enabled           = var.efs_enabled
+      id                = var.efs_enabled ? aws_efs_file_system.shared[0].id : ""
+      dns_name          = var.efs_enabled ? aws_efs_file_system.shared[0].dns_name : ""
+      mount_name        = ""
+      storage_capacity  = ""
+      persistent_volume = "efs-neuron-workspace"
+    }
+  }
+}

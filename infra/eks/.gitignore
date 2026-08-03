@@ -10,5 +10,12 @@ crash.*.log
 terraform.tfvars
 terraform.tfvars.local
 *.auto.tfvars
+# Editor/sed backups of the tfvars. Basic10 enables EFS with `sed -i.bak`, which leaves
+# terraform.tfvars.bak holding a full copy of the ignored file — reservation ids, account id,
+# cluster name. Without this line that copy is untracked-but-committable, so a reader following
+# the chapter can leak their environment in the next `git add .`.
+terraform.tfvars.bak
+terraform.tfvars.*.bak
+*.tfvars.bak
 plan.tfplan
 *.tfplan
