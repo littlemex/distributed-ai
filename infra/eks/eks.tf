@@ -32,7 +32,7 @@ module "eks" {
   ################################################################################
   # EKS Add-ons
   # aws-fsx-csi-driver is NOT listed here — fsx.tf manages it as a standalone
-  # aws_eks_addon resource (with a pinned version and dedicated IRSA role).
+  # aws_eks_addon resource (with a pinned version and its own Pod Identity association).
   ################################################################################
   addons = {
     vpc-cni = {

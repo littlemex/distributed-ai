@@ -1,30 +1,35 @@
 ################################################################################
-# In-cluster image builder (Kaniko + ECR + Pod Identity)
+# In-cluster image builder (rootless BuildKit + ECR + Pod Identity)
 #
 # Lets the workshop build the ddp-sample container INSIDE the cluster instead of
 # depending on a local docker/finch. This file provisions only the MECHANISM
 # (ECR repo, IAM role, Pod Identity association, namespace, ServiceAccount) — it
-# does NOT run a build. The build itself is a Kaniko Job in the experiments Helm
+# does NOT run a build. The build itself is a BuildKit Job in the experiments Helm
 # catalog (charts/experiments/templates/image-build-ddp-sample.yaml), applied with
 # `helm template | kubectl apply` exactly like the training Jobs. This is the same
 # split we use for the Training Operator: Terraform installs the operator, but the
 # TrainJob is a catalog workload — never a Terraform resource.
 #
-# Auth chain (settings-free): a Pod on the image-builder SA gets Pod Identity env
-# injected (AWS_CONTAINER_CREDENTIALS_FULL_URI + token file); Kaniko's bundled
-# amazon-ecr-credential-helper (ecr-login) resolves ECR logins through the SDK's
-# container-credentials provider. No config.json, no docker login.
+# Auth chain (settings-free at the IAM layer): a Pod on the image-builder SA gets
+# Pod Identity env injected (AWS_CONTAINER_CREDENTIALS_FULL_URI + token file).
+# BuildKit — unlike Kaniko, which it replaced — bundles no ECR credential helper, so
+# the build Job runs an initContainer that turns those credentials into an ECR login
+# token and writes a Docker config.json that BuildKit reads via DOCKER_CONFIG. Still
+# no `docker login` by hand and no credentials in the repo.
 #
 # Depends on: the eks-pod-identity-agent addon (eks.tf) and a CPU NodePool
-# (karpenter-resources.tf, cpu_nodepool_enabled). Kaniko runs as root, so the
-# namespace is Pod-Security "baseline" (not "restricted").
+# (karpenter-resources.tf, cpu_nodepool_enabled). Rootless BuildKit is NON-privileged
+# (uid 1000, no CAP_SYS_ADMIN) but rootlesskit needs clone/unshare syscalls that the
+# RuntimeDefault seccomp profile blocks, so the build container sets
+# seccompProfile: Unconfined — which PSA "baseline" forbids. Hence enforce=privileged
+# on THIS namespace only (warn/audit stay at baseline); see the Namespace below.
 ################################################################################
 
 variable "image_builder_enabled" {
   description = <<-EOT
     Provision the in-cluster image builder: an ECR repository (ddp-sample), an IAM
     role scoped to push to it, a Pod Identity association, and a dedicated
-    "image-builder" namespace + ServiceAccount for Kaniko. Default ON so the Basic02
+    "image-builder" namespace + ServiceAccount for BuildKit. Default ON so the Basic02
     workshop needs no local docker/finch. The build Job itself is NOT created here —
     render it from charts/experiments (imageBuild.enabled=true). Requires the
     eks-pod-identity-agent addon and a CPU NodePool (cpu_nodepool_enabled).
@@ -58,11 +63,12 @@ locals {
 }
 
 # ── Dedicated builder NodePool (opt-in, for LARGE images) ──────────────────────
-# Kaniko expands the base image onto the node's root filesystem (ephemeral-storage);
-# that path cannot be moved to a PVC or FSx, so a large image (e.g. a vLLM/CUDA build
-# whose pushed size is tens of GB) needs a big LOCAL disk. Peak disk ~= pushed size x4-5.
-# The default CPU NodePool ships a 50Gi root, which fits the ddp-sample (~3.3GB pushed,
-# ~15Gi peak) but not a 20GB image (~100Gi peak). Rather than inflate every CPU node,
+# BuildKit expands the base image and writes its layer snapshots on the node's local disk
+# (ephemeral-storage); that path cannot be moved to a PVC or FSx (network filesystems break
+# xattr/timestamp fidelity and can produce corrupt layers), so a large image (e.g. a vLLM/CUDA
+# build whose pushed size is tens of GB) needs a big LOCAL disk. Peak disk ~= pushed size x4-5.
+# The default CPU NodePool ships a 150Gi root (var.cpu_node_volume_size), which fits the
+# ddp-sample (~3.3GB pushed, ~15Gi peak) comfortably but not a 40GB image (~200Gi peak). Rather than inflate every CPU node,
 # opt into a dedicated, tainted builder pool that Karpenter spins up only while a build
 # Job exists and consolidates back to zero after — so the big disk is billed only during
 # the build. It uses NVMe instance-store striped RAID0 for the scratch (far faster than
@@ -70,7 +76,7 @@ locals {
 variable "image_builder_dedicated_pool" {
   description = <<-EOT
     Provision a dedicated, tainted Karpenter NodePool for large image builds (NVMe
-    instance-store RAID0 scratch). OFF by default — the shared CPU NodePool's 50Gi root
+    instance-store RAID0 scratch). OFF by default — the shared CPU NodePool's 150Gi root
     handles small images like ddp-sample. Turn ON when building images whose pushed size
     is more than a few GB (peak build disk ~= pushed size x4-5). When on, render the build
     Job with imageBuild.dedicatedPool.enabled=true so it targets this pool.
@@ -216,7 +222,7 @@ resource "aws_eks_pod_identity_association" "image_builder" {
   role_arn        = aws_iam_role.image_builder[0].arn
 }
 
-# The ECR URL the Kaniko Job pushes to and the training workloads pull from. Feed it
+# The ECR URL the BuildKit Job pushes to and the training workloads pull from. Feed it
 # into the catalog with: --set imageBuild.repository=$(terraform output -raw ddp_sample_ecr_url)
 output "ddp_sample_ecr_url" {
   description = "ECR repository URL for the in-cluster-built ddp-sample image (null when image_builder_enabled=false)."
@@ -238,7 +244,7 @@ resource "kubectl_manifest" "ec2nodeclass_image_builder" {
     spec = merge(local.nodeclass_common, {
       amiSelectorTerms = [{ alias = "al2023@latest" }]
       # RAID0 stripes all local NVMe instance-store volumes and mounts them for containerd/
-      # kubelet, so Kaniko's rootfs unpack + snapshot land on fast local disk, not EBS.
+      # kubelet, so BuildKit's rootfs unpack + snapshots land on fast local disk, not EBS.
       userData = <<-EOT
         ---
         apiVersion: node.eks.aws/v1alpha1

@@ -153,7 +153,7 @@ spec:
               memory: 8Gi
               # Peak build disk ~= pushed image size x4-5 (base unpacked + snapshot, uncompressed);
               # the buildkit state emptyDir counts against this too. 30Gi fits ddp-sample on the
-              # shared CPU pool's 50Gi root. For a large image raise imageBuild.ephemeralStorage AND
+              # shared CPU pool's 150Gi root. For a large image raise imageBuild.ephemeralStorage AND
               # set dedicatedPool.enabled=true, else the Job stays Pending or is Evicted mid-build.
               ephemeral-storage: {{ $ib.ephemeralStorage | default "30Gi" }}
             limits:
