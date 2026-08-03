@@ -34,7 +34,7 @@ from analyze_position_profile import load, token_slope
 
 def arm_slope(dump_dir, min_len=None):
     """Absolute-position slope of |r| for one run. Returns (slope, n_seq, min_len)."""
-    seqs, files, n_dup, n_bad = load(dump_dir)
+    seqs, files, n_dup, n_bad, n_nonfinite = load(dump_dir)
     if not seqs:
         return None, 0, 0, n_bad
     lens = sorted(s["response_len"] for s in seqs)
@@ -45,17 +45,30 @@ def arm_slope(dump_dir, min_len=None):
 
 
 def t_crit(df):
-    """Two-sided 95% t critical value. Table lookup: no scipy in this image."""
+    """Two-sided 95% t critical value. Table lookup: no scipy in this image.
+
+    Off-table df round DOWN to the nearest tabulated df, which is the conservative
+    direction: t decreases as df grows, so the smaller df gives the LARGER critical value
+    and hence the wider interval. Rounding up (an earlier version's behaviour) returned a
+    value below the true one at every off-table df -- df=11 got 2.179 against a true 2.201,
+    df=16 got 2.086 against 2.120, and anything past 30 got the normal 1.96 against 2.040
+    at df=31. Each of those narrows the interval, and the interval is what the
+    accumulating/flat verdict is read off, so the error was in the direction that
+    manufactures significance.
+    """
     table = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447,
-             7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228, 12: 2.179, 15: 2.131,
-             20: 2.086, 30: 2.042}
+             7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179,
+             13: 2.160, 14: 2.145, 15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101,
+             19: 2.093, 20: 2.086, 25: 2.060, 30: 2.042, 40: 2.021, 60: 2.000,
+             120: 1.980}
     if df in table:
         return table[df]
-    keys = sorted(table)
-    for k in keys:
-        if df < k:
-            return table[k]
-    return 1.96
+    if df < 1:
+        raise ValueError(f"t_crit needs df >= 1, got {df}")
+    below = [k for k in table if k < df]
+    if not below:
+        return table[min(table)]
+    return table[max(below)]
 
 
 def main():
@@ -96,7 +109,13 @@ def main():
         se = sd / math.sqrt(k)
         half = t_crit(k - 1) * se
         lo, hi = m - half, m + half
-        verdict = "accumulating" if lo > 0 else ("decreasing" if hi < 0 else "flat")
+        # Same rule as the per-run analysis: no interval, no verdict. A nan slope in any
+        # run makes lo/hi nan, and nan fails both comparisons, so the default branch would
+        # print "flat" -- a definite negative conclusion from unusable input.
+        if not (math.isfinite(lo) and math.isfinite(hi)):
+            verdict = "UNDECIDED"
+        else:
+            verdict = "accumulating" if lo > 0 else ("decreasing" if hi < 0 else "flat")
         print(f"{name:<10} {k:>6} {m:>13.3e} {se:>12.3e} "
               f"{'[' + format(lo, '.3e') + ', ' + format(hi, '.3e') + ']':>28} {verdict:>12}")
 

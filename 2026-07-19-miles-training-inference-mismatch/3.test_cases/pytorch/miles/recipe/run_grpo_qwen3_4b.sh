@@ -214,6 +214,15 @@ TRAIN_ARGS=(
 # whole GPU (does not disturb the colocated placement group). HF_TOKEN is NOT set
 # here: it is injected into the pod env from the k8s Secret in raycluster.yaml, so
 # it never lands in the Ray GCS runtime-env (visible via the dashboard API).
+#
+# CUDA_DEVICE_MAX_CONNECTIONS=1 is mandatory the moment TP_SIZE or CP_SIZE exceeds
+# 1: Megatron asserts on it at startup ("Using tensor model parallelism or context
+# parallelism require setting the environment variable
+# CUDA_DEVICE_MAX_CONNECTIONS to 1") and the job dies in ~30s, before any rollout.
+# It was missing here and went unnoticed because every result-bearing run so far
+# used TP1/CP1, where the assert never fires -- the first TP2 run failed instantly.
+# Setting it unconditionally is safe: it only caps the per-device work-queue depth
+# so TP's overlapped all-reduce keeps ordering, and TP1 runs are unaffected.
 echo "[INFO] Submitting Ray job..."
 
 ray job submit \
@@ -228,6 +237,7 @@ ray job submit \
             \"NCCL_DEBUG\": \"WARN\",
             \"FI_PROVIDER\": \"efa\",
             \"FI_EFA_USE_DEVICE_RDMA\": \"1\",
+            \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
             \"TENSORBOARD_DIR\": \"${TENSORBOARD_DIR:-}\"
         }
     }" \

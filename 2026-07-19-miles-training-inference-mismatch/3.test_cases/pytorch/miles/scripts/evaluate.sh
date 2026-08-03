@@ -22,6 +22,7 @@ set -euo pipefail
 # Defaults
 MODEL_PATH=""
 EVAL_DATA="/fsx/data/aime-2024/aime-2024.jsonl"
+SERVER_PORT="${SERVER_PORT:-30000}"
 NUM_SAMPLES=16
 TP_SIZE=2
 MAX_TOKENS=16384
@@ -70,9 +71,9 @@ python3 -m sglang.launch_server \
     --model-path "${MODEL_PATH}" \
     --tp "${TP_SIZE}" \
     --host 0.0.0.0 \
-    --port 30000 \
-    --mem-fraction-static 0.85 \
-    --log-level WARN &
+    --port "${SERVER_PORT}" \
+    --mem-fraction-static "${SGLANG_MEM_FRACTION:-0.85}" \
+    --log-level warning &   # lowercase: uvicorn KeyErrors on "WARN"
 
 SGLANG_PID=$!
 
@@ -80,7 +81,7 @@ SGLANG_PID=$!
 SGLANG_STARTUP_TIMEOUT=${SGLANG_STARTUP_TIMEOUT:-300}
 echo "[INFO] Waiting for SGLang server to start (timeout=${SGLANG_STARTUP_TIMEOUT}s)..."
 for i in $(seq 1 ${SGLANG_STARTUP_TIMEOUT}); do
-    if curl -s http://localhost:30000/health > /dev/null 2>&1; then
+    if curl -s "http://localhost:${SERVER_PORT}/health" > /dev/null 2>&1; then
         echo "[INFO] SGLang server ready."
         break
     fi
@@ -94,6 +95,15 @@ done
 
 # ----- Step 2: Run evaluation -----
 echo "[INFO] Running evaluation..."
+# The heredoc below is quoted, so the Python reads these through the environment rather
+# than through shell expansion. They must be exported: a plain assignment stays in the
+# shell and the Python silently falls back to its defaults, which would produce
+# confident-looking results for parameters the caller never asked for.
+export EVAL_DATA NUM_SAMPLES MAX_TOKENS TEMPERATURE TOP_P RESULT_DIR SERVER_PORT
+export EVAL_MAX_CONCURRENCY="${EVAL_MAX_CONCURRENCY:-32}"
+export EVAL_REQUEST_TIMEOUT="${EVAL_REQUEST_TIMEOUT:-1800}"
+export EVAL_ERROR_FRACTION_ABORT="${EVAL_ERROR_FRACTION_ABORT:-0.05}"
+
 python3 - <<'EVAL_SCRIPT'
 import json
 import sys
@@ -108,7 +118,13 @@ MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "16384"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.6"))
 TOP_P = float(os.environ.get("TOP_P", "0.95"))
 RESULT_DIR = os.environ.get("RESULT_DIR", "/fsx/eval_results")
-SERVER_URL = "http://localhost:30000/v1/chat/completions"
+SERVER_URL = f"http://localhost:{os.environ.get('SERVER_PORT', '30000')}/v1/chat/completions"
+# Bounded concurrency and a timeout sized for the generation, not for the queue. With
+# MAX_TOKENS=16384 a single response can take minutes, so a 300s cap applied to every
+# request at once made most of them time out and be tallied as wrong answers.
+MAX_CONCURRENCY = int(os.environ.get("EVAL_MAX_CONCURRENCY", "32"))
+REQUEST_TIMEOUT = float(os.environ.get("EVAL_REQUEST_TIMEOUT", "1800"))
+ERROR_FRACTION_ABORT = float(os.environ.get("EVAL_ERROR_FRACTION_ABORT", "0.05"))
 
 # Load evaluation prompts
 prompts = []
@@ -119,7 +135,34 @@ with open(EVAL_DATA, "r") as f:
 
 print(f"Loaded {len(prompts)} evaluation prompts")
 
-async def evaluate_prompt(session, prompt_item, sample_idx):
+def extract_boxed(text):
+    r"""Return the content of the last \boxed{...}, honouring nested braces.
+
+    A `[^}]*` character class stops at the first closing brace, so it reads `\boxed{\frac{1}
+    {2}}` as `\frac{1` -- silently wrong on exactly the answers a math model produces. This
+    scans forward with a brace counter instead.
+    """
+    out = []
+    needle = r"\boxed{"
+    start = text.find(needle)
+    while start != -1:
+        i = start + len(needle)
+        depth = 1
+        while i < len(text) and depth:
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth == 0:
+            out.append(text[start + len(needle):i])
+        start = text.find(needle, start + len(needle))
+    return out[-1].strip() if out else ""
+
+
+async def evaluate_prompt(session, prompt_item, prompt_idx, sample_idx, sem):
     """Generate a response and check correctness."""
     messages = [{"role": "user", "content": prompt_item.get("prompt", prompt_item.get("question", ""))}]
 
@@ -132,49 +175,63 @@ async def evaluate_prompt(session, prompt_item, sample_idx):
     }
 
     try:
-        async with session.post(SERVER_URL, json=payload, timeout=aiohttp.ClientTimeout(total=300)) as resp:
-            result = await resp.json()
-            response_text = result["choices"][0]["message"]["content"]
+        # The semaphore bounds how many requests are in flight. Submitting every
+        # prompt x sample at once means most requests spend their timeout sitting in the
+        # server's queue rather than generating, and a timeout is indistinguishable from a
+        # wrong answer in the tally below -- accuracy would sag toward zero for a reason
+        # that has nothing to do with the model.
+        async with sem:
+            async with session.post(SERVER_URL, json=payload,
+                                    timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as resp:
+                result = await resp.json()
+                response_text = result["choices"][0]["message"]["content"]
 
-            # Extract \boxed{} answer
-            pattern = r"\\boxed\{([^}]*)\}"
-            matches = re.findall(pattern, response_text)
-            predicted = matches[-1].strip() if matches else ""
+                predicted = extract_boxed(response_text)
+                # A label may be a number in the JSONL, and str.strip() on an int raises
+                # AttributeError -- which the except below would turn into "incorrect" for
+                # every sample.
+                label = str(prompt_item.get("label", prompt_item.get("answer", ""))).strip()
 
-            label = prompt_item.get("label", prompt_item.get("answer", ""))
-
-            return {
-                "prompt_idx": prompt_item.get("idx", 0),
-                "sample_idx": sample_idx,
-                "predicted": predicted,
-                "label": label,
-                "correct": predicted.strip() == label.strip() if predicted else False,
-                "response_length": len(response_text),
-            }
+                return {
+                    "prompt_idx": prompt_idx,
+                    "sample_idx": sample_idx,
+                    "predicted": predicted,
+                    "label": label,
+                    "correct": predicted == label if predicted else False,
+                    "response_length": len(response_text),
+                }
     except Exception as e:
         return {
-            "prompt_idx": prompt_item.get("idx", 0),
+            "prompt_idx": prompt_idx,
             "sample_idx": sample_idx,
             "predicted": "",
-            "label": prompt_item.get("label", ""),
+            "label": str(prompt_item.get("label", "")),
             "correct": False,
-            "error": str(e),
+            "error": f"{type(e).__name__}: {e}",
         }
 
 async def main():
     results = []
+    sem = asyncio.Semaphore(MAX_CONCURRENCY)
     async with aiohttp.ClientSession() as session:
         tasks = []
-        for prompt_item in prompts:
+        # The prompt index comes from the loop, not from the data. AIME-2024 as prepared
+        # here has only {"prompt", "label"} -- no "idx" -- so `prompt_item.get("idx", 0)`
+        # collapsed all 30 prompts onto key 0 and pass@k became "any of the 480 samples was
+        # right", i.e. ~1.0, with nothing in the output flagging it but a "Prompts
+        # evaluated: 1" line.
+        for prompt_idx, prompt_item in enumerate(prompts):
             for s in range(NUM_SAMPLES):
-                tasks.append(evaluate_prompt(session, prompt_item, s))
+                tasks.append(evaluate_prompt(session, prompt_item, prompt_idx, s, sem))
 
-        print(f"Evaluating {len(tasks)} total samples...")
+        print(f"Evaluating {len(tasks)} total samples "
+              f"({MAX_CONCURRENCY} concurrent, {REQUEST_TIMEOUT}s timeout each)...")
         results = await asyncio.gather(*tasks)
 
     # Compute metrics
     total = len(results)
     correct = sum(1 for r in results if r.get("correct", False))
+    errors = sum(1 for r in results if r.get("error"))
     accuracy = correct / total if total > 0 else 0
 
     # Per-prompt pass@k (at least one correct)
@@ -190,10 +247,14 @@ async def main():
     print(f"{'='*60}")
     print(f"  Total samples:    {total}")
     print(f"  Correct:          {correct}")
+    print(f"  Errors:           {errors}")
     print(f"  Accuracy:         {accuracy:.4f}")
     print(f"  Pass@{NUM_SAMPLES}:          {pass_at_k:.4f}")
     print(f"  Prompts evaluated:{len(prompt_results)}")
     print(f"{'='*60}")
+    if len(prompt_results) != len(prompts):
+        print(f"  WARNING: {len(prompts)} prompts were loaded but only "
+              f"{len(prompt_results)} distinct prompt indices appear in the results.")
 
     # Save results
     output_file = os.path.join(RESULT_DIR, "eval_results.json")
@@ -202,13 +263,24 @@ async def main():
             "metrics": {
                 "total_samples": total,
                 "correct": correct,
+                "errors": errors,
                 "accuracy": accuracy,
                 "pass_at_k": pass_at_k,
                 "k": NUM_SAMPLES,
+                "prompts": len(prompt_results),
             },
             "results": results,
         }, f, indent=2)
     print(f"  Results saved to: {output_file}")
+
+    # A run where a large share of requests failed has not measured accuracy, it has
+    # measured the timeout. Exiting non-zero keeps that out of a results table.
+    if total and errors / total > ERROR_FRACTION_ABORT:
+        print(f"\nERROR: {errors}/{total} requests failed "
+              f"(> {ERROR_FRACTION_ABORT:.0%}). These count as incorrect, so the accuracy "
+              "above understates the model. Raise SGLANG_MEM_FRACTION, lower "
+              "EVAL_MAX_CONCURRENCY, or raise EVAL_REQUEST_TIMEOUT, then re-run.")
+        sys.exit(2)
 
 asyncio.run(main())
 EVAL_SCRIPT

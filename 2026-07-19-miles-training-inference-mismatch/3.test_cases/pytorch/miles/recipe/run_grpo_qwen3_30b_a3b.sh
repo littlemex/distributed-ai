@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# STATUS: Verified (colocated, 2 nodes / 16 GPU H200) -- step 0 SUCCEEDED with
-#   --colocate + --use-distributed-optimizer + triton MoE runner (mis_kl 0.00192,
-#   ppo_kl 0.0 at dropout 0). The disaggregated actor-8 layout (see the parent slime
-#   recipe) needs B300 288GB and is UNVERIFIED on H200; colocated 16-GPU with the
-#   distributed optimizer is the H200-fitting path and is the one shipped as default here.
+# STATUS: RUNS on 2 nodes / 16 GPU H200 (--colocate + --use-distributed-optimizer + triton
+#   MoE runner), but does NOT produce usable training. Across 4 runs generation falls into a
+#   repetition loop and raw_reward stays 0.0; the mis_kl those runs report is measuring
+#   repetition, not train/rollout mismatch, and is marked UNUSABLE in the data ledger. Root
+#   cause unresolved -- see docs/RESULTS.md and experiment/h200_results/P2R_30B_INVALID.md.
+#   (An earlier header quoted "mis_kl 0.00192" as verified; no run produced that value and it
+#   has been retracted.) The disaggregated actor-8 layout (see the parent slime recipe) needs
+#   B300 288GB and is UNVERIFIED on H200; colocated 16-GPU with the distributed optimizer is
+#   the H200-fitting path and is the one shipped as default here.
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 # ============================================================

@@ -29,6 +29,6 @@ spec:
   volumes:
     - name: fsx
       persistentVolumeClaim:
-        claimName: fsx-claim
+        claimName: ${FSX_CLAIM}
   restartPolicy: Never
   terminationGracePeriodSeconds: 30

@@ -31,8 +31,42 @@ below exists to make that specific failure impossible rather than merely unlikel
 | `analyze_position_profile.py` | Position profile: slope of the gap against absolute position, plus the variance-scaling exponents. |
 | `pool_seeds.py` | Pools slopes across seeds and reports a seed-level interval. |
 | `verify_results.py` | The audit described above. |
+| `test_harness.py` | Regression tests for the guarantees above. Every test corresponds to a path by which a wrong number could once have reached a document. |
 | `specs/*.json` | One spec per experiment. Everything that varies between cells lives here, not in the code. |
 | `h200_results/*.md` | Findings, with the run names behind each number. |
+
+## The tests are the point
+
+```bash
+python3 test_harness.py      # needs numpy; no cluster, tensorboard or GPU required
+```
+
+An audit in 2026-08 attacked the harness itself rather than the results, asking where a wrong
+number could still get through. It found eleven paths, all now closed and all now tested. The
+ones worth knowing about, because they were quiet rather than loud:
+
+- `inf == inf` is true in Python, so a diverged run's `grad_norm=inf` matched itself across
+  both sources and earned a `VERIFIED` stamp.
+- A run that recorded none of the three sanity tags was reported as having passed the sanity
+  screen, with zero screens actually applied. `nan` did the same thing numerically, since both
+  `nan > threshold` and `nan <= threshold` are false.
+- A cell whose `mis_kl` was missing but whose `reward` verified was printed as `VERIFIED`.
+- The dump directory's multi-run guard only recognised run ids made of digits or lowercase hex,
+  so a Ray submission id slipped past it and two runs could be pooled undetected.
+- One `nan` token made the bootstrap interval `nan`, and a `nan` interval fails both the
+  "excludes zero" tests -- landing on the `flat: no accumulation detected` branch. A directory
+  of garbage would have printed a confident negative result.
+- The t-table rounded off-table degrees of freedom the wrong way, returning critical values
+  *below* the true ones and narrowing every interval that used them.
+
+New verdicts exist so that "not checked" can no longer look like "checked and fine":
+`NONFINITE`, `PARTIAL`, `UNSCREENED`, `AMBIGUOUS_PAIRING`, `TB_ONLY_UNCONFIRMED`.
+
+Every published number was re-derived on the same hardware after these changes and none moved:
+the ledger's verified cells, the position-profile slope (`-3.212623e-07`, `alpha_within` 1.03),
+and the four-seed pooled interval all reproduced exactly, and no verdict changed. On the real
+data the new guards fire zero times -- no non-finite tokens, no duplicates across all fourteen
+dump directories, no ambiguous pairings. These were latent holes, not active corruption.
 
 ## Reading the results
 

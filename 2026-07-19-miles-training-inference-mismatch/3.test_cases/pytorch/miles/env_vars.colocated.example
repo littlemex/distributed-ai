@@ -55,10 +55,27 @@ export FSX_CLAIM="fsx-claim"
 export GPU_NODE_ROLE="gpu-p5en"
 export NUM_NODES=1
 export GPUS_PER_NODE=8
-# EFA_PER_NODE: EFA cards requested per worker (raycluster.yaml resources). p5en
-# exposes 16, p5 exposes 32; requesting 8 uses ~half the fabric (verified). Set to
-# the node's card count for max NCCL busbw. Must not exceed the node's EFA count.
-export EFA_PER_NODE=8
+# EFA_PER_NODE: EFA cards requested per worker (raycluster.yaml resources).
+#
+# Request the node's FULL allocatable count, not a fraction. Check it with:
+#   kubectl get node <gpu-node> -o jsonpath='{.status.allocatable.vpc\.amazonaws\.com/efa}'
+# p5en.48xlarge reports 15 (16 physical, one reserved), p5.48xlarge reports 32.
+#
+# A partial request is not just slower -- it breaks multi-node P2P. When only some
+# of the cards are claimed, the device plugin picks which ones per node, the two
+# pods end up with different EFA-device-to-NIC-rail mappings, and aws-ofi-nccl
+# aborts with:
+#   NET/OFI Unexpected number of remote rails for dev N. Expected 1 but got 2
+#   ncclInternalError: Internal check failed
+# This was hit with EFA_PER_NODE=8 on p5en (15 allocatable) running TP8 x PP2:
+# the pipeline stage boundary crosses nodes and uses P2P send/recv, which is where
+# the asymmetry surfaces. Requesting all 15 fixed it.
+#
+# Note it does NOT show up in an all-reduce-only test: TP16 (all-reduce across the
+# node boundary) passed with 8 cards while TP8 x PP2 (P2P) failed on the same
+# cluster. EFA validation must include a P2P path, not just all_reduce_perf.
+# EP all-to-all (MoE) is P2P-like, so 30B MoE runs need the full count too.
+export EFA_PER_NODE=15
 export TOTAL_GPUS=$((NUM_NODES * GPUS_PER_NODE))
 
 # ----- Training -----
@@ -112,12 +129,27 @@ export TENSORBOARD_DIR="/fsx/tb/baseline"
 export EXTRA_TRAIN_ARGS="--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0"
 
 # ============================================================
-# ALTERNATE: Qwen3-30B-A3B MoE, colocated on 2 nodes (16 GPU) -- VERIFIED
+# ALTERNATE: Qwen3-30B-A3B MoE, colocated on 2 nodes (16 GPU) -- RUNS, BUT DOES NOT LEARN
 # ------------------------------------------------------------
 # To run the 30B MoE case instead of 4B, override the model block above with the
-# values below (uncomment) and launch recipe/run_grpo_qwen3_30b_a3b.sh. This is
-# the exact configuration that completed step 0 on 2 p5en nodes (16 GPU, EFA):
-# mis_kl 0.00192, ppo_kl 0.0 at dropout 0, job SUCCEEDED.
+# values below (uncomment) and launch recipe/run_grpo_qwen3_30b_a3b.sh.
+#
+# WHAT IS VERIFIED: this layout fits 30B on 2 p5en nodes (16 GPU, EFA) and completes its
+# rollout/train cycles without OOM or crash. Treat it as a memory-and-flags reference for
+# fitting a 30B MoE actor on H200.
+#
+# WHAT IS NOT: across 4 independent runs the model falls into a repetition loop and never
+# reaches an answer -- repetition_frac 0.48-0.70, truncated 0.97-0.99, raw_reward 0.0,
+# against 0.0 / 0.43-0.58 / 0.42-0.55 on dense Qwen3-4B. The mis_kl these runs report
+# (0.196-0.839) is therefore measuring repetition rather than train/rollout mismatch and is
+# marked UNUSABLE in the data ledger. Root cause unresolved: response-length cap, weight-
+# update divergence, sampling temperature and checkpoint corruption were each tested and
+# ruled out; all 4 runs used bf16 KV, so it is not a quantization effect. See
+# experiment/h200_results/P2R_30B_INVALID.md.
+#
+# An earlier version of this comment claimed "mis_kl 0.00192, ppo_kl 0.0, job SUCCEEDED" as
+# a verified result. That mis_kl was not produced by any run and has been retracted; see
+# docs/RESULTS.md.
 #
 # The actor spans ALL 16 GPU (2 nodes x 8) with --use-distributed-optimizer
 # (added by the recipe) so the 30B optimizer state is sharded and fits H200

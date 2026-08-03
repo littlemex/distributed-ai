@@ -34,8 +34,9 @@ compression. r is order 1e-3, so float32 is kept and float16 is not an option.
 ENV:
   MIS_DUMP_DIR    destination directory; dumping is off when unset
   MIS_DUMP_TAG    filename prefix (default "run")
-  MIS_DUMP_EVERY  dump every Nth call (default 4); position statistics do not need
-                  every microbatch, and the write is synchronous with training
+  MIS_DUMP_EVERY  dump every Nth call (default 1). Raising it thins the write, which is
+                  synchronous with training, but a stride larger than the run's call count
+                  writes nothing and warns about nothing -- so the default is 1
 """
 
 import os
@@ -168,7 +169,12 @@ def compute_mis_weights_with_cp_dumping(
             elif not _is_tp_rank_zero():
                 pass  # duplicate of TP rank 0; see _is_tp_rank_zero
             else:
-                every = int(os.environ.get("MIS_DUMP_EVERY", "4"))
+                # Default 1, not 4. With a stride of 4 a run making fewer than 4 calls
+                # writes nothing at all and says nothing about it, so "the dump produced no
+                # data" and "the dump never fired" look identical from the outside -- the
+                # exact confusion this instrumentation exists to prevent. Every spec sets
+                # MIS_DUMP_EVERY=1 explicitly, so the safe value is also the used one.
+                every = int(os.environ.get("MIS_DUMP_EVERY", "1"))
                 if every > 0 and call_n % every == 0:
                     _write_dump(
                         d, os.environ.get("MIS_DUMP_TAG", "run"), _rank(), call_n,

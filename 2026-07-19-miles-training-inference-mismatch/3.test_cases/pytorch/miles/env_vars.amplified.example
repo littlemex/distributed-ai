@@ -53,9 +53,13 @@ export FSX_CLAIM="fsx-claim"
 export GPU_NODE_ROLE="gpu-p5en"
 export NUM_NODES=1
 export GPUS_PER_NODE=8
-# EFA_PER_NODE: EFA cards requested per worker. p5en exposes 16, p5 exposes 32;
-# 8 uses ~half the fabric (verified). Must not exceed the node's EFA count.
-export EFA_PER_NODE=8
+# EFA_PER_NODE: EFA cards requested per worker. Request the node's FULL allocatable
+# count (p5en reports 15, p5 reports 32) -- a partial request breaks multi-node P2P
+# because the two pods get different EFA-device-to-rail mappings and aws-ofi-nccl
+# aborts with "NET/OFI Unexpected number of remote rails". See the long note in
+# env_vars.colocated.example. Verify with:
+#   kubectl get node <gpu-node> -o jsonpath='{.status.allocatable.vpc\.amazonaws\.com/efa}'
+export EFA_PER_NODE=15
 export TOTAL_GPUS=$((NUM_NODES * GPUS_PER_NODE))
 
 # ----- Training -----

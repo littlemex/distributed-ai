@@ -102,36 +102,62 @@ consistent with the single-node arm.
 
 Colocated actor 2x8 + `--use-distributed-optimizer` (30B static memory sharded across the
 16 GPU) + `--sglang-moe-runner-backend triton --sglang-expert-parallel-size 2` (required
-for online weight update on SGLang 0.5.12+ MoE). Both frameworks were run with the
-**identical flags** (mismatch metrics, `--attention-dropout 0 --hidden-dropout 0`, seeds
-1234/42, `mis_metrics_only.yaml`), so this is a clean apple-to-apple pair. Step 0 completed
-on both (miles job SUCCEEDED in ~1223s; the slime job reached step 0 with the same config):
+for online weight update on SGLang 0.5.12+ MoE).
 
-| Metric (step 0) | slime 30B | miles 30B | Concordance |
-| --- | --- | --- | --- |
-| train/ppo_kl (dropout=0) | 0.0 | 0.0 | both zero |
-| train/mis_kl | 0.00182 | 0.00192 | same order (single-run point estimates; cf. slime's ~±17% run-to-run spread at 4B) |
-| train/mis_ppl_ratio | 1.00182 | 1.00192 | matches |
-| train/mis_chi2_token | 0.00373 | 0.00415 | same order |
-| train/train_rollout_logprob_abs_diff | 0.0197 | 0.0198 | matches |
-| train/grad_norm | 0.0663 | 0.0655 | matches |
-| train/pg_clipfrac | 0.0 | 0.0 | both zero |
-| train/loss | ~0 | ~0 | both ~0 |
-| rollout/raw_reward | 0.56 | 0.54 | same range |
+**This configuration runs. It does not produce a usable mismatch measurement.**
 
-The 30B MoE mismatch (`mis_kl` ~0.0018-0.0019) is ~3x the 4B dense figure (~0.0006) --
-larger but still in the "benign" regime, and `ppo_kl` is 0.0 on **both** frameworks at
-dropout=0. This establishes the fork-level concordance on the 30B MoE case as well as the
-4B dense case. (One implementation difference: slime records `train/entropy_loss` 0.26
-while miles records 0.0; neither feeds the loss -- `--entropy-coef 0` on both -- so it does
-not affect the comparison, it is a metric-logging difference.)
+### Retracted: the 30B concordance table
 
-**How the clean pair was obtained.** An earlier slime 30B run had been launched
-**without** the mismatch/dropout flags and reported `ppo_kl 0.213`
-(train-mode dropout on) and no `mis_kl`. Re-running slime 30B with the exact miles flags
-drove `ppo_kl` to 0.0, confirming the 0.213 was the train-mode dropout artefact (same
-mechanism as the 4B dropout-0.1 arm), not framework drift. Two porting gotchas surfaced
-doing this: (1) the 30B recipe lacked the `EXTRA_TRAIN_ARGS` hook the 4B recipe has (added);
+A table here previously reported a step-0 comparison across the two frameworks -- `mis_kl`
+0.00182 against 0.00192, `mis_ppl_ratio` 1.00182/1.00192, `grad_norm` 0.0663/0.0655,
+`raw_reward` 0.56/0.54 -- and concluded that "this establishes the fork-level concordance on
+the 30B MoE case as well as the 4B dense case".
+
+**None of those numbers came from a run.** They were removed when every reported cell in this
+project was cross-checked against the trainer's own TensorBoard event files. The audit ledger
+is `experiment/h200_results/DATA_STATUS.md`; the tool is `experiment/verify_results.py`, which
+reports `MISSING` for any value present in a document but absent from both the event file and
+the driver's `results.tsv`.
+
+What the four real 30B runs report:
+
+| run | mis_kl | repetition_frac | raw_reward | truncated | verdict |
+| --- | --- | --- | --- | --- | --- |
+| `30b_bf16` | 0.309076 | 0.633 | 0.0 | 0.99 | UNUSABLE |
+| `30b_bf16_16k` | 0.196407 | 0.695 | 0.0 | 0.99 | UNUSABLE |
+| `30b_t06` | 0.838965 | 0.633 | 0.0 | 0.97 | UNUSABLE |
+| `p2w_30b_wcheck` | 0.205788 | 0.484 | 0.0 | 0.98 | UNUSABLE |
+
+Two things follow. First, the real values are 0.196-0.839, two to three orders of magnitude
+above the retracted 0.0018-0.0019, so the retracted figures were not merely imprecise. Second,
+the real values cannot replace them: all four runs fail the step-0 sanity screen, because
+generation is already looping *before the first optimizer step* -- so the logprob gap these
+runs measure is a property of repeated tokens, not of the train/rollout numerical path.
+`raw_reward` is 0.0 in every run, against 0.42-0.55 on dense Qwen3-4B.
+
+Root cause is unresolved. Four hypotheses were tested against the data and rejected: a
+response-length cap, weight-update divergence (checked with `--check-weight-update-equal`),
+sampling temperature, and checkpoint corruption. All four runs used bf16 KV, so this is not a
+quantization effect. See `experiment/h200_results/P2R_30B_INVALID.md`.
+
+**Consequence for the framework comparison: it holds at 4B dense only.** It was not
+demonstrated at MoE scale.
+
+The `ppo_kl` 0.0 observed on both frameworks is genuine, but carries no information here:
+`ppo_kl` is identically zero whenever dropout is 0, so it reads the same on a broken run as on
+a healthy one. Likewise the logging difference (slime records `train/entropy_loss` 0.26 while
+miles records 0.0; neither feeds the loss, `--entropy-coef 0` on both) is real and unaffected
+by the retraction.
+
+**Flag-alignment work on the 30B arm.** This is worth keeping because the porting lessons are
+real and reusable, even though the comparison it was building toward is retracted above. An
+earlier slime 30B run had been launched **without** the mismatch/dropout flags and reported
+`ppo_kl 0.213` (train-mode dropout on) and no `mis_kl`. Re-running slime 30B with the exact
+miles flags drove `ppo_kl` to 0.0, confirming the 0.213 was the train-mode dropout artefact
+(same mechanism as the 4B dropout-0.1 arm), not framework drift. That conclusion does not
+depend on the retracted mis_kl values: it is a before/after on one framework's own `ppo_kl`.
+Two porting gotchas surfaced doing this: (1) the 30B recipe lacked the `EXTRA_TRAIN_ARGS` hook
+the 4B recipe has (added);
 (2) `--custom-tis-function-path` must be a **dotted** module path
 (`examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp`), not the
 `file.py:func` form -- `load_function` does `rpartition('.')` + `import_module`, so the

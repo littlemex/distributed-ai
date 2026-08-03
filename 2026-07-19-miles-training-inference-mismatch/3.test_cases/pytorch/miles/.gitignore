@@ -1,0 +1,13 @@
+# Filled-in env files. The Quick Start tells you to copy an example to `env_vars`
+# and edit it, and HF_TOKEN goes in there, so these must never be committed.
+env_vars
+env_vars.colocated
+env_vars.disaggregated
+env_vars.amplified
+env_vars.tis
+
+# Rendered manifests (envsubst output) and local scratch
+*.rendered.yaml
+eval_results/
+runs/
+tb/

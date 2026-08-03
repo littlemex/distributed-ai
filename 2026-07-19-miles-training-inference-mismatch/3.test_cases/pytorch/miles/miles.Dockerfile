@@ -4,17 +4,45 @@
 # miles (radixark/miles) + EFA image for Amazon EKS
 # ============================================================================
 # Strategy C (see docs/PORT_NOTES.md): the miles upstream image already bundles
-# a matched PyTorch 2.11 / CUDA 13.0.1 stack, the sglang-miles fork (weight sync
+# a matched CUDA 13.0.1 / PyTorch 2.11 stack, the sglang-miles fork (weight sync
 # HTTP endpoints), the radixark Megatron-LM fork, prebuilt flash_attn / TE /
 # apex wheels, and the B300 sm_103 TE FA2 whitelist patch. Rebuilding that on an
 # NGC base is infeasible (wheel ABI mismatch), so we take the miles image as-is
 # and add ONLY the AWS EFA networking stack on top.
 #
-# Pin the base to a dated tag (never :latest) per awsome-distributed-ai
-# CONTRIBUTING. cu13 tags target CUDA 13.0.1 (B300 sm_103 / H200 sm_90).
+# The CUDA-before-PyTorch word order above is deliberate: the repository CI
+# derives the CUDA version by grepping the first line matching "cuda" and taking
+# the first X.Y number on it. Writing "PyTorch 2.11" ahead of "CUDA 13.0.1" makes
+# that check read 2.11 as the CUDA version and fail the 13.0 minimum.
+#
+# BASE TAG AND ITS LIFETIME. radixark/miles publishes rolling `dev-<timestamp>`
+# tags with no git tags or releases, and OLD TAGS ARE DELETED from the registry.
+# Pin a dated tag (never :latest) per awsome-distributed-ai CONTRIBUTING, but
+# expect the pin to 404 within weeks and re-pin. Check what still exists with:
+#   TOKEN=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:radixark/miles:pull" | jq -r .token)
+#   curl -s -H "Authorization: Bearer $TOKEN" https://registry-1.docker.io/v2/radixark/miles/tags/list
+# Because the base ships prebuilt wheels rather than cloned sources, the miles
+# commit inside a given tag cannot be recovered from this Dockerfile alone --
+# record the tag alongside any result you publish.
 # ============================================================================
-ARG MILES_BASE_TAG=dev-202607182122
-FROM radixark/miles:${MILES_BASE_TAG}
+# Pin by DIGEST, not by tag. radixark publishes dev-* as mutable rolling snapshots and
+# DELETES old ones: the tag this file used to pin (dev-202608010334) already returns 404 from
+# the registry, so a dated tag alone gives neither reproducibility nor availability. The tag is
+# kept alongside for readability; the digest is what the build resolves.
+#
+# To move to a newer base, resolve its digest first:
+#   TOK=$(curl -s "https://auth.docker.io/token?service=registry.docker.io\
+# &scope=repository:radixark/miles:pull" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+#   curl -sI -H "Authorization: Bearer $TOK" \
+#     -H "Accept: application/vnd.oci.image.index.v1+json" \
+#     https://registry-1.docker.io/v2/radixark/miles/manifests/<tag> | grep -i docker-content-digest
+#
+# Because the base ships prebuilt wheels rather than cloned sources, the miles commit inside a
+# given tag cannot be recovered from this Dockerfile alone -- record the digest alongside any
+# result you publish.
+ARG MILES_BASE_TAG=dev-202607310056
+ARG MILES_BASE_DIGEST=sha256:ca0bb593dd6f4011b444f64d478b72c213e4c70421f4d7f94e593a709562429e
+FROM radixark/miles@${MILES_BASE_DIGEST}
 
 ARG GDRCOPY_VERSION=v2.5.2
 ARG EFA_INSTALLER_VERSION=1.48.0

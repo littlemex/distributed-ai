@@ -189,6 +189,22 @@ TRAIN_ARGS=(
 # to the Ray workers; the SLIME code itself is already in the image at
 # /opt/slime. MODEL_SCRIPT is forwarded so the launcher can source the right
 # model definition.
+#
+# PYTHONPATH carries /opt/slime as well as Megatron. Any flag that takes a dotted
+# module path needs the framework install dir importable -- notably
+# --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp,
+# where load_function() does rpartition('.') + import_module. Without /opt/slime on
+# the path that fails with ModuleNotFoundError at the loss forward, i.e. late, after
+# the rollout has already burned GPU time.
+#
+# CUDA_DEVICE_MAX_CONNECTIONS=1 is mandatory as soon as TP_SIZE or CP_SIZE exceeds 1:
+# Megatron asserts on it at startup ("Using tensor model parallelism or context
+# parallelism require setting the environment variable CUDA_DEVICE_MAX_CONNECTIONS
+# to 1") and the job dies in ~30s, before any rollout. Runs that stay at TP1/CP1
+# never trip it, which is why this went unnoticed until a TP2 sweep was attempted on
+# the sibling miles test case. Setting it unconditionally is safe: it caps the
+# per-device work-queue depth so TP's overlapped all-reduce keeps its ordering, and
+# TP1 runs are unaffected.
 echo "[INFO] Submitting Ray job..."
 
 ray job submit \
@@ -196,7 +212,8 @@ ray job submit \
     --working-dir "${SCRIPT_DIR}/launcher" \
     --runtime-env-json="{
         \"env_vars\": {
-            \"PYTHONPATH\": \"/opt/Megatron-LM\",
+            \"PYTHONPATH\": \"/opt/Megatron-LM:/opt/slime\",
+            \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
             \"HF_TOKEN\": \"${HF_TOKEN}\",
             \"MODEL_SCRIPT\": \"${MODEL_SCRIPT}\",
             \"TOKENIZERS_PARALLELISM\": \"false\",

@@ -69,19 +69,19 @@ spec:
           node-role: cpu
   rayVersion: 2.55.1
   workerGroupSpecs:
-  # Single-node baseline (Qwen3-4B mismatch arms). For the 2-node runs (4B 3-cycle
-  # and 30B MoE colocated on 16 GPU, both hardware-verified over EFA) set
-  # replicas/minReplicas/maxReplicas to 2 -- each worker is one p5en (8 GPU), so
-  # 2 replicas = 16 GPU. Keep podAntiAffinity (below) so the two workers land on
-  # separate nodes and the actor spans both.
+  # One worker per GPU node, driven by ${NUM_NODES} so the manifest cannot disagree with
+  # the recipe's topology. This used to be a hardcoded `replicas: 1` with a comment telling
+  # the reader to edit it for the 2-node runs (4B 3-cycle, 30B MoE colocated on 16 GPU) --
+  # miss that edit and the job waits on placement for a layout the workers cannot supply,
+  # rather than erroring. podAntiAffinity (below) keeps the workers on separate nodes.
   - groupName: gpu-workers
-    maxReplicas: 2
-    minReplicas: 1
+    maxReplicas: ${NUM_NODES}
+    minReplicas: ${NUM_NODES}
     numOfHosts: 1
     rayStartParams:
       num-gpus: '${GPUS_PER_NODE}'
       resources: '"{\"gpu_node\": 1}"'
-    replicas: 1
+    replicas: ${NUM_NODES}
     template:
       metadata:
         labels:

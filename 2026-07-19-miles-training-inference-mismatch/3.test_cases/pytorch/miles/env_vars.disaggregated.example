@@ -44,6 +44,15 @@ export ROLLOUT_TEMPERATURE=1.0
 export RM_TYPE="remote_rm"
 export REWARD_BACKEND="reward_model"
 export REWARD_MODEL_NAME="OpenAssistant/reward-model-deberta-v3-large-v2"
+# Image for the reward pods, built from reward_service.Dockerfile (CPU-only, so it
+# does not need the miles GPU image). kubernetes/reward-service.yaml substitutes
+# this via envsubst; leaving it unset renders `image:` empty and the Deployment is
+# rejected. Build and push it the same way as the miles image:
+#   docker build -f reward_service.Dockerfile -t "${REGISTRY}/${REWARD_IMAGE_NAME}:${REWARD_TAG}" .
+#   docker push "${REGISTRY}/${REWARD_IMAGE_NAME}:${REWARD_TAG}"
+export REWARD_IMAGE_NAME="miles-reward"
+export REWARD_TAG="v1"
+export REWARD_IMAGE="${REGISTRY}/${REWARD_IMAGE_NAME}:${REWARD_TAG}"
 # Name of the CPU instance group hosting the reward pods. This sample assumes a
 # Spot-capacity group (CapacityRequirements: Spot) already exists -- the reward
 # service is stateless and SLIME's remote_rm client retries on transient

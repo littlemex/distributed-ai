@@ -31,13 +31,14 @@ mismatch-measurement flags are compatible with slime (verified on hardware).
 | RayCluster with head on a CPU node | UNVERIFIED | the shipped `raycluster.yaml` puts the head on a CPU node; the actual runs used the head-on-GPU overlay in `local-overlays/` because the borrowed cluster had no large-disk CPU node. The GRPO results are valid; only this head-placement variant of the manifest is untested. |
 | 2-node EFA (16 GPU NCCL) | Verified | busbw 190-257 GB/s over EFA (efa-direct + GPUDirect RDMA, no TCP fallback); see docs/EFA_2NODE.md. Required fixing a self-referencing egress gap in the EFA security group |
 | Qwen3-4B GRPO, colocated, 2 nodes (16 GPU), 3 cycles | Verified | actor 2x8 + rollout 16 over EFA; 3 rollouts SUCCEEDED (raw_reward 0.48/0.52/0.49); see docs/RESULTS.md |
-| Qwen3-30B-A3B MoE, colocated, 2 nodes (16 GPU) | Verified | actor 2x8 + `--use-distributed-optimizer` + triton EP2; step 0 SUCCEEDED (mis_kl 0.00192, ppo_kl 0.0 at dropout 0); see docs/RESULTS.md |
+| Qwen3-30B-A3B MoE, colocated, 2 nodes (16 GPU) -- completes without OOM/crash | Verified | actor 2x8 + `--use-distributed-optimizer` + triton EP2; the rollout/train cycle completes. This row is about the layout fitting and running, nothing more |
+| Qwen3-30B-A3B MoE -- produces a usable measurement | **Known Issue** | across 4 independent runs generation falls into a repetition loop and never reaches an answer (`repetition_frac` 0.48-0.70, `truncated` 0.97-0.99, `raw_reward` 0.0). The `mis_kl` these runs report is therefore a measurement of repetition, not of train/rollout mismatch, and is marked UNUSABLE in the data ledger. Root cause unresolved -- see `experiment/h200_results/P2R_30B_INVALID.md` |
 | Multi-seed variance | UNVERIFIED | attempted; the p5en node went NotReady (EC2 impaired) mid-run. Results stay single-seed point estimates |
 | KV fp8 collapse arm (no TIS) | Verified | driven to divergence: mis_kl 0.033 -> 2.10, grad_norm 0.22 -> 14.3 over 25 steps; matches slime's step-14-18 collapse. See docs/RESULTS.md |
 | TIS rescue arm (through collapse) | Verified | `env_vars.tis.example`, 30 steps: with TIS, mis_kl stays ~0.03-0.045 and grad_norm ~0.11-0.22 throughout -- no divergence, vs the no-TIS arm's mis_kl 2.10 / grad_norm 14.3 at step 24. See docs/RESULTS.md |
 | Multi-node (>=2 nodes) | Verified | 4B + 30B MoE both ran colocated on 2 p5en nodes (16 GPU) over EFA |
 | Qwen3-30B-A3B MoE, disaggregated | UNVERIFIED | verified as **colocated 16 GPU** (fits H200 141GB with distributed optimizer); the disaggregated actor-8 layout needs B300 288GB and is not run here |
-| 30B slime-vs-miles clean pairing | Verified | both run with identical mismatch/dropout/seed flags: ppo_kl 0.0/0.0, mis_kl 0.00182/0.00192. See docs/RESULTS.md |
+| 30B slime-vs-miles clean pairing | **Withdrawn** | the mis_kl values this row once quoted (0.00182/0.00192) are not backed by any run: see "Withdrawn numbers" below. The 30B runs that do exist report mis_kl 0.196-0.839 and are UNUSABLE (repetition loop). The framework comparison stands on the 4B dense pairing only |
 | Disaggregated reward (remote_rm on CPU pool) | UNVERIFIED | `reward_service/`, `kubernetes/reward-service.yaml`; miles remote_rm lacks slime's retry |
 | Checkpoint convert / long run | Known Issue | `save_model()` fails with `_pickle.UnpicklingError`; see Known Issues |
 
@@ -82,11 +83,28 @@ TP1/PP1/CP1/EP1, colocated.
 | KV fp8 mis_kl (4B, see LR note) | 0.0327 (~54x) | 0.0310 (~49x) | same direction & order |
 | ppo_kl at dropout 0 (4B) | 0.0 | 0.0 | both zero |
 | ppo_kl at dropout 0.1 (4B) | 0.31 | 0.30 | both ~0.30 (dropout artefact) |
-| 30B MoE mis_kl (colocated 16 GPU, dropout 0) | 0.00182 | 0.00192 | same order (single-run point estimates) |
-| 30B MoE ppo_kl at dropout 0 | 0.0 | 0.0 | both zero |
+### Withdrawn numbers
 
-The 30B MoE pair was measured with identical flags on both frameworks (see docs/RESULTS.md);
-the concordance now holds on both the 4B dense and 30B MoE scales.
+An earlier version of this table reported a 30B MoE row: `mis_kl` 0.00182 (slime) against
+0.00192 (miles), described as "same order" and used to claim the framework concordance held
+at MoE scale as well as at 4B. **No run produced those values.** They were retracted when
+every reported cell was cross-checked against the trainer's own TensorBoard event files; the
+audit is `experiment/h200_results/DATA_STATUS.md` and the tool that performs it is
+`experiment/verify_results.py`.
+
+What the 30B runs actually report is `mis_kl` 0.196 to 0.839 across four runs -- two to three
+orders of magnitude away from the withdrawn figures -- and every one of those runs fails the
+step-0 sanity screen, because generation is already looping before the first optimizer step
+(`repetition_frac` 0.48-0.70, `raw_reward` 0.0). So the real numbers cannot substitute for the
+withdrawn ones either: at this configuration the 30B MoE `mis_kl` is measuring repetition
+rather than train/rollout mismatch, and it is marked UNUSABLE rather than quoted.
+
+**The framework concordance therefore rests on the 4B dense pairing alone.** It was not shown
+at MoE scale, and this table no longer claims it was.
+
+The 30B `ppo_kl` values were 0.0 on both frameworks, which is genuine but carries no
+information here: `ppo_kl` is identically zero whenever dropout is 0 (see the dropout note
+below), so it holds on a broken run exactly as it does on a healthy one.
 
 LR note: the baseline runs at LR 1e-6 and the KV fp8 runs at LR 1e-5, so the "~49x/~54x"
 figure varies dtype and LR together. `mis_kl` at step 0 is a property of the

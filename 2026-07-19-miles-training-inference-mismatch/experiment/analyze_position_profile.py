@@ -66,7 +66,7 @@ def load(dump_dir, run_id=None):
     the data" and "there was no data" are different findings.
     """
     seqs = []
-    seen, n_dup, n_bad = set(), 0, 0
+    seen, n_dup, n_bad, n_nonfinite = set(), 0, 0, 0
     files = sorted(glob.glob(os.path.join(dump_dir, "*.npz")))
     if run_id:
         files = [f for f in files if f"_{run_id}_rank" in os.path.basename(f)]
@@ -78,11 +78,31 @@ def load(dump_dir, run_id=None):
     # pooled, and the sequence-level bootstrap interval narrows for no reason. Since that
     # interval is what the accumulation verdict is read off, this has to be fatal rather
     # than a warning.
-    runs = set()
+    # The run id is whatever mis_dump.py put between the tag and "_rank": RAY_JOB_ID, or
+    # MIS_DUMP_RUN_ID, or a unix timestamp. An earlier version of this guard matched only
+    # digits or lowercase hex, which meant a Ray submission id ("raysubmit_tUeANK..."),
+    # uppercase hex, or a hand-set label slipped through unmatched -- and an unmatched file
+    # was loaded anyway, so the very mixing this is meant to forbid went undetected. So the
+    # id is now read as "everything before _rank<N>_call<N>", and a file that does not
+    # follow that shape at all is fatal rather than quietly included: an unrecognised file
+    # in the dump directory is not something to average over.
+    runs, unparsed = set(), []
     for f in files:
-        m = re.search(r"_(\d+|[0-9a-f]{8,})_rank\d+_call\d+\.npz$", os.path.basename(f))
+        base = os.path.basename(f)
+        m = re.search(r"^(?P<tag>.+)_rank(?P<rank>\d+)_call(?P<call>\d+)\.npz$", base)
         if m:
-            runs.add(m.group(1))
+            # <tag>_<run>: the run id is the last underscore-separated field of the prefix.
+            prefix = m.group("tag")
+            runs.add(prefix.rsplit("_", 1)[-1] if "_" in prefix else prefix)
+        else:
+            unparsed.append(base)
+    if unparsed:
+        raise SystemExit(
+            f"{dump_dir} holds {len(unparsed)} file(s) that are not mis_dump output:\n"
+            f"  {sorted(unparsed)[:5]}\n"
+            "Expected <tag>_<run>_rank<N>_call<N>.npz. A file whose provenance cannot be\n"
+            "read must not be pooled into the sample -- move it out of this directory."
+        )
     if len(runs) > 1:
         raise SystemExit(
             f"{dump_dir} holds dumps from {len(runs)} runs: {sorted(runs)}\n"
@@ -115,6 +135,18 @@ def load(dump_dir, run_id=None):
                 m = np.ones(n, dtype=bool)
             if not m.any():
                 continue
+            # A single -inf (a forced token) or nan anywhere in r poisons every statistic
+            # downstream: the OLS slope becomes nan, so does every bootstrap replicate, so
+            # do the percentiles -- and nan fails both `lo > 0` and `hi < 0`, which lands
+            # on the "flat: no accumulation detected" branch. A directory of nan would
+            # therefore have been reported as a confident negative result. Non-finite
+            # tokens are dropped from the mask and counted, so the loss is visible.
+            finite = np.isfinite(r) & np.isfinite(tr[:n]) & np.isfinite(ro[:n])
+            if not finite.all():
+                n_nonfinite += int((~finite).sum())
+                m = m & finite
+                if not m.any():
+                    continue
             h = hashlib.sha1(tr[:n].tobytes() + ro[:n].tobytes()).hexdigest()
             if h in seen:
                 n_dup += 1
@@ -130,7 +162,7 @@ def load(dump_dir, run_id=None):
                 "prompt_len": prompt_len,
                 "response_len": resp_len,
             })
-    return seqs, files, n_dup, n_bad
+    return seqs, files, n_dup, n_bad, n_nonfinite
 
 
 def _ols_slope(x, y):
@@ -234,6 +266,11 @@ def slope_with_ci(seqs, min_len, n_boot, rng):
     if len(boots) < 20:
         return point, signed, None, None, len(kept)
     lo, hi = np.percentile(boots, [2.5, 97.5])
+    # A non-finite interval is not an interval. Returning it as numbers would let the
+    # verdict fall through to "flat", i.e. a definite negative conclusion drawn from
+    # unusable data; None makes the caller say it could not decide.
+    if not (math.isfinite(lo) and math.isfinite(hi)):
+        return point, signed, None, None, len(kept)
     return point, signed, float(lo), float(hi), len(kept)
 
 
@@ -324,15 +361,20 @@ def main():
                     help="when a dump directory holds several runs, analyse only this one")
     a = ap.parse_args()
 
-    seqs, files, n_dup, n_bad = load(a.dump_dir, a.run_id or None)
+    seqs, files, n_dup, n_bad, n_nonfinite = load(a.dump_dir, a.run_id or None)
     label = a.label or os.path.basename(a.dump_dir.rstrip("/"))
     print(f"label={label}")
     print(f"argv: {' '.join(sys.argv[1:])}")
     print(f"files={len(files)} sequences={len(seqs)} "
-          f"duplicates_dropped={n_dup} unreadable_files={n_bad}")
+          f"duplicates_dropped={n_dup} unreadable_files={n_bad} "
+          f"nonfinite_tokens_dropped={n_nonfinite}")
     if n_bad:
         print(f"  WARNING: {n_bad} npz file(s) could not be read -- that is not the "
               "same as there being no data; investigate before reporting.")
+    if n_nonfinite:
+        print(f"  WARNING: {n_nonfinite} non-finite token(s) (inf/nan) dropped. A forced "
+              "or zero-probability token can produce these; the slope below is computed "
+              "on the remainder, so check the count is a negligible fraction of n.")
     if n_dup:
         print(f"  note: {n_dup} duplicate sequence(s) dropped by content hash "
               "(expected 0 now that the dump is restricted to TP rank 0)")
@@ -385,6 +427,11 @@ def main():
                 print("  => decreasing: CI excludes zero")
             else:
                 print("  => flat: CI includes zero (no accumulation detected)")
+        else:
+            # No verdict without an interval. "flat" is a claim, and the absence of a
+            # usable interval is not evidence for it.
+            print("  => UNDECIDED: no usable bootstrap interval, so no verdict. This is "
+                  "not the same as 'flat'.")
         print("  reminder: compare the prompt_len distributions printed above between "
               "arms; if they differ materially, the absolute-position comparison is "
               "still offset-correct but the token mix behind each position differs.")

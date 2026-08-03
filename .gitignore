@@ -14,8 +14,13 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# `lib/` and `lib64/` here mean a virtualenv's library directories, so anchor them to the
+# repo root. Unanchored, they match at ANY depth -- which silently excluded
+# 2026-07-19-miles-training-inference-mismatch/experiment/lib/, the driver library that
+# experiment/run_batch.sh sources on its first line. The result was a published harness that
+# could not run, with `git status` clean and nothing to indicate the omission.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

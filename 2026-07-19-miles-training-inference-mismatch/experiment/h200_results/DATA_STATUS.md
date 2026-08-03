@@ -13,6 +13,33 @@ cd /tmp/miles-run && python3 verify_results.py --json /fsx/exp/VERIFICATION.json
 実装: `/Users/akazawt/tmp/distai-p5-ue2-miles/verify_results.py`
 最終実行: 2026-08-03
 
+## 2026-08-04 の監査で塞いだ穴 (再発防止テスト付き)
+
+Fable と独立レビューで **ハーネス自身**を攻撃し、「間違った数値が文書に到達しうる経路」を
+探した。以下は実際に開いていた穴で、すべて `test_harness.py` の回帰テストで塞いだ
+(33 チェック、ローカルとクラスタ両方で全 PASS)。
+
+| 穴 | 何が起きえたか | 検証 |
+|---|---|---|
+| `agree(inf, inf)` が True | 発散した run の `grad_norm=inf` が **VERIFIED** の判子付きで表に載る | `inf` を `NONFINITE` verdict に分離 |
+| sanity screen の tag 欠損が pass | 3 つの screen を **1 つも記録していない run** が「screen 通過」と報告される (30B 事故の再来) | `UNSCREENED` verdict を新設。screen 0 件は pass でなく「未検査」 |
+| screen 値が NaN で pass | `nan > 0.05` も `nan <= 0.0` も False なので **NaN は全 screen を通過** | NaN も `UNSCREENED` に倒す |
+| overall verdict の集約 | reward だけ VERIFIED で `mis_kl` が MISSING の cell が **緑の VERIFIED** で通る | core metric (`mis_kl`/`reward`) が未検証なら `PARTIAL` に降格 |
+| tb run の曖昧一致 | `e4m3_s123` が `pp3_*` と `8bs_*` の両方に一致し `hits[0]` で**別 run の event file と照合** | 曖昧なら `AMBIGUOUS_PAIRING` で fatal。実データでは 0 件 |
+| driver row 無しの run | step 0 を書いた直後に kill された job も引用可能判定 | `TB_ONLY_UNCONFIRMED` に分離 |
+| dump の run-id 正規表現 | 数字/小文字hex 以外の run id (`raysubmit_*`, 大文字hex, 任意ラベル) が**照合を素通り**し 2 run 混在が検知されない | prefix 全体で group。mis_dump 形式でないファイルは fatal |
+| NaN → 「flat」判定 | `-inf`/NaN が 1 つあると bootstrap CI が NaN になり、`lo>0`/`hi<0` 両方 False で **「蓄積なし」という確定的な陰性結論**になる | 非有限トークンを除外・計数し、CI が非有限なら `UNDECIDED` |
+| `t_crit()` の補間方向 | 表に無い df で**真値より小さい**臨界値を返し CI が狭まる (df=11 は 2.179 対 真値 2.201、df≥31 は 1.96 対 2.040)。有意性を捏造する方向 | 切り下げ (保守側) に修正。16 df で検算 |
+| `MIS_DUMP_EVERY` 既定 4 | call 数 4 未満の run が**無警告でゼロ dump**。「データが無い」と「dump しなかった」が区別不能 | 既定 1 に変更 |
+| 凍結 base env が未使用 | `gen_cells.py` は base env を凍結コピーするのに、cell は **/tmp の原本を source** していた。凍結ハッシュは誰も読まないファイルの記録 | cell は凍結コピーを source。base が読めなければ生成自体を拒否 |
+
+**重要: 上記の修正後、公開済みの数値はすべて再現した。** 実機で再実行し、
+台帳の VERIFIED 6 セル、位置プロファイル (`sm_dump1` slope -3.212623e-07、alpha_within 1.03)、
+4 seed プール (bf16 平均 -3.247e-07 / SE 3.549e-08 / 区間 [-4.376e-07, -2.117e-07]) が
+すべて一致。verdict も 1 件も変わっていない。つまりこれらは**潜在的な穴**であって、
+既発表の結論を動かすものではなかった。実データでの実測: 非有限トークン 0 件、
+重複 0 件 (全 14 dump ディレクトリ)、曖昧 pairing 0 件。
+
 ## 判定の意味
 
 | verdict | 意味 | 引用可否 |
