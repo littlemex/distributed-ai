@@ -371,3 +371,63 @@ vllmRay:
   #     'TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,MEM:.status.allocatable.memory'
   # Verified: memory=8Gi + shmSize=2Gi fits a g6.xlarge (12.6Gi allocatable).
   memory: 48Gi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10) prewarm — keep each pool's node-local image cache warm (Advanced01).
+#
+# Keyed by accelerator_pools key (= the node-role label Karpenter stamps), so a pool only
+# warms the images its own workloads run. One DaemonSet is rendered per key that has a
+# non-empty images list; the default below renders nothing.
+#
+# Each listed image runs as a sleeping container, which is what makes the image genuinely
+# in-use and therefore immune to image GC. An initContainer that exits would leave the image
+# unused and reclaimable, and the pod would keep reporting Running after the cache was gone.
+# The cost is that the node cannot reclaim these images under disk pressure without evicting
+# the prewarm pod first — which is the intended order, since prewarm is lowest priority.
+#
+# Pin by DIGEST. A tag is mutable, so `repo:v1` can name a different image on the node than
+# in the registry and the node would report a warm cache while holding the wrong layers. The
+# template rejects anything without @sha256:. Filter on imageTags so an untagged intermediate
+# or a failed build is never picked up:
+#   DIGEST=$(aws ecr describe-images --repository-name <repo> \
+#     --query 'sort_by(imageDetails[?imageTags],&imagePushedAt)[-1].imageDigest' --output text)
+#   --set "prewarm.gpu-ddp.images[0]=$(terraform output -raw ddp_sample_ecr_url)@$DIGEST"
+#
+# Pin the MANIFEST LIST digest, not a per-architecture child digest. A child digest bypasses
+# the node's platform resolution, so warming an arm64 child on an x86_64 pool fails with
+# "exec format error" on every node of that pool.
+#
+# Only warm images a pool actually starts. Every entry costs a pull and node disk on EVERY
+# node of that pool, and on a Capacity Block pool the reservation is billed while it happens
+# (warming there is still the highest-value case — the pull happens before the workload lands,
+# on time that is already paid for).
+#
+# Each listed image must contain /bin/sh and sleep, and must run them as its default USER
+# under a dropped-capability securityContext. That holds for the CUDA, vLLM and Neuron images
+# in this book. A distroless or scratch image cannot be warmed this way: it has no shell, so
+# the container crash-loops and the DaemonSet never becomes healthy.
+#
+# Per-pool tolerations can be added when a pool carries a taint beyond the GPU/Neuron device
+# taints the template already tolerates:
+#   prewarm:
+#     gpu-cb:
+#       images: [...]
+#       tolerations:
+#         - key: my-pool-taint
+#           operator: Exists
+prewarm: {}
+#   gpu-ddp:
+#     images:
+#       - 111122223333.dkr.ecr.us-west-2.amazonaws.com/ddp-sample@sha256:...
+
+# PriorityClass for the prewarm DaemonSets. Must be a class whose value is BELOW every real
+# workload so prewarm is what the scheduler preempts and the kubelet evicts first under
+# pressure — the cache-headroom class from Advanced01 (value: -10) is the intended one. Left
+# empty by default because the class is created by the reader in that chapter, and naming a
+# class that does not exist would make every prewarm pod unschedulable.
+#
+# Being preempted or evicted mid-pull only costs the time already spent: completed layers stay
+# in the containerd content store, so the restart re-fetches at most the layer that was in
+# flight. Raising this above a real workload to protect the pull would let cache warming
+# displace a training job, which is strictly worse than the cold pull it was trying to avoid.
+prewarmPriorityClassName: ""
