@@ -1,0 +1,25 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_ctl_",
+  "tag_prefix": "ctl_",
+  "note": "The control this study never ran. Every collapse arm changed TWO things at once: KV dtype\n(bf16 -> fp8_e5m2) AND learning rate (1e-6 -> 1e-5). Every bf16 run is at 1e-6. So the claim\n'fp8-amplified mismatch drives the collapse' has no bf16-at-1e-5 arm to rule out 'LR 1e-5 alone\ncollapses this setup'. This cell runs exactly that: bf16 KV, LR 1e-5, no TIS, 30 steps, seed 1234\n-- identical to the collapse arm except the KV dtype. If it stays stable, the fp8 attribution\nholds. If it also collapses, the headline causal claim needs rewriting.",
+  "common": {
+    "LEARNING_RATE": "1e-5",
+    "NUM_ROLLOUT": "30",
+    "TP_SIZE": "1",
+    "CP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "bf16_lr1e5",
+      "note": "bf16 KV, LR 1e-5, no TIS. The missing control.",
+      "extra_args": ""
+    }
+  ]
+}
