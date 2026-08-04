@@ -1,0 +1,32 @@
+{
+  "cell": "H_tp8_ep1",
+  "meta": {
+    "engine": "sglang",
+    "model": "/fsx/models/Qwen3-30B-A3B",
+    "tp": 8,
+    "ep": 1,
+    "backend": "triton",
+    "sampling": {
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": -1
+    },
+    "max_new_tokens": 8192,
+    "gen_seconds": 54.9,
+    "extra": {}
+  },
+  "n_samples": 32,
+  "repetition_frac": 0.0,
+  "n_repetition": 0,
+  "chars_mean": 22605.0625,
+  "chars_max": 34952,
+  "over_10k_frac": 1.0,
+  "tail_ratio_mean": 3.2209304766609366,
+  "tail_ratio_max": 4.3781181619256015,
+  "longest_repeat_repeats_max": 2,
+  "n_with_repeat_run_ge_5": 0,
+  "finish_reasons": {
+    "length": 24,
+    "stop": 8
+  }
+}

@@ -207,13 +207,19 @@ EP2 の expert 配置など) が生成品質を壊しているというもので
 | `C_backend` | 4 | 2 | **既定** | miles 既定 | 0.844 |
 | `B_tp1` | 1 | 1 | triton | miles 既定 | 0.000 |
 | **`F_tp4_ep1`** | **4** | **1** | triton | miles 既定 | **0.000** |
+| **`F_tp4_ep1`** | **4** | **1** | triton | miles 既定 | **0.000** |
+| `H_tp8_ep1` | 8 | 1 | triton | miles 既定 | 0.000 |
+| `I_tp8_ep2` | 8 | 2 | triton | miles 既定 | 0.594 |
+| `J_tp8_ep4` | 8 | 4 | triton | miles 既定 | 0.844 |
 | `E_dense` (8B dense) | 4 | 1 | 既定 | miles 既定 | 0.000 |
 
 - **miles の GRPO ループを一切通さずに再現した** (0.875 は実測 0.633 より高い)。
   したがって GRPO・weight sync・Megatron 側はすべて無関係で、4 つの仮説が空振りした理由も
   これで説明がつく (すべて miles 内部を疑っていた)。
-- **`A_repro` と `F_tp4_ep1` は EP の値だけが違う。** 0.875 対 0.000。
-  TP・モデル・backend・sampling はすべて同一。原因は **EP (expert parallelism)** である。
+- **原因は EP (expert parallelism) である。** EP=1 の 3 セル (TP 1/4/8) はすべて 0.000、
+  EP>1 の 5 セル (TP 4/8) はすべて 0.594 以上。TP は完全に無関係だった。
+- **EP を増やすほど悪化する。** TP=8 固定で EP だけを振ると
+  EP1 -> 0.000、EP2 -> 0.594、EP4 -> 0.844。偶発ではなく用量反応である。
 - サンプリングは原因でない。Qwen 公式推奨値 (temp 0.6 / top_p 0.95 / top_k 20) でも 0.875。
   これは Web 調査で最有力だった仮説の棄却である。
 - `moe_runner_backend` の明示指定も原因でない。既定 (auto) に戻しても 0.844。
