@@ -20,8 +20,9 @@
     "ROLLOUT_NUM_GPUS": "16",
     "ROLLOUT_GPUS_PER_ENGINE": "8",
     "CLUSTER_GPUS": "16",
-    "SGLANG_MEM_FRACTION": "0.5",
-    "SAVE_INTERVAL": "100000"
+    "SGLANG_MEM_FRACTION": "0.35",
+    "SAVE_INTERVAL": "100000",
+    "MAX_TOKENS_PER_GPU": "4096"
   },
   "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0 --use-distributed-optimizer --sglang-moe-runner-backend triton",
   "checkpoint_root": "/fsx/runs",
@@ -29,7 +30,7 @@
   "cells": [
     {
       "name": "30b_ep1_bf16",
-      "note": "30B MoE, EP=1, bf16 KV. The screens to watch are the same three the ledger uses:\nrepetition_frac <= 0.05, mis_ppl_ratio <= 1.5, raw_reward > 0. The EP=2 runs failed all three\n(0.633 / 1.78 / 0.0).\n\nTP=16 across 2 nodes because EP=1 replicates all 128 experts per rank and TP=8 on one node ran out of memory (108.76 GiB requested per rank).\n\nThird attempt: TP=8 PP=2. TP=16 requested the same 108 GiB as TP=8, so tensor parallelism does not split the expert weights -- only EP and PP can. PP=2 halves the layers each rank holds, and with 48 layers that is 24 each, so the expert footprint should halve too. mem-fraction drops to 0.5 to leave the trainer room.",
+      "note": "30B MoE, EP=1, bf16 KV. The screens to watch are the same three the ledger uses:\nrepetition_frac <= 0.05, mis_ppl_ratio <= 1.5, raw_reward > 0. The EP=2 runs failed all three\n(0.633 / 1.78 / 0.0).\n\nTP=16 across 2 nodes because EP=1 replicates all 128 experts per rank and TP=8 on one node ran out of memory (108.76 GiB requested per rank).\n\nThird attempt: TP=8 PP=2. TP=16 requested the same 108 GiB as TP=8, so tensor parallelism does not split the expert weights -- only EP and PP can. PP=2 halves the layers each rank holds, and with 48 layers that is 24 each, so the expert footprint should halve too. mem-fraction drops to 0.5 to leave the trainer room.\n\nFourth attempt: same TP8/PP2, but mem-fraction 0.5 -> 0.35 and max-tokens-per-gpu 8192 -> 4096. Attempt 3 was 12 MiB short at 125 GiB, so these two together should free several GiB.",
       "extra_args": ""
     }
   ],

@@ -1,0 +1,73 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_p3t_",
+  "tag_prefix": "p3t_",
+  "note": "P3T: the TP8 row of the method matrix, at the same mem fraction as the TP1 row.\n\nP3M settled TP1: colocated 0.482s against disaggregated 0.170s. The TP8 numbers this study already had are not comparable to it -- the colocated one ran 3 rollouts (so it reports NO_STEADY_SAMPLES once the first 3 samples are discarded) and the disaggregated one ran at mem fraction 0.85. Without this row the interesting mechanism cannot be stated: colocated showed a 2.1x step from TP1 to TP8 (0.40 -> 0.85 under the old, weaker bar), which fits per-chunk CUDA IPC costing more as the weights shard further, while a buffered NCCL broadcast should be indifferent to TP. Whether disaggregated is flat is the test of that story, and it needs both arms measured the same way.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "7",
+    "PP_SIZE": "1",
+    "CP_SIZE": "1",
+    "EP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "CLUSTER_GPUS": "16",
+    "SGLANG_MEM_FRACTION": "0.8",
+    "SAVE_INTERVAL": "100000"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "colo_tp8_mf08",
+      "note": "colocated, TP8, mem fraction 0.8, 7 rollouts. Pairs with p3m_colo_tp1_mf08 (0.482s) to give the TP1/TP8 step a defensible measurement on the colocated side.",
+      "vars": {
+        "SYNC_METHOD": "colocated",
+        "TP_SIZE": "8",
+        "ROLLOUT_NUM_GPUS": "8",
+        "ROLLOUT_GPUS_PER_ENGINE": "8"
+      }
+    },
+    {
+      "name": "disagg_tp8_mf08",
+      "note": "disaggregated, TP8, mem fraction 0.8, 7 rollouts. The cell that decides whether the TP1/TP8 step exists on the distributed side at all.",
+      "vars": {
+        "SYNC_METHOD": "disaggregated",
+        "TP_SIZE": "8",
+        "ROLLOUT_NUM_GPUS": "8",
+        "ROLLOUT_GPUS_PER_ENGINE": "8"
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "label": "method at TP8, matched mem fraction",
+      "cells": [
+        "colo_tp8_mf08",
+        "disagg_tp8_mf08"
+      ],
+      "must_differ": [
+        "SYNC_METHOD"
+      ],
+      "must_match": [
+        "SGLANG_MEM_FRACTION",
+        "TP_SIZE",
+        "NUM_ROLLOUT",
+        "LEARNING_RATE",
+        "PP_SIZE",
+        "CP_SIZE",
+        "EP_SIZE",
+        "ROLLOUT_GPUS_PER_ENGINE",
+        "SAVE_INTERVAL"
+      ],
+      "ignored": [
+        "ACTOR_NUM_NODES",
+        "ACTOR_GPUS_PER_NODE",
+        "ROLLOUT_NUM_GPUS",
+        "CLUSTER_GPUS"
+      ]
+    }
+  ],
+  "comparisons_note": "ACTOR_* / ROLLOUT_NUM_GPUS / CLUSTER_GPUS are listed as ignored in the method comparison because the placement IS the GPU layout: colocated shares 8 devices while disaggregated takes 8 + 8, so requiring them to match would forbid the comparison the study exists to make. Every other key must agree, and any key not listed anywhere is refused rather than assumed harmless -- the 0.8-vs-0.85 pair that motivated this matrix was an omission from an allowlist."
+}
