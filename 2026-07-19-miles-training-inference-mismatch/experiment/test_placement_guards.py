@@ -61,24 +61,34 @@ GOOD_COLO = {
 }
 GOOD_DISAGG = dict(GOOD_COLO, SYNC_METHOD="disaggregated")
 
-# (ラベル, vars, python が落ちるか, bash が落ちるか)
+# (ラベル, vars, python が落ちるか, bash が落ちるか, 期待する拒否理由)
 #
 # bash は SYNC_METHOD を読まない (COLOCATE を読む) ので、bash に食わせるときは
 # SYNC_METHOD から COLOCATE へ変換する。変換できない不正 (未知の method) は
 # python 専用のケースになる。
+#
+# 5 番目の要素は「両方が同じ理由で拒否したか」を見るための部分文字列である。
+# 終了コードだけを見ると、bash が未定義変数エラーなど**別の理由で偶然落ちた**場合も
+# テストが通ってしまう。それでは「このガードが働いた」ことを確認できていない。
 CASES = [
     ("colocated with a rollout pool that is not the actor pool",
-     dict(GOOD_COLO, ROLLOUT_NUM_GPUS="4"), True, True),
+     dict(GOOD_COLO, ROLLOUT_NUM_GPUS="4"), True, True,
+     "must equal the actor GPU count"),
     ("disaggregated that does not fit the cluster",
-     dict(GOOD_DISAGG, ROLLOUT_NUM_GPUS="16"), True, True),
+     dict(GOOD_DISAGG, ROLLOUT_NUM_GPUS="16"), True, True,
+     "more than CLUSTER_GPUS"),
     ("engine size that does not divide the rollout pool",
-     dict(GOOD_DISAGG, ROLLOUT_GPUS_PER_ENGINE="3"), True, True),
+     dict(GOOD_DISAGG, ROLLOUT_GPUS_PER_ENGINE="3"), True, True,
+     "divisor of ROLLOUT_NUM_GPUS"),
     ("engine size zero",
-     dict(GOOD_DISAGG, ROLLOUT_GPUS_PER_ENGINE="0"), True, True),
+     dict(GOOD_DISAGG, ROLLOUT_GPUS_PER_ENGINE="0"), True, True,
+     "divisor of ROLLOUT_NUM_GPUS"),
     ("non-numeric GPU count",
-     dict(GOOD_DISAGG, ROLLOUT_NUM_GPUS="8x"), True, True),
+     dict(GOOD_DISAGG, ROLLOUT_NUM_GPUS="8x"), True, True,
+     "integer"),
     ("actor alone exceeds the cluster",
-     dict(GOOD_COLO, ACTOR_NUM_NODES="4", ROLLOUT_NUM_GPUS="32"), True, True),
+     dict(GOOD_COLO, ACTOR_NUM_NODES="4", ROLLOUT_NUM_GPUS="32"), True, True,
+     "more than CLUSTER_GPUS"),
 ]
 
 # bash 側だけの穴。生成器を通らず env を手で書く経路で起こる。
@@ -149,17 +159,24 @@ class TestBothLayersAgree(unittest.TestCase):
     """同じ不正入力を Python と bash の両方が拒否する。"""
 
     def test_shared_cases(self):
-        for label, vars_, py_fails, sh_fails in CASES:
+        for label, vars_, py_fails, sh_fails, reason in CASES:
             with self.subTest(label=label, layer="python"):
                 if py_fails:
-                    with self.assertRaises(ValueError, msg=f"python accepted: {label}"):
+                    with self.assertRaises(ValueError, msg=f"python accepted: {label}") as e:
                         _expand_sync_method(vars_, "t")
+                    # 同じ理由で拒否したことまで見る。別の理由で偶然落ちても
+                    # 終了コードだけなら通ってしまう。
+                    self.assertIn(reason, str(e.exception),
+                                  f"python rejected {label} for the wrong reason")
                 else:
                     _expand_sync_method(vars_, "t")
             with self.subTest(label=label, layer="bash"):
                 rc, out = run_recipe(vars_)
                 if sh_fails:
                     self.assertNotEqual(rc, 0, f"bash accepted: {label}\n{out[-800:]}")
+                    self.assertIn(reason, out,
+                                  f"bash rejected {label} for the wrong reason -- the guard "
+                                  f"under test may not have run at all:\n{out[-800:]}")
                 else:
                     self.assertEqual(rc, 0, f"bash rejected a valid case: {label}\n{out[-800:]}")
 
@@ -224,6 +241,10 @@ class TestComparisons(unittest.TestCase):
                 "cells": ["colo", "disagg"],
                 "must_differ": ["SYNC_METHOD"],
                 "must_match": ["SGLANG_MEM_FRACTION", "TP_SIZE", "NUM_ROLLOUT"],
+                # Every remaining key has to be accounted for explicitly; see the
+                # exhaustive-classification check in check_comparisons().
+                "ignored": ["ACTOR_NUM_NODES", "ACTOR_GPUS_PER_NODE", "ROLLOUT_NUM_GPUS",
+                            "ROLLOUT_GPUS_PER_ENGINE", "CLUSTER_GPUS"],
             }],
         }
         spec.update(kw)
@@ -258,6 +279,26 @@ class TestComparisons(unittest.TestCase):
         spec["comparisons"][0]["cells"] = ["colo", "typo"]
         problems = check_comparisons(spec)
         self.assertTrue(any("unknown cell" in p for p in problems))
+
+    def test_unclassified_key_is_caught(self):
+        """列挙し忘れたキーは「無害」ではなく「未分類」として落とす。
+
+        0.8 対 0.85 の事故は must_match の列挙漏れそのものだった。allowlist 方式では
+        同じ漏れが再発するので、両セルに現れる全キーの分類を要求する。
+        """
+        spec = self._spec("0.8", "0.8")
+        spec["cells"][0]["vars"]["SOME_NEW_KNOB"] = "a"
+        spec["cells"][1]["vars"]["SOME_NEW_KNOB"] = "b"
+        problems = check_comparisons(spec)
+        self.assertTrue(any("neither must_match" in p for p in problems))
+        self.assertTrue(any("SOME_NEW_KNOB" in p for p in problems))
+
+    def test_ignored_silences_a_key_deliberately(self):
+        spec = self._spec("0.8", "0.8")
+        spec["cells"][0]["vars"]["SOME_NEW_KNOB"] = "a"
+        spec["cells"][1]["vars"]["SOME_NEW_KNOB"] = "b"
+        spec["comparisons"][0]["ignored"].append("SOME_NEW_KNOB")
+        self.assertEqual(check_comparisons(spec), [])
 
     def test_no_comparisons_is_silent(self):
         """comparisons を書かない既存 spec は無変更で通る。"""

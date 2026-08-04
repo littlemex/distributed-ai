@@ -243,6 +243,30 @@ def check_comparisons(spec):
                 problems.append(
                     f"{label}: must_differ {key} is not distinct across cells: {values}"
                 )
+
+        # An allowlist of keys to check leaves everything unlisted as a silent confounder:
+        # forget SGLANG_MEM_FRACTION and the comparison passes while measuring two things.
+        # That is exactly how the 0.8-vs-0.85 pair got run. So classify EVERY key that
+        # appears in either cell -- must_match, must_differ, or an explicit `ignored` -- and
+        # refuse the ones nobody accounted for. Being noisy here is the point: the spec
+        # author has to look at each key once and say why it is safe.
+        classified = set(cmp_.get("must_match") or []) \
+            | set(cmp_.get("must_differ") or []) \
+            | set(cmp_.get("ignored") or [])
+        seen = set()
+        for n in names:
+            seen |= set(by_name[n].keys())
+        # Derived paths differ per cell by construction (they carry the cell name), and
+        # SYNC_METHOD/COLOCATE move together, so exempt what the generator itself controls.
+        generator_owned = {"CHECKPOINT_DIR", "TENSORBOARD_DIR", "MIS_DUMP_DIR", "MIS_DUMP_TAG",
+                           "COLOCATE"}
+        unclassified = sorted(seen - classified - generator_owned)
+        if unclassified:
+            problems.append(
+                f"{label}: these keys are neither must_match, must_differ nor ignored: "
+                f"{unclassified}. An unlisted key that differs is a silent confounder; list "
+                "it under `ignored` with a reason if it genuinely does not matter."
+            )
     return problems
 
 

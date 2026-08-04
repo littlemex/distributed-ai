@@ -50,5 +50,62 @@
         "SGLANG_MEM_FRACTION": "0.85"
       }
     }
-  ]
+  ],
+  "comparisons": [
+    {
+      "label": "method at a matched mem fraction (the headline comparison)",
+      "cells": [
+        "colo_tp1_mf08",
+        "disagg_tp1_mf08"
+      ],
+      "must_differ": [
+        "SYNC_METHOD"
+      ],
+      "must_match": [
+        "SGLANG_MEM_FRACTION",
+        "TP_SIZE",
+        "NUM_ROLLOUT",
+        "LEARNING_RATE",
+        "PP_SIZE",
+        "CP_SIZE",
+        "EP_SIZE",
+        "ROLLOUT_GPUS_PER_ENGINE",
+        "SAVE_INTERVAL"
+      ],
+      "ignored": [
+        "ACTOR_NUM_NODES",
+        "ACTOR_GPUS_PER_NODE",
+        "ROLLOUT_NUM_GPUS",
+        "CLUSTER_GPUS"
+      ]
+    },
+    {
+      "label": "mem fraction sensitivity within one method",
+      "cells": [
+        "disagg_tp1_mf08",
+        "disagg_tp1_mf085"
+      ],
+      "must_differ": [
+        "SGLANG_MEM_FRACTION"
+      ],
+      "must_match": [
+        "SYNC_METHOD",
+        "TP_SIZE",
+        "NUM_ROLLOUT",
+        "LEARNING_RATE",
+        "PP_SIZE",
+        "CP_SIZE",
+        "EP_SIZE",
+        "ROLLOUT_GPUS_PER_ENGINE",
+        "SAVE_INTERVAL",
+        "ROLLOUT_NUM_GPUS"
+      ],
+      "ignored": [
+        "ACTOR_NUM_NODES",
+        "ACTOR_GPUS_PER_NODE",
+        "CLUSTER_GPUS"
+      ]
+    }
+  ],
+  "comparisons_note": "ACTOR_* / ROLLOUT_NUM_GPUS / CLUSTER_GPUS are listed as ignored in the method comparison because the placement IS the GPU layout: colocated shares 8 devices while disaggregated takes 8 + 8, so requiring them to match would forbid the comparison the study exists to make. Every other key must agree, and any key not listed anywhere is refused rather than assumed harmless -- the 0.8-vs-0.85 pair that motivated this matrix was an omission from an allowlist."
 }

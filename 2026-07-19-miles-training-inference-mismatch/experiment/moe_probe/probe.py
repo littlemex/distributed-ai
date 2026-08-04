@@ -290,6 +290,17 @@ CELLS = {
     "G_tp1_ep2": dict(  # 動かす軸: TP のみ (A_repro から TP4 -> TP1)
         model="/fsx/models/Qwen3-30B-A3B", tp=1, ep=2, backend="triton",
         sampling=MILES_SAMPLING),
+    # EP が原因と分かった後の次の問い: EP>1 で一律に壊れるのか、EP に比例して悪化するのか。
+    # EP は TP に従属するので EP4 には TP8 が要る (TP4/EP4 は起動しない)。
+    "H_tp8_ep1": dict(  # EP1 の対照。TP8 でも EP1 なら健全か
+        model="/fsx/models/Qwen3-30B-A3B", tp=8, ep=1, backend="triton",
+        sampling=MILES_SAMPLING),
+    "I_tp8_ep2": dict(  # TP8/EP2。TP を変えても EP2 で壊れるかを確認する
+        model="/fsx/models/Qwen3-30B-A3B", tp=8, ep=2, backend="triton",
+        sampling=MILES_SAMPLING),
+    "J_tp8_ep4": dict(  # EP4。EP を増やすと悪化するかを見る
+        model="/fsx/models/Qwen3-30B-A3B", tp=8, ep=4, backend="triton",
+        sampling=MILES_SAMPLING),
 }
 
 
