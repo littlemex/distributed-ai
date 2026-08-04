@@ -1,0 +1,38 @@
+{
+  "base_path": "/tmp/miles-run/env_common_30b",
+  "prefix": "env_p2v_",
+  "tag_prefix": "p2v_",
+  "note": "Recover the 30B MoE point of the model-scale axis, which the ledger currently marks\nUNUSABLE.\n\nEvery previous 30B run used --expert-model-parallel-size 2 and produced degenerate\nrepetition before the first optimizer step, so its mis_kl measured the repetition rather than\nany quantization effect (h200_results/P2R_30B_INVALID.md). The standalone probe has since\nshown the cause: expert parallelism. EP=1 generates correctly at TP 1, 4 and 8, and EP>1\nfails at every TP tried (moe_probe/README.md).\n\nSo run 30B with EP=1 and see whether the sanity screens pass this time. If they do, the\nmodel-scale axis gets its third point (4B and 8B dense, plus 30B MoE) and the 30B mis_kl\nbecomes quotable. If they do not, something beyond EP is involved and the ledger entry\nstands.\n\nSizing: TP=8 on one node rather than TP=4/EP=2 across two, because the probe measured\nTP8/EP1 as healthy and a single node removes the cross-node variable entirely. 30B bf16 is\nabout 61GB, which fits 8x143GB with room for the trainer.\n\nFirst attempt at TP=8 on one node died with CUDA OOM in MegatronTrainRayActor.init: each rank tried to allocate 108.76 GiB against 139.80 GiB of capacity. That is the point -- with EP=1 every rank holds all 128 experts, whereas EP=2 gives each rank 64. So EP is not merely a performance knob here; dropping it to 1 to avoid the repetition bug costs memory that a single node does not have. Retrying across 2 nodes with TP=16.",
+  "common": {
+    "MODEL_NAME": "Qwen/Qwen3-30B-A3B",
+    "MODEL_LOCAL": "/fsx/models/Qwen3-30B-A3B",
+    "MODEL_DIST": "/fsx/models/Qwen3-30B-A3B_torch_dist",
+    "MODEL_SCRIPT": "qwen3-30B-A3B.sh",
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "1",
+    "TP_SIZE": "8",
+    "PP_SIZE": "2",
+    "CP_SIZE": "1",
+    "EP_SIZE": "1",
+    "SYNC_METHOD": "colocated",
+    "ACTOR_NUM_NODES": "2",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "16",
+    "ROLLOUT_GPUS_PER_ENGINE": "8",
+    "CLUSTER_GPUS": "16",
+    "SGLANG_MEM_FRACTION": "0.5",
+    "SAVE_INTERVAL": "100000"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0 --use-distributed-optimizer --sglang-moe-runner-backend triton",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "30b_ep1_bf16",
+      "note": "30B MoE, EP=1, bf16 KV. The screens to watch are the same three the ledger uses:\nrepetition_frac <= 0.05, mis_ppl_ratio <= 1.5, raw_reward > 0. The EP=2 runs failed all three\n(0.633 / 1.78 / 0.0).\n\nTP=16 across 2 nodes because EP=1 replicates all 128 experts per rank and TP=8 on one node ran out of memory (108.76 GiB requested per rank).\n\nThird attempt: TP=8 PP=2. TP=16 requested the same 108 GiB as TP=8, so tensor parallelism does not split the expert weights -- only EP and PP can. PP=2 halves the layers each rank holds, and with 48 layers that is 24 each, so the expert footprint should halve too. mem-fraction drops to 0.5 to leave the trainer room.",
+      "extra_args": ""
+    }
+  ],
+  "comparisons": [],
+  "comparisons_note": "No paired comparison here: this is a single cell asking whether the sanity screens pass at all. The contrast is against the ledger's existing 30B entries, which were run with EP=2 under a different recipe and are recorded as UNUSABLE rather than as a comparison arm."
+}
