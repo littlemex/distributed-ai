@@ -193,6 +193,36 @@ EP2 の expert 配置など) が生成品質を壊しているというもので
 (パラメータ数と MoE/dense が同時に変わる)。8B を入れたのは 4B と同じ dense で
 パラメータ数だけを変えるためだった。その目的は達成できている。
 
+## 決着 (2026-08-04): 原因は expert parallelism (EP) だった
+
+上の「現時点の結論」で次の一手として書いた「SGLang 単体で HF checkpoint を直接サーブして
+反復するか」を実施した。**再現した。そして原因を EP に特定した。**
+
+詳細は `../moe_probe/README.md`。要点だけ:
+
+| cell | TP | EP | backend | sampling | `repetition_frac` |
+|---|---|---|---|---|---|
+| `A_repro` (miles と同一構成) | 4 | 2 | triton | miles 既定 | **0.875** |
+| `D_sampling` | 4 | 2 | triton | **Qwen 推奨** | 0.875 |
+| `C_backend` | 4 | 2 | **既定** | miles 既定 | 0.844 |
+| `B_tp1` | 1 | 1 | triton | miles 既定 | 0.000 |
+| **`F_tp4_ep1`** | **4** | **1** | triton | miles 既定 | **0.000** |
+| `E_dense` (8B dense) | 4 | 1 | 既定 | miles 既定 | 0.000 |
+
+- **miles の GRPO ループを一切通さずに再現した** (0.875 は実測 0.633 より高い)。
+  したがって GRPO・weight sync・Megatron 側はすべて無関係で、4 つの仮説が空振りした理由も
+  これで説明がつく (すべて miles 内部を疑っていた)。
+- **`A_repro` と `F_tp4_ep1` は EP の値だけが違う。** 0.875 対 0.000。
+  TP・モデル・backend・sampling はすべて同一。原因は **EP (expert parallelism)** である。
+- サンプリングは原因でない。Qwen 公式推奨値 (temp 0.6 / top_p 0.95 / top_k 20) でも 0.875。
+  これは Web 調査で最有力だった仮説の棄却である。
+- `moe_runner_backend` の明示指定も原因でない。既定 (auto) に戻しても 0.844。
+
+**この節より下の Web 調査 (仮説の整理) は、実測の前に書いたものである。** 仮説 A
+(TP/EP シャーディング形状と kernel の不整合) は方向として当たっていたが、
+具体的な機構 (ROCm/aiter のフォールバック) はこの環境では発火しないので別物である。
+記録として残す。
+
 ## Web 調査 (2026-08-04): 仮説の整理 (実機検証はしていない)
 
 上の「現時点の結論」で次の一手として書いた「SGLang 単体で HF checkpoint を直接サーブして

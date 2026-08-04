@@ -41,7 +41,16 @@ disaggregated は actor 8 GPU (node A) と rollout 8 GPU (node B) で転送は E
 | `p3m_colo_tp1_mf08` | colocated | 0.8 | 0.798 | **0.482** | 0.473 | 0.486 | 0.012 | 4 | STEADY |
 | `p3m_disagg_tp1_mf08` | disaggregated | 0.8 | 14.414 | **0.170** | 0.166 | 0.172 | 0.013 | 4 | STEADY |
 
-**方式差は 2.84 倍** (0.482 / 0.170)。B300 の 5.1 倍ではない。
+**絶対値で 0.482s 対 0.170s。** 倍率は 2.84 倍だが、この数字を主語にしてはいけない。
+理由は後述の非対称にある: colocated の 0.482s には転送以外の処理 (pause/flush/barrier) が
+含まれ、その内訳が取れていない。disaggregated 側は分解できていて転送本体 0.146s なので、
+言えるのはこうなる。
+
+- **配置を変えたときの weight sync 総コスト差: 0.482s 対 0.170s (2.84 倍)** — これは実測。
+- **転送方式そのものの差: 未測定。** colocated 側の付帯処理を仮に 0 とした極端な場合でも
+  2.84 倍が上限であり、実際の転送同士の比は 2.84 倍より小さい。
+
+B300/slime の 5.1 倍とは別物である。
 
 ### 定常の定義を機械化した
 
@@ -93,8 +102,22 @@ miles は disaggregated 経路にだけ `perf/update_weights_implementation_time
 したがって 0.482 対 0.170 の差は「転送方式の差」**プラス** 「colocated 側の pause/flush の
 費用」である。`flush_cache` は SGLang の `/flush_cache` への HTTP GET
 (`sglang_engine.py:397-409`) で radix cache を破棄する処理であり、KV プールの大きさに
-依存しうる。**この分解は未実施**で、`p3m_disagg_tp1_mf085` (mem-fraction 感度) は
-その第一歩にすぎない。
+依存しうる。**この分解は未実施**で、`p3m_disagg_tp1_mf085` で mem-fraction 感度だけは測れた。
+
+| cell | mem-frac | 定常 median | impl | 差 |
+|---|---|---|---|---|
+| `p3m_disagg_tp1_mf08` | 0.80 | 0.170 | 0.146 | — |
+| `p3m_disagg_tp1_mf085` | 0.85 | 0.173 | 0.146 | +0.003 (1.8%) |
+
+**mem-fraction を 0.05 動かしても 1.8% (0.003s) しか変わらない。** 方式差 0.312s に対して
+無視できる大きさである。これは 2 つのことを意味する。
+
+1. 交絡を潰すために mem-fraction を揃えた判断は正しかったが、揃えなくても結論は変わらなかった。
+   したがって**先に測った `p3d_*` セル (mem-fraction 0.85) も、この軸については救済できる**
+   (ただし 3 rollout なので定常判定は依然として通らない)。
+2. `flush_cache` の費用が KV プールサイズに強く依存するなら、この感度はもっと大きく出るはず
+   だった。**disaggregated 側では** そうならなかったので、`flush_cache` を持たない経路の
+   mem-fraction 感度が小さいことは確認できた。colocated 側の感度は未測定である。
 
 ## 言えること / 言えないこと
 

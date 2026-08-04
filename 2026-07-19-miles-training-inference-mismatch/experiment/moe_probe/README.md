@@ -1,4 +1,4 @@
-# 30B MoE の反復崩壊は sharding が原因だった (2026-08-04)
+# 30B MoE の反復崩壊は expert parallelism (EP) が原因だった (2026-08-04)
 
 > **データ裏付け: 一次データ** — `results/*.summary.json` は本 probe が直接生成したもので、
 > 生成テキスト全文 (`*.samples.jsonl`、各 0.8-1.3MB) はクラスタの `/fsx/moe-probe/results/`
@@ -31,12 +31,16 @@ miles の GRPO で Qwen3-30B-A3B (MoE) を回すと、**optimizer step を 1 回
 | cell | engine | TP | EP | moe_runner_backend | sampling | 動かす軸 |
 |---|---|---|---|---|---|---|
 | `A_repro` | SGLang | 4 | 2 | triton | miles 既定 | (miles と完全同一) |
-| `B_tp1` | SGLang | **1** | **1** | triton | miles 既定 | **sharding** |
+| `B_tp1` | SGLang | **1** | **1** | triton | miles 既定 | **TP と EP を同時に** |
 | `C_backend` | SGLang | 4 | 2 | **既定(auto)** | miles 既定 | backend |
 | `D_sampling` | SGLang | 4 | 2 | triton | **Qwen 推奨** | sampling |
 | `E_dense` | SGLang | 4 | 1 | 既定 | miles 既定 | 対照群 (8B dense) |
+| `F_tp4_ep1` | SGLang | 4 | **1** | triton | miles 既定 | **EP のみ** |
+| `G_tp1_ep2` | SGLang | **1** | 2 | triton | miles 既定 | **TP のみ** |
 
 各セル 32 プロンプト、max_new_tokens 8192、DAPO-Math の先頭から順に。
+`F` と `G` は `B_tp1` が TP と EP を同時に動かしていたため、1 軸ずつ戻して分離するもの。
+事前宣言は `CELLS_TP_EP.md` に、結果を見る前に書いてある。
 
 ## 結果
 
@@ -45,11 +49,28 @@ miles の GRPO で Qwen3-30B-A3B (MoE) を回すと、**optimizer step を 1 回
 | `A_repro` | **0.875** | 4083 回 | length 32/32 | miles を再現 (実測 0.633 を上回る) |
 | `D_sampling` | **0.875** | 10000 回 | length 31, stop 1 | sampling は原因でない |
 | `C_backend` | **0.844** | 8151 回 | length 32/32 | backend は原因でない |
-| **`B_tp1`** | **0.000** | **2** | length 24, stop 8 | **sharding が原因** |
+| **`B_tp1`** | **0.000** | **2** | length 24, stop 8 | **この構成では起きない** |
 | `E_dense` | 0.000 | 2 | length 26, stop 6 | dense は健全 |
+| **`F_tp4_ep1`** | **0.000** | **2** | length 23, stop 9 | **EP が原因。TP は無関係** |
+| `G_tp1_ep2` | (起動失敗) | - | - | SGLang が TP1/EP2 を受け付けない |
 
-**TP4/EP2 を TP1/EP1 に落とした瞬間に反復が完全に消えた。** 同じモデル・同じ backend・
-同じ sampling で、sharding だけが違う。
+**TP4/EP2 を TP1/EP1 に落とすと反復が完全に消えた** (`B_tp1`)。ただしこれは TP と EP を
+同時に動かしているので、分離セルを追加した。
+
+**`F_tp4_ep1` が決めた: TP4 のまま EP を 2 -> 1 にしただけで反復が消える。** つまり
+原因は TP ではなく **EP (expert parallelism)** である。`A_repro` (TP4/EP2) と
+`F_tp4_ep1` (TP4/EP1) の差は EP の値だけで、モデル・backend・sampling・TP はすべて同一。
+
+逆向きの `G_tp1_ep2` (TP1/EP2) は SGLang が起動を拒否した:
+
+```
+sglang/srt/entrypoints/engine.py:1496 in _compute_parallelism_ranks
+ZeroDivisionError: integer division or modulo by zero
+```
+
+EP は TP に従属する構造なので TP1 で EP2 は表現できない。これは `CELLS_TP_EP.md` で
+「失敗した場合はそれ自体が構造の証拠になる」と予告していた通りで、`F` の結果だけで
+帰属は決まる。
 
 ### 生成テキストの実物
 
@@ -85,16 +106,23 @@ B_tp1 idx=6 : "... Thus, the minimal possible value of d is 10. ... $$\boxed{10}
 
 - 原因は miles の訓練ループの外にある。GRPO・weight sync・Megatron 側は無関係。
   これは 4 つの仮説がすべて空振りした理由を説明する (すべて miles 内部を疑っていた)。
-- 原因は MoE の **TP/EP sharding 経路**にある。同一 checkpoint・同一 backend・同一 sampling で
-  TP4/EP2 だけが壊れ、TP1/EP1 は健全。
+- **原因は EP (expert parallelism) である。** `A_repro` (TP4/EP2) と `F_tp4_ep1` (TP4/EP1) は
+  EP の値だけが違い、前者は 0.875、後者は 0.000。TP・モデル・backend・sampling はすべて同一。
+  **TP は無関係**であり、`B_tp1` で見えた改善は EP を 1 に落としたことによるものだった。
 - sampling params は原因でない。Qwen 公式推奨値 (temp 0.6 / top_p 0.95 / top_k 20) にしても
   `repetition_frac` は 0.875 で動かない。これは web 調査で最有力だった仮説の棄却である。
 - `moe_runner_backend` の明示指定も原因でない。既定 (auto) に戻しても 0.844。
 
 **言えない。**
 
-- sharding 経路の**どこ**が壊れているか。TP と EP のどちらが効いているかも分離していない
-  (TP4/EP2 -> TP1/EP1 で 2 軸を同時に動かした)。
+- **EP 経路のどこが壊れているか。** EP=2 で何が変わるかは 3 つある:
+  expert が 2 グループに分割される、all-to-all dispatch/combine が走る、
+  各 rank が持つ expert 数が 128 -> 64 になる。どれが原因かは分離していない。
+- **EP=4 以上でも同じか。** EP=2 しか測っていない。EP を増やすと悪化するのか、
+  それとも EP>1 で一律に壊れるのかは未確認。
+- **dense モデルで EP>1 は測れない。** dense には expert が無いので、この軸の対照群は
+  原理的に作れない。`E_dense` は「MoE 固有か」の対照群としては機能するが、
+  EP の効果を測るものではない。
 - upstream のどの issue に対応するか。web 調査で構造的に同型の事例
   (SGLang PR #28244: Qwen3-30B-A3B で TP=8 時に kernel フォールバックと重みレイアウトが
   食い違い garbled 出力) を見つけたが、あれは ROCm/aiter 経路であり、この環境 (H200/CUDA) では
@@ -102,12 +130,17 @@ B_tp1 idx=6 : "... Thus, the minimal possible value of d is 10. ... $$\boxed{10}
 
 ## 次にやるべきこと
 
-1. **TP と EP を分離する。** TP4/EP1 と TP1/EP2 を測れば、どちらの軸が効いているか決まる。
-   各セル 5 分程度。
-2. TP2/TP8 も測って閾値を探す。`moe_intermediate_size=768` が TP で割られた値
-   (TP4 -> 192、TP8 -> 96) と kernel の alignment 要求の関係を疑う根拠になる。
-3. 特定できたら upstream (sglang-project/sglang) に issue を出す。再現手順は
-   `probe.py --cell A_repro` で 32 サンプル 5 分なので、報告として十分に軽い。
+1. **~~TP と EP を分離する~~ 完了。** EP が原因と確定した (`F_tp4_ep1`)。
+2. **EP=4/EP=8 を測る。** EP>1 で一律に壊れるのか、EP に比例して悪化するのかを見る。
+   TP8 なら EP4 まで取れる。各セル 5 分程度。
+3. **EP の内訳を分離する。** all-to-all dispatch を疑うなら
+   `--moe-a2a-backend` (既定 none / deepep 等) を振る。expert 分割そのものを疑うなら
+   `--ep-num-redundant-experts` などの配置系オプションを振る。
+4. **upstream (sglang-project/sglang) に issue を出す。** 再現手順は
+   `probe.py --cell A_repro` (32 サンプル・5 分) と `--cell F_tp4_ep1` の対比だけで、
+   EP=2 の有無以外は完全に同一条件なので、報告としては十分に軽く強い。
+   併せて `G_tp1_ep2` の `ZeroDivisionError` (TP1/EP2 が
+   `_compute_parallelism_ranks` で除算エラーになる) も、入力検証の不足として報告できる。
 
 ## 実行方法
 

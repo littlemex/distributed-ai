@@ -1,0 +1,4 @@
+                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/sgl-workspace/sglang/python/sglang/srt/entrypoints/engine.py", line 1496, in _compute_parallelism_ranks
+    tp_rank
+ZeroDivisionError: integer division or modulo by zero
