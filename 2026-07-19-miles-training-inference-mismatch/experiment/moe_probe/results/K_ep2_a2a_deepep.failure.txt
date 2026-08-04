@@ -1,0 +1,4 @@
+AssertionError: forward_deepgemm_masked is deprecated
+    return self.forward_deepep(hidden_states, forward_batch)
+  File "/sgl-workspace/sglang/python/sglang/srt/models/qwen3_moe.py", line 382, in forward_deepep
+AssertionError: forward_deepgemm_masked is deprecated

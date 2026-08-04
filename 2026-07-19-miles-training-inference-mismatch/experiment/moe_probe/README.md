@@ -53,6 +53,8 @@ miles の GRPO で Qwen3-30B-A3B (MoE) を回すと、**optimizer step を 1 回
 | `H_tp8_ep1` | 30B MoE | **8** | 1 | triton | miles 既定 | TP (EP=1 側) |
 | `I_tp8_ep2` | 30B MoE | **8** | 2 | triton | miles 既定 | TP (EP=2 側) |
 | `J_tp8_ep4` | 30B MoE | 8 | **4** | triton | miles 既定 | **EP の大きさ** |
+| `K_ep2_a2a_deepep` | 30B MoE | 8 | 2 | triton | miles 既定 | all-to-all 実装 |
+| `L_ep2_redundant0` | 30B MoE | 8 | 2 | triton | miles 既定 | expert 冗長配置 |
 
 各セル 32 プロンプト、`max_new_tokens` 8192、DAPO-Math の先頭から順、H200 (p5en)。
 sampling の「miles 既定」は temperature 1.0 / top_p 1.0 / top_k -1
@@ -70,9 +72,10 @@ sampling の「miles 既定」は temperature 1.0 / top_p 1.0 / top_k -1
 | `D_sampling` | 4 | 2 | 0.875 | 0.875 | 10000 | length 31, stop 1 |
 | `I_tp8_ep2` | 8 | 2 | 0.594 | 0.719 | 2500 | length 31, stop 1 |
 | `J_tp8_ep4` | 8 | 4 | 0.844 | 0.875 | 3333 | length 32 |
+| `L_ep2_redundant0` | 8 | 2 | 0.781 | 0.875 | 4761 | length 30, stop 2 |
 | `E_dense` (8B) | 4 | 1 | 0.000 | 1.000 | 2 | length 26, stop 6 |
 
-`G_tp1_ep2` は SGLang が起動を拒否した (後述)。
+`G_tp1_ep2` と `K_ep2_a2a_deepep` は起動しなかった (後述)。
 
 ### EP が原因である (TP ではない)
 
@@ -109,6 +112,24 @@ EP は TP に従属する構造なので、TP1 で EP2 は作れない。`CELLS_
 逆向きの検証は `H`/`I` (TP8 固定で EP を振る) が代替している。
 なお **入力検証の不足としては報告に値する**: 不可能な組み合わせが
 `ZeroDivisionError` になるのは利用者に原因が伝わらない。
+
+### EP の内訳: expert 配置オプションでは解消しない
+
+EP>1 で変わるものを 1 つずつ潰そうとした。
+
+`L_ep2_redundant0` は `ep_num_redundant_experts=0` を明示した (冗長 expert を持たせない)。
+**反復は 0.781 で残った。** expert の冗長配置は原因ではない。
+
+`K_ep2_a2a_deepep` は all-to-all 実装を `deepep` に差し替えようとしたが、
+**その経路自体が壊れていて起動しなかった。**
+
+```
+sglang/srt/models/qwen3_moe.py:382 in forward_deepep
+AssertionError: forward_deepgemm_masked is deprecated
+```
+
+つまり Qwen3-MoE の deepep 経路は、この版では deprecated な関数を呼んでおり使えない。
+all-to-all 実装の寄与は測れていない。**これも独立した報告対象である。**
 
 ### 生成テキストの実物
 
@@ -155,9 +176,11 @@ B_tp1 idx=6 : "... Thus, the minimal possible value of d is 10. ... $$\boxed{10}
 
 **言えない。**
 
-- **EP 経路のどこが壊れているか。** EP>1 で変わるのは少なくとも 3 つある:
-  expert が複数グループに分割される、all-to-all の dispatch/combine が走る、
-  各 rank が持つ expert 数が減る (EP2 なら 128 -> 64)。どれが原因かは分離していない。
+- **EP 経路のどこが壊れているか。** EP>1 で変わるのは少なくとも 3 つあり、
+  1 つだけ潰せた。
+  - expert の冗長配置 -> **否定** (`ep_num_redundant_experts=0` でも 0.781)
+  - all-to-all の dispatch/combine -> **未測定** (`deepep` 経路が別のバグで起動しない)
+  - expert のグループ分割そのもの / 各 rank の expert 数の減少 -> 未測定
 - **他の MoE モデルでも起きるか。** Qwen3-30B-A3B のみで確認した。
 - **他のバージョンでも起きるか。** SGLang 0.5.16.dev25+g6460e2c のみ。
 - **dense モデルとの厳密な対照は作れない。** dense には expert が無いので EP 軸の
@@ -168,8 +191,10 @@ B_tp1 idx=6 : "... Thus, the minimal possible value of d is 10. ... $$\boxed{10}
 1. **upstream (sglang-project/sglang) に issue を出す。** 再現は
    `probe.py --cell H_tp8_ep1` と `--cell I_tp8_ep2` の対比 (各 5 分) で、
    **EP の値以外は完全に同一**という形になる。EP=4 で悪化する用量反応も添えられる。
-2. **EP の内訳を分離する。** `--moe-a2a-backend` を振れば all-to-all 実装の寄与が見える。
-   expert 配置そのものを疑うなら `--ep-num-redundant-experts` 等を振る。
+2. **EP の内訳を分離する。** 冗長 expert 配置は否定済み (`L_ep2_redundant0` で 0.781)。
+   all-to-all 実装は `deepep` 経路が別のバグ (`forward_deepgemm_masked is deprecated`) で
+   起動しないため未測定。残る候補は「expert のグループ分割そのもの」と
+   「各 rank が持つ expert 数の減少」で、後者は `num_experts` を変えたモデルが要る。
 3. `has_repetition` の反例を miles に報告する (10000 文字閾値による偽陰性)。
 4. **他の MoE モデル (Qwen3-235B-A22B、Mixtral 等) で再現するか**を見て、
    モデル固有かフレームワーク側かを切り分ける。

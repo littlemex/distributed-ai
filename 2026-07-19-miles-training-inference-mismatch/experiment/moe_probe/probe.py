@@ -301,6 +301,16 @@ CELLS = {
     "J_tp8_ep4": dict(  # EP4。EP を増やすと悪化するかを見る
         model="/fsx/models/Qwen3-30B-A3B", tp=8, ep=4, backend="triton",
         sampling=MILES_SAMPLING),
+    # EP>1 で何が変わるかは少なくとも 3 つある: expert がグループに分割される、
+    # all-to-all dispatch/combine が走る、各 rank が持つ expert 数が減る。
+    # 次の 2 セルは all-to-all 実装を差し替えて、そこが原因かを切り分ける。
+    # ここで反復が消えれば all-to-all 実装、消えなければ expert 分割そのものが原因になる。
+    "K_ep2_a2a_deepep": dict(  # 動かす軸: all-to-all 実装 (none -> deepep)
+        model="/fsx/models/Qwen3-30B-A3B", tp=8, ep=2, backend="triton",
+        sampling=MILES_SAMPLING, extra={"moe_a2a_backend": "deepep"}),
+    "L_ep2_redundant0": dict(  # 動かす軸: expert 配置 (冗長 expert を明示 0 に)
+        model="/fsx/models/Qwen3-30B-A3B", tp=8, ep=2, backend="triton",
+        sampling=MILES_SAMPLING, extra={"ep_num_redundant_experts": 0}),
 }
 
 

@@ -1,0 +1,34 @@
+{
+  "cell": "L_ep2_redundant0",
+  "meta": {
+    "engine": "sglang",
+    "model": "/fsx/models/Qwen3-30B-A3B",
+    "tp": 8,
+    "ep": 2,
+    "backend": "triton",
+    "sampling": {
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": -1
+    },
+    "max_new_tokens": 8192,
+    "gen_seconds": 50.2,
+    "extra": {
+      "ep_num_redundant_experts": 0
+    }
+  },
+  "n_samples": 32,
+  "repetition_frac": 0.78125,
+  "n_repetition": 25,
+  "chars_mean": 16799.25,
+  "chars_max": 50615,
+  "over_10k_frac": 0.84375,
+  "tail_ratio_mean": 42.36355288172068,
+  "tail_ratio_max": 158.73015873015873,
+  "longest_repeat_repeats_max": 4761,
+  "n_with_repeat_run_ge_5": 21,
+  "finish_reasons": {
+    "stop": 2,
+    "length": 30
+  }
+}
