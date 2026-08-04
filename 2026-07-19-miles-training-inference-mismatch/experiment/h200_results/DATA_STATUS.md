@@ -92,6 +92,29 @@ repetition 0.27 / reward 0.03 まで歩く。一方 30B は **optimizer step を
 (`/fsx/dumps/{sm_dump1,pp_e4m3,pp_e5m2}/`、各 120 ファイル)。
 解析結果は `PP_POSITION_PROFILE.md`。
 
+### weight sync の方式比較 (2026-08-04 追加、TB_ONLY)
+
+`update_weights` の所要時間は `verify_results.py` が扱う mismatch 指標とは別系統なので、
+専用の抽出ツール `collect_weight_sync.py` で TensorBoard から読み、定常判定まで機械化した。
+**先頭 3 サンプルを warmup として捨て、残り 4 以上・CV <= 0.05・drift <= 10% を満たしたときだけ
+`STEADY` とする。** この基準で 3-rollout の旧セルはすべて `NO_STEADY_SAMPLES` になる。
+
+| cell | 方式 | mem-frac | 初回 | 定常 median | CV | n | verdict |
+|---|---|---|---|---|---|---|---|
+| `p3m_colo_tp1_mf08` | colocated | 0.8 | 0.798 | **0.482** | 0.012 | 4 | STEADY |
+| `p3m_disagg_tp1_mf08` | disaggregated | 0.8 | 14.414 | **0.170** | 0.013 | 4 | STEADY |
+| `p3d_h200_p3d_disagg_tp1` | disaggregated | 0.85 | 14.409 | (3 rollout) | - | 0 | NO_STEADY_SAMPLES |
+| `p3d_h200_p3d_disagg_tp8` | disaggregated | 0.85 | 12.745 | (3 rollout) | - | 0 | NO_STEADY_SAMPLES |
+| `h200_p3_colo_tp1` (旧) | colocated | 0.8 | 0.488 | (3 rollout) | - | 0 | NO_STEADY_SAMPLES |
+| `h200_p3_colo_tp8` (旧) | colocated | 0.8 | 0.967 | (3 rollout) | - | 0 | NO_STEADY_SAMPLES |
+
+**引用してよいのは上 2 行だけである。** 下 4 行は値は本物だが「定常」と呼ぶ根拠がない。
+詳細と限界は `P3M_METHOD_MATRIX.md`。
+
+**重要な注意**: colocated の総時間だけが `pause_generation` + `flush_cache` を含む
+(`update_weight_from_tensor.py:213-215`)。したがって 0.482 対 0.170 は「転送方式の差」ではなく
+「配置を変えたときの総コストの差」である。数値を引用するときはこの区別を落とさない。
+
 ### 引用可能 (TB_ONLY = 単一ソースだが trainer の一次データ)
 
 | 群 | cells | 用途 |

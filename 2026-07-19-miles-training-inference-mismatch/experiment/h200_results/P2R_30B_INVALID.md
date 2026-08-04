@@ -192,3 +192,40 @@ EP2 の expert 配置など) が生成品質を壊しているというもので
 なお 30B が dense ではなく MoE であることも、規模軸の 3 点目としては本来交絡している
 (パラメータ数と MoE/dense が同時に変わる)。8B を入れたのは 4B と同じ dense で
 パラメータ数だけを変えるためだった。その目的は達成できている。
+
+## Web 調査 (2026-08-04): 仮説の整理 (実機検証はしていない)
+
+上の「現時点の結論」で次の一手として書いた「SGLang 単体で HF checkpoint を直接サーブして
+反復するか」の検証はまだ実施していないが、その前段としてクラスタ外で web 調査を行った。
+2 系統のエージェントに分けて調査し、以下は見つかった一次情報の要約である。
+**いずれも実機で再検証していない仮説であり、この節の内容は `UNUSABLE` 判定を動かさない。**
+
+### 見つかった一次情報のうち、この症状と一致度が高いもの
+
+| ソース | 内容 | この症状との一致 |
+|---|---|---|
+| QwenLM/Qwen3 issue #1384 | Qwen3-30B-A3B は vLLM 上で反復無限ループに陥りやすいと開発者(jklj077)自身が認めており、`presence_penalty=1.5` を回避策として推奨 | モデル自体の既知の弱点。ただし単独では repetition_frac 0.48-0.70 という大きさや mis_ppl_ratio 1.3-1.8 は説明しきれない |
+| SGLang PR #28244 | **Qwen3-30B-A3B 特有**。TP=8 で `intermediate_size/TP=96` が aiter CK kernel の要求形状(128 の倍数)を満たさず triton へ暗黙フォールバックするが、重みは CK 用レイアウトに shuffle済みのままのため triton が誤ったレイアウトを読み、garbled/repetitive 出力になる | **最も一致度が高い**。「明示的に `--sglang-moe-runner-backend triton` を指定する必要があった」という今回の経緯そのものが、同種の backend 切替パスの脆弱性を疑わせる |
+| vLLM PR #48032 | Marlin MoE の `moe_align_block_size` がトークン整列順序を非決定にし、量子化 GEMM でその順序差が top-1/top-2 境界のルーティングを反転させ、実機で "reasoning loop" が再現・特定された | 「反復ループ」の発生機序としては具体的で一致度が高いが、量子化(Marlin)経路の話で今回の bf16 ロードには直接は当てはまらない可能性 |
+| vLLM issue #30321 / PR #45683 | Qwen3-30B-A3B-Instruct-2507 を DP+EP で動かすと `VLLM_BATCH_INVARIANT=1` でも DP>2 でサンプルトークンが変わる。MoE combine の reduce 順序が EP のトークン分配に依存して変わることが根本原因と明記 | MoE 特有の並列化構成依存の非決定性を示す直接証拠。ただし「反復」そのものより「再現性」の問題 |
+| NVIDIA/Megatron-LM issue #5844 / PR #5845 | HF→Mcore の checkpoint 変換で MoE expert 重みが無警告で未初期化のまま保存される既知バグ (Mixtral) | 一致度は当初高いと思ったが、**要注意**: `rollout/repetition_frac` は SGLang (rollout) が生成した出力を測っており、Megatron 変換後の重みではなく生成直後の HF checkpoint そのものに対する SGLang の生成結果に依存する。したがって今回の症状 (optimizer step 前・rollout 側で既に反復) を Megatron 変換バグだけで説明するのは無理がある可能性が高い |
+
+### 見つからなかったもの
+
+- SGLang 本体側で今回名前が挙がった issue #2091 / #1840 に相当する反復崩壊 issue は見つからなかった (THUDM/slime 側の別issueが近いのみ)。
+- router (gating) 自体の量子化精度が top-k 選択を反転させるという直接の論文・実測報告は見つからなかった。
+- 「MoE は構造的に repetition を起こしやすい」と理論的に論じた論文は見つからなかった (ST-MoE の router z-loss は訓練時の routing collapse の話で、推論時の自己強化的反復ループの理論的説明ではない)。
+- 「training-inference mismatch は MoE の方が dense より大きい」と明言した論文・ブログも見つからなかった (間接証拠のみ)。
+
+### 整理: 最も有力な仮説 (未検証)
+
+`rollout/repetition_frac` が測っているのは **SGLang が HF checkpoint を読んで生成した結果**であり、
+これは Megatron 側の訓練パスを経由していない。したがって Megatron のチェックポイント変換バグ
+(issue #5844 系) は今回の第一原因としては説明力が弱く、**SGLang の MoE 推論パス自体
+(triton runner backend への切替、または Qwen3-30B-A3B が公式に認めている反復しやすい体質)**
+の方が時系列と一致する。
+
+次の一手 (このドキュメントの「現時点の結論」に既に書いてあったが未実施) は変わらず:
+**SGLang 単体・miles の外で、同じ HF checkpoint を同じ temperature/max_tokens で serve し、
+反復が再現するかを見ること。** 再現すれば SGLang/rollout 側の推論バグに絞れる。
+再現しなければ miles 側の prompt 処理や chat template 適用に疑いが移る。

@@ -1,0 +1,41 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_p3d_",
+  "tag_prefix": "p3d_",
+  "note": "P3 disaggregated: the missing arm of the H200 weight sync study. Every existing H200 cell is\ncolocated (P3_RESULTS.md), so the claim 'colocated is ~5x slower than disaggregated' rests only on\nB300 measurements. Worse, H200 colocated (0.40s TP1) is already about as fast as B300\ndisaggregated (0.30s), which means the method gap may largely vanish on H200. These cells measure\nthe disaggregated path on H200 with the SAME model, TP and NUM_ROLLOUT as the existing colocated\ncells, so the two can be differenced directly.\n\nLayout: actor 1 node x 8 GPU, rollout a SEPARATE 8 GPU pool. On this 2-node p5en cluster that puts\nthe trainer and the rollout engines on different nodes, so the weight broadcast crosses EFA -- the\nsame topology as the B300 disaggregated measurement. mem-fraction is 0.85 rather than the colocated\n0.8 because the rollout GPUs no longer host the trainer.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "3",
+    "PP_SIZE": "1",
+    "CP_SIZE": "1",
+    "EP_SIZE": "1",
+    "COLOCATE": "false",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "ROLLOUT_NUM_GPUS": "8",
+    "SGLANG_MEM_FRACTION": "0.85"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "h200_p3d_disagg_tp1",
+      "note": "Pairs with the existing h200_p3_colo_tp1 (0.40s steady). Same model, same TP, same\nNUM_ROLLOUT=3; only the weight sync method differs. This is the cell that decides whether the B300\n'colocated is 5x slower' finding transfers to H200 at all.",
+      "vars": {
+        "TP_SIZE": "1",
+        "ROLLOUT_GPUS_PER_ENGINE": "1"
+      },
+      "extra_args": ""
+    },
+    {
+      "name": "h200_p3d_disagg_tp8",
+      "note": "Pairs with the existing h200_p3_colo_tp8 (0.85s steady). Checks whether the TP1/TP8 step\nseen on the colocated side (2.1x) also exists on the distributed side, where the transfer is one\nbuffered NCCL broadcast rather than per-chunk CUDA IPC with ipc_collect().",
+      "vars": {
+        "TP_SIZE": "8",
+        "ROLLOUT_GPUS_PER_ENGINE": "8"
+      },
+      "extra_args": ""
+    }
+  ]
+}

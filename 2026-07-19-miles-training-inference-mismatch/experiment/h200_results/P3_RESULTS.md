@@ -102,6 +102,26 @@ B300 内部の比較 (colocated 1.53 vs disaggregated 0.30 = 5.1 倍) はその�
 なお事前予測「ソフト要因なのでハード不変、H200 でも 1.5s が再現する」は**外れた**。
 weight sync のコストは環境依存性が強く、単一環境の絶対値を他環境に持ち込めない。
 
+## 追記 (2026-08-04): disaggregated を測った。この節の残タスクは解消した
+
+下の残タスク一覧の 1 番目「disaggregated x TP{1,8} x 4B」を実測した。結果は
+`P3M_METHOD_MATRIX.md` にある。要点だけ:
+
+- **H200 disaggregated の定常は 0.170s** (mem-fraction 0.8、7 rollout、CV 0.013、STEADY)。
+  同条件の colocated は 0.482s なので **方式差は 2.84 倍**。B300 の 5.1 倍ではない。
+- **この節の「colocated 定常 0.40s」は基準が甘かった。** 3 rollout の 2-3 周目を定常と
+  呼んでいたが、B300 では 4 周目以降が定常だったので自分たちの観測と矛盾していた。
+  7 rollout で先頭 3 つを捨てて測り直すと 0.482s である。
+- **なぜ今まで測れていなかったか**: recipe が `--colocate` をハードコードしていて、
+  `COLOCATE` 変数は banner の echo にしか使われていなかった。`COLOCATE=false` を書いても
+  disaggregated にはならず、このアームはハーネスから到達不能だった。upstream の
+  miles test case 側で修正済み。
+- **2.84 倍は「転送方式の差」ではない。** colocated 経路だけが sync ごとに
+  `pause_generation` + `flush_cache` を呼ぶ (`update_weight_from_tensor.py:213-215`)。
+  正しくは「配置を変えたときの weight sync 総コストの差」である。
+
+以下の残タスク一覧は当時のまま残す。1 番目は上記で解消、2-3 番目は未実施。
+
 ## 残タスク
 
 - disaggregated x TP{1,8} x 4B の 2 セル: 「TP を揃えても方式差は残るか」の核心。

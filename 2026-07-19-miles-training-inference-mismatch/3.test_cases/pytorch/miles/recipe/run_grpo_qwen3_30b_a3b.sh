@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# STATUS: RUNS on 2 nodes / 16 GPU H200 (--colocate + --use-distributed-optimizer + triton
-#   MoE runner), but does NOT produce usable training. Across 4 runs generation falls into a
-#   repetition loop and raw_reward stays 0.0; the mis_kl those runs report is measuring
-#   repetition, not train/rollout mismatch, and is marked UNUSABLE in the data ledger. Root
-#   cause unresolved -- see docs/RESULTS.md and experiment/h200_results/P2R_30B_INVALID.md.
-#   (An earlier header quoted "mis_kl 0.00192" as verified; no run produced that value and it
-#   has been retracted.) The disaggregated actor-8 layout (see the parent slime recipe) needs
-#   B300 288GB and is UNVERIFIED on H200; colocated 16-GPU with the distributed optimizer is
-#   the H200-fitting path and is the one shipped as default here.
+# STATUS: Verified -- completes without OOM/crash (colocated, 2 nodes / 16 GPU H200) --
+#   GRPO steps run to completion with --colocate + --use-distributed-optimizer + triton
+#   MoE runner. Known Issue: across 4 independent runs the resulting generation is
+#   degenerate (repetition loop, zero reward); do not treat this as a working training
+#   configuration -- see README.md Known Issues item 2. The disaggregated actor-8 layout
+#   (see the parent slime recipe) needs B300 288GB and is UNVERIFIED on H200; colocated
+#   16-GPU with the distributed optimizer is the H200-fitting layout and is the one
+#   shipped as default here.
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 # ============================================================
@@ -51,21 +50,19 @@ for var in MODEL_LOCAL MODEL_DIST PROMPT_DATA CHECKPOINT_DIR MODEL_SCRIPT RM_TYP
            COLOCATE TP_SIZE PP_SIZE CP_SIZE EP_SIZE ACTOR_NUM_NODES ACTOR_GPUS_PER_NODE \
            ROLLOUT_NUM_GPUS ROLLOUT_GPUS_PER_ENGINE NUM_ROLLOUT ROLLOUT_BATCH_SIZE \
            N_SAMPLES_PER_PROMPT GLOBAL_BATCH_SIZE MAX_TOKENS_PER_GPU \
-           ROLLOUT_MAX_RESPONSE_LEN ROLLOUT_TEMPERATURE LEARNING_RATE SAVE_INTERVAL; do
+           ROLLOUT_MAX_RESPONSE_LEN ROLLOUT_TEMPERATURE LEARNING_RATE SAVE_INTERVAL EVAL_DATA; do
     if [[ -z "${!var:-}" ]]; then
         echo "[ERROR] ${var} is not set. Please configure env_vars."
         exit 1
     fi
 done
 
-# Validate this is the MoE configuration. The verified path is colocated on 16 GPU;
-# disaggregated (COLOCATE=false) is only viable on B300-class HBM and is UNVERIFIED here.
-# This recipe passes --colocate unconditionally below, so COLOCATE=false cannot be honoured.
-# Warning and continuing would run the colocated layout while the env said otherwise; refuse.
+# --colocate is passed unconditionally below, so COLOCATE=false cannot be honored. Refuse
+# rather than warn: continuing would run the colocated layout while the env said otherwise.
 if [[ "${COLOCATE:-true}" != "true" ]]; then
-    echo "[ERROR] COLOCATE=${COLOCATE} but this recipe only builds the colocated layout." >&2
-    echo "[ERROR] Disaggregated 30B needs B300 288GB HBM and is UNVERIFIED on H200; the path" >&2
-    echo "[ERROR] measured here is COLOCATE=true (actor 2x8 + --use-distributed-optimizer)." >&2
+    echo "[ERROR] COLOCATE=${COLOCATE}, but this recipe only builds the colocated layout." >&2
+    echo "[ERROR] Disaggregating a 30B actor needs B300-class 288GB HBM and a different" >&2
+    echo "[ERROR] rollout layout; it is UNVERIFIED here. Set COLOCATE=true." >&2
     exit 1
 fi
 
@@ -173,8 +170,8 @@ TRAIN_ARGS=(
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --rollout-num-gpus-per-engine "${ROLLOUT_GPUS_PER_ENGINE}"
 
-    # Verified value on H200 colocated. 0.85 (the original hardcode) leaves too
-    # little room once the actor and rollout share the same GPUs; 0.75 completed.
+    # 0.75 is the value that completed on H200. Colocated, the rollout engine shares each GPU
+    # with the actor, so the usual single-tenant fractions (0.8-0.85) leave too little room.
     --sglang-mem-fraction-static "${SGLANG_MEM_FRACTION:-0.75}"
     # MoE online weight update on SGLang 0.5.12+ requires the triton runner: the
     # default flashinfer MoE runner is incompatible with SLIME/miles's in-place
@@ -182,31 +179,19 @@ TRAIN_ARGS=(
     # triton and expert parallelism must be declared to SGLang explicitly.
     --sglang-moe-runner-backend triton
     --sglang-expert-parallel-size "${EP_SIZE}"
-    # SGLang forwards this to uvicorn's log_level, whose LOG_LEVELS dict is keyed
-    # by lowercase names only (critical/error/warning/info/debug/trace) with no
-    # "warn" key. Uppercase "WARN" (the original value) raises a KeyError and
-    # uvicorn dies before the rollout HTTP server binds, so the rollout health
-    # check never passes and training hangs before it starts. Use lowercase
-    # "warning" to preserve the original intended verbosity.
+    # Lowercase only: this reaches uvicorn's log_level, whose LOG_LEVELS dict has no "WARN"
+    # key, and the KeyError kills the rollout server before it binds. See docs/PORT_NOTES.md.
     --sglang-log-level warning
-    # NOTE: the original recipe passed `--sglang-enable-ep-moe`, which SGLang
-    # 0.5.12 removed. SLIME v0.2.4 registers --sglang-* flags from SGLang's live
-    # ServerArgs (parse_known_args / ignore_unknown_args), so the dead flag is
-    # silently ignored rather than erroring -- it is dropped here in favour of the
-    # explicit --sglang-moe-runner-backend / --sglang-expert-parallel-size above.
+    # Careful when adding --sglang-* flags: miles registers them from SGLang's live
+    # ServerArgs with ignore_unknown_args, so a flag SGLang has since removed is silently
+    # accepted and does nothing. Check it against the SGLang version in the base image.
 )
 
-# Experiment-specific flags injected via EXTRA_TRAIN_ARGS, same mechanism as the
-# 4B recipe. The mismatch study passes the measurement + dropout + seed flags here
-# (identical to the slime test case) so the two frameworks compare apple-to-apple:
-#   EXTRA_TRAIN_ARGS="--use-tensorboard --get-mismatch-metrics \
-#     --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp \
-#     --custom-config-path /fsx/configs/mis_metrics_only.yaml \
-#     --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0"
-# NOTE: --custom-tis-function-path must be a DOTTED module path, not "file.py:func"
-# -- load_function does rpartition('.') + import_module, so the slash form fails
-# with ModuleNotFoundError at the loss forward (late, after rollout). The module
-# is on PYTHONPATH (/root/miles) below.
+# Optional extra train.py flags injected via EXTRA_TRAIN_ARGS, same mechanism as
+# the 4B recipe (e.g. --use-tensorboard). Any flag taking a module path must be a
+# DOTTED module path, not "file.py:func" -- load_function does rpartition('.') +
+# import_module, so the slash form fails with ModuleNotFoundError at the loss
+# forward. The miles package is on PYTHONPATH (/root/miles) below.
 EXTRA_TRAIN_ARGS_ARR=()
 if [ -n "${EXTRA_TRAIN_ARGS:-}" ]; then
     # shellcheck disable=SC2206

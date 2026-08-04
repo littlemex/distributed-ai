@@ -1,0 +1,54 @@
+{
+  "base_path": "/tmp/miles-run/env_common",
+  "prefix": "env_p3m_",
+  "tag_prefix": "p3m_",
+  "note": "P3M: the weight sync method comparison, run so the difference can actually be attributed.\n\nThe first pass at this (cells p3d_*) measured colocated at mem-fraction 0.8 and disaggregated at\n0.85, because colocated has to leave room for the trainer on the same device. That difference is\nnot innocent: the colocated path calls flush_cache() on every sync\n(update_weight_from_tensor.py:215) and the cost of dropping a KV pool scales with the pool, while\nthe distributed path never flushes at all. So a 0.05 gap in mem-fraction lands INSIDE the quantity\nbeing compared. These cells hold mem-fraction at 0.8 for BOTH methods, which is the value colocated\nalready used, so the colocated arm stays comparable to the existing h200_p3_colo_* numbers and the\ndisaggregated arm gives up a little KV headroom rather than the comparison giving up its meaning.\n\nSecond change: NUM_ROLLOUT 3 -> 7. The B300 measurement observed steady state only from the 4th\nsync onward, so claiming 'steady' from a 3-rollout run (2 post-warmup samples) contradicts our own\nprior evidence. 7 rollouts give 4 samples after discarding the first 3.\n\nWhat this matrix can and cannot settle: it isolates the method axis on H200/miles at fixed\nmem-fraction and TP. It does NOT separate framework (miles vs slime) -- that needs the slime arm,\nand the existing slime numbers came from a different cluster on a different day with no surviving\nlaunch log, so they cannot carry that claim.",
+  "common": {
+    "LEARNING_RATE": "1e-6",
+    "NUM_ROLLOUT": "7",
+    "PP_SIZE": "1",
+    "CP_SIZE": "1",
+    "EP_SIZE": "1",
+    "ACTOR_NUM_NODES": "1",
+    "ACTOR_GPUS_PER_NODE": "8",
+    "CLUSTER_GPUS": "16",
+    "SGLANG_MEM_FRACTION": "0.8",
+    "SAVE_INTERVAL": "100000"
+  },
+  "common_extra_args": "--use-tensorboard --get-mismatch-metrics --custom-tis-function-path examples.train_infer_mismatch_helper.mis.compute_mis_weights_with_cp --custom-config-path /fsx/configs/mis_metrics_only.yaml --seed 1234 --rollout-seed 42 --attention-dropout 0 --hidden-dropout 0",
+  "checkpoint_root": "/fsx/runs",
+  "tensorboard_root": "/fsx/tb",
+  "cells": [
+    {
+      "name": "colo_tp1_mf08",
+      "note": "colocated, TP1, mem-fraction 0.8, 7 rollouts. Re-measures the existing\nh200_p3_colo_tp1 (0.40s from 3 rollouts) with enough samples to call it steady, and becomes the\nreference the disaggregated arm is differenced against.",
+      "vars": {
+        "SYNC_METHOD": "colocated",
+        "TP_SIZE": "1",
+        "ROLLOUT_NUM_GPUS": "8",
+        "ROLLOUT_GPUS_PER_ENGINE": "1"
+      }
+    },
+    {
+      "name": "disagg_tp1_mf08",
+      "note": "disaggregated, TP1, mem-fraction 0.8 (NOT 0.85), 7 rollouts. Differs from the cell\nabove in the placement and nothing else, which is the whole point.",
+      "vars": {
+        "SYNC_METHOD": "disaggregated",
+        "TP_SIZE": "1",
+        "ROLLOUT_NUM_GPUS": "8",
+        "ROLLOUT_GPUS_PER_ENGINE": "1"
+      }
+    },
+    {
+      "name": "disagg_tp1_mf085",
+      "note": "disaggregated, TP1, mem-fraction 0.85. Exists only to measure how much\nmem-fraction moves the number at all. If the 0.8 vs 0.85 gap is small next to the method gap, the\nearlier p3d_* cells are salvageable rather than confounded beyond use; if it is comparable, they\nare not, and saying so is the point of running this.",
+      "vars": {
+        "SYNC_METHOD": "disaggregated",
+        "TP_SIZE": "1",
+        "ROLLOUT_NUM_GPUS": "8",
+        "ROLLOUT_GPUS_PER_ENGINE": "1",
+        "SGLANG_MEM_FRACTION": "0.85"
+      }
+    }
+  ]
+}

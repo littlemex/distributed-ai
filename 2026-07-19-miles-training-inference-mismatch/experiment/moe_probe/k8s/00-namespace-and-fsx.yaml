@@ -1,0 +1,60 @@
+# Isolated namespace for the additional 30B MoE repetition probe.
+#
+# This probe is ADDITIVE. It must not touch the existing miles harness:
+#   - separate namespace (moe-probe, not default)
+#   - separate PV/PVC objects (moe-probe-fsx*, not fsx-training/fsx-claim)
+#   - all writes confined to /fsx/moe-probe/ on the shared filesystem
+#
+# The PV points at the SAME FSx filesystem as the existing experiment, because
+# the 30B checkpoint (~61GB) already lives there and re-downloading it would
+# burn most of the remaining Capacity Block window. FSx is ReadWriteMany, so a
+# second static PV against the same volumeHandle is safe. Reclaim policy is
+# Retain so deleting this namespace can never delete experiment data.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: moe-probe
+  labels:
+    purpose: 30b-moe-repetition-probe
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: moe-probe-fsx
+spec:
+  accessModes:
+  - ReadWriteMany
+  capacity:
+    storage: 4800Gi
+  csi:
+    driver: fsx.csi.aws.com
+    volumeAttributes:
+      dnsname: fs-0b5c35b493051ba74.fsx.us-east-2.amazonaws.com
+      mountname: oueanb4v
+    volumeHandle: fs-0b5c35b493051ba74
+  mountOptions:
+  - flock
+  # Retain: deleting this PV must never trigger deletion of the shared FSx data.
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  volumeMode: Filesystem
+  # Pin the claim so this PV can only ever bind to the probe's own PVC.
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: moe-probe-fsx-claim
+    namespace: moe-probe
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: moe-probe-fsx-claim
+  namespace: moe-probe
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 4800Gi
+  storageClassName: ""
+  volumeName: moe-probe-fsx

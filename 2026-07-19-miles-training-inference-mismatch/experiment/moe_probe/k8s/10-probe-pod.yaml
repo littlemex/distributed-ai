@@ -1,0 +1,81 @@
+# A single 8-GPU probe pod in the isolated `moe-probe` namespace.
+#
+# Deliberately NOT a RayCluster: this probe runs SGLang (and HF transformers)
+# standalone, outside the miles GRPO loop. That is the whole point -- if the
+# repetition reproduces here, the cause is in the rollout/inference path and
+# not in miles' training loop.
+#
+# Isolation properties:
+#   - namespace moe-probe (the miles harness lives in `default`)
+#   - its own PVC (moe-probe-fsx-claim) against the same FSx filesystem
+#   - every write goes to /fsx/moe-probe/ only
+#   - `sleep infinity` so scripts are driven interactively; nothing auto-runs
+#
+# The LD_LIBRARY_PATH override is copied verbatim from the working miles
+# RayCluster: this image ships a forward-compat libcuda (580.82.07) under
+# /usr/local/cuda*/compat that is OLDER than the host driver (580.159.03),
+# which makes torch.cuda die with error 803 / SGLang report "No accelerator
+# available". Dropping compat from the path lets the host driver win.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: moe-probe
+  namespace: moe-probe
+  labels:
+    app: moe-probe
+  annotations:
+    karpenter.sh/do-not-disrupt: "true"
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 30
+  containers:
+  - name: probe
+    image: 776010787911.dkr.ecr.us-east-2.amazonaws.com/miles-hyperpod:miles-dev202607182122-efa1.48
+    imagePullPolicy: IfNotPresent
+    command: ["bash", "-lc", "sleep infinity"]
+    env:
+    - name: PYTHONPATH
+      value: /root/Megatron-LM:/root/miles
+    - name: LD_LIBRARY_PATH
+      value: /opt/amazon/efa/lib:/opt/amazon/aws-ofi-nccl/lib:/opt/amazon/ofi-nccl/lib:/opt/gdrcopy/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64:/usr/lib64
+    - name: HF_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: hf-token
+          key: HF_TOKEN
+    - name: TOKENIZERS_PARALLELISM
+      value: "false"
+    - name: HF_HOME
+      value: /fsx/moe-probe/hf_home
+    # Keep everything offline: the checkpoint is already on FSx, and a stray
+    # download would waste the remaining Capacity Block window.
+    - name: HF_HUB_OFFLINE
+      value: "1"
+    resources:
+      limits:
+        cpu: "90"
+        memory: 1600Gi
+        nvidia.com/gpu: "8"
+      requests:
+        cpu: "80"
+        memory: 1500Gi
+        nvidia.com/gpu: "8"
+    volumeMounts:
+    - mountPath: /fsx
+      name: fsx
+    - mountPath: /dev/shm
+      name: dshm
+  nodeSelector:
+    node-role: gpu-p5en
+  tolerations:
+  - effect: NoSchedule
+    key: nvidia.com/gpu
+    operator: Exists
+  volumes:
+  - name: fsx
+    persistentVolumeClaim:
+      claimName: moe-probe-fsx-claim
+  - name: dshm
+    emptyDir:
+      medium: Memory
+      sizeLimit: 200Gi
