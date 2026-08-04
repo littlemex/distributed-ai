@@ -175,7 +175,7 @@
         <mxCell id="c49" parent="1" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontColor=#14442F;strokeColor=none;fillColor=none;;fontFamily=Helvetica;fontSize=25;" value="A gap of 0.03 on average is not small where it matters, because one token can carry the step." vertex="1">
           <mxGeometry height="44" width="1120" x="730" y="850" as="geometry" />
         </mxCell>
-        <mxCell id="c50" parent="1" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontColor=#5A7A6B;strokeColor=none;fillColor=none;;fontFamily=Helvetica;fontSize=24;" value="This mechanism comes from the paper and the earlier H100 runs, not from the position-profile measurements above." vertex="1">
+        <mxCell id="c50" parent="1" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontColor=#5A7A6B;strokeColor=none;fillColor=none;;fontFamily=Helvetica;fontSize=24;" value="The ratio distribution here is illustrative. The mechanism comes from the paper and the earlier H100 runs, not from a measured histogram." vertex="1">
           <mxGeometry height="44" width="1770" x="80" y="920" as="geometry" />
         </mxCell>
       </root>
