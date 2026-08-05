@@ -3,24 +3,34 @@
 > 登壇資料・blog の数値はこのファイルから引用すること。
 > 全 run の帰属は FSx の TensorBoard event file と CloudTrail から機械的に確定した (2026-08-05)。
 
+## 引用時の禁止事項 (最初に読むこと)
+
+1. **H100 データと H200 データの値の大小を比較してはいけない。** 方向 (崩壊 vs 収束) のみ。
+2. **倍率は全て単一 seed の点推定。** 49x と 55x の差は run 間ばらつき (±20%) に埋もれる。「miles の方が小さい」等と読んではいけない。
+3. **Baseline の LR は 1e-6、fp8 アームは 1e-5。** 倍率を KV fp8 単独の効果に帰属できない。
+4. **`E_kvfp8` / `smoke` を slime と呼ぶのは推定** (miles 固有タグが無いことからの消去法)。断定形で書かないこと。
+5. **Weight sync の colocated は flush_cache を含む。** 「転送方式の差」ではなく「配置の総コスト差」。
+6. **崩壊アーム (`collapse-amp`) の 2.097 は単一 run。** H100 3-seed で方向は再現したが、値の大きさは H200 の run と比較不可。
+
 ## ハードウェア
 
 | 期間 | GPU | クラスタ | 確定方法 |
 |---|---|---|---|
 | 7月 (07-17〜07-21) | **H200 x8** (p5en.48xlarge) | `distai-eks-smoke` | CloudTrail: p5en のみ、H100 は 0 台 |
-| 8月前半 (08-02 05:48〜19:51 JST) | **H100 x8** (p5.48xlarge) | `distai-p5-ue2` | CloudTrail: gpu-p5 nodepool |
-| 8月後半 (08-02 20:42〜CB終了) | **H200 x8** (p5en.48xlarge) | `distai-p5-ue2` | CloudTrail: gpu-p5en nodepool |
+| 08-02 日中 (05:48〜19:51 JST) | **H100 x8** (p5.48xlarge) | `distai-p5-ue2` | CloudTrail: gpu-p5 nodepool |
+| 08-02 夜以降 (20:42〜CB終了 08-04 20:30) | **H200 x8** (p5en.48xlarge) | `distai-p5-ue2` | CloudTrail: gpu-p5en nodepool |
 
 ## 確定データ
 
 ### 1. Baseline (4B dense, bf16, LR 1e-6, dropout=0, colocated, H200)
 
-| run | mis_kl | abs_diff | 出所 |
-|---|---|---|---|
-| `miles-smoke` (7月) | **0.000632** | 0.0130 | 7月FSx TB, wall 07-19 14:47 JST |
-| `h200_p4_calib` (8月) | **0.000627** | 0.0127 | 8月FSx TB, wall 08-02 21:50 JST |
+| run | framework | mis_kl | abs_diff | 出所 |
+|---|---|---|---|---|
+| `miles-smoke` (7月) | miles | **0.000632** | 0.0130 | 7月FSx TB, wall 07-19 14:47 JST |
+| `smoke` (7月) | 非miles計装 (推定slime) | **0.000597** | 0.0128 | 7月FSx TB, wall 07-18 04:05 JST |
+| `h200_p4_calib` (8月) | miles | **0.000627** | 0.0127 | 8月FSx TB, wall 08-02 21:50 JST |
 
-Run 間ばらつき (8月 3seed): 0.000527-0.000745 (最大/最小 1.41倍)
+Run 間ばらつき (8月 H200 3seed, `pp3_bf16_*`): 0.000527-0.000621 (runs: `pp3_bf16_s123` 0.000621, `pp3_bf16_s777` 0.000527, `pp2_bf16_s42` 0.000606)
 
 ### 2. KV fp8 増幅 (4B, fp8_e5m2, LR 1e-5, H200)
 
@@ -81,12 +91,13 @@ Run 間ばらつき (8月 3seed): 0.000527-0.000745 (最大/最小 1.41倍)
 | `e4_c4_nocudagraph` | cuda graph 無効 | 0.000671 |
 | `e4_c5_triton_only` | triton のみ | 0.000663 |
 
-結論: KV quantization だけが増幅の主因。他 kernel は baseline と同等。
+結論: KV quantization だけが増幅の主因。比較対象は同じ H100 の `e4_c0_auto` (0.000716) であり、H200 baseline (0.000632) ではない。H100/H200 間での値比較は禁止事項 #1 に該当。
 
-## 限界 (成果物に必ず書くこと)
+## 限界 (冒頭の禁止事項と重複するが、各セクションからも参照されるため残す)
 
 - 倍率は全て**単一 seed の点推定**。
 - Baseline の LR は 1e-6、fp8 アームは 1e-5 で**LR も同時変化**。
 - H100 (3-seed, per-kernel) と H200 (崩壊/救済, weight sync) のデータは**値の大小を比較してはいけない**。方向のみ。
 - `E_kvfp8` / `smoke` を slime と呼ぶのは推定 (miles 固有タグが無いことからの消去法)。
 - Weight sync の colocated は flush_cache を含むので「転送方式の差」ではなく「配置の総コスト差」。
+- 崩壊アーム `collapse-amp` の 2.097 は**単一 run**。H100 3-seed (セクション5) で方向は再現したが、値の比較は不可。
