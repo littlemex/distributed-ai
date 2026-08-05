@@ -9,6 +9,8 @@ this directory. 100 runs across two clusters (July `distai-eks-smoke` H200, Augu
 | What | Path |
 |---|---|
 | **Confirmed numbers for the talk/blog** | `h200_results/PROVENANCE_SUMMARY.md` |
+| **Full experiment conditions (env files)** | `h200_results/EXPERIMENT_CONDITIONS.md` |
+| **mis_kl calculation logic (source-verified)** | `h200_results/MIS_KL_IMPLEMENTATION.md` |
 | Per-run GPU and framework attribution | `h200_results/PROVENANCE_LEDGER.md` (when created) |
 | Which numbers are引用可能 vs UNUSABLE | `h200_results/DATA_STATUS.md` |
 | Weight sync method comparison | `h200_results/P3M_METHOD_MATRIX.md` |
