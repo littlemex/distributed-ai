@@ -151,23 +151,26 @@
         <mxCell id="b-scaleR" parent="b-1" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontStyle=1;fontColor=#B8860B;" value="elastic pool · scale GPU and CPU independently" vertex="1">
           <mxGeometry height="40" width="800" x="1000" y="728" as="geometry" />
         </mxCell>
-        <mxCell id="b-bartitle" parent="b-1" style="text;html=1;align=left;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#14442F;" value="cycle time" vertex="1">
-          <mxGeometry height="36" width="400" x="140" y="858" as="geometry" />
+        <mxCell id="b-bartitle" parent="b-1" style="text;html=1;align=left;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#14442F;" value="measured cycle time · 119.2s / step (miles, 4B, H200 x2)" vertex="1">
+          <mxGeometry height="36" width="1200" x="140" y="858" as="geometry" />
         </mxCell>
-        <mxCell id="b-synclbl" parent="b-1" style="text;html=1;align=right;verticalAlign=middle;fontSize=28;fontStyle=1;fontColor=#14442F;" value="weight sync · ~0.5s (&lt;1%)" vertex="1">
-          <mxGeometry height="36" width="500" x="1300" y="858" as="geometry" />
+        <mxCell id="b-synclbl" parent="b-1" style="text;html=1;align=right;verticalAlign=middle;fontSize=28;fontStyle=1;fontColor=#14442F;" value="weight sync · 0.57s (0.5%)" vertex="1">
+          <mxGeometry height="36" width="560" x="1240" y="858" as="geometry" />
         </mxCell>
         <mxCell id="b-lead" parent="b-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#8FA69B;strokeColor=none;" value="" vertex="1">
-          <mxGeometry height="16" width="3" x="1763" y="894" as="geometry" />
+          <mxGeometry height="16" width="3" x="1772" y="894" as="geometry" />
         </mxCell>
-        <mxCell id="b-seg1" parent="b-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;fontColor=#FFFFFF;fontSize=30;fontStyle=1;" value="rollout generation · tens of s" vertex="1">
-          <mxGeometry height="80" width="1150" x="140" y="910" as="geometry" />
+        <mxCell id="b-seg1" parent="b-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;fontColor=#FFFFFF;fontSize=30;fontStyle=1;" value="rollout generation · 74.8s (63%)" vertex="1">
+          <mxGeometry height="80" width="1029" x="140" y="910" as="geometry" />
         </mxCell>
-        <mxCell id="b-seg2" parent="b-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;fontColor=#FFFFFF;fontSize=28;fontStyle=1;" value="actor_train · 20–30s" vertex="1">
-          <mxGeometry height="80" width="460" x="1290" y="910" as="geometry" />
+        <mxCell id="b-seg2" parent="b-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;fontColor=#FFFFFF;fontSize=26;fontStyle=1;" value="actor_train · 16.4s" vertex="1">
+          <mxGeometry height="80" width="226" x="1169" y="910" as="geometry" />
         </mxCell>
-        <mxCell id="b-seg3" parent="b-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#8FA69B;strokeColor=none;" value="" vertex="1">
-          <mxGeometry height="80" width="30" x="1750" y="910" as="geometry" />
+        <mxCell id="b-seg-other" parent="b-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#7FA893;strokeColor=none;fontColor=#FFFFFF;fontSize=24;fontStyle=1;" value="other · 27.4s" vertex="1">
+          <mxGeometry height="80" width="373" x="1395" y="910" as="geometry" />
+        </mxCell>
+        <mxCell id="b-seg3" parent="b-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C0392B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="80" width="12" x="1768" y="910" as="geometry" />
         </mxCell>
         <mxCell id="b-danger-box" parent="b-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#C0392B;strokeWidth=5;dashed=1;dashPattern=8 6;arcSize=8;" value="" vertex="1">
           <mxGeometry height="170" width="260" x="830" y="90" as="geometry" />

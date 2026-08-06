@@ -1,5 +1,5 @@
-<mxfile host="embed.diagrams.net" agent="draw.io" pages="2">
-  <diagram id="tis-vscode-yaml" name="tis-vscode-yaml">
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="draw.io" version="22.1.0" type="device">
+<diagram id="tis-vscode-yaml" name="tis-vscode-yaml">
     <mxGraphModel dx="1985" dy="1409" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" background="#F4FBF7" math="0" shadow="0">
       <root>
         <mxCell id="0" />
@@ -109,7 +109,7 @@
       </root>
     </mxGraphModel>
   </diagram>
-  <diagram id="tis-measured-t2" name="tis-measured-t2">
+<diagram id="tis-measured-t2" name="tis-measured-t2">
     <mxGraphModel dx="1868" dy="1326" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" background="#F4FBF7" math="0" shadow="0">
       <root>
         <mxCell id="0" />
@@ -146,80 +146,6 @@
         </mxCell>
         <mxCell id="bandBlue" parent="1" style="shape=mxgraph.basic.polygon;polyCoords=[[260.0,765.3],[296.0,764.0],[332.0,756.4],[368.0,759.4],[404.0,759.7],[440.0,745.9],[476.0,726.6],[512.0,722.8],[548.0,710.5],[584.0,699.9],[620.0,700.3],[656.0,694.2],[692.0,684.1],[728.0,692.3],[764.0,691.4],[800.0,679.6],[836.0,673.5],[872.0,662.0],[908.0,674.3],[944.0,664.9],[980.0,659.0],[1016.0,659.0],[1052.0,664.8],[1088.0,660.7],[1124.0,661.9],[1160.0,659.4],[1196.0,654.6],[1232.0,661.7],[1268.0,662.1],[1304.0,667.5],[1304.0,711.5],[1268.0,710.9],[1232.0,698.6],[1196.0,693.0],[1160.0,681.0],[1124.0,692.1],[1088.0,680.7],[1052.0,688.4],[1016.0,668.5],[980.0,687.0],[944.0,704.2],[908.0,715.8],[872.0,709.3],[836.0,719.2],[800.0,722.0],[764.0,739.5],[728.0,745.5],[692.0,734.5],[656.0,749.3],[620.0,743.6],[584.0,724.0],[548.0,724.8],[512.0,743.1],[476.0,741.7],[440.0,758.2],[404.0,770.8],[368.0,777.3],[332.0,775.8],[296.0,776.0],[260.0,767.7]];fillColor=#4D7DFF;strokeColor=none;opacity=18;" value="" vertex="1">
           <mxGeometry height="122.69999999999993" width="1044" x="260" y="654.6" as="geometry" />
-        </mxCell>
-        <mxCell id="theoryT2" edge="1" parent="1" style="endArrow=none;strokeColor=#CC3333;strokeWidth=4;dashed=1;dashPattern=8 8;curved=1;rounded=0;" value="">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="296" y="761.6" />
-              <mxPoint x="332" y="663.8" />
-              <mxPoint x="368" y="606.5" />
-              <mxPoint x="404" y="565.9" />
-              <mxPoint x="440" y="534.4" />
-              <mxPoint x="476" y="508.7" />
-              <mxPoint x="512" y="486.9" />
-              <mxPoint x="548" y="468.1" />
-              <mxPoint x="584" y="451.5" />
-              <mxPoint x="620" y="436.6" />
-              <mxPoint x="656" y="423.1" />
-              <mxPoint x="692" y="410.9" />
-              <mxPoint x="728" y="399.6" />
-              <mxPoint x="764" y="389.1" />
-              <mxPoint x="800" y="379.4" />
-              <mxPoint x="836" y="370.2" />
-              <mxPoint x="872" y="361.7" />
-              <mxPoint x="908" y="353.6" />
-              <mxPoint x="944" y="346" />
-              <mxPoint x="980" y="338.8" />
-              <mxPoint x="1016" y="331.9" />
-              <mxPoint x="1052" y="325.3" />
-              <mxPoint x="1088" y="319" />
-              <mxPoint x="1124" y="313" />
-              <mxPoint x="1160" y="307.3" />
-              <mxPoint x="1196" y="301.7" />
-              <mxPoint x="1232" y="296.4" />
-              <mxPoint x="1268" y="291.3" />
-              <mxPoint x="1304" y="286.3" />
-            </Array>
-            <mxPoint x="260" y="859.4" as="sourcePoint" />
-            <mxPoint x="1340" y="281.5" as="targetPoint" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="theoryT" edge="1" parent="1" style="endArrow=none;strokeColor=#2266CC;strokeWidth=4;dashed=1;dashPattern=8 8;curved=1;rounded=0;" value="">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="296" y="898.9" />
-              <mxPoint x="332" y="850" />
-              <mxPoint x="368" y="821.4" />
-              <mxPoint x="404" y="801.1" />
-              <mxPoint x="440" y="785.3" />
-              <mxPoint x="476" y="772.5" />
-              <mxPoint x="512" y="761.6" />
-              <mxPoint x="548" y="752.2" />
-              <mxPoint x="584" y="743.9" />
-              <mxPoint x="620" y="736.4" />
-              <mxPoint x="656" y="729.7" />
-              <mxPoint x="692" y="723.6" />
-              <mxPoint x="728" y="717.9" />
-              <mxPoint x="764" y="712.7" />
-              <mxPoint x="800" y="707.8" />
-              <mxPoint x="836" y="703.2" />
-              <mxPoint x="872" y="699" />
-              <mxPoint x="908" y="694.9" />
-              <mxPoint x="944" y="691.1" />
-              <mxPoint x="980" y="687.5" />
-              <mxPoint x="1016" y="684.1" />
-              <mxPoint x="1052" y="680.8" />
-              <mxPoint x="1088" y="677.6" />
-              <mxPoint x="1124" y="674.6" />
-              <mxPoint x="1160" y="671.8" />
-              <mxPoint x="1196" y="669" />
-              <mxPoint x="1232" y="666.3" />
-              <mxPoint x="1268" y="663.8" />
-              <mxPoint x="1304" y="661.3" />
-            </Array>
-            <mxPoint x="260" y="935" as="sourcePoint" />
-            <mxPoint x="1340" y="658.9" as="targetPoint" />
-          </mxGeometry>
         </mxCell>
         <mxCell id="lineRed" edge="1" parent="1" style="endArrow=none;strokeColor=#CC3333;strokeWidth=5;curved=1;rounded=0;" value="">
           <mxGeometry relative="1" as="geometry">
@@ -425,47 +351,26 @@
         <mxCell id="leg2t" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;" value="TIS on (measured)" vertex="1">
           <mxGeometry height="38" width="360" x="380" y="260" as="geometry" />
         </mxCell>
-        <mxCell id="leg3s" parent="1" style="line;html=1;strokeWidth=4;strokeColor=#CC3333;dashed=1;dashPattern=8 8;" value="" vertex="1">
-          <mxGeometry height="10" width="70" x="295" y="320" as="geometry" />
-        </mxCell>
-        <mxCell id="leg3t" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;" value="O(T²) bound (illustrative)" vertex="1">
-          <mxGeometry height="38" width="460" x="380" y="306" as="geometry" />
-        </mxCell>
-        <mxCell id="leg4s" parent="1" style="line;html=1;strokeWidth=4;strokeColor=#2266CC;dashed=1;dashPattern=8 8;" value="" vertex="1">
-          <mxGeometry height="10" width="70" x="295" y="366" as="geometry" />
-        </mxCell>
-        <mxCell id="leg4t" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;" value="O(T) bound (illustrative)" vertex="1">
-          <mxGeometry height="38" width="460" x="380" y="352" as="geometry" />
-        </mxCell>
-        <mxCell id="calloutC" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CC3333;strokeWidth=2;fontSize=28;fontColor=#1B3A2D;align=left;verticalAlign=middle;spacing=12;" value="fit eps in eps·T² (0.035) ≈ step-0 mis_kl (0.032): one step of mismatch blew up ~1000x by step 29" vertex="1">
-          <mxGeometry height="210" width="440" x="1390" y="180" as="geometry" />
-        </mxCell>
-        <mxCell id="leadC" edge="1" parent="1" style="endArrow=none;strokeColor=#999999;strokeWidth=2;" value="">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint x="1390" y="285" as="sourcePoint" />
-            <mxPoint x="1310" y="283" as="targetPoint" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="calloutA" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A8D2B8;strokeWidth=2;fontSize=28;fontColor=#1B3A2D;align=left;verticalAlign=middle;spacing=12;" value="onset near step 17-20: positive feedback through the gradient exceeds the simple sum of per-step epsilon" vertex="1">
-          <mxGeometry height="180" width="440" x="1390" y="420" as="geometry" />
+        <mxCell id="calloutA" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CC3333;strokeWidth=2;fontSize=28;fontColor=#1B3A2D;align=left;verticalAlign=middle;spacing=12;" value="TIS off: mis_kl runs away ~1000x over 29 steps (0.032 → 31.8). Roughly straight on a log axis, i.e. step-to-step positive feedback, not a within-step effect." vertex="1">
+          <mxGeometry height="230" width="440" x="1390" y="220" as="geometry" />
         </mxCell>
         <mxCell id="leadA" edge="1" parent="1" style="endArrow=none;strokeColor=#999999;strokeWidth=2;" value="">
           <mxGeometry relative="1" as="geometry">
-            <mxPoint x="1390" y="510" as="sourcePoint" />
-            <mxPoint x="1016" y="466" as="targetPoint" />
+            <mxPoint x="1390" y="335" as="sourcePoint" />
+            <mxPoint x="1226" y="316" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="calloutB" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#B8860B;strokeWidth=3;fontSize=28;fontColor=#1B3A2D;align=left;verticalAlign=middle;spacing=12;" value="cap = 2.0 limits each step&#39;s contribution → accumulation is O(T), stays flat (3 seeds)" vertex="1">
-          <mxGeometry height="180" width="440" x="1390" y="640" as="geometry" />
+        <mxCell id="calloutB" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#B8860B;strokeWidth=3;fontSize=28;fontColor=#1B3A2D;align=left;verticalAlign=middle;spacing=12;" value="TIS on (cap = 2.0): mis_kl stays flat near 0.03-0.15 across all 3 seeds. The cap breaks the feedback loop." vertex="1">
+          <mxGeometry height="200" width="440" x="1390" y="600" as="geometry" />
         </mxCell>
         <mxCell id="leadB" edge="1" parent="1" style="endArrow=none;strokeColor=#999999;strokeWidth=2;" value="">
           <mxGeometry relative="1" as="geometry">
-            <mxPoint x="1390" y="720" as="sourcePoint" />
+            <mxPoint x="1390" y="700" as="sourcePoint" />
             <mxPoint x="1300" y="705" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="note" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontColor=#777777;" value="All 30 steps plotted from TensorBoard (pt_e5m2_collapse_train vs tis_s1234); bands = min-max over 3 seeds. eps·T² / eps·T lines are illustrative fits." vertex="1">
-          <mxGeometry height="40" width="1740" x="90" y="936" as="geometry" />
+        <mxCell id="note" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontColor=#777777;whiteSpace=wrap;" value="All 30 steps plotted from TensorBoard (pt_e5m2_collapse_train vs tis_s1234); bands = min-max over 3 seeds. The paper's O(T²) bound is a within-step, response-length result (see the concept slide), not this step-axis curve." vertex="1">
+          <mxGeometry height="60" width="1680" x="120" y="928" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
