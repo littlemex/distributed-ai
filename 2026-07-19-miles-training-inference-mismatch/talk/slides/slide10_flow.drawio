@@ -1,0 +1,119 @@
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="miles-docs" version="21.0.0">
+  <diagram id="mis-kl-data-flow" name="data-flow">
+    <mxGraphModel dx="1920" dy="1080" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0" background="#F4FBF7">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ================= SGLANG BOX ================= -->
+        <mxCell id="sglang_box" value="rollout / SGLang" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#1B7A55;strokeWidth=4;fontSize=32;fontStyle=1;fontColor=#1B7A55;verticalAlign=top;spacingTop=16;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="60" y="280" width="460" height="420" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sglang_step1" value="generate tokens&#10;(autoregressive decoding)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F4EC;strokeColor=#1B7A55;strokeWidth=2;fontSize=28;fontColor=#0E4D36;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="360" width="380" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sglang_arrow_inner" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1B7A55;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="sglang_step1" target="sglang_step2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sglang_step2" value="record log_probs&#10;per token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F4EC;strokeColor=#1B7A55;strokeWidth=2;fontSize=28;fontColor=#0E4D36;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="540" width="380" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- SGLang config badge (pinned to bottom edge of green box) -->
+        <mxCell id="sglang_badge" value="--sglang-kv-cache-dtype fp8_e5m2&#10;&#8593; this is the amplifier knob" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1E2A26;strokeColor=#1B7A55;strokeWidth=2;fontSize=24;fontColor=#7FE0B8;fontFamily=Courier New;arcSize=14;align=left;spacingLeft=18;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="80" y="668" width="500" height="104" as="geometry" />
+        </mxCell>
+
+        <!-- ================= RAY TRANSFER ARROW ================= -->
+        <mxCell id="ray_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6B7772;strokeWidth=5;endArrow=block;endFill=1;endSize=8;" edge="1" parent="1" source="sglang_box" target="megatron_box">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="520" y="490" as="sourcePoint" />
+            <mxPoint x="780" y="490" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="ray_label_top" value="tokens + rollout_log_probs" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontStyle=1;fontColor=#1B7A55;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="510" y="380" width="290" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ray_label_bottom" value="batch via Ray&#10;(object store)" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#6B7772;" vertex="1" parent="1">
+          <mxGeometry x="530" y="510" width="250" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ================= MEGATRON BOX ================= -->
+        <mxCell id="megatron_box" value="training / Megatron" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B8860B;strokeWidth=4;fontSize=32;fontStyle=1;fontColor=#B8860B;verticalAlign=top;spacingTop=16;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="810" y="200" width="700" height="560" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mega_step3" value="STEP 3 &#8212; re-forward the SAME tokens&#10;&#8594; train_scored_log_probs (per token)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBF3DD;strokeColor=#B8860B;strokeWidth=2;fontSize=28;fontColor=#6E5106;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="850" y="280" width="620" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mega_arrow_inner" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#B8860B;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="mega_step3" target="mega_step4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mega_arrow_label" value="train_log_probs" style="text;html=1;align=left;verticalAlign=middle;fontSize=24;fontColor=#B8860B;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="415" width="260" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mega_step4" value="STEP 4 &#8212; the comparison happens HERE&#10;r = train_log_prob &#8722; rollout_log_prob&#10;mis_kl = mean( exp(r) &#8722; r &#8722; 1 )   [k3]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBF3DD;strokeColor=#B8860B;strokeWidth=3;fontSize=28;fontColor=#6E5106;arcSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="850" y="460" width="620" height="170" as="geometry" />
+        </mxCell>
+
+        <!-- rollout_log_probs feeding into step 4 from batch -->
+        <mxCell id="rollout_to_step4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1B7A55;strokeWidth=3;endArrow=block;endFill=1;dashed=1;exitX=1;exitY=0.5;entryX=0;entryY=0.7;" edge="1" parent="1" source="sglang_step2" target="mega_step4">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="700" y="595" />
+              <mxPoint x="700" y="579" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="rollout_to_step4_label" value="rollout_log_probs&#10;(from batch)" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontColor=#1B7A55;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="560" y="600" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mega_note" value="TIS correction also applied here &#8212; does NOT change mis_kl" style="text;html=1;align=left;verticalAlign=middle;fontSize=24;fontColor=#8A6D1A;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="850" y="645" width="620" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Megatron config badge (pinned to bottom edge of amber box) -->
+        <mxCell id="mega_badge" value="get_mismatch_metrics: true&#10;computed at losses.py L206, before backward" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2A2419;strokeColor=#B8860B;strokeWidth=2;fontSize=24;fontColor=#F0C860;fontFamily=Courier New;arcSize=14;align=left;spacingLeft=18;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="850" y="726" width="620" height="104" as="geometry" />
+        </mxCell>
+
+        <!-- ================= OUTPUT ================= -->
+        <mxCell id="out_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#C0392B;strokeWidth=5;endArrow=block;endFill=1;endSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="megatron_box" target="output_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out_arrow_label" value="scalar&#10;per step" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontColor=#C0392B;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="390" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="output_box" value="mis_kl&#10;&#8594; TensorBoard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FDECEA;strokeColor=#C0392B;strokeWidth=4;fontSize=32;fontStyle=1;fontColor=#C0392B;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1660" y="400" width="220" height="160" as="geometry" />
+        </mxCell>
+
+        <mxCell id="output_note" value="non-negative,&#10;0 = match" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontColor=#C0392B;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="1660" y="570" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ================= ROLE CALLOUTS ================= -->
+        <mxCell id="role_sglang" value="PRODUCES log_probs only" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontStyle=1;fontColor=#1B7A55;" vertex="1" parent="1">
+          <mxGeometry x="60" y="200" width="460" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="role_megatron" value="COMPUTES the comparison" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontStyle=1;fontColor=#B8860B;" vertex="1" parent="1">
+          <mxGeometry x="810" y="120" width="700" height="60" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

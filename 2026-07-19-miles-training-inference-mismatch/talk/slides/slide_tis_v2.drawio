@@ -1,0 +1,174 @@
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="assistant" version="22.1.0" type="device">
+  <diagram id="tis-explainer-v2" name="tis-explainer-v2">
+    <mxGraphModel dx="1422" dy="798" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0" background="#F4FBF7">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="TIS: capping the importance ratio&#160;&#160;[arXiv:2602.01826]" style="text;html=1;fontSize=34;fontStyle=1;fontColor=#1B3A2D;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="14" width="1840" height="56" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z1head" value="Why the gradient error grows &#8212; Paper&#39;s bound (Theorem 3.1)" style="rounded=1;arcSize=30;html=1;fillColor=#1B7A55;strokeColor=none;fontColor=#FFFFFF;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="88" width="900" height="46" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z1formula" value="|| grad J_actual &#8722; grad J ||&#8322; &#8804; C &#183; T&#178;" style="rounded=0;html=1;fillColor=#FFFFFF;strokeColor=#2E8B57;strokeWidth=1;fontColor=#1B3A2D;fontSize=28;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="150" width="860" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z1ann1" value="T = response length (tokens generated)" style="text;html=1;fontSize=22;fontColor=#1B3A2D;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="222" width="840" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="z1ann2" value="C = per-token numerical mismatch (LR-independent)" style="text;html=1;fontSize=22;fontColor=#1B3A2D;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="254" width="840" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="z1accum" value="per-token gaps accumulate &#8594; quadratic in T" style="text;html=1;fontSize=22;fontStyle=1;fontColor=#1B7A55;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="294" width="840" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z1yaxis" style="endArrow=block;endFill=1;endSize=8;html=1;strokeColor=#1B3A2D;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="200" y="560" as="sourcePoint" />
+            <mxPoint x="200" y="370" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="z1xaxis" style="endArrow=block;endFill=1;endSize=8;html=1;strokeColor=#1B3A2D;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="200" y="560" as="sourcePoint" />
+            <mxPoint x="800" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="z1curve" style="endArrow=none;curved=1;html=1;strokeColor=#2E8B57;strokeWidth=3;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="210" y="552" as="sourcePoint" />
+            <mxPoint x="766" y="388" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="434" y="528" />
+              <mxPoint x="546" y="496" />
+              <mxPoint x="658" y="450" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="z1curvelabel" value="error ~ T&#178;" style="text;html=1;fontSize=22;fontStyle=1;fontColor=#2E8B57;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="430" y="396" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="z1xlabel" value="sequence length T" style="text;html=1;fontSize=22;fontColor=#1B3A2D;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="330" y="566" width="340" height="28" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z2head" value="What TIS does &#8212; TIS = clip the ratio (Eq. 5)" style="rounded=1;arcSize=30;html=1;fillColor=#1B7A55;strokeColor=none;fontColor=#FFFFFF;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="980" y="88" width="900" height="46" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z2rho" value="&#961; = &#960;_train / &#956;_rollout&#160;&#160;(&#961; = 1 means the two engines agree)" style="text;html=1;fontSize=22;fontColor=#1B3A2D;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="140" width="860" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z2formula" value="grad J_TIS = E[ min(&#961;, C) &#183; grad log &#960; &#183; R ]" style="rounded=0;html=1;fillColor=#FFFFFF;strokeColor=#2E8B57;strokeWidth=1;fontColor=#1B3A2D;fontSize=28;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="178" width="860" height="58" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z2clipzone" value="" style="rounded=0;html=1;fillColor=#C62828;strokeColor=none;opacity=15;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="274" width="258" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="z2dashcont" style="endArrow=none;dashed=1;html=1;strokeColor=#C62828;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1330" y="368" as="sourcePoint" />
+            <mxPoint x="1548" y="258" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="z2capline" style="endArrow=none;dashed=1;html=1;strokeColor=#C62828;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1100" y="368" as="sourcePoint" />
+            <mxPoint x="1600" y="368" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="z2yaxis" style="endArrow=block;endFill=1;endSize=8;html=1;strokeColor=#1B3A2D;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1100" y="480" as="sourcePoint" />
+            <mxPoint x="1100" y="290" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="z2xaxis" style="endArrow=block;endFill=1;endSize=8;html=1;strokeColor=#1B3A2D;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1100" y="480" as="sourcePoint" />
+            <mxPoint x="1610" y="480" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="z2transfer" style="endArrow=none;html=1;strokeColor=#2E8B57;strokeWidth=3;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1102" y="478" as="sourcePoint" />
+            <mxPoint x="1588" y="368" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="1330" y="368" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="z2caplabel" value="C = 2.0" style="text;html=1;fontSize=22;fontStyle=1;fontColor=#C62828;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1112" y="332" width="120" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="z2cliplabel" value="clipped" style="text;html=1;fontSize=22;fontStyle=3;fontColor=#C62828;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="288" width="120" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="z2ylabel" value="weight applied" style="text;html=1;fontSize=22;fontColor=#1B3A2D;align=center;verticalAlign=middle;rotation=-90;" vertex="1" parent="1">
+          <mxGeometry x="980" y="370" width="180" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="z2xlabel" value="&#961;" style="text;html=1;fontSize=26;fontStyle=1;fontColor=#1B3A2D;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1616" y="462" width="36" height="32" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z2note" value="this study: tis_mode=truncate, upper_bound=2.0" style="text;html=1;fontSize=22;fontColor=#B8860B;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="492" width="860" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="z2clamp" value="extreme ratios get clamped &#8594; gradient variance bounded" style="text;html=1;fontSize=22;fontStyle=1;fontColor=#2E8B57;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="524" width="860" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="z2caption" value="TIS does not remove the mismatch; it stops the mismatch from feeding back into the gradient." style="text;html=1;whiteSpace=wrap;fontSize=22;fontStyle=2;fontColor=#1B3A2D;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="558" width="860" height="62" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z3head" value="This work: does the cap hold?" style="rounded=1;arcSize=30;html=1;fillColor=#1B7A55;strokeColor=none;fontColor=#FFFFFF;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="632" width="1840" height="46" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z3left" value="" style="rounded=1;arcSize=8;html=1;fillColor=#FFFFFF;strokeColor=#2E8B57;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="692" width="900" height="272" as="geometry" />
+        </mxCell>
+        <mxCell id="z3ltitle" value="This work (H200, miles, fp8_e5m2, LR 1e-5)" style="text;html=1;fontSize=24;fontStyle=1;fontColor=#1B3A2D;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="64" y="706" width="852" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="z3lred" value="no TIS: mis_kl 0.033 &#8594; 2.097 (runs away)" style="text;html=1;fontSize=22;fontStyle=1;fontColor=#C62828;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="64" y="756" width="852" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="z3lgreen" value="TIS cap 2.0: mis_kl 0.0322 &#8594; 0.0279 over 30 steps (flat)" style="text;html=1;fontSize=22;fontStyle=1;fontColor=#2E8B57;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="64" y="800" width="852" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="z3lnote" value="same run, one switch" style="text;html=1;fontSize=22;fontStyle=2;fontColor=#1B3A2D;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="64" y="844" width="852" height="32" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z3right" value="" style="rounded=1;arcSize=8;html=1;fillColor=#FFFFFF;strokeColor=#B8860B;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="692" width="900" height="272" as="geometry" />
+        </mxCell>
+        <mxCell id="z3rtitle" value="Paper&#39;s caveat (arXiv:2602.01826)" style="text;html=1;fontSize=24;fontStyle=1;fontColor=#B8860B;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1004" y="706" width="852" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="z3rb1" value="&#8226; TIS reduces variance but adds bias &#8212; breaks theoretical soundness (Eq. 5)" style="text;html=1;whiteSpace=wrap;fontSize=22;fontColor=#1B3A2D;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="1004" y="750" width="852" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="z3rb2" value="&#8226; TIS is NOT shown to reduce the C&#183;T&#178; bound, only clamps individual samples" style="text;html=1;whiteSpace=wrap;fontSize=22;fontColor=#1B3A2D;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="1004" y="814" width="852" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="z3rb3" value="&#8226; Paper: corrections can &#39;prolong&#39; the stable window, not eliminate collapse, headline fix is LR scheduling" style="text;html=1;whiteSpace=wrap;fontSize=22;fontColor=#1B3A2D;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="1004" y="878" width="852" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bottomline" value="my run stopped at 30 steps; paper&#39;s collapse onset is ~step 300 (Fig 1, with a response-length surge, Fig 6) &#8212; &#39;flat here&#39; is not &#39;safe forever&#39;." style="text;html=1;whiteSpace=wrap;fontSize=22;fontStyle=2;fontColor=#666666;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="984" width="1840" height="56" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

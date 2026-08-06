@@ -1,0 +1,66 @@
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="draw.io" version="22.1.0" type="device">
+  <diagram id="key-takeaways" name="key-takeaways">
+    <mxGraphModel dx="1920" dy="1080" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0" background="#F4FBF7">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Key takeaways" style="text;html=1;align=left;verticalAlign=middle;fontSize=44;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="90" y="40" width="900" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="rule" value="" style="endArrow=none;html=1;strokeColor=#1B7A55;strokeWidth=4;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="92" y="118" as="sourcePoint" /><mxPoint x="1830" y="118" as="targetPoint" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="n1" value="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;fontColor=#FFFFFF;fontSize=32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="150" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t1" value="&lt;b&gt;The network is not the bottleneck you assume.&lt;/b&gt; Weight sync is under 1% of the GRPO cycle — the costly, silent constraints live elsewhere." style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="185" y="150" width="1645" height="62" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n2" value="2" style="ellipse;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;fontColor=#FFFFFF;fontSize=32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="238" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t2" value="&lt;b&gt;Training–inference mismatch (mis_kl) silently breaks RL post-training.&lt;/b&gt; Rollout and training compute slightly different numbers for the same tokens, and the gap accumulates at the weight-sync boundary." style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="185" y="230" width="1645" height="76" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n3" value="3" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B8860B;strokeColor=none;fontColor=#FFFFFF;fontSize=32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="334" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t3" value="&lt;b&gt;This work — per-kernel attribution.&lt;/b&gt; KV-cache quantization alone drives the amplification (e4m3 ≈ 12×, e5m2 ≈ 45×, monotone in mantissa bits). CUDA graph and the triton backend are irrelevant." style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="185" y="326" width="1645" height="76" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n4" value="4" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B8860B;strokeColor=none;fontColor=#FFFFFF;fontSize=32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="430" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t4" value="&lt;b&gt;The negative results are a contribution too.&lt;/b&gt; No hardware dependence (H100 vs H200 within noise), no framework dependence (miles vs slime), direction reproduces across 3 seeds — the effect is structural, not a setup artifact." style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="185" y="422" width="1645" height="76" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n5" value="5" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B8860B;strokeColor=none;fontColor=#FFFFFF;fontSize=32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="526" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t5" value="&lt;b&gt;Amplification is structural and LR-independent; collapse is not.&lt;/b&gt; fp8 raises mis_kl at any learning rate, but training only destabilizes when high LR is added (2×2 cross-experiment)." style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="185" y="518" width="1645" height="76" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n6" value="6" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2E8B57;strokeColor=none;fontColor=#FFFFFF;fontSize=32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="622" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t6" value="&lt;b&gt;TIS caps the runaway (arXiv:2602.01826).&lt;/b&gt; A cap of 2.0 flattens the T²-shaped blow-up to O(T). It does not remove the mismatch — it bounds each sample's push, prolonging the stable window, with LR scheduling as the fuller fix." style="text;html=1;align=left;verticalAlign=middle;fontSize=28;fontColor=#1B3A2D;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="185" y="614" width="1645" height="76" as="geometry" />
+        </mxCell>
+
+        <mxCell id="banner" value="Your inference engine and your training engine are two different calculators. If you quantize one, either measure the gap or let TIS pay the bill." style="rounded=1;arcSize=16;whiteSpace=wrap;html=1;fillColor=#E0F2E7;strokeColor=#2E8B57;strokeWidth=2;fontColor=#1B3A2D;fontSize=30;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="100" y="740" width="1730" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend" value="green = framing · amber = this work's findings · TIS = the mitigation" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontColor=#777777;" vertex="1" parent="1">
+          <mxGeometry x="100" y="890" width="1730" height="34" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

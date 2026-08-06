@@ -1,0 +1,148 @@
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="draw.io" version="22.1.0" type="device">
+  <diagram id="terminology" name="terminology">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="bg" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F4FBF7;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="1920" height="1080" as="geometry" />
+        </mxCell>
+        <mxCell id="pageTitle" value="KL divergence &#183; ppo_kl &#183; mis_kl" style="text;html=1;align=center;verticalAlign=middle;fontSize=44;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="0" y="30" width="1920" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cardLeft" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#14442F;strokeWidth=2;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="40" y="110" width="560" height="810" as="geometry" />
+        </mxCell>
+        <mxCell id="leftTitle" value="KL divergence" style="text;html=1;align=center;verticalAlign=middle;fontSize=40;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="60" y="140" width="520" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="h1b1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="160" y="360" width="44" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="h1b2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="220" y="300" width="44" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="h1b3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="280" y="260" width="44" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="h1b4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="340" y="320" width="44" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="h1b5" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="400" y="370" width="44" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="klArrowLeft" value="KL" style="endArrow=block;startArrow=block;html=1;strokeColor=#14442F;strokeWidth=3;fontSize=34;fontStyle=1;fontColor=#14442F;labelBackgroundColor=#FFFFFF;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="302" y="445" as="sourcePoint" />
+            <mxPoint x="302" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="h2b1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="160" y="590" width="44" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="h2b2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="220" y="660" width="44" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="h2b3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="280" y="680" width="44" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="h2b4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="340" y="620" width="44" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="h2b5" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#14442F;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="400" y="570" width="44" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="leftDesc" value="divergence between two distributions" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontColor=#14442F;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="60" y="770" width="480" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cardMid" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#14442F;strokeWidth=2;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="620" y="110" width="560" height="810" as="geometry" />
+        </mxCell>
+        <mxCell id="midTitle" value="where they&#39;re measured" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="640" y="140" width="520" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="rolloutBox" value="rollout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#1B7A55;strokeWidth=3;fontSize=36;fontStyle=1;fontColor=#1B7A55;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="700" y="220" width="400" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="trainingBox" value="training" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B8860B;strokeWidth=3;fontSize=36;fontStyle=1;fontColor=#B8860B;arcSize=12;verticalAlign=top;spacingTop=12;" vertex="1" parent="1">
+          <mxGeometry x="700" y="540" width="400" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="misklArrowMid" value="mis_kl" style="endArrow=block;startArrow=block;html=1;strokeColor=#C0392B;strokeWidth=4;dashed=1;fontSize=34;fontStyle=1;fontColor=#C0392B;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="rolloutBox" target="trainingBox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tNode" value="t" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B8860B;strokeWidth=2;fontSize=30;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="750" y="655" width="80" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="t1Node" value="t+1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B8860B;strokeWidth=2;fontSize=30;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="960" y="655" width="110" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ppoklArrow" value="ppo_kl" style="endArrow=block;html=1;strokeColor=#B8860B;strokeWidth=3;dashed=1;fontSize=30;fontStyle=1;fontColor=#B8860B;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="tNode" target="t1Node">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="midNote1" value="mis_kl: gap between engines" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#C0392B;" vertex="1" parent="1">
+          <mxGeometry x="640" y="800" width="520" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="midNote2" value="ppo_kl: shift within training, t &#8594; t+1" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#B8860B;" vertex="1" parent="1">
+          <mxGeometry x="640" y="850" width="520" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cardRight" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C0392B;strokeWidth=3;dashed=1;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="110" width="640" height="810" as="geometry" />
+        </mxCell>
+        <mxCell id="rightTitle" value="mis_kl" style="text;html=1;align=center;verticalAlign=middle;fontSize=44;fontStyle=1;fontColor=#C0392B;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="140" width="560" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="g1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="370" width="44" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="g2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="310" width="44" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="g3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="270" width="44" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="g4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="330" width="44" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="g5" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1570" y="380" width="44" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="labelRollout" value="rollout / SGLang" style="text;html=1;align=left;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#1B7A55;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1630" y="340" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="misklArrowRight" value="mis_kl" style="endArrow=block;startArrow=block;html=1;strokeColor=#C0392B;strokeWidth=4;fontSize=34;fontStyle=1;fontColor=#C0392B;labelBackgroundColor=#FFFFFF;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1472" y="455" as="sourcePoint" />
+            <mxPoint x="1472" y="535" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="a1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#B8860B;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="570" width="44" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#B8860B;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="640" width="44" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#B8860B;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="665" width="44" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#B8860B;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="600" width="44" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#B8860B;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1570" y="550" width="44" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="labelTraining" value="training / Megatron" style="text;html=1;align=left;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#B8860B;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1630" y="600" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="rightDesc" value="same tokens &#183; same time" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="745" width="560" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="formula" value="mis_kl = D_KL( &#960;_rollout &#8214; &#960;_trainer )" style="text;html=1;align=center;verticalAlign=middle;fontSize=32;fontStyle=1;fontColor=#C0392B;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="815" width="560" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

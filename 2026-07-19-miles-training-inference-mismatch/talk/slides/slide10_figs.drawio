@@ -1,0 +1,155 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="A" id="pageA">
+    <mxGraphModel dx="1000" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0" background="#F4FBF7">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="bg" value="" style="rounded=0;fillColor=#F4FBF7;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="1920" height="1080" as="geometry" />
+        </mxCell>
+        <mxCell id="title" value="How I measured" style="text;html=1;align=left;verticalAlign=middle;fontSize=48;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="90" y="30" width="1200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="trainBox" value="training / Megatron" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#B8860B;strokeWidth=4;verticalAlign=top;fontSize=32;fontStyle=1;fontColor=#14442F;spacingTop=16;" vertex="1" parent="1">
+          <mxGeometry x="180" y="150" width="560" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="trainLP" value="train_log_probs" style="rounded=1;arcSize=12;fillColor=#FBF3DC;strokeColor=#B8860B;strokeWidth=2;fontSize=30;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="280" y="250" width="360" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="rollBox" value="rollout / SGLang" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#1B7A55;strokeWidth=4;verticalAlign=top;fontSize=32;fontStyle=1;fontColor=#14442F;spacingTop=16;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="150" width="560" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="rollLP" value="rollout_log_probs" style="rounded=1;arcSize=12;fillColor=#E4F3EC;strokeColor=#1B7A55;strokeWidth=2;fontSize=30;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="250" width="360" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrW" value="same weights" style="endArrow=block;html=1;strokeColor=#14442F;strokeWidth=3;fontSize=28;fontColor=#14442F;labelBackgroundColor=#F4FBF7;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="750" y="205" as="sourcePoint" />
+            <mxPoint x="1170" y="205" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arrT" value="same tokens" style="endArrow=block;html=1;strokeColor=#14442F;strokeWidth=3;fontSize=28;fontColor=#14442F;labelBackgroundColor=#F4FBF7;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1170" y="320" as="sourcePoint" />
+            <mxPoint x="750" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="formula" value="mis_kl = E[ exp(r) - r - 1 ],&#160;&#160; r = log(pi_train / pi_rollout)" style="rounded=1;arcSize=8;fillColor=#FFFFFF;strokeColor=#C0392B;strokeWidth=3;fontSize=30;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="410" y="480" width="1100" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="formulaNote" value="k3 estimator, non-negative, 0 = perfect match" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontStyle=2;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="510" y="585" width="900" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="redA1" value="" style="endArrow=block;html=1;strokeColor=#C0392B;strokeWidth=3;" edge="1" parent="1" source="trainLP" target="formula">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="460" y="330" as="sourcePoint" />
+            <mxPoint x="700" y="480" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="redA2" value="" style="endArrow=block;html=1;strokeColor=#C0392B;strokeWidth=3;" edge="1" parent="1" source="rollLP" target="formula">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1460" y="330" as="sourcePoint" />
+            <mxPoint x="1220" y="480" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="cardL" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CADFD3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="180" y="670" width="760" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="cardLTitle" value="Per-kernel attribution" style="text;html=1;align=left;verticalAlign=middle;fontSize=32;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="220" y="690" width="680" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="cardLList" value="step 0 only, no optimizer update&#10;one factor at a time&#10;LR = 1e-6 all arms" style="text;html=1;align=left;verticalAlign=top;fontSize=28;fontColor=#14442F;spacing=4;lineHeight=1.4;" vertex="1" parent="1">
+          <mxGeometry x="220" y="750" width="680" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="cardR" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CADFD3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="980" y="670" width="760" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="cardRTitle" value="Collapse dynamics" style="text;html=1;align=left;verticalAlign=middle;fontSize=32;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="690" width="680" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="cardRList" value="multi-step runs, 25-30 steps&#10;LR = 1e-5 to induce collapse&#10;TIS on/off as the variable" style="text;html=1;align=left;verticalAlign=top;fontSize=28;fontColor=#14442F;spacing=4;lineHeight=1.4;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="750" width="680" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="hw" value="Qwen3-4B dense, miles on H200 x8, cross-validated on slime, 3-seed on H100 x8" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#6B7B72;" vertex="1" parent="1">
+          <mxGeometry x="180" y="985" width="1560" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="B" id="pageB">
+    <mxGraphModel dx="1000" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0" background="#F4FBF7">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="bgB" value="" style="rounded=0;fillColor=#F4FBF7;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="1920" height="1080" as="geometry" />
+        </mxCell>
+        <mxCell id="titleB" value="How I measured" style="text;html=1;align=left;verticalAlign=middle;fontSize=48;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="90" y="25" width="1200" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="trainB" value="training / Megatron&#10;train_log_probs" style="rounded=1;arcSize=8;fillColor=#FFFFFF;strokeColor=#B8860B;strokeWidth=4;fontSize=28;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="120" y="120" width="430" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="rollB" value="rollout / SGLang&#10;rollout_log_probs" style="rounded=1;arcSize=8;fillColor=#FFFFFF;strokeColor=#1B7A55;strokeWidth=4;fontSize=28;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="790" y="120" width="430" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="arrWB" value="same weights" style="endArrow=block;html=1;strokeColor=#14442F;strokeWidth=3;fontSize=28;fontColor=#14442F;labelBackgroundColor=#F4FBF7;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="558" y="160" as="sourcePoint" />
+            <mxPoint x="782" y="160" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arrTB" value="same tokens" style="endArrow=block;html=1;strokeColor=#14442F;strokeWidth=3;fontSize=28;fontColor=#14442F;labelBackgroundColor=#F4FBF7;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="782" y="235" as="sourcePoint" />
+            <mxPoint x="558" y="235" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="formulaB" value="mis_kl = E[ exp(r) - r - 1 ],&#10;r = log(pi_train / pi_rollout)" style="rounded=1;arcSize=8;fillColor=#FFFFFF;strokeColor=#C0392B;strokeWidth=3;fontSize=30;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="110" width="480" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="formulaNoteB" value="k3 estimator, non-negative, 0 = perfect match" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontStyle=2;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="290" width="640" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="redB1" value="" style="endArrow=block;html=1;strokeColor=#C0392B;strokeWidth=3;exitX=1;exitY=0.85;exitDx=0;exitDy=0;entryX=0;entryY=0.85;entryDx=0;entryDy=0;" edge="1" parent="1" source="trainB" target="formulaB">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="670" y="300" />
+              <mxPoint x="1270" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="redB2" value="" style="endArrow=block;html=1;strokeColor=#C0392B;strokeWidth=3;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="rollB" target="formulaB">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cardLB" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CADFD3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="140" y="390" width="790" height="540" as="geometry" />
+        </mxCell>
+        <mxCell id="cardLTitleB" value="Per-kernel attribution" style="text;html=1;align=left;verticalAlign=middle;fontSize=40;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="190" y="420" width="700" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="cardLDivB" value="" style="line;strokeWidth=3;strokeColor=#B8860B;html=1;" vertex="1" parent="1">
+          <mxGeometry x="190" y="500" width="690" height="10" as="geometry" />
+        </mxCell>
+        <mxCell id="cardLListB" value="step 0 only, no optimizer update&#10;&#10;one factor at a time&#10;&#10;LR = 1e-6 all arms" style="text;html=1;align=left;verticalAlign=top;fontSize=30;fontColor=#14442F;spacing=6;lineHeight=1.4;" vertex="1" parent="1">
+          <mxGeometry x="190" y="530" width="700" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="cardRB" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CADFD3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="990" y="390" width="790" height="540" as="geometry" />
+        </mxCell>
+        <mxCell id="cardRTitleB" value="Collapse dynamics" style="text;html=1;align=left;verticalAlign=middle;fontSize=40;fontStyle=1;fontColor=#14442F;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="420" width="700" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="cardRDivB" value="" style="line;strokeWidth=3;strokeColor=#1B7A55;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="500" width="690" height="10" as="geometry" />
+        </mxCell>
+        <mxCell id="cardRListB" value="multi-step runs, 25-30 steps&#10;&#10;LR = 1e-5 to induce collapse&#10;&#10;TIS on/off as the variable" style="text;html=1;align=left;verticalAlign=top;fontSize=30;fontColor=#14442F;spacing=6;lineHeight=1.4;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="530" width="700" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="hwB" value="Qwen3-4B dense, miles on H200 x8, cross-validated on slime, 3-seed on H100 x8" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#6B7B72;" vertex="1" parent="1">
+          <mxGeometry x="180" y="985" width="1560" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

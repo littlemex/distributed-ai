@@ -1,0 +1,93 @@
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="draw.io" version="22.1.0" type="device">
+  <diagram id="cross-experiment-page" name="cross-experiment">
+    <mxGraphModel dx="1422" dy="794" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="bg" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F4FBF7;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="1920" height="1080" as="geometry" />
+        </mxCell>
+        <mxCell id="title" value="2x2 Cross-Experiment: what amplifies, what destabilizes" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=36;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1"><mxGeometry x="360" y="15" width="1200" height="55" as="geometry" /></mxCell>
+        <mxCell id="strip" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D2D2D;strokeColor=none;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="60" y="80" width="1800" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="cond1" value="&lt;b&gt;GPU&lt;/b&gt;&lt;br&gt;H200 x8, single node" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#EDEDED;" vertex="1" parent="1">
+          <mxGeometry x="80" y="90" width="300" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="cond2" value="&lt;b&gt;Framework&lt;/b&gt;&lt;br&gt;miles (SGLang 0.5.16 + Megatron-LM + Ray)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#EDEDED;" vertex="1" parent="1">
+          <mxGeometry x="390" y="90" width="400" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="cond3" value="&lt;b&gt;Model&lt;/b&gt;&lt;br&gt;Qwen3-4B dense, bf16, Dropout 0, Seed 1234" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#EDEDED;" vertex="1" parent="1">
+          <mxGeometry x="800" y="90" width="400" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="cond4" value="&lt;b&gt;Data&lt;/b&gt;&lt;br&gt;DAPO-Math-17k" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#EDEDED;" vertex="1" parent="1">
+          <mxGeometry x="1210" y="90" width="260" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="cond5" value="&lt;b&gt;Infra&lt;/b&gt;&lt;br&gt;Amazon EKS + KubeRay + FSx for Lustre" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#EDEDED;" vertex="1" parent="1">
+          <mxGeometry x="1480" y="90" width="360" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="sep1" value="" style="endArrow=none;html=1;strokeColor=#555555;strokeWidth=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="385" y="95" as="sourcePoint" />
+            <mxPoint x="385" y="180" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="sep2" value="" style="endArrow=none;html=1;strokeColor=#555555;strokeWidth=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="795" y="95" as="sourcePoint" />
+            <mxPoint x="795" y="180" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="sep3" value="" style="endArrow=none;html=1;strokeColor=#555555;strokeWidth=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1205" y="95" as="sourcePoint" />
+            <mxPoint x="1205" y="180" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="sep4" value="" style="endArrow=none;html=1;strokeColor=#555555;strokeWidth=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1475" y="95" as="sourcePoint" />
+            <mxPoint x="1475" y="180" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="corner" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=#0F4A33;strokeWidth=4;" vertex="1" parent="1">
+          <mxGeometry x="240" y="235" width="280" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="colh1" value="bf16 KV" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=#0F4A33;strokeWidth=4;fontSize=32;fontStyle=1;fontColor=#FFFFFF;" vertex="1" parent="1">
+          <mxGeometry x="520" y="235" width="580" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="colh2" value="fp8_e5m2 KV" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=#0F4A33;strokeWidth=4;fontSize=32;fontStyle=1;fontColor=#FFFFFF;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="235" width="580" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="rowh1" value="LR 1e-6" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=#0F4A33;strokeWidth=4;fontSize=32;fontStyle=1;fontColor=#FFFFFF;" vertex="1" parent="1">
+          <mxGeometry x="240" y="330" width="280" height="215" as="geometry" />
+        </mxCell>
+        <mxCell id="rowh2" value="LR 1e-5" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1B7A55;strokeColor=#0F4A33;strokeWidth=4;fontSize=32;fontStyle=1;fontColor=#FFFFFF;" vertex="1" parent="1">
+          <mxGeometry x="240" y="545" width="280" height="215" as="geometry" />
+        </mxCell>
+        <mxCell id="cell11" value="mis_kl ~0.0007&lt;br&gt;&lt;b&gt;stable&lt;/b&gt;&lt;br&gt;(14 steps)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#0F4A33;strokeWidth=4;fontSize=28;fontColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="520" y="330" width="580" height="215" as="geometry" />
+        </mxCell>
+        <mxCell id="cell12" value="mis_kl ~0.028&lt;br&gt;grad_norm 0.17&lt;br&gt;&lt;b&gt;amplified but stable&lt;/b&gt;&lt;br&gt;(14 steps)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF3CD;strokeColor=#0F4A33;strokeWidth=4;fontSize=28;fontColor=#7A5C00;" vertex="1" parent="1"><mxGeometry x="1100" y="330" width="580" height="215" as="geometry" /></mxCell>
+        <mxCell id="cell21" value="mis_kl ~0.0006&lt;br&gt;&lt;b&gt;stable&lt;/b&gt;&lt;br&gt;(30 steps)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#0F4A33;strokeWidth=4;fontSize=28;fontColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="520" y="545" width="580" height="215" as="geometry" />
+        </mxCell>
+        <mxCell id="cell22" value="mis_kl 0.03 &amp;rarr; 0.399 at step 14&lt;br&gt;grad_norm 2.78 (20x normal)&lt;br&gt;&lt;b&gt;training destabilized&lt;/b&gt;&lt;br&gt;(30 steps)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F8D7DA;strokeColor=#B71C1C;strokeWidth=8;fontSize=28;fontStyle=0;fontColor=#B71C1C;" vertex="1" parent="1"><mxGeometry x="1100" y="545" width="580" height="215" as="geometry" /></mxCell>
+        <mxCell id="collapseTag" value="only this cell destabilizes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B71C1C;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#FFFFFF;arcSize=30;" vertex="1" parent="1"><mxGeometry x="1700" y="620" width="195" height="65" as="geometry" /></mxCell>
+        <mxCell id="collapseArrow" value="" style="endArrow=block;html=1;strokeColor=#B71C1C;strokeWidth=4;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1700" y="652" as="sourcePoint" />
+            <mxPoint x="1685" y="652" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="takeaway" value="fp8 raises mis_kl regardless of LR &amp;mdash; but training instability requires both fp8 AND high LR" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=32;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1"><mxGeometry x="160" y="800" width="1600" height="70" as="geometry" /></mxCell>
+        <mxCell id="note" value="mismatch itself is LR-independent &amp;mdash; it exists at step 0 before any optimizer update" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=22;fontStyle=2;fontColor=#3E6B57;" vertex="1" parent="1">
+          <mxGeometry x="260" y="885" width="1400" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="footer" value="H100, slime, and LR variations also measured for cross-validation. Direction reproduces." style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="360" y="1020" width="1200" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
