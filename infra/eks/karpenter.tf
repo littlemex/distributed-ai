@@ -46,8 +46,9 @@ resource "helm_release" "karpenter_crd" {
   repository_username = data.aws_ecrpublic_authorization_token.karpenter.user_name
   repository_password = data.aws_ecrpublic_authorization_token.karpenter.password
 
-  # The karpenter-crd chart can optionally run a conversion webhook; it is not needed here
-  # (the controller chart runs its own), so disable it to avoid a second webhook Deployment.
+  # The karpenter-crd chart exposes webhook.enabled to wire a CRD conversion webhook. Karpenter
+  # removed the v1beta1->v1 conversion webhooks in v1.1, so on the version pinned here it is not
+  # needed; disable it explicitly to keep the CRD schema plain.
   set {
     name  = "webhook.enabled"
     value = "false"

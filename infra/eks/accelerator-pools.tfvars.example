@@ -1,0 +1,67 @@
+# Accelerator pools — copy this file to `accelerator-pools.auto.tfvars` and edit it:
+#
+#     cp accelerator-pools.tfvars.example accelerator-pools.auto.tfvars
+#
+# Terraform auto-loads every `*.auto.tfvars` file, so no `-var-file` flag is needed.
+# `accelerator_pools` is assigned in exactly ONE place — this file — which is why
+# terraform.tfvars must NOT also define it (two assignments = a duplicate-definition
+# error). The variable has `default = {}`, so an empty map below is valid: Basic01
+# (cluster scope only — VPC, control plane, system nodes, Karpenter, CSI, storage)
+# applies fine with no pools. Accelerator pools arrive from Basic04 onward, and you
+# add them by uncommenting / editing the entries below.
+#
+# `*.auto.tfvars` is git-ignored, so your real IDs and pool set never get committed.
+#
+# One map entry per accelerated NodePool. GPU (device_plugin = "nvidia") and Trainium/
+# Inferentia (device_plugin = "neuron") are described uniformly; the matching device-
+# plugin add-on is installed automatically, and the EFA layout is DERIVED from the
+# instance type (leave efa_interface_count / efa_multi_card unset unless you must
+# override). A pool with device_plugin = "nvidia" flips local.has_gpu_pool and pulls
+# in the GPU Operator, so an empty map keeps the cluster GPU-free by design.
+#
+# Every pool pins to a single AZ, but you do NOT write it: `zone` is derived (reserved
+# → the Capacity Block's AZ, on-demand/spot → the first cluster AZ). Set `zone`
+# explicitly only to override. capacity_type is per-pool, so on-demand / spot /
+# reserved can be MIXED in one cluster. The map key becomes Kubernetes resource names
+# (must be RFC1123: [a-z0-9-]).
+
+accelerator_pools = {
+  # GPU on-demand pool: g6e.12xlarge (L40S x4, single-card EFA derived). Steady dev/verify.
+  # gpu-dev = {
+  #   instance_types = ["g6e.12xlarge"]
+  #   device_plugin  = "nvidia"
+  #   capacity_type  = "on-demand"
+  #   # zone omitted → derived to the first cluster AZ (local.azs[0]).
+  #   # efa_interface_count / efa_multi_card omitted → derived (g6e = 1, single-card).
+  # }
+
+  # GPU spot pool: cheapest, interruptible. Same shape, capacity_type = "spot".
+  # gpu-spot = {
+  #   instance_types = ["g6e.12xlarge"]
+  #   device_plugin  = "nvidia"
+  #   capacity_type  = "spot"
+  # }
+
+  # GPU Capacity Block pool: p5en.48xlarge (H200 x8, EFA x16 multi-card, derived).
+  # A Pod may request at most 15 EFA (card 0 carries the node IP) — see
+  # `terraform output accelerator_pool_efa_schedulable`. zone is derived from the reservation.
+  # gpu-p5en = {
+  #   instance_types    = ["p5en.48xlarge"]
+  #   device_plugin     = "nvidia"
+  #   capacity_type     = "reserved"
+  #   cb_reservation_id = "cr-REPLACE_ME"
+  #   cb_end_date       = "2026-01-01T12:00:00Z"  # optional: pre-expiry SNS alert for this pool
+  #   volume_size       = "500Gi"
+  # }
+
+  # Trainium2 serving pool: trn2.48xlarge (16 Trainium2, EFA x16 multi-card, derived).
+  # zone is derived from the reservation.
+  # trn2-serving = {
+  #   instance_types    = ["trn2.48xlarge"]
+  #   device_plugin     = "neuron"
+  #   capacity_type     = "reserved"
+  #   cb_reservation_id = "cr-REPLACE_ME"
+  #   ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
+  #   volume_size       = "500Gi"
+  # }
+}
