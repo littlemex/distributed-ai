@@ -197,24 +197,26 @@ resource "kubectl_manifest" "gdrdrv_loader" {
             image           = var.gdrcopy_loader_image
             securityContext = { privileged = true }
             command = ["/bin/bash", "-c", <<-EOSH
-              # No `set -e`: the if/elif/else below handles every outcome explicitly.
-              if chroot /host bash -c "lsmod | grep -q '^gdrdrv'"; then
-                echo "[gdrdrv-loader] gdrdrv already loaded"
-              elif chroot /host bash -c "dnf install -y gdrcopy-kmod && systemctl enable --now gdrcopy.service"; then
-                echo "[gdrdrv-loader] gdrcopy-kmod installed, gdrcopy.service started"
-              else
-                echo "[gdrdrv-loader] install/load failed; exiting for restart-backoff retry" >&2
-                exit 1
-              fi
-              # Verify the end state for real: gdrcopy.service starting is not proof gdrdrv
-              # actually loaded (dkms build can still fail). Require the module AND the device
-              # node, else exit non-zero so the pod restarts and retries rather than reporting
-              # success on a node with no /dev/gdrdrv.
+              # No `set -e`: each step is checked explicitly.
+              # Install the package if needed, then load via the rpm's own init script
+              # `/usr/libexec/gdrcopy/gdrcopy start`. That script does modprobe + mknod of
+              # /dev/gdrdrv and needs NO systemd bus, so it works from this container even
+              # without hostPID (a chroot `systemctl --now` would fail with "Failed to connect
+              # to bus"). It also fixes the "module loaded but device node missing" state that
+              # a bare `lsmod` check would skip. We additionally `systemctl enable` (no --now)
+              # best-effort for reboot persistence; if the enable can't reach the bus it is
+              # harmless (the package auto-enables the unit at install time anyway).
+              chroot /host bash -c 'rpm -q gdrcopy-kmod >/dev/null 2>&1 || dnf install -y gdrcopy-kmod'
+              chroot /host /usr/libexec/gdrcopy/gdrcopy start || true
+              chroot /host systemctl enable gdrcopy.service 2>/dev/null || true
+              # Verify the end state for real: require the module AND the device node, else exit
+              # non-zero so the pod restarts and retries rather than reporting success on a node
+              # with no /dev/gdrdrv.
               if chroot /host bash -c 'lsmod | grep -q "^gdrdrv" && test -e /dev/gdrdrv'; then
                 chroot /host ls -l /dev/gdrdrv
                 echo "[gdrdrv-loader] verified: gdrdrv loaded, /dev/gdrdrv present"
               else
-                echo "[gdrdrv-loader] gdrdrv not loaded or /dev/gdrdrv missing after install; retrying" >&2
+                echo "[gdrdrv-loader] gdrdrv not loaded or /dev/gdrdrv missing; retrying" >&2
                 exit 1
               fi
             EOSH
