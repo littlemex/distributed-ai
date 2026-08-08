@@ -578,14 +578,43 @@ variable "gpu_operator_install_driver" {
 
 variable "gpu_operator_enable_gdrcopy" {
   description = <<-EOT
-    Whether the GPU Operator should enable gdrcopy (GPUDirect RDMA copy). When true,
-    the operator's validator requires the gdrdrv kernel module to be loaded; if the
-    module is absent, gdrcopy-validation blocks indefinitely and the NVIDIA device
-    plugin never advertises nvidia.com/gpu. Leave false unless the node image ships
-    or builds gdrdrv. gdrcopy is a latency optimization, not required for EFA/NCCL.
+    Whether the GPU Operator should build/load gdrdrv via its own gdrcopy component.
+    This ONLY works when gpu_operator_install_driver = true: the operator implements
+    gdrcopy as a sidecar container inside its driver DaemonSet, so with an
+    AMI-preinstalled driver (install_driver = false) the driver DaemonSet — and thus
+    the gdrcopy sidecar — never exists, and this flag is a no-op. To load gdrdrv on
+    nodes that use the AMI's preinstalled driver, use var.gdrcopy_mode instead.
+    gdrcopy is a small-message latency optimization; the bulk GPUDirect RDMA path
+    (NIC DMA straight into GPU memory) does not depend on it.
   EOT
   type        = bool
   default     = false
+}
+
+variable "gdrcopy_mode" {
+  description = <<-EOT
+    How to load the gdrdrv kernel module on GPU nodes that use the AMI's preinstalled
+    driver (the Capacity Block path, where gpu_operator_install_driver = false and the
+    GPU Operator's own gdrcopy sidecar cannot run). AL2023 ships gdrcopy-kmod as a
+    native dkms package plus a gdrcopy.service systemd unit that loads gdrdrv AFTER
+    nvidia and recreates /dev/gdrdrv on every boot, so all we must do is install the
+    package once. gdrcopy accelerates small-message receive copies over EFA; it is NOT
+    required for the bulk GPUDirect RDMA path, which is already active.
+      "off"       — do nothing (default). /dev/gdrdrv is absent; NCCL logs a benign
+                    "Failed to initialize GDRCopy" and falls back to an EFA loopback copy.
+      "userdata"  — install gdrcopy-kmod from the EC2NodeClass userData (a cloud-init
+                    x-shellscript part merged before the nodeadm NodeConfig). Declarative,
+                    no extra running pod; reboot persistence is handled by gdrcopy.service.
+      "daemonset" — install it from a privileged gdrdrv-loader DaemonSet on GPU nodes.
+                    Verified end-to-end on a live node; useful when you cannot recycle
+                    nodes to pick up a userData change.
+  EOT
+  type        = string
+  default     = "off"
+  validation {
+    condition     = contains(["off", "userdata", "daemonset"], var.gdrcopy_mode)
+    error_message = "gdrcopy_mode must be one of: off, userdata, daemonset."
+  }
 }
 
 # ── Component versions ────────────────────────────────────────────────────────

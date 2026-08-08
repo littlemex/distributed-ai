@@ -216,6 +216,47 @@ locals {
           strategy: Raid0
   EOT
 
+  # gdrcopy (gdrdrv) install script, folded into the accelerator userData when
+  # var.gdrcopy_mode == "userdata". AL2023 ships gdrcopy-kmod as a native dkms package
+  # plus a gdrcopy.service systemd unit that loads gdrdrv AFTER nvidia and recreates
+  # /dev/gdrdrv on every boot — so installing the package once is enough and reboot
+  # persistence is the unit's job, not ours. Runs as a cloud-init x-shellscript, which
+  # nodeadm-run.service is ordered after, so gdrdrv is present before kubelet starts.
+  # We do NOT `set -e` on the whole node bringup: a failed gdrcopy install must not block
+  # the node from joining. Instead the failure is surfaced (a marker file + log) so a pod
+  # that truly needs /dev/gdrdrv can gate on its presence rather than silently degrading.
+  gdrcopy_install_script = <<-EOSH
+    #!/bin/bash
+    # gdrcopy(gdrdrv): GPUDirect small-message receive-copy latency optimization for EFA.
+    # The bulk GPUDirect RDMA path does not need this. The GPU Operator cannot provide it
+    # here because the driver is preinstalled in the AMI (its gdrcopy sidecar lives in the
+    # operator-managed driver DaemonSet, which does not exist with an AMI driver).
+    if dnf install -y gdrcopy-kmod; then
+      # gdrcopy.service (shipped by the rpm, auto-enabled) loads gdrdrv after nvidia and
+      # creates /dev/gdrdrv; enable --now is idempotent and makes this boot's node ready now.
+      systemctl enable --now gdrcopy.service || echo "gdrcopy: service start failed" >&2
+    else
+      echo "gdrcopy: dnf install gdrcopy-kmod failed; /dev/gdrdrv will be absent" >&2
+      touch /run/gdrcopy-install-failed
+    fi
+  EOSH
+
+  # When gdrcopy_mode == "userdata", wrap the nodeadm NodeConfig and the install script in a
+  # cloud-init MIME multipart. Karpenter re-wraps AL2023 userData into its own multipart and
+  # appends its generated NodeConfig; a user-provided multipart is merged into that. ALWAYS
+  # verify the final rendered userData on a fresh node with
+  #   aws ec2 describe-instance-attribute --instance-id <id> --attribute userData
+  # (base64 -d) so a Karpenter merge-order change cannot silently drop the shellscript part.
+  accelerator_user_data_mime = format(
+    "MIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"BOUNDARY\"\n\n--BOUNDARY\nContent-Type: text/x-shellscript; charset=\"utf-8\"\n\n%s\n--BOUNDARY\nContent-Type: application/node.eks.aws\n\n%s\n--BOUNDARY--\n",
+    local.gdrcopy_install_script,
+    local.accelerator_user_data,
+  )
+
+  accelerator_user_data_effective = (
+    var.gdrcopy_mode == "userdata" ? local.accelerator_user_data_mime : local.accelerator_user_data
+  )
+
   # CPU pool nodeadm: same image-pull tuning, but NO localStorage Raid0 (m5a-class has no NVMe
   # instance store; imagefs = nodefs = the gp3 root). systemReserved is lighter (no accelerator
   # memory pressure). Paired with a higher gp3 throughput on the CPU NodeClass below.
@@ -293,7 +334,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
         networkInterfaces = local.pool_network_interfaces[each.key]
       } : {},
       {
-        userData = local.accelerator_user_data
+        userData = local.accelerator_user_data_effective
         blockDeviceMappings = [{
           deviceName = "/dev/xvda"
           ebs = {

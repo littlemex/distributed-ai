@@ -145,3 +145,77 @@ resource "helm_release" "aws_efa_k8s_device_plugin" {
   # See the identical comment on helm_release.gpu_operator above.
   depends_on = [helm_release.karpenter]
 }
+
+# ---------------------------------------------------------------------------
+# 3. gdrdrv-loader DaemonSet — only when var.gdrcopy_mode == "daemonset".
+#    Installs AL2023's gdrcopy-kmod (dkms) and loads gdrdrv on GPU nodes whose driver
+#    is preinstalled in the AMI (so the GPU Operator's own gdrcopy sidecar cannot run).
+#    It chroots into the host to use the host's dnf (AL2023 repo) and modprobe: a
+#    container's own dnf cannot insert a module into the host kernel. gdrcopy is a
+#    small-message latency optimization; the bulk GPUDirect RDMA path does not need it.
+#    Prefer var.gdrcopy_mode = "userdata" (declarative, no standing pod, reboot handled
+#    by the rpm's gdrcopy.service); this DaemonSet exists for when nodes cannot be
+#    recycled to pick up a userData change, and was verified end-to-end on a live node.
+resource "kubectl_manifest" "gdrdrv_loader" {
+  count = var.gdrcopy_mode == "daemonset" && local.has_gpu_pool ? 1 : 0
+
+  yaml_body = yamlencode({
+    apiVersion = "apps/v1"
+    kind       = "DaemonSet"
+    metadata = {
+      name      = "gdrdrv-loader"
+      namespace = "kube-system"
+      labels    = { app = "gdrdrv-loader" }
+    }
+    spec = {
+      selector = { matchLabels = { app = "gdrdrv-loader" } }
+      template = {
+        metadata = { labels = { app = "gdrdrv-loader" } }
+        spec = {
+          # nvidia.com/gpu.present is set by the GPU Operator's node-feature-discovery
+          # once a node is up; the loader lands only on GPU nodes.
+          nodeSelector      = { "nvidia.com/gpu.present" = "true" }
+          priorityClassName = "system-node-critical"
+          tolerations = [
+            { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+            { key = "vpc.amazonaws.com/efa", operator = "Exists", effect = "NoSchedule" },
+            { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
+          ]
+          containers = [{
+            name            = "gdrdrv-loader"
+            image           = "public.ecr.aws/amazonlinux/amazonlinux:2023"
+            securityContext = { privileged = true }
+            command = ["/bin/bash", "-c", <<-EOSH
+              set -uo pipefail
+              # chroot into the host to use its dnf (AL2023 repo) and modprobe; a container's
+              # own dnf cannot load a module into the host kernel.
+              if chroot /host bash -c "lsmod | grep -q '^gdrdrv'"; then
+                echo "[gdrdrv-loader] gdrdrv already loaded"
+              elif chroot /host bash -c "dnf install -y gdrcopy-kmod && systemctl enable --now gdrcopy.service"; then
+                echo "[gdrdrv-loader] gdrcopy-kmod installed, gdrcopy.service started"
+              else
+                # Exit non-zero so the kubelet restarts us with backoff: a transient dnf/network
+                # failure then retries instead of sitting idle forever behind `sleep infinity`.
+                echo "[gdrdrv-loader] install/load failed; exiting for restart-backoff retry" >&2
+                exit 1
+              fi
+              chroot /host bash -c 'lsmod | grep "^gdrdrv" && ls -l /dev/gdrdrv' || true
+              # Loaded successfully; idle so the DaemonSet pod stays Running (gdrdrv itself
+              # persists in the host kernel independently of this pod's lifecycle).
+              sleep infinity
+            EOSH
+            ]
+            volumeMounts = [{ name = "host", mountPath = "/host" }]
+            resources = {
+              requests = { cpu = "10m", memory = "32Mi" }
+              limits   = { cpu = "200m", memory = "256Mi" }
+            }
+          }]
+          volumes = [{ name = "host", hostPath = { path = "/" } }]
+        }
+      }
+    }
+  })
+
+  depends_on = [helm_release.gpu_operator]
+}
