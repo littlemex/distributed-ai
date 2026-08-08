@@ -206,7 +206,17 @@ resource "kubectl_manifest" "gdrdrv_loader" {
                 echo "[gdrdrv-loader] install/load failed; exiting for restart-backoff retry" >&2
                 exit 1
               fi
-              chroot /host bash -c 'lsmod | grep "^gdrdrv" && ls -l /dev/gdrdrv' || true
+              # Verify the end state for real: gdrcopy.service starting is not proof gdrdrv
+              # actually loaded (dkms build can still fail). Require the module AND the device
+              # node, else exit non-zero so the pod restarts and retries rather than reporting
+              # success on a node with no /dev/gdrdrv.
+              if chroot /host bash -c 'lsmod | grep -q "^gdrdrv" && test -e /dev/gdrdrv'; then
+                chroot /host ls -l /dev/gdrdrv
+                echo "[gdrdrv-loader] verified: gdrdrv loaded, /dev/gdrdrv present"
+              else
+                echo "[gdrdrv-loader] gdrdrv not loaded or /dev/gdrdrv missing after install; retrying" >&2
+                exit 1
+              fi
             EOSH
             ]
             volumeMounts = [{ name = "host", mountPath = "/host" }]
@@ -224,6 +234,8 @@ resource "kubectl_manifest" "gdrdrv_loader" {
             securityContext = {
               allowPrivilegeEscalation = false
               readOnlyRootFilesystem   = true
+              runAsNonRoot             = true
+              runAsUser                = 65534
               capabilities             = { drop = ["ALL"] }
             }
             resources = {
@@ -240,19 +252,6 @@ resource "kubectl_manifest" "gdrdrv_loader" {
   depends_on = [helm_release.gpu_operator]
 }
 
-# Guard: the three gdrdrv-loading mechanisms (GPU Operator gdrcopy sidecar, userData,
-# DaemonSet) must never race to load the same module. gdrcopy_mode != "off" is for the
-# AMI-preinstalled-driver path only, where the operator's sidecar cannot run; if the
-# operator is also told to manage the driver AND enable gdrcopy, both would fight over
-# gdrdrv. Fail at plan time rather than produce a node with two installers.
-check "gdrcopy_single_loader" {
-  assert {
-    condition = var.gdrcopy_mode == "off" || !(var.gpu_operator_install_driver && var.gpu_operator_enable_gdrcopy)
-    error_message = join(" ", [
-      "gdrcopy_mode is \"${var.gdrcopy_mode}\" (node-side gdrdrv load) while the GPU Operator",
-      "is also set to manage the driver and enable gdrcopy",
-      "(gpu_operator_install_driver && gpu_operator_enable_gdrcopy).",
-      "Pick one gdrcopy loader: set gdrcopy_mode = \"off\", or disable the operator's gdrcopy.",
-    ])
-  }
-}
+# Note: the "single gdrdrv loader" exclusivity is enforced as a hard plan-time error by a
+# cross-variable validation on var.gdrcopy_mode (variables.tf), not a `check` block here —
+# a `check` assert only warns and would still let a two-loader apply through.

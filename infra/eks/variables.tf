@@ -617,6 +617,15 @@ variable "gdrcopy_mode" {
     condition     = contains(["off", "userdata", "daemonset"], var.gdrcopy_mode)
     error_message = "gdrcopy_mode must be one of: off, userdata, daemonset."
   }
+  # Single gdrdrv loader. gdrcopy_mode is the node-side loader for the AMI-driver path;
+  # it must not run alongside the GPU Operator's own gdrcopy sidecar (which needs the
+  # operator to manage the driver). If both are active they race to load gdrdrv. This is a
+  # cross-variable validation (Terraform >= 1.9) so it hard-fails at plan time — unlike a
+  # `check` block, which only warns and would let a two-loader config apply.
+  validation {
+    condition     = var.gdrcopy_mode == "off" || !(var.gpu_operator_install_driver && var.gpu_operator_enable_gdrcopy)
+    error_message = "gdrcopy_mode is not \"off\" (node-side gdrdrv load) while the GPU Operator is also set to load gdrdrv (gpu_operator_install_driver && gpu_operator_enable_gdrcopy). Pick one loader: set gdrcopy_mode = \"off\", or disable the operator's gdrcopy."
+  }
 }
 
 variable "gdrcopy_loader_image" {
