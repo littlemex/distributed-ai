@@ -60,7 +60,20 @@ if [[ "$RESV" == "null" ]] || [[ -z "$RESV" ]]; then
 fi
 
 INSTANCE_TYPE=$(echo "$RESV" | python3 -c "import sys,json; print(json.load(sys.stdin)['type'])")
-END_DATE=$(echo "$RESV"      | python3 -c "import sys,json; print(json.load(sys.stdin).get('end') or '')")
+# EndDate comes back as RFC3339 with a numeric offset (e.g. "...+00:00"), but the
+# accelerator_pools validation requires a UTC "Z" suffix (a non-Z offset is
+# misread as UTC by the EventBridge schedule). Normalize any offset to a "Z"
+# instant so the emitted cb_end_date passes validation as-is.
+END_DATE=$(echo "$RESV" | python3 -c "
+import sys, json
+from datetime import timezone
+d = json.load(sys.stdin).get('end') or ''
+if d:
+    from datetime import datetime
+    # Python 3.11+ parses trailing 'Z'; older needs +00:00. Handle both.
+    d = datetime.fromisoformat(d.replace('Z', '+00:00')).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+print(d)
+")
 AZ=$(echo "$RESV"            | python3 -c "import sys,json; print(json.load(sys.stdin).get('az') or '')")
 RTYPE=$(echo "$RESV"         | python3 -c "import sys,json; print(json.load(sys.stdin).get('rtype') or '')")
 
