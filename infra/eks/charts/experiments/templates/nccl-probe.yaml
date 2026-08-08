@@ -45,7 +45,6 @@ spec:
       # NCCL_SOCKET_IFNAME uses the exclusion prefix "^" to avoid TCP fallback (~28x slower).
       env:
         - { name: FI_PROVIDER,            value: "efa" }
-        - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
         - { name: FI_EFA_FORK_SAFE,       value: "1" }
         - { name: NCCL_SOCKET_IFNAME,     value: "^lo,docker,veth" }
         # INFO, not WARN: the "NET/OFI Selected provider is efa" line that proves EFA is in use

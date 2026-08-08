@@ -198,7 +198,6 @@ spec:
       - { name: NCCL_DEBUG,        value: "INFO" }
       - { name: NCCL_DEBUG_SUBSYS, value: "INIT,NET" }
       - { name: FI_PROVIDER,       value: "efa" }
-      - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
       # Without FORK_SAFE a fork in the process (any subprocess, including some torch internals)
       # can corrupt libfabric's registered memory.
       - { name: FI_EFA_FORK_SAFE,  value: "1" }
