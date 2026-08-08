@@ -3,7 +3,8 @@
 # Print the Terraform snippet to add a purchased Capacity Block to a reserved accelerator
 # pool. Everything about the reservation — instance type, availability zone, end date — is
 # resolved from the CR-ID via `aws ec2 describe-capacity-reservations`, so the CR-ID is the
-# only thing you must supply. The emitted block is per-pool on accelerator_pools, so this
+# only thing you must supply. The emitted block is a per-pool entry in accelerator_pools,
+# which lives in accelerator-pools.auto.tfvars (NOT terraform.tfvars — see Basic04). This
 # script cannot know which pool key you want — pass --pool (defaults to gpu-cb).
 #
 # Usage:
@@ -77,7 +78,7 @@ echo "Resolved from ${CR_ID}: ${INSTANCE_TYPE} in ${AZ}, ends ${END_DATE:-n/a}."
 
 cat <<EOF
 
-Add this reserved pool to accelerator_pools in terraform.tfvars, then apply:
+Add this reserved pool to accelerator_pools in accelerator-pools.auto.tfvars, then apply:
 
   ${POOL} = {
     instance_types    = ["${INSTANCE_TYPE}"]
