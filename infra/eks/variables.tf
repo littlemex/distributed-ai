@@ -578,14 +578,65 @@ variable "gpu_operator_install_driver" {
 
 variable "gpu_operator_enable_gdrcopy" {
   description = <<-EOT
-    Whether the GPU Operator should enable gdrcopy (GPUDirect RDMA copy). When true,
-    the operator's validator requires the gdrdrv kernel module to be loaded; if the
-    module is absent, gdrcopy-validation blocks indefinitely and the NVIDIA device
-    plugin never advertises nvidia.com/gpu. Leave false unless the node image ships
-    or builds gdrdrv. gdrcopy is a latency optimization, not required for EFA/NCCL.
+    Whether the GPU Operator should build/load gdrdrv via its own gdrcopy component.
+    This ONLY works when gpu_operator_install_driver = true: the operator implements
+    gdrcopy as a sidecar container inside its driver DaemonSet, so with an
+    AMI-preinstalled driver (install_driver = false) the driver DaemonSet — and thus
+    the gdrcopy sidecar — never exists, and this flag is a no-op. To load gdrdrv on
+    nodes that use the AMI's preinstalled driver, use var.gdrcopy_mode instead.
+    gdrcopy is a small-message latency optimization; the bulk GPUDirect RDMA path
+    (NIC DMA straight into GPU memory) does not depend on it.
   EOT
   type        = bool
   default     = false
+}
+
+variable "gdrcopy_mode" {
+  description = <<-EOT
+    How to load the gdrdrv kernel module on GPU nodes that use the AMI's preinstalled
+    driver (the Capacity Block path, where gpu_operator_install_driver = false and the
+    GPU Operator's own gdrcopy sidecar cannot run). AL2023 ships gdrcopy-kmod as a
+    native dkms package plus a gdrcopy.service systemd unit that loads gdrdrv AFTER
+    nvidia and recreates /dev/gdrdrv on every boot, so all we must do is install the
+    package once. gdrcopy accelerates small-message receive copies over EFA; it is NOT
+    required for the bulk GPUDirect RDMA path, which is already active.
+      "off"       — do nothing (default). /dev/gdrdrv is absent; NCCL logs a benign
+                    "Failed to initialize GDRCopy" and falls back to an EFA loopback copy.
+      "userdata"  — RECOMMENDED. Install gdrcopy-kmod from the EC2NodeClass userData (a
+                    cloud-init x-shellscript part merged before the nodeadm NodeConfig).
+                    Applied only to nvidia GPU pools. Declarative, no standing pod; reboot
+                    persistence is handled by gdrcopy.service. Requires a node roll to apply.
+      "daemonset" — FALLBACK for when you cannot recycle nodes. A gdrdrv-loader DaemonSet
+                    loads gdrdrv on already-running GPU nodes via a privileged initContainer
+                    (the long-running pod is unprivileged). Prefer "userdata" for steady state.
+    Only the AMI-driver path needs this; leave "off" once amazon-eks-ami loads gdrdrv itself.
+  EOT
+  type        = string
+  default     = "off"
+  validation {
+    condition     = contains(["off", "userdata", "daemonset"], var.gdrcopy_mode)
+    error_message = "gdrcopy_mode must be one of: off, userdata, daemonset."
+  }
+  # Single gdrdrv loader. gdrcopy_mode is the node-side loader for the AMI-driver path;
+  # it must not run alongside the GPU Operator's own gdrcopy sidecar (which needs the
+  # operator to manage the driver). If both are active they race to load gdrdrv. This is a
+  # cross-variable validation (Terraform >= 1.9) so it hard-fails at plan time — unlike a
+  # `check` block, which only warns and would let a two-loader config apply.
+  validation {
+    condition     = var.gdrcopy_mode == "off" || !(var.gpu_operator_install_driver && var.gpu_operator_enable_gdrcopy)
+    error_message = "gdrcopy_mode is not \"off\" (node-side gdrdrv load) while the GPU Operator is also set to load gdrdrv (gpu_operator_install_driver && gpu_operator_enable_gdrcopy). Pick one loader: set gdrcopy_mode = \"off\", or disable the operator's gdrcopy."
+  }
+}
+
+variable "gdrcopy_loader_image" {
+  description = <<-EOT
+    Image for the gdrdrv-loader DaemonSet (gdrcopy_mode = "daemonset"). Only used to run
+    the host's dnf/modprobe via chroot, so any minimal AL2023-compatible base works. Pin
+    to a digest (…@sha256:…) in production per the same rationale as other images here;
+    the default mutable tag is for convenience.
+  EOT
+  type        = string
+  default     = "public.ecr.aws/amazonlinux/amazonlinux:2023"
 }
 
 # ── Component versions ────────────────────────────────────────────────────────

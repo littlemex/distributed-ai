@@ -216,6 +216,70 @@ locals {
           strategy: Raid0
   EOT
 
+  # gdrcopy (gdrdrv) install script, folded into a GPU pool's userData when
+  # var.gdrcopy_mode == "userdata". AL2023 ships gdrcopy-kmod as a native dkms package
+  # plus a gdrcopy.service systemd unit that loads gdrdrv AFTER nvidia and recreates
+  # /dev/gdrdrv on every boot — so installing the package once is enough and reboot
+  # persistence is the unit's job, not ours. Runs as a cloud-init x-shellscript, which
+  # nodeadm-run.service is ordered after, so gdrdrv is present before kubelet starts.
+  # We do NOT `set -e` on the whole node bringup: a failed gdrcopy install must not block
+  # the node from joining (gdrcopy is a latency optimization, not an EFA/NCCL requirement).
+  # The failure is logged; we deliberately do NOT write a marker file — a consumer that
+  # truly needs gdrcopy gates on the presence of /dev/gdrdrv itself, which is the real
+  # signal (a tmpfs marker would vanish on reboot and go stale against gdrcopy.service).
+  gdrcopy_install_script = <<-EOSH
+    #!/bin/bash
+    # gdrcopy(gdrdrv): GPUDirect small-message receive-copy latency optimization for EFA.
+    # The bulk GPUDirect RDMA path does not need this. The GPU Operator cannot provide it
+    # here because the driver is preinstalled in the AMI (its gdrcopy sidecar lives in the
+    # operator-managed driver DaemonSet, which does not exist with an AMI driver).
+    if dnf install -y gdrcopy-kmod; then
+      # gdrcopy.service (shipped by the rpm, auto-enabled) loads gdrdrv after nvidia and
+      # creates /dev/gdrdrv; enable --now is idempotent and makes this boot's node ready now.
+      systemctl enable --now gdrcopy.service || echo "gdrcopy: service start failed" >&2
+    else
+      echo "gdrcopy: dnf install gdrcopy-kmod failed; /dev/gdrdrv will be absent" >&2
+    fi
+  EOSH
+
+  # When gdrcopy_mode == "userdata", wrap the nodeadm NodeConfig and the install script in a
+  # cloud-init MIME multipart. The boundary is a project-specific token (not a generic word
+  # like "BOUNDARY") so it can never collide with a line in the NodeConfig or the script.
+  # trimspace + explicit "\n" guarantees each MIME boundary sits on its own line even if the
+  # embedded parts' trailing whitespace changes. Karpenter re-wraps AL2023 userData into its
+  # own multipart and merges a user-provided multipart into it; ALWAYS verify the final
+  # rendered userData on a fresh node with
+  #   aws ec2 describe-instance-attribute --instance-id <id> --attribute userData
+  # (base64 -d) — a Karpenter merge-order change cannot be caught at plan time.
+  gdrcopy_mime_boundary = "==tenantpools-gdrcopy-boundary=="
+  accelerator_user_data_mime = join("\n", [
+    "MIME-Version: 1.0",
+    "Content-Type: multipart/mixed; boundary=\"${local.gdrcopy_mime_boundary}\"",
+    "",
+    "--${local.gdrcopy_mime_boundary}",
+    "Content-Type: text/x-shellscript; charset=\"utf-8\"",
+    "",
+    trimspace(local.gdrcopy_install_script),
+    "--${local.gdrcopy_mime_boundary}",
+    "Content-Type: application/node.eks.aws",
+    "",
+    trimspace(local.accelerator_user_data),
+    "--${local.gdrcopy_mime_boundary}--",
+    "",
+  ])
+
+  # Per-pool effective userData: only nvidia GPU pools get the gdrcopy install script folded
+  # in (Neuron pools have no gdrdrv and would just log a spurious dnf failure every boot).
+  # This mirrors the DaemonSet path, which is scoped to GPU nodes by the nvidia.com/gpu.present
+  # nodeSelector — the two gdrcopy mechanisms stay symmetric in what they touch.
+  accelerator_user_data_by_pool = {
+    for k, p in var.accelerator_pools : k => (
+      var.gdrcopy_mode == "userdata" && p.device_plugin == "nvidia"
+      ? local.accelerator_user_data_mime
+      : local.accelerator_user_data
+    )
+  }
+
   # CPU pool nodeadm: same image-pull tuning, but NO localStorage Raid0 (m5a-class has no NVMe
   # instance store; imagefs = nodefs = the gp3 root). systemReserved is lighter (no accelerator
   # memory pressure). Paired with a higher gp3 throughput on the CPU NodeClass below.
@@ -293,7 +357,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
         networkInterfaces = local.pool_network_interfaces[each.key]
       } : {},
       {
-        userData = local.accelerator_user_data
+        userData = local.accelerator_user_data_by_pool[each.key]
         blockDeviceMappings = [{
           deviceName = "/dev/xvda"
           ebs = {

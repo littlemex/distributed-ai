@@ -145,3 +145,113 @@ resource "helm_release" "aws_efa_k8s_device_plugin" {
   # See the identical comment on helm_release.gpu_operator above.
   depends_on = [helm_release.karpenter]
 }
+
+# ---------------------------------------------------------------------------
+# 3. gdrdrv-loader DaemonSet — only when var.gdrcopy_mode == "daemonset".
+#
+#    FALLBACK path, not the recommended one. Prefer var.gdrcopy_mode = "userdata":
+#    it is declarative, keeps no standing privileged pod, and lets the rpm's
+#    gdrcopy.service own reboot persistence. This DaemonSet exists only for the case
+#    where you cannot recycle nodes to pick up a userData change and must load gdrdrv
+#    on already-running GPU nodes. It was verified end-to-end on a live node.
+#
+#    It installs AL2023's gdrcopy-kmod (dkms) and loads gdrdrv on GPU nodes whose driver
+#    is preinstalled in the AMI (so the GPU Operator's own gdrcopy sidecar cannot run).
+#    A container's own dnf cannot insert a module into the host kernel, so the install
+#    chroots into the host. To keep the standing attack surface small, that privileged,
+#    host-root-mounting work runs ONLY in an initContainer that exits once gdrdrv is
+#    loaded; the long-running pod is an unprivileged `pause` with no host mounts (the
+#    kernel module persists in the host independently of this pod). gdrcopy is a
+#    small-message latency optimization; the bulk GPUDirect RDMA path does not need it.
+resource "kubectl_manifest" "gdrdrv_loader" {
+  count = var.gdrcopy_mode == "daemonset" && local.has_gpu_pool ? 1 : 0
+
+  yaml_body = yamlencode({
+    apiVersion = "apps/v1"
+    kind       = "DaemonSet"
+    metadata = {
+      name      = "gdrdrv-loader"
+      namespace = "kube-system"
+      labels    = { app = "gdrdrv-loader" }
+    }
+    spec = {
+      selector = { matchLabels = { app = "gdrdrv-loader" } }
+      template = {
+        metadata = { labels = { app = "gdrdrv-loader" } }
+        spec = {
+          # nvidia.com/gpu.present is set by the GPU Operator's node-feature-discovery
+          # once a node is up; the loader lands only on GPU nodes.
+          nodeSelector      = { "nvidia.com/gpu.present" = "true" }
+          priorityClassName = "system-node-critical"
+          tolerations = [
+            { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+            { key = "vpc.amazonaws.com/efa", operator = "Exists", effect = "NoSchedule" },
+            { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
+          ]
+          # Privileged, host-root work is confined to the initContainer. It exits after
+          # loading gdrdrv; if it fails the pod restarts (kubelet backoff) and retries —
+          # a fail-closed retry loop, unlike the userData path's fail-open install (the
+          # asymmetry is intentional: on an already-running node we WANT to keep retrying).
+          initContainers = [{
+            name            = "load-gdrdrv"
+            image           = var.gdrcopy_loader_image
+            securityContext = { privileged = true }
+            command = ["/bin/bash", "-c", <<-EOSH
+              # No `set -e`: the if/elif/else below handles every outcome explicitly.
+              if chroot /host bash -c "lsmod | grep -q '^gdrdrv'"; then
+                echo "[gdrdrv-loader] gdrdrv already loaded"
+              elif chroot /host bash -c "dnf install -y gdrcopy-kmod && systemctl enable --now gdrcopy.service"; then
+                echo "[gdrdrv-loader] gdrcopy-kmod installed, gdrcopy.service started"
+              else
+                echo "[gdrdrv-loader] install/load failed; exiting for restart-backoff retry" >&2
+                exit 1
+              fi
+              # Verify the end state for real: gdrcopy.service starting is not proof gdrdrv
+              # actually loaded (dkms build can still fail). Require the module AND the device
+              # node, else exit non-zero so the pod restarts and retries rather than reporting
+              # success on a node with no /dev/gdrdrv.
+              if chroot /host bash -c 'lsmod | grep -q "^gdrdrv" && test -e /dev/gdrdrv'; then
+                chroot /host ls -l /dev/gdrdrv
+                echo "[gdrdrv-loader] verified: gdrdrv loaded, /dev/gdrdrv present"
+              else
+                echo "[gdrdrv-loader] gdrdrv not loaded or /dev/gdrdrv missing after install; retrying" >&2
+                exit 1
+              fi
+            EOSH
+            ]
+            volumeMounts = [{ name = "host", mountPath = "/host" }]
+            resources = {
+              requests = { cpu = "10m", memory = "32Mi" }
+              limits   = { cpu = "200m", memory = "256Mi" }
+            }
+          }]
+          # Unprivileged idle main: keeps the DaemonSet pod Running (so its status reflects
+          # "gdrdrv loaded on this node") without holding privilege or host mounts.
+          containers = [{
+            name    = "pause"
+            image   = var.gdrcopy_loader_image
+            command = ["/bin/bash", "-c", "trap 'exit 0' TERM; while true; do sleep 3600 & wait $!; done"]
+            securityContext = {
+              allowPrivilegeEscalation = false
+              readOnlyRootFilesystem   = true
+              runAsNonRoot             = true
+              runAsUser                = 65534
+              capabilities             = { drop = ["ALL"] }
+            }
+            resources = {
+              requests = { cpu = "10m", memory = "16Mi" }
+              limits   = { cpu = "50m", memory = "64Mi" }
+            }
+          }]
+          volumes = [{ name = "host", hostPath = { path = "/" } }]
+        }
+      }
+    }
+  })
+
+  depends_on = [helm_release.gpu_operator]
+}
+
+# Note: the "single gdrdrv loader" exclusivity is enforced as a hard plan-time error by a
+# cross-variable validation on var.gdrcopy_mode (variables.tf), not a `check` block here —
+# a `check` assert only warns and would still let a two-loader apply through.
