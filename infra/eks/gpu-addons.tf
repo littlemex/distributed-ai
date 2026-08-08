@@ -148,14 +148,21 @@ resource "helm_release" "aws_efa_k8s_device_plugin" {
 
 # ---------------------------------------------------------------------------
 # 3. gdrdrv-loader DaemonSet — only when var.gdrcopy_mode == "daemonset".
-#    Installs AL2023's gdrcopy-kmod (dkms) and loads gdrdrv on GPU nodes whose driver
+#
+#    FALLBACK path, not the recommended one. Prefer var.gdrcopy_mode = "userdata":
+#    it is declarative, keeps no standing privileged pod, and lets the rpm's
+#    gdrcopy.service own reboot persistence. This DaemonSet exists only for the case
+#    where you cannot recycle nodes to pick up a userData change and must load gdrdrv
+#    on already-running GPU nodes. It was verified end-to-end on a live node.
+#
+#    It installs AL2023's gdrcopy-kmod (dkms) and loads gdrdrv on GPU nodes whose driver
 #    is preinstalled in the AMI (so the GPU Operator's own gdrcopy sidecar cannot run).
-#    It chroots into the host to use the host's dnf (AL2023 repo) and modprobe: a
-#    container's own dnf cannot insert a module into the host kernel. gdrcopy is a
+#    A container's own dnf cannot insert a module into the host kernel, so the install
+#    chroots into the host. To keep the standing attack surface small, that privileged,
+#    host-root-mounting work runs ONLY in an initContainer that exits once gdrdrv is
+#    loaded; the long-running pod is an unprivileged `pause` with no host mounts (the
+#    kernel module persists in the host independently of this pod). gdrcopy is a
 #    small-message latency optimization; the bulk GPUDirect RDMA path does not need it.
-#    Prefer var.gdrcopy_mode = "userdata" (declarative, no standing pod, reboot handled
-#    by the rpm's gdrcopy.service); this DaemonSet exists for when nodes cannot be
-#    recycled to pick up a userData change, and was verified end-to-end on a live node.
 resource "kubectl_manifest" "gdrdrv_loader" {
   count = var.gdrcopy_mode == "daemonset" && local.has_gpu_pool ? 1 : 0
 
@@ -181,34 +188,47 @@ resource "kubectl_manifest" "gdrdrv_loader" {
             { key = "vpc.amazonaws.com/efa", operator = "Exists", effect = "NoSchedule" },
             { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
           ]
-          containers = [{
-            name            = "gdrdrv-loader"
-            image           = "public.ecr.aws/amazonlinux/amazonlinux:2023"
+          # Privileged, host-root work is confined to the initContainer. It exits after
+          # loading gdrdrv; if it fails the pod restarts (kubelet backoff) and retries —
+          # a fail-closed retry loop, unlike the userData path's fail-open install (the
+          # asymmetry is intentional: on an already-running node we WANT to keep retrying).
+          initContainers = [{
+            name            = "load-gdrdrv"
+            image           = var.gdrcopy_loader_image
             securityContext = { privileged = true }
             command = ["/bin/bash", "-c", <<-EOSH
-              set -uo pipefail
-              # chroot into the host to use its dnf (AL2023 repo) and modprobe; a container's
-              # own dnf cannot load a module into the host kernel.
+              # No `set -e`: the if/elif/else below handles every outcome explicitly.
               if chroot /host bash -c "lsmod | grep -q '^gdrdrv'"; then
                 echo "[gdrdrv-loader] gdrdrv already loaded"
               elif chroot /host bash -c "dnf install -y gdrcopy-kmod && systemctl enable --now gdrcopy.service"; then
                 echo "[gdrdrv-loader] gdrcopy-kmod installed, gdrcopy.service started"
               else
-                # Exit non-zero so the kubelet restarts us with backoff: a transient dnf/network
-                # failure then retries instead of sitting idle forever behind `sleep infinity`.
                 echo "[gdrdrv-loader] install/load failed; exiting for restart-backoff retry" >&2
                 exit 1
               fi
               chroot /host bash -c 'lsmod | grep "^gdrdrv" && ls -l /dev/gdrdrv' || true
-              # Loaded successfully; idle so the DaemonSet pod stays Running (gdrdrv itself
-              # persists in the host kernel independently of this pod's lifecycle).
-              sleep infinity
             EOSH
             ]
             volumeMounts = [{ name = "host", mountPath = "/host" }]
             resources = {
               requests = { cpu = "10m", memory = "32Mi" }
               limits   = { cpu = "200m", memory = "256Mi" }
+            }
+          }]
+          # Unprivileged idle main: keeps the DaemonSet pod Running (so its status reflects
+          # "gdrdrv loaded on this node") without holding privilege or host mounts.
+          containers = [{
+            name    = "pause"
+            image   = var.gdrcopy_loader_image
+            command = ["/bin/bash", "-c", "trap 'exit 0' TERM; while true; do sleep 3600 & wait $!; done"]
+            securityContext = {
+              allowPrivilegeEscalation = false
+              readOnlyRootFilesystem   = true
+              capabilities             = { drop = ["ALL"] }
+            }
+            resources = {
+              requests = { cpu = "10m", memory = "16Mi" }
+              limits   = { cpu = "50m", memory = "64Mi" }
             }
           }]
           volumes = [{ name = "host", hostPath = { path = "/" } }]
@@ -218,4 +238,21 @@ resource "kubectl_manifest" "gdrdrv_loader" {
   })
 
   depends_on = [helm_release.gpu_operator]
+}
+
+# Guard: the three gdrdrv-loading mechanisms (GPU Operator gdrcopy sidecar, userData,
+# DaemonSet) must never race to load the same module. gdrcopy_mode != "off" is for the
+# AMI-preinstalled-driver path only, where the operator's sidecar cannot run; if the
+# operator is also told to manage the driver AND enable gdrcopy, both would fight over
+# gdrdrv. Fail at plan time rather than produce a node with two installers.
+check "gdrcopy_single_loader" {
+  assert {
+    condition = var.gdrcopy_mode == "off" || !(var.gpu_operator_install_driver && var.gpu_operator_enable_gdrcopy)
+    error_message = join(" ", [
+      "gdrcopy_mode is \"${var.gdrcopy_mode}\" (node-side gdrdrv load) while the GPU Operator",
+      "is also set to manage the driver and enable gdrcopy",
+      "(gpu_operator_install_driver && gpu_operator_enable_gdrcopy).",
+      "Pick one gdrcopy loader: set gdrcopy_mode = \"off\", or disable the operator's gdrcopy.",
+    ])
+  }
 }

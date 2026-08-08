@@ -602,12 +602,14 @@ variable "gdrcopy_mode" {
     required for the bulk GPUDirect RDMA path, which is already active.
       "off"       — do nothing (default). /dev/gdrdrv is absent; NCCL logs a benign
                     "Failed to initialize GDRCopy" and falls back to an EFA loopback copy.
-      "userdata"  — install gdrcopy-kmod from the EC2NodeClass userData (a cloud-init
-                    x-shellscript part merged before the nodeadm NodeConfig). Declarative,
-                    no extra running pod; reboot persistence is handled by gdrcopy.service.
-      "daemonset" — install it from a privileged gdrdrv-loader DaemonSet on GPU nodes.
-                    Verified end-to-end on a live node; useful when you cannot recycle
-                    nodes to pick up a userData change.
+      "userdata"  — RECOMMENDED. Install gdrcopy-kmod from the EC2NodeClass userData (a
+                    cloud-init x-shellscript part merged before the nodeadm NodeConfig).
+                    Applied only to nvidia GPU pools. Declarative, no standing pod; reboot
+                    persistence is handled by gdrcopy.service. Requires a node roll to apply.
+      "daemonset" — FALLBACK for when you cannot recycle nodes. A gdrdrv-loader DaemonSet
+                    loads gdrdrv on already-running GPU nodes via a privileged initContainer
+                    (the long-running pod is unprivileged). Prefer "userdata" for steady state.
+    Only the AMI-driver path needs this; leave "off" once amazon-eks-ami loads gdrdrv itself.
   EOT
   type        = string
   default     = "off"
@@ -615,6 +617,17 @@ variable "gdrcopy_mode" {
     condition     = contains(["off", "userdata", "daemonset"], var.gdrcopy_mode)
     error_message = "gdrcopy_mode must be one of: off, userdata, daemonset."
   }
+}
+
+variable "gdrcopy_loader_image" {
+  description = <<-EOT
+    Image for the gdrdrv-loader DaemonSet (gdrcopy_mode = "daemonset"). Only used to run
+    the host's dnf/modprobe via chroot, so any minimal AL2023-compatible base works. Pin
+    to a digest (…@sha256:…) in production per the same rationale as other images here;
+    the default mutable tag is for convenience.
+  EOT
+  type        = string
+  default     = "public.ecr.aws/amazonlinux/amazonlinux:2023"
 }
 
 # ── Component versions ────────────────────────────────────────────────────────

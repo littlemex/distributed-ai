@@ -216,15 +216,17 @@ locals {
           strategy: Raid0
   EOT
 
-  # gdrcopy (gdrdrv) install script, folded into the accelerator userData when
+  # gdrcopy (gdrdrv) install script, folded into a GPU pool's userData when
   # var.gdrcopy_mode == "userdata". AL2023 ships gdrcopy-kmod as a native dkms package
   # plus a gdrcopy.service systemd unit that loads gdrdrv AFTER nvidia and recreates
   # /dev/gdrdrv on every boot — so installing the package once is enough and reboot
   # persistence is the unit's job, not ours. Runs as a cloud-init x-shellscript, which
   # nodeadm-run.service is ordered after, so gdrdrv is present before kubelet starts.
   # We do NOT `set -e` on the whole node bringup: a failed gdrcopy install must not block
-  # the node from joining. Instead the failure is surfaced (a marker file + log) so a pod
-  # that truly needs /dev/gdrdrv can gate on its presence rather than silently degrading.
+  # the node from joining (gdrcopy is a latency optimization, not an EFA/NCCL requirement).
+  # The failure is logged; we deliberately do NOT write a marker file — a consumer that
+  # truly needs gdrcopy gates on the presence of /dev/gdrdrv itself, which is the real
+  # signal (a tmpfs marker would vanish on reboot and go stale against gdrcopy.service).
   gdrcopy_install_script = <<-EOSH
     #!/bin/bash
     # gdrcopy(gdrdrv): GPUDirect small-message receive-copy latency optimization for EFA.
@@ -237,25 +239,46 @@ locals {
       systemctl enable --now gdrcopy.service || echo "gdrcopy: service start failed" >&2
     else
       echo "gdrcopy: dnf install gdrcopy-kmod failed; /dev/gdrdrv will be absent" >&2
-      touch /run/gdrcopy-install-failed
     fi
   EOSH
 
   # When gdrcopy_mode == "userdata", wrap the nodeadm NodeConfig and the install script in a
-  # cloud-init MIME multipart. Karpenter re-wraps AL2023 userData into its own multipart and
-  # appends its generated NodeConfig; a user-provided multipart is merged into that. ALWAYS
-  # verify the final rendered userData on a fresh node with
+  # cloud-init MIME multipart. The boundary is a project-specific token (not a generic word
+  # like "BOUNDARY") so it can never collide with a line in the NodeConfig or the script.
+  # trimspace + explicit "\n" guarantees each MIME boundary sits on its own line even if the
+  # embedded parts' trailing whitespace changes. Karpenter re-wraps AL2023 userData into its
+  # own multipart and merges a user-provided multipart into it; ALWAYS verify the final
+  # rendered userData on a fresh node with
   #   aws ec2 describe-instance-attribute --instance-id <id> --attribute userData
-  # (base64 -d) so a Karpenter merge-order change cannot silently drop the shellscript part.
-  accelerator_user_data_mime = format(
-    "MIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"BOUNDARY\"\n\n--BOUNDARY\nContent-Type: text/x-shellscript; charset=\"utf-8\"\n\n%s\n--BOUNDARY\nContent-Type: application/node.eks.aws\n\n%s\n--BOUNDARY--\n",
-    local.gdrcopy_install_script,
-    local.accelerator_user_data,
-  )
+  # (base64 -d) — a Karpenter merge-order change cannot be caught at plan time.
+  gdrcopy_mime_boundary = "==tenantpools-gdrcopy-boundary=="
+  accelerator_user_data_mime = join("\n", [
+    "MIME-Version: 1.0",
+    "Content-Type: multipart/mixed; boundary=\"${local.gdrcopy_mime_boundary}\"",
+    "",
+    "--${local.gdrcopy_mime_boundary}",
+    "Content-Type: text/x-shellscript; charset=\"utf-8\"",
+    "",
+    trimspace(local.gdrcopy_install_script),
+    "--${local.gdrcopy_mime_boundary}",
+    "Content-Type: application/node.eks.aws",
+    "",
+    trimspace(local.accelerator_user_data),
+    "--${local.gdrcopy_mime_boundary}--",
+    "",
+  ])
 
-  accelerator_user_data_effective = (
-    var.gdrcopy_mode == "userdata" ? local.accelerator_user_data_mime : local.accelerator_user_data
-  )
+  # Per-pool effective userData: only nvidia GPU pools get the gdrcopy install script folded
+  # in (Neuron pools have no gdrdrv and would just log a spurious dnf failure every boot).
+  # This mirrors the DaemonSet path, which is scoped to GPU nodes by the nvidia.com/gpu.present
+  # nodeSelector — the two gdrcopy mechanisms stay symmetric in what they touch.
+  accelerator_user_data_by_pool = {
+    for k, p in var.accelerator_pools : k => (
+      var.gdrcopy_mode == "userdata" && p.device_plugin == "nvidia"
+      ? local.accelerator_user_data_mime
+      : local.accelerator_user_data
+    )
+  }
 
   # CPU pool nodeadm: same image-pull tuning, but NO localStorage Raid0 (m5a-class has no NVMe
   # instance store; imagefs = nodefs = the gp3 root). systemReserved is lighter (no accelerator
@@ -334,7 +357,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
         networkInterfaces = local.pool_network_interfaces[each.key]
       } : {},
       {
-        userData = local.accelerator_user_data_effective
+        userData = local.accelerator_user_data_by_pool[each.key]
         blockDeviceMappings = [{
           deviceName = "/dev/xvda"
           ebs = {
