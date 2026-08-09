@@ -453,7 +453,10 @@ resource "kubectl_manifest" "dcgm_servicemonitor" {
       # has_gpu_pool, so gpu_operator[0] always exists here.
       namespace = helm_release.gpu_operator[0].namespace
       labels = {
-        release = "kps" # release-label discovery
+        # Must match the kps release name so Prometheus' release-label selector
+        # discovers this SM; derived from the release so a rename cannot silently
+        # break scraping. dcgm_sm_enabled implies enable_observability, so [0] exists.
+        release = helm_release.kube_prometheus_stack[0].name
       }
     }
     spec = {
@@ -523,11 +526,10 @@ resource "kubectl_manifest" "dashboard_gpu_tenant" {
 }
 
 # --- Node Monitoring Agent (detection only) ----------------------------------
-# EKS Node Monitoring Agent: a systemd-based agent (installed as an EKS add-on)
-# that emits NodeConditions for kernel / container-runtime / networking /
-# storage / accelerated-hardware faults. GPU faults come through NVML (XID,
-# double-bit ECC, NVLink/NVSwitch); this is a health *signal*, distinct from the
-# GPU Operator's DCGM exporter (continuous metrics).
+# EKS Node Monitoring Agent: emits NodeConditions for kernel / container-runtime
+# / networking / storage / accelerated-hardware faults. GPU faults come through
+# a bundled DCGM nv-hostengine (XID, double-bit ECC, NVLink/NVSwitch); this is a
+# health *signal*, distinct from the GPU Operator's DCGM exporter (metrics).
 #
 # Detection only: Karpenter node auto-repair (the NodeRepair feature gate, which
 # would terminate an unhealthy node) is intentionally NOT enabled. On a Capacity
@@ -538,23 +540,45 @@ resource "kubectl_manifest" "dashboard_gpu_tenant" {
 # replace stays with the job layer / an operator. See the reasoning in the blog
 # post referenced by the observability book chapter.
 #
-# Installed as a standalone aws_eks_addon (not a module.eks `addons` entry) on
-# purpose: adding to that map forces the Karpenter node IAM policy attachments to
-# be replaced. Same pattern as the EFS/FSx CSI addons.
-resource "aws_eks_addon" "node_monitoring_agent" {
+# Installed via HELM, not the EKS add-on. The add-on's configuration schema is
+# empty, so it gives no way to set tolerations — and its bundled `dcgm-server`
+# DaemonSet (the nv-hostengine that reads GPU health) ships with NO tolerations.
+# On this cluster the GPU pools carry a nvidia.com/gpu:NoSchedule taint, so under
+# the add-on the dcgm-server cannot land on any GPU node (DESIRED=0) and
+# AcceleratedHardwareReady stays stuck False (verified live — a detection gap
+# exactly on the nodes that matter). The Helm chart exposes dcgmAgent.tolerations,
+# so we install via Helm and grant the dcgm-server the GPU toleration explicitly.
+# This looks like an upstream oversight (the NMA agent itself tolerates all taints
+# but the dcgm-server does not); if AWS fixes it, the tolerations block below can
+# simply be dropped. The "cannot use an existing DCGM with the NMA" limitation is
+# tracked as https://github.com/aws/containers-roadmap/issues/2763; a dedicated
+# issue for the dcgm-server missing GPU-taint tolerations was not found — file one
+# and record the number here so this workaround has a clear removal trigger.
+resource "helm_release" "node_monitoring_agent" {
   count = var.enable_node_monitoring_agent ? 1 : 0
 
-  cluster_name  = module.eks.cluster_name
-  addon_name    = "eks-node-monitoring-agent"
-  addon_version = var.node_monitoring_agent_version # null => EKS default for the K8s version
+  name       = "eks-node-monitoring-agent"
+  repository = "https://aws.github.io/eks-node-monitoring-agent"
+  chart      = "eks-node-monitoring-agent"
+  version    = var.node_monitoring_agent_chart_version
+  namespace  = "kube-system"
 
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-
-  tags = {
-    Environment = var.environment
-    Project     = "distributed-ai"
-  }
+  # The ONLY override is the dcgm-server toleration below — the agent itself
+  # already tolerates all taints by default, so values stays minimal and this
+  # whole block can be deleted once upstream tolerates the GPU taint (see the
+  # comment above). THE FIX: the bundled dcgm-server (nv-hostengine) must
+  # tolerate the GPU taint to land on GPU nodes and read AcceleratedHardwareReady.
+  # Scoped to nvidia.com/gpu (not a blanket Exists) so it never leaks onto
+  # unrelated tainted nodes.
+  values = [yamlencode({
+    dcgmAgent = {
+      tolerations = [{
+        key      = "nvidia.com/gpu"
+        operator = "Exists"
+        effect   = "NoSchedule"
+      }]
+    }
+  })]
 }
 
 # --- Alerting rules for the Node Monitoring Agent's NodeConditions -----------
@@ -573,7 +597,9 @@ resource "kubectl_manifest" "node_health_alert_rules" {
     metadata = {
       name      = "node-monitoring-agent"
       namespace = local.observability_namespace
-      labels    = { release = "kps" } # release-label discovery
+      # Derived from the kps release name so a rename cannot silently drop these
+      # rules from Prometheus (a detection gap that itself would be unmonitored).
+      labels = { release = helm_release.kube_prometheus_stack[0].name }
     }
     spec = {
       groups = [{
@@ -584,11 +610,12 @@ resource "kubectl_manifest" "node_health_alert_rules" {
             expr  = "kube_node_status_condition{condition=\"AcceleratedHardwareReady\",status=\"true\"} == 0"
             "for" = "2m"
             labels = {
-              severity = "critical"
+              severity  = "critical"
+              component = "node-monitoring-agent"
             }
             annotations = {
               summary     = "Accelerated hardware unhealthy on {{ $labels.node }}"
-              description = "The Node Monitoring Agent reports AcceleratedHardwareReady=False (GPU/accelerator fault: XID, ECC, NVLink, etc.). A tightly-coupled job on this node is likely hung; investigate and let the job layer decide to drain/replace."
+              description = "AcceleratedHardwareReady=False. Either a real GPU/accelerator fault (XID, ECC, NVLink) — in which case a tightly-coupled job on this node is likely hung, so let the job layer decide to drain/replace — OR the NMA's dcgm-server DaemonSet is down/unschedulable on this node (check `kubectl get ds dcgm-server -n kube-system` first, since that also pins the condition False)."
             }
           },
           {
@@ -596,11 +623,29 @@ resource "kubectl_manifest" "node_health_alert_rules" {
             expr  = "kube_node_status_condition{condition=~\"KernelReady|ContainerRuntimeReady|NetworkingReady|StorageReady\",status=\"true\"} == 0"
             "for" = "5m"
             labels = {
-              severity = "warning"
+              severity  = "warning"
+              component = "node-monitoring-agent"
             }
             annotations = {
               summary     = "{{ $labels.condition }} is False on {{ $labels.node }}"
               description = "The Node Monitoring Agent reports {{ $labels.condition }}=False for 5m."
+            }
+          },
+          {
+            # Self-monitor the detector. NodeConditions do not auto-expire, so if
+            # the NMA agent (or dcgm-server) DaemonSet is down, its last reported
+            # condition goes stale and the two alerts above fall silent — a blind
+            # spot in a detection-only setup. Watch the DaemonSets themselves.
+            alert = "NodeMonitoringAgentDown"
+            expr  = "kube_daemonset_status_number_unavailable{namespace=\"kube-system\",daemonset=~\"eks-node-monitoring-agent|dcgm-server\"} > 0"
+            "for" = "10m"
+            labels = {
+              severity  = "warning"
+              component = "node-monitoring-agent"
+            }
+            annotations = {
+              summary     = "Node monitoring DaemonSet {{ $labels.daemonset }} has unavailable pods"
+              description = "{{ $labels.daemonset }} has unavailable pods for 10m; GPU/node health detection may be blind on the affected nodes."
             }
           },
         ]
