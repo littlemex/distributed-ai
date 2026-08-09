@@ -1,7 +1,20 @@
 # Experiment harness
 
 The driver, instrumentation, and analysis used for the training-inference mismatch runs in
-this directory. Roughly 70 runs on H100 and H200 capacity blocks went through this code.
+this directory. 100 runs across two clusters (July `distai-eks-smoke` H200, August
+`distai-p5-ue2` H100+H200) went through this code.
+
+## Where to find things
+
+| What | Path |
+|---|---|
+| **Confirmed numbers for the talk/blog** | `h200_results/PROVENANCE_SUMMARY.md` |
+| **Full experiment conditions (env files)** | `h200_results/EXPERIMENT_CONDITIONS.md` |
+| **mis_kl calculation logic (source-verified)** | `h200_results/MIS_KL_IMPLEMENTATION.md` |
+| Per-run GPU and framework attribution | `h200_results/PROVENANCE_LEDGER.md` (when created) |
+| Which numbers are引用可能 vs UNUSABLE | `h200_results/DATA_STATUS.md` |
+| Weight sync method comparison | `h200_results/P3M_METHOD_MATRIX.md` |
+| 30B MoE EP investigation | `moe_probe/` |
 
 ## Why it looks like this
 

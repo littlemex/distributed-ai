@@ -1,0 +1,166 @@
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="drawio" version="24.0.0" type="device">
+  <diagram id="cross-3d" name="cross-3d">
+    <mxGraphModel dx="1920" dy="1080" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" background="#F4FBF7" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="One arm towers: mis_kl and grad_norm blow up only at fp8 + LR 1e-5" style="text;html=1;align=center;verticalAlign=middle;fontSize=34;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="60" y="25" width="1800" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ================= LEFT PANEL: mis_kl ================= -->
+        <mxCell id="lp_title" value="mis_kl" style="text;html=1;align=center;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="350" y="170" width="300" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_note" value="(log height)" style="text;html=1;align=center;verticalAlign=middle;fontSize=18;fontColor=#5B7F6C;" vertex="1" parent="1">
+          <mxGeometry x="350" y="218" width="300" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- floor cells (back row first) -->
+        <mxCell id="lp_cell_BL" value="" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=110;fillColor=#E4F3EA;strokeColor=#9CC3AD;" vertex="1" parent="1">
+          <mxGeometry x="220" y="610" width="390" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_cell_BR" value="" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=110;fillColor=#D5EBDE;strokeColor=#9CC3AD;" vertex="1" parent="1">
+          <mxGeometry x="500" y="610" width="390" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_cell_FL" value="" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=110;fillColor=#D5EBDE;strokeColor=#9CC3AD;" vertex="1" parent="1">
+          <mxGeometry x="110" y="710" width="390" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_cell_FR" value="" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=110;fillColor=#E4F3EA;strokeColor=#9CC3AD;" vertex="1" parent="1">
+          <mxGeometry x="390" y="710" width="390" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- bars: back row then front row -->
+        <mxCell id="lp_bar_BL" value="" style="shape=cube;whiteSpace=wrap;html=1;size=16;fillColor=#2E8B57;strokeColor=#1B3A2D;darkOpacity=0.15;darkOpacity2=0.3;" vertex="1" parent="1">
+          <mxGeometry x="377" y="586" width="76" height="74" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_bar_BR" value="" style="shape=cube;whiteSpace=wrap;html=1;size=16;fillColor=#2E8B57;strokeColor=#1B3A2D;darkOpacity=0.15;darkOpacity2=0.3;" vertex="1" parent="1">
+          <mxGeometry x="657" y="440" width="76" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_bar_FL" value="" style="shape=cube;whiteSpace=wrap;html=1;size=16;fillColor=#2E8B57;strokeColor=#1B3A2D;darkOpacity=0.15;darkOpacity2=0.3;" vertex="1" parent="1">
+          <mxGeometry x="267" y="690" width="76" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_bar_FR" value="" style="shape=cube;whiteSpace=wrap;html=1;size=16;fillColor=#C62828;strokeColor=#7F1616;darkOpacity=0.15;darkOpacity2=0.3;" vertex="1" parent="1">
+          <mxGeometry x="547" y="436" width="76" height="324" as="geometry" />
+        </mxCell>
+
+        <!-- value labels -->
+        <mxCell id="lp_val_FL" value="~0.0006" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="215" y="650" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_val_BL" value="0.000668" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="330" y="548" width="170" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_val_FR" value="0.399" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#C62828;" vertex="1" parent="1">
+          <mxGeometry x="525" y="398" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_val_BR" value="0.0283" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="650" y="402" width="140" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- axis arrows + labels -->
+        <mxCell id="lp_kv_arrow" style="endArrow=blockThin;endFill=1;html=1;strokeColor=#1B3A2D;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="200" y="845" as="sourcePoint" />
+            <mxPoint x="700" y="845" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lp_kv_label" value="KV: bf16 &#8594; fp8_e5m2" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="280" y="855" width="340" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="lp_lr_arrow" style="endArrow=blockThin;endFill=1;html=1;strokeColor=#1B3A2D;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="295" y="605" as="sourcePoint" />
+            <mxPoint x="75" y="815" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lp_lr_label" value="LR: 1e-6 &#8594; 1e-5" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="10" y="640" width="185" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ================= RIGHT PANEL: grad_norm ================= -->
+        <mxCell id="rp_title" value="grad_norm" style="text;html=1;align=center;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="1270" y="170" width="300" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_note" value="(log height)" style="text;html=1;align=center;verticalAlign=middle;fontSize=18;fontColor=#5B7F6C;" vertex="1" parent="1">
+          <mxGeometry x="1270" y="218" width="300" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- floor cells -->
+        <mxCell id="rp_cell_BL" value="" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=110;fillColor=#E4F3EA;strokeColor=#9CC3AD;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="610" width="390" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_cell_BR" value="" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=110;fillColor=#D5EBDE;strokeColor=#9CC3AD;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="610" width="390" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_cell_FL" value="" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=110;fillColor=#D5EBDE;strokeColor=#9CC3AD;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="710" width="390" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_cell_FR" value="" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=110;fillColor=#E4F3EA;strokeColor=#9CC3AD;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="710" width="390" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- bars -->
+        <mxCell id="rp_bar_BL" value="" style="shape=cube;whiteSpace=wrap;html=1;size=16;fillColor=#2E8B57;strokeColor=#1B3A2D;darkOpacity=0.15;darkOpacity2=0.3;" vertex="1" parent="1">
+          <mxGeometry x="1297" y="520" width="76" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_bar_BR" value="" style="shape=cube;whiteSpace=wrap;html=1;size=16;fillColor=#2E8B57;strokeColor=#1B3A2D;darkOpacity=0.15;darkOpacity2=0.3;" vertex="1" parent="1">
+          <mxGeometry x="1577" y="500" width="76" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_bar_FL" value="" style="shape=cube;whiteSpace=wrap;html=1;size=16;fillColor=#2E8B57;strokeColor=#1B3A2D;darkOpacity=0.15;darkOpacity2=0.3;" vertex="1" parent="1">
+          <mxGeometry x="1187" y="620" width="76" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_bar_FR" value="" style="shape=cube;whiteSpace=wrap;html=1;size=16;fillColor=#C62828;strokeColor=#7F1616;darkOpacity=0.15;darkOpacity2=0.3;" vertex="1" parent="1">
+          <mxGeometry x="1467" y="442" width="76" height="318" as="geometry" />
+        </mxCell>
+
+        <!-- value labels -->
+        <mxCell id="rp_val_FL" value="~0.12" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="1155" y="582" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_val_BL" value="0.12" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="1265" y="482" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_val_FR" value="2.78" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#C62828;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="404" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_val_BR" value="0.17" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="1545" y="462" width="140" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- axis arrows + labels -->
+        <mxCell id="rp_kv_arrow" style="endArrow=blockThin;endFill=1;html=1;strokeColor=#1B3A2D;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1120" y="845" as="sourcePoint" />
+            <mxPoint x="1620" y="845" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rp_kv_label" value="KV: bf16 &#8594; fp8_e5m2" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="855" width="340" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="rp_lr_arrow" style="endArrow=blockThin;endFill=1;html=1;strokeColor=#1B3A2D;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1215" y="605" as="sourcePoint" />
+            <mxPoint x="995" y="815" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rp_lr_label" value="LR: 1e-6 &#8594; 1e-5" style="text;html=1;align=center;verticalAlign=middle;fontSize=22;fontColor=#1B3A2D;" vertex="1" parent="1">
+          <mxGeometry x="920" y="640" width="185" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- TAKEAWAY -->
+        <mxCell id="takeaway_bg" value="fp8 amplifies mis_kl at any LR &#8212; but the run only destabilizes when high LR is added" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DFF0E6;strokeColor=none;fontSize=30;fontStyle=1;fontColor=#1B3A2D;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="220" y="920" width="1480" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- FOOTER -->
+        <mxCell id="footer" value="H200, miles, Qwen3-4B, step 14. bf16 arms and low-LR fp8 arm remain at the floor." style="text;html=1;align=center;verticalAlign=middle;fontSize=16;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1005" width="1800" height="25" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

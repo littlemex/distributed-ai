@@ -1,0 +1,34 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="lineage" id="lineage-page">
+    <mxGraphModel dx="1920" dy="1080" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0" background="#F4FBF7">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="boxLeft" value="&lt;font style=&quot;font-size:36px&quot;&gt;&lt;b&gt;SLIME&lt;/b&gt;&lt;/font&gt;&lt;br&gt;&lt;br&gt;discovered the phenomenon" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#1B7A55;strokeWidth=3;fontColor=#14442F;fontSize=30;align=center;verticalAlign=middle;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="230" y="430" width="380" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="lblLeft" value="THUDM, 2025" style="text;html=1;align=center;verticalAlign=middle;fontColor=#8FA69B;fontSize=26;" vertex="1" parent="1">
+          <mxGeometry x="230" y="645" width="380" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="boxMid" value="&lt;font style=&quot;font-size:36px&quot;&gt;&lt;b&gt;Beyond Precision&lt;/b&gt;&lt;/font&gt;&lt;br&gt;&lt;br&gt;theoretical formalization, O(T^2) bound" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#1B7A55;strokeWidth=3;fontColor=#14442F;fontSize=30;align=center;verticalAlign=middle;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="690" y="430" width="400" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="lblMid" value="arXiv:2602.01826, Feb 2026" style="text;html=1;align=center;verticalAlign=middle;fontColor=#8FA69B;fontSize=26;" vertex="1" parent="1">
+          <mxGeometry x="690" y="645" width="400" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="boxRight" value="&lt;font style=&quot;font-size:40px&quot;&gt;&lt;b&gt;This work&lt;/b&gt;&lt;/font&gt;&lt;br&gt;&lt;br&gt;&lt;b style=&quot;font-size:32px&quot;&gt;KV cache quantization alone drives amplification. Monotone in mantissa bits: e4m3 ~12x, e5m2 ~45x&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B8860B;strokeWidth=5;fontColor=#14442F;fontSize=32;align=center;verticalAlign=middle;arcSize=8;spacing=20;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="390" width="520" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="annotation" value="validated: 3 seeds / 2 forks / H100 &amp;amp; H200 — details in following slides" style="text;html=1;align=center;verticalAlign=middle;fontColor=#8FA69B;fontSize=26;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="700" width="700" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#14442F;strokeWidth=4;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="boxLeft" target="boxMid">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#14442F;strokeWidth=4;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="boxMid" target="boxRight">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

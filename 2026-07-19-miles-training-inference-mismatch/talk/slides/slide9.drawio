@@ -1,0 +1,116 @@
+<mxfile host="app.diagrams.net"><diagram id="pageD" name="D before-after">
+    <mxGraphModel dx="1926" dy="1554" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" background="#F4FBF7" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="d_lpanel" parent="1" style="rounded=1;html=1;fillColor=#FFFFFF;strokeColor=#B0B0B0;strokeWidth=2;arcSize=4;" value="" vertex="1">
+          <mxGeometry height="916" width="620" x="60" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="d_lhead" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=32;fontStyle=1;fontColor=#444444;" value="WHAT WAS KNOWN" vertex="1">
+          <mxGeometry height="44" width="580" x="80" y="108" as="geometry" />
+        </mxCell>
+        <mxCell id="d_lsub" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#8A8A8A;" value="slime (2025) · Beyond Precision (2026)" vertex="1">
+          <mxGeometry height="40" width="580" x="80" y="174" as="geometry" />
+        </mxCell>
+        <mxCell id="d_lcap" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=32;fontColor=#C0392B;" value="&lt;font style=&quot;font-size:36px&quot;&gt;&lt;b&gt;KV fp8 → ~50×&lt;/b&gt;&lt;/font&gt;&amp;nbsp; mechanism ?" vertex="1">
+          <mxGeometry height="50" width="580" x="80" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="d_lbar" parent="1" style="rounded=0;html=1;fillColor=#C0392B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="400" width="160" x="220" y="308" as="geometry" />
+        </mxCell>
+        <mxCell id="d_lq" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=72;fontStyle=1;fontColor=#FFFFFF;" value="?" vertex="1">
+          <mxGeometry height="120" width="160" x="220" y="438" as="geometry" />
+        </mxCell>
+        <mxCell id="d_l50" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontStyle=1;fontColor=#FFFFFF;" value="~50×" vertex="1">
+          <mxGeometry height="50" width="160" x="220" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="d_lbase" parent="1" style="rounded=0;html=1;fillColor=#1B7A55;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="10" width="120" x="470" y="698" as="geometry" />
+        </mxCell>
+        <mxCell id="d_laxis" edge="1" parent="1" style="endArrow=none;html=1;strokeColor=#333333;strokeWidth=3;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="708" as="sourcePoint" />
+            <mxPoint x="620" y="708" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="d_llab1" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#C0392B;" value="fp8 KV" vertex="1">
+          <mxGeometry height="40" width="160" x="220" y="718" as="geometry" />
+        </mxCell>
+        <mxCell id="d_llab2" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#1B7A55;" value="bf16" vertex="1">
+          <mxGeometry height="40" width="160" x="450" y="718" as="geometry" />
+        </mxCell>
+        <mxCell id="d_lunres" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#8A8A8A;whiteSpace=wrap;" value="cause: KV quant? cuda graph? triton attn? — unresolved" vertex="1">
+          <mxGeometry height="60" width="580" x="80" y="764" as="geometry" />
+        </mxCell>
+        <mxCell id="d_lamber" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#B8860B;whiteSpace=wrap;" value="reference: training logprobs (bf16 Megatron)" vertex="1">
+          <mxGeometry height="50" width="580" x="80" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="d_arrow" parent="1" style="shape=singleArrow;html=1;fillColor=#1B7A55;strokeColor=none;arrowWidth=0.55;arrowSize=0.45;" value="" vertex="1">
+          <mxGeometry height="120" width="144" x="688" y="448" as="geometry" />
+        </mxCell>
+        <mxCell id="d_rpanel" parent="1" style="rounded=1;html=1;fillColor=#FFFFFF;strokeColor=#B0B0B0;strokeWidth=2;arcSize=4;" value="" vertex="1">
+          <mxGeometry height="916" width="1020" x="840" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="d_rhead" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=32;fontStyle=1;fontColor=#1B7A55;" value="THIS WORK — per-kernel ablation" vertex="1">
+          <mxGeometry height="44" width="980" x="860" y="108" as="geometry" />
+        </mxCell>
+        <mxCell id="d_b1" parent="1" style="rounded=0;html=1;fillColor=#1B7A55;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="10" width="140" x="900" y="738" as="geometry" />
+        </mxCell>
+        <mxCell id="d_v1" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontStyle=1;fontColor=#1B7A55;" value="0.000632" vertex="1">
+          <mxGeometry height="46" width="180" x="880" y="682" as="geometry" />
+        </mxCell>
+        <mxCell id="d_b2" parent="1" style="rounded=0;html=1;fillColor=#C0392B;strokeColor=none;fontColor=#FFFFFF;fontSize=36;fontStyle=1;verticalAlign=middle;" value="~45×" vertex="1">
+          <mxGeometry height="520" width="140" x="1080" y="228" as="geometry" />
+        </mxCell>
+        <mxCell id="d_v2" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontStyle=1;fontColor=#C0392B;" value="0.0324" vertex="1">
+          <mxGeometry height="46" width="180" x="1060" y="176" as="geometry" />
+        </mxCell>
+        <mxCell id="d_b3" parent="1" style="rounded=0;html=1;fillColor=#C0392B;strokeColor=none;fontColor=#FFFFFF;fontSize=36;fontStyle=1;verticalAlign=middle;" value="~12×" vertex="1">
+          <mxGeometry height="140" width="140" x="1260" y="608" as="geometry" />
+        </mxCell>
+        <mxCell id="d_v3" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontStyle=1;fontColor=#C0392B;" value="0.0087" vertex="1">
+          <mxGeometry height="46" width="180" x="1240" y="556" as="geometry" />
+        </mxCell>
+        <mxCell id="d_b4" parent="1" style="rounded=0;html=1;fillColor=#9E9E9E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="11" width="140" x="1440" y="737" as="geometry" />
+        </mxCell>
+        <mxCell id="d_v4" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontStyle=1;fontColor=#666666;" value="0.000671" vertex="1">
+          <mxGeometry height="46" width="176" x="1422" y="682" as="geometry" />
+        </mxCell>
+        <mxCell id="d_b5" parent="1" style="rounded=0;html=1;fillColor=#9E9E9E;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="11" width="140" x="1620" y="737" as="geometry" />
+        </mxCell>
+        <mxCell id="d_v5" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=36;fontStyle=1;fontColor=#666666;" value="0.000663" vertex="1">
+          <mxGeometry height="46" width="176" x="1602" y="634" as="geometry" />
+        </mxCell>
+        <mxCell id="d_raxis" edge="1" parent="1" style="endArrow=none;html=1;strokeColor=#333333;strokeWidth=3;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="880" y="748" as="sourcePoint" />
+            <mxPoint x="1820" y="748" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="d_x1" parent="1" style="text;html=1;align=center;verticalAlign=top;fontSize=28;fontColor=#1B7A55;" value="bf16&lt;br&gt;(baseline)" vertex="1">
+          <mxGeometry height="72" width="170" x="885" y="760" as="geometry" />
+        </mxCell>
+        <mxCell id="d_x2" parent="1" style="text;html=1;align=center;verticalAlign=top;fontSize=28;fontColor=#C0392B;" value="KV fp8&lt;br&gt;e5m2" vertex="1">
+          <mxGeometry height="72" width="170" x="1065" y="760" as="geometry" />
+        </mxCell>
+        <mxCell id="d_x3" parent="1" style="text;html=1;align=center;verticalAlign=top;fontSize=28;fontColor=#C0392B;" value="KV fp8&lt;br&gt;e4m3" vertex="1">
+          <mxGeometry height="72" width="170" x="1245" y="760" as="geometry" />
+        </mxCell>
+        <mxCell id="d_x4" parent="1" style="text;html=1;align=center;verticalAlign=top;fontSize=28;fontColor=#666666;" value="cuda graph&lt;br&gt;OFF" vertex="1">
+          <mxGeometry height="72" width="170" x="1425" y="760" as="geometry" />
+        </mxCell>
+        <mxCell id="d_x5" parent="1" style="text;html=1;align=center;verticalAlign=top;fontSize=28;fontColor=#666666;" value="triton&lt;br&gt;attn" vertex="1">
+          <mxGeometry height="72" width="170" x="1605" y="760" as="geometry" />
+        </mxCell>
+        <mxCell id="d_rpunch" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#1B7A55;whiteSpace=wrap;" value="Only KV cache dtype matters — cuda graph &amp;amp; triton contribute nothing; monotone in mantissa bits" vertex="1">
+          <mxGeometry height="60" width="980" x="860" y="866" as="geometry" />
+        </mxCell>
+        <mxCell id="d_valid" parent="1" style="text;html=1;align=right;verticalAlign=middle;fontSize=28;fontStyle=2;fontColor=#8A8A8A;" value="&lt;font style=&quot;font-size: 36px;&quot;&gt;validated: 3 seeds / 2 forks / H100 &amp;amp; H200&lt;/font&gt;" vertex="1">
+          <mxGeometry height="40" width="560" x="1300" y="1010" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram></mxfile>

@@ -1,0 +1,183 @@
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="draw.io" version="24.0.0" type="device">
+  <diagram id="pageA" name="A table">
+    <mxGraphModel dx="1200" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0" background="#F4FBF7">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="titleA" value="Measurement Conditions (H200 / miles)" style="text;html=1;fontSize=40;fontStyle=1;fontColor=#123B2C;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="20" width="1760" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="commonBox" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="80" y="90" width="1760" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="commonTitle" value="Common conditions (all runs)" style="text;html=1;fontSize=28;fontStyle=1;fontColor=#1B7A55;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="110" y="98" width="800" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="commonCol1" value="GPU: H200 &#215;8 (p5en.48xlarge), single node&lt;br&gt;Framework: miles (SGLang 0.5.16 + Megatron-LM + Ray)&lt;br&gt;Model: Qwen3-4B dense, bf16 weights &#183; Dropout 0 &#183; Seed 1234" style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="110" y="140" width="860" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="commonCol2" value="Data: DAPO-Math-17k &#183; Colocated topology (CUDA IPC weight sync)&lt;br&gt;Orchestration: Amazon EKS + KubeRay + FSx for Lustre&lt;br&gt;TIS: measurement only (get_mismatch_metrics: true, tis_mode: none)" style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="990" y="140" width="830" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="h1" value="Measurement" style="rounded=0;fillColor=#E3F4EC;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#123B2C;align=left;spacingLeft=14;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="300" width="340" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="h2" value="LR" style="rounded=0;fillColor=#E3F4EC;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#123B2C;align=center;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="300" width="160" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="h3" value="KV cache" style="rounded=0;fillColor=#E3F4EC;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#123B2C;align=left;spacingLeft=14;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="580" y="300" width="280" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="h4" value="Steps" style="rounded=0;fillColor=#E3F4EC;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#123B2C;align=left;spacingLeft=14;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="860" y="300" width="380" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="h5" value="Purpose" style="rounded=0;fillColor=#E3F4EC;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#123B2C;align=left;spacingLeft=14;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="300" width="600" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="r1c1" value="1 &#183; Baseline measurement" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="364" width="340" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r1c2" value="1e-6" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=center;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="364" width="160" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r1c3" value="bf16 (auto)" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="580" y="364" width="280" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r1c4" value="&lt;b&gt;step 0 &#8212; no optimizer update&lt;/b&gt;" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="860" y="364" width="380" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r1c5" value="Establish the baseline mis_kl with no amplification" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=2;fontColor=#1B7A55;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="364" width="600" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r2c1" value="2 &#183; fp8 amplification measurement" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="500" width="340" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r2c2" value="1e-6" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=center;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="500" width="160" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r2c3" value="fp8_e5m2" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="580" y="500" width="280" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r2c4" value="&lt;b&gt;step 0 &#8212; no optimizer update&lt;/b&gt;" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="860" y="500" width="380" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r2c5" value="Measure the amplified mis_kl under fp8 quantization" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=2;fontColor=#1B7A55;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="500" width="600" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r3c1" value="3 &#183; Collapse observation" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="636" width="340" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r3c2" value="1e-5" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=center;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="636" width="160" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r3c3" value="fp8_e5m2 &#183; TIS off" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="580" y="636" width="280" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r3c4" value="25 steps" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="860" y="636" width="380" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r3c5" value="Observe whether amplified mismatch leads to training collapse over time" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=2;fontColor=#1B7A55;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="636" width="600" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r4c1" value="4 &#183; Rescue observation" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=1;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="772" width="340" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r4c2" value="1e-5" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=center;verticalAlign=middle;html=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="772" width="160" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r4c3" value="fp8_e5m2 &#183; TIS on (cap=2.0)" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="580" y="772" width="280" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r4c4" value="30 steps" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontColor=#24332B;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="860" y="772" width="380" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="r4c5" value="Confirm TIS prevents the collapse under the same amplified conditions" style="rounded=0;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;fontSize=28;fontStyle=2;fontColor=#1B7A55;align=left;spacingLeft=14;verticalAlign=middle;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="772" width="600" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="keyNote" value="Key design point: at &lt;b&gt;step 0 no optimizer update runs&lt;/b&gt; &#8212; weights are identical and LR is irrelevant, isolating the mismatch to the computation path. In #3/#4, LR=1e-5 is deliberately high to trigger collapse within a feasible number of steps." style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="80" y="922" width="1760" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="footerA" value="H100, slime, and LR variations also measured for cross-validation. Direction reproduces; details in appendix." style="text;html=1;fontSize=24;fontColor=#8FA69B;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="1010" width="1760" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="pageB" name="B cards">
+    <mxGraphModel dx="1200" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0" background="#F4FBF7">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="titleB" value="Measurement Conditions (H200 / miles)" style="text;html=1;fontSize=40;fontStyle=1;fontColor=#123B2C;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="20" width="1760" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="sidebar" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="430" height="850" as="geometry" />
+        </mxCell>
+        <mxCell id="sbTitle" value="Common (all runs)" style="text;html=1;fontSize=28;fontStyle=1;fontColor=#1B7A55;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="85" y="122" width="380" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="sbList" value="GPU: H200 &#215;8 (p5en.48xlarge), single node&lt;br&gt;&lt;br&gt;miles (SGLang 0.5.16 + Megatron-LM + Ray)&lt;br&gt;&lt;br&gt;Qwen3-4B dense, bf16 &#183; Dropout 0 &#183; Seed 1234&lt;br&gt;&lt;br&gt;Data: DAPO-Math-17k&lt;br&gt;&lt;br&gt;Amazon EKS + KubeRay + FSx for Lustre&lt;br&gt;&lt;br&gt;Colocated (CUDA IPC weight sync)&lt;br&gt;&lt;br&gt;TIS: measurement only (get_mismatch_metrics: true, tis_mode: none)" style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="85" y="170" width="380" height="520" as="geometry" />
+        </mxCell>
+        <mxCell id="sbKeyTitle" value="Key design point" style="text;html=1;fontSize=28;fontStyle=1;fontColor=#1B7A55;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="85" y="700" width="380" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="sbKeyText" value="&lt;b&gt;Step 0 = no optimizer update&lt;/b&gt;: weights identical, LR irrelevant &#8212; isolates the computation path. LR=1e-5 in #3/#4 is deliberately high to trigger collapse." style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="85" y="745" width="380" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="card1" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="530" y="110" width="650" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="c1t" value="1 &#183; Baseline measurement" style="text;html=1;fontSize=30;fontStyle=1;fontColor=#123B2C;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="555" y="125" width="600" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c1c" value="LR: 1e-6&lt;br&gt;KV cache: bf16 (auto)&lt;br&gt;Steps: &lt;b&gt;step 0 &#8212; no optimizer update&lt;/b&gt;" style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="555" y="185" width="600" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="c1p" value="Establish the baseline mis_kl with no amplification." style="text;html=1;fontSize=28;fontStyle=2;fontColor=#1B7A55;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="555" y="360" width="600" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="card2" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1210" y="110" width="650" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="c2t" value="2 &#183; fp8 amplification measurement" style="text;html=1;fontSize=30;fontStyle=1;fontColor=#123B2C;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="125" width="600" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c2c" value="LR: 1e-6&lt;br&gt;KV cache: fp8_e5m2&lt;br&gt;Steps: &lt;b&gt;step 0 &#8212; no optimizer update&lt;/b&gt;" style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="185" width="600" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="c2p" value="Measure the amplified mis_kl under fp8 quantization." style="text;html=1;fontSize=28;fontStyle=2;fontColor=#1B7A55;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="360" width="600" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="card3" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="530" y="550" width="650" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="c3t" value="3 &#183; Collapse observation" style="text;html=1;fontSize=30;fontStyle=1;fontColor=#123B2C;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="555" y="565" width="600" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c3c" value="LR: 1e-5&lt;br&gt;KV cache: fp8_e5m2 &#183; TIS off&lt;br&gt;Steps: 25" style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="555" y="625" width="600" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="c3p" value="Observe whether amplified mismatch leads to training collapse over time." style="text;html=1;fontSize=28;fontStyle=2;fontColor=#1B7A55;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="555" y="800" width="600" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="card4" value="" style="rounded=1;arcSize=6;fillColor=#FFFFFF;strokeColor=#CDE9DC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1210" y="550" width="650" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="c4t" value="4 &#183; Rescue observation" style="text;html=1;fontSize=30;fontStyle=1;fontColor=#123B2C;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="565" width="600" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c4c" value="LR: 1e-5&lt;br&gt;KV cache: fp8_e5m2 &#183; TIS on (cap=2.0)&lt;br&gt;Steps: 30" style="text;html=1;fontSize=28;fontColor=#24332B;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="625" width="600" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="c4p" value="Confirm TIS prevents the collapse under the same amplified conditions." style="text;html=1;fontSize=28;fontStyle=2;fontColor=#1B7A55;align=left;verticalAlign=top;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="800" width="600" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="footerB" value="H100, slime, and LR variations also measured for cross-validation. Direction reproduces; details in appendix." style="text;html=1;fontSize=24;fontColor=#8FA69B;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="990" width="1800" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
