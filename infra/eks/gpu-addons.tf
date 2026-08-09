@@ -56,6 +56,15 @@ locals {
       # gdrcopy-validation blocks forever and the device plugin never advertises GPUs.
       # Off by default; gdrcopy is a GPUDirect latency optimization, not required for NCCL.
       gdrcopy = { enabled = var.gpu_operator_enable_gdrcopy }
+      # NOTE: do NOT enable the operator's standalone DCGM (dcgm.enabled) for the
+      # Node Monitoring Agent. The NMA bundles its OWN nv-hostengine as a
+      # `dcgm-server` DaemonSet that binds hostPort 5555; AWS docs state you
+      # cannot use an existing DCGM installation with the NMA. The operator's
+      # standalone DCGM also binds hostPort 5555, so the two DaemonSets fight over
+      # that port and whichever lands second stays Pending, leaving
+      # AcceleratedHardwareReady stuck False (verified live). Leaving dcgm disabled
+      # keeps dcgm-exporter in its default EMBEDDED mode (own DCGM, containerPort
+      # 9400, no hostPort), which coexists cleanly with the NMA's dcgm-server.
       # DCGM ServiceMonitor is emitted by observability.tf (kubectl_manifest.dcgm_servicemonitor),
       # NOT by the operator. The operator's built-in SM cannot relabel node labels, so it cannot
       # stamp the karpenter-tenant-pools `tenant` label onto GPU metrics. observability.tf's
