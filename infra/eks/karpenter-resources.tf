@@ -299,6 +299,31 @@ locals {
           maxParallelImagePulls: ${local.image_pull_max_parallel}
           imageMaximumGCAge: "${local.image_maximum_gc_age}"
   EOT
+
+  # Shared EC2NodeClass spec for the general-purpose CPU-class pools (the `cpu`
+  # NodePool here and the `monitoring` NodePool in observability.tf). Both run
+  # plain AL2023 on a gp3 root with the same image-pull tuning; keeping one spec
+  # means a disk/AMI change is made once, not copy-pasted per pool. The
+  # cpu_node_volume_* variables therefore size the monitoring nodes too.
+  general_cpu_nodeclass_spec = merge(local.nodeclass_common, {
+    amiSelectorTerms = [{ alias = "al2023@latest" }]
+    # CPU-class nodes have no NVMe instance store, so imagefs = the gp3 root. gp3's 125MiB/s
+    # baseline throughput is the real bottleneck for a multi-GB image pull (download + extract
+    # both write here). Raise it (throughput is cheap and node lifetime is short); IOPS matched.
+    blockDeviceMappings = [{
+      deviceName = "/dev/xvda"
+      ebs = {
+        volumeSize          = var.cpu_node_volume_size
+        volumeType          = "gp3"
+        throughput          = var.cpu_node_volume_throughput
+        iops                = var.cpu_node_volume_iops
+        deleteOnTermination = true
+        encrypted           = true
+      }
+    }]
+    # Image-pull tuning (containerd parallel download + kubelet parallel pull + GC age bound).
+    userData = local.cpu_user_data
+  })
 }
 
 # ── EC2 placement groups for pools that request one ────────────────────────────
@@ -380,7 +405,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
         for t in each.value.instance_types :
         format("%d/%s",
           data.aws_ec2_instance_type.pool_rep[t].efa_supported ? coalesce(data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces, 0) : 0,
-          data.aws_ec2_instance_type.pool_rep[t].efa_supported && coalesce(data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces, 0) > 1)
+        data.aws_ec2_instance_type.pool_rep[t].efa_supported && coalesce(data.aws_ec2_instance_type.pool_rep[t].efa_maximum_interfaces, 0) > 1)
       ])) == 1
       error_message = "Pool ${each.key} mixes instance types with different EFA topologies (${join(", ", each.value.instance_types)}). All instance_types in a pool must share the same EFA card count and multi-card layout."
     }
@@ -390,7 +415,7 @@ resource "kubectl_manifest" "accelerator_nodeclass" {
         local.pool_efa[each.key].count == 0 ||
         !(
           (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_supported &&
-           coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces, 0) > 1) &&
+          coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[each.key]].efa_maximum_interfaces, 0) > 1) &&
           (local.pool_efa[each.key].count <= 1 || !local.pool_efa[each.key].multi_card)
         )
       )
@@ -600,25 +625,8 @@ resource "kubectl_manifest" "ec2nodeclass_cpu" {
     apiVersion = "karpenter.k8s.aws/v1"
     kind       = "EC2NodeClass"
     metadata   = { name = "cpu" }
-    spec = merge(local.nodeclass_common, {
-      amiSelectorTerms = [{ alias = "al2023@latest" }]
-      # CPU nodes have no NVMe instance store, so imagefs = the gp3 root. gp3's 125MiB/s baseline
-      # throughput is the real bottleneck for a multi-GB image pull (download + extract both write
-      # here). Raise it (throughput is cheap and node lifetime is short). IOPS bumped to match.
-      blockDeviceMappings = [{
-        deviceName = "/dev/xvda"
-        ebs = {
-          volumeSize          = var.cpu_node_volume_size
-          volumeType          = "gp3"
-          throughput          = var.cpu_node_volume_throughput
-          iops                = var.cpu_node_volume_iops
-          deleteOnTermination = true
-          encrypted           = true
-        }
-      }]
-      # Image-pull tuning (containerd parallel download + kubelet parallel pull + GC age bound).
-      userData = local.cpu_user_data
-    })
+    # Shared with the monitoring NodeClass (observability.tf) via this local.
+    spec = local.general_cpu_nodeclass_spec
   })
 
   # See the identical comment on kubectl_manifest.accelerator_nodeclass above.

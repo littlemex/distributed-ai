@@ -1026,3 +1026,67 @@ variable "cloudfront_web_acl_id" {
   type        = string
   default     = ""
 }
+
+###############################################################################
+# Observability (observability.tf) — kube-prometheus-stack. On by default.
+###############################################################################
+
+variable "enable_observability" {
+  description = "Deploy the kube-prometheus-stack (Prometheus + Grafana + DCGM GPU metrics) on a dedicated monitoring NodePool. On by default."
+  type        = bool
+  default     = true
+}
+
+variable "kube_prometheus_stack_version" {
+  description = "Helm chart version for kube-prometheus-stack (prometheus-community). Pin it: the chart carries CRDs, so unattended version drift is unsafe. See README for the CRD upgrade step."
+  type        = string
+  default     = "75.6.0" # attachMetadata(node) supported; bump per README CRD step
+}
+
+variable "prometheus_retention" {
+  description = "Prometheus TSDB retention by time."
+  type        = string
+  default     = "15d"
+}
+
+variable "prometheus_retention_size" {
+  description = "Prometheus TSDB size cap (oldest blocks dropped on overflow). Second bound so a series spike cannot fill the disk and crash-loop Prometheus. Leave null to derive ~90% of prometheus_storage_size automatically."
+  type        = string
+  default     = null
+}
+
+variable "prometheus_storage_size" {
+  description = "Prometheus PVC size (gp3)."
+  type        = string
+  default     = "50Gi"
+}
+
+variable "grafana_storage_size" {
+  description = "Grafana PVC size (gp3)."
+  type        = string
+  default     = "10Gi"
+}
+
+variable "observability_storage_class" {
+  description = "StorageClass name the monitoring PVCs reference. Default gp3, created by this module (see observability_storage_class_create) because a cluster's default SC may still be the in-tree gp2."
+  type        = string
+  default     = "gp3"
+}
+
+variable "observability_storage_class_create" {
+  description = "Create the gp3 EBS-CSI StorageClass named observability_storage_class. Set false to reference a pre-existing StorageClass of that name instead (avoids clobbering an existing immutable SC)."
+  type        = bool
+  default     = true
+}
+
+variable "observability_instance_categories" {
+  description = "Instance categories for the dedicated monitoring NodePool (Karpenter karpenter.k8s.aws/instance-category). Defaults to general-purpose/memory families; monitoring is memory-bound."
+  type        = list(string)
+  default     = ["c", "m"]
+}
+
+variable "tenant_node_label_key" {
+  description = "Node label key stamped by karpenter-tenant-pools (Experiment01) on tenant nodes; observability relabels it to a `tenant` label on GPU metrics. Keep in sync with the operator's configuration."
+  type        = string
+  default     = "tenantpools.dev/tenant"
+}

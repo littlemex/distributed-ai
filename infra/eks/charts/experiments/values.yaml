@@ -407,7 +407,7 @@ gpuServingVllm:
   # the run was stopped (2026-08-03). Check with:
   #   kubectl get nodes -l node-role=<pool> -o custom-columns=\
   #     'TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,MEM:.status.allocatable.memory'
-  # Verified: memory=8Gi + shmSize=2Gi fits a g6.xlarge (12.6Gi allocatable).
+  # Verified: memory=8Gi + shmSize=2Gi fits a g6.xlarge (12925972Ki ~= 12.3Gi allocatable).
   memory: 48Gi
   # CPU request. Keep well below the pool's smallest node's allocatable so the pod
   # schedules: a g6.2xlarge/g5.2xlarge (8 vCPU) has ~7.9 allocatable after kube/system
@@ -472,7 +472,7 @@ vllmRay:
   # the run was stopped (2026-08-03). Check with:
   #   kubectl get nodes -l node-role=<pool> -o custom-columns=\
   #     'TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,MEM:.status.allocatable.memory'
-  # Verified: memory=8Gi + shmSize=2Gi fits a g6.xlarge (12.6Gi allocatable).
+  # Verified: memory=8Gi + shmSize=2Gi fits a g6.xlarge (12925972Ki ~= 12.3Gi allocatable).
   memory: 48Gi
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -56,11 +56,13 @@ locals {
       # gdrcopy-validation blocks forever and the device plugin never advertises GPUs.
       # Off by default; gdrcopy is a GPUDirect latency optimization, not required for NCCL.
       gdrcopy = { enabled = var.gpu_operator_enable_gdrcopy }
-      # Emit a ServiceMonitor for the DCGM exporter so kube-prometheus-stack (Basic08) can
-      # scrape GPU metrics. The chart default is false; without it the Prometheus
-      # serviceMonitorSelector has nothing to match and no GPU metrics are collected.
+      # DCGM ServiceMonitor is emitted by observability.tf (kubectl_manifest.dcgm_servicemonitor),
+      # NOT by the operator. The operator's built-in SM cannot relabel node labels, so it cannot
+      # stamp the karpenter-tenant-pools `tenant` label onto GPU metrics. observability.tf's
+      # self-managed SM uses attachMetadata(node)=true + relabeling for that. Keep this false to
+      # avoid a duplicate scrape of the same DCGM endpoint.
       dcgmExporter = {
-        serviceMonitor = { enabled = true }
+        serviceMonitor = { enabled = false }
       }
     }
   )
@@ -123,7 +125,17 @@ resource "helm_release" "gpu_operator" {
   # manages a per-node ClusterPolicy/device-plugin DaemonSet, and removing it while a GPU
   # node is still draining can itself stall (observed live: an uninstall got stuck
   # "uninstalling" with a live GPU node present).
-  depends_on = [helm_release.karpenter]
+  #
+  # kube_prometheus_stack dependency: observability.tf's self-managed DCGM ServiceMonitor
+  # needs the servicemonitors CRD (installed by kps) present before it is applied, and the
+  # GPU Operator's own resources must be torn down before kps removes that CRD. Ordering the
+  # operator AFTER kps gives create "monitoring -> GPU" and destroy "GPU -> monitoring".
+  # When enable_observability=false the referenced resource has count=0 (empty), so the
+  # dependency is simply inert.
+  depends_on = [
+    helm_release.karpenter,
+    helm_release.kube_prometheus_stack,
+  ]
 }
 
 # ---------------------------------------------------------------------------

@@ -115,8 +115,8 @@ output "shared_storage" {
   EOT
   value = {
     fsx_lustre = {
-      enabled = var.fsx_enabled
-      id      = var.fsx_enabled ? aws_fsx_lustre_file_system.training[0].id : ""
+      enabled  = var.fsx_enabled
+      id       = var.fsx_enabled ? aws_fsx_lustre_file_system.training[0].id : ""
       dns_name = var.fsx_enabled ? aws_fsx_lustre_file_system.training[0].dns_name : ""
       # mount_name is what the CSI driver needs alongside the DNS name; easy to miss otherwise.
       mount_name        = var.fsx_enabled ? aws_fsx_lustre_file_system.training[0].mount_name : ""
@@ -140,4 +140,31 @@ output "shared_storage" {
       persistent_volume = "efs-neuron-workspace"
     }
   }
+}
+
+###############################################################################
+# Observability (observability.tf)
+###############################################################################
+
+output "grafana_admin_password" {
+  description = "Grafana admin password. Fetch with: terraform output -raw grafana_admin_password"
+  value       = var.enable_observability ? random_password.grafana_admin[0].result : null
+  sensitive   = true
+}
+
+output "grafana_access" {
+  description = "How to reach Grafana (port-forward for verification; production should front it with an internal LB + OIDC)."
+  value = var.enable_observability ? join("\n", [
+    "kubectl -n monitoring port-forward svc/kps-grafana 3000:80",
+    "# -> http://localhost:3000  (user: admin)",
+    "# password: terraform output -raw grafana_admin_password",
+  ]) : null
+}
+
+output "prometheus_access" {
+  description = "How to reach Prometheus (fullnameOverride=kps -> service name kps-prometheus)."
+  value = var.enable_observability ? join("\n", [
+    "kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090",
+    "# -> http://localhost:9090",
+  ]) : null
 }
