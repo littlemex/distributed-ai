@@ -1026,3 +1026,92 @@ variable "cloudfront_web_acl_id" {
   type        = string
   default     = ""
 }
+
+###############################################################################
+# Observability (observability.tf) — kube-prometheus-stack. On by default.
+###############################################################################
+
+variable "enable_observability" {
+  description = "Deploy the kube-prometheus-stack (Prometheus + Grafana + DCGM GPU metrics) on a dedicated monitoring NodePool. On by default."
+  type        = bool
+  default     = true
+}
+
+variable "enable_node_monitoring_agent" {
+  description = "Install the EKS Node Monitoring Agent (detection only). It emits NodeConditions (KernelReady/StorageReady/NetworkingReady/AcceleratedHardwareReady etc.) for kernel/network/storage/GPU faults. Karpenter node auto-repair is intentionally NOT enabled here — this surfaces faults for alerting, it does not terminate nodes."
+  type        = bool
+  default     = true
+}
+
+variable "node_monitoring_agent_version" {
+  description = "Version of the eks-node-monitoring-agent EKS add-on. Leave null to let EKS pick the default for the cluster's Kubernetes version."
+  type        = string
+  default     = null
+}
+
+variable "kube_prometheus_stack_version" {
+  description = "Helm chart version for kube-prometheus-stack (prometheus-community). Pin it: the chart carries CRDs, so unattended version drift is unsafe. See README for the CRD upgrade step."
+  type        = string
+  default     = "75.6.0" # attachMetadata(node) supported; bump per README CRD step
+}
+
+variable "prometheus_retention" {
+  description = "Prometheus TSDB retention by time."
+  type        = string
+  default     = "15d"
+}
+
+variable "prometheus_retention_size" {
+  description = "Prometheus TSDB size cap (oldest blocks dropped on overflow). Second bound so a series spike cannot fill the disk and crash-loop Prometheus. Leave null to derive ~90% of prometheus_storage_size automatically."
+  type        = string
+  default     = null
+  validation {
+    # Prometheus accepts B|KB|MB|GB|TB|PB|EB for retentionSize (NOT the "Gi"
+    # Kubernetes form). A wrong unit applies cleanly but crash-loops Prometheus
+    # at runtime, which Terraform cannot see — so validate the override here.
+    condition     = var.prometheus_retention_size == null || can(regex("^[0-9]+(B|KB|MB|GB|TB|PB|EB)$", var.prometheus_retention_size))
+    error_message = "prometheus_retention_size must be null or a Prometheus size like \"45GB\" (units B|KB|MB|GB|TB|PB|EB, not Gi)."
+  }
+}
+
+variable "prometheus_storage_size" {
+  description = "Prometheus PVC size, as \"<int>Gi\". prometheus_retention_size is derived from this (~90%) when left null, so the format is load-bearing."
+  type        = string
+  default     = "50Gi"
+  validation {
+    # try() so a non-"<int>Gi" value surfaces this message instead of a raw
+    # tonumber() error (Terraform's && does not short-circuit the second term).
+    condition     = can(regex("^[0-9]+Gi$", var.prometheus_storage_size)) && try(tonumber(trimsuffix(var.prometheus_storage_size, "Gi")) >= 2, false)
+    error_message = "prometheus_storage_size must be \"<int>Gi\" and at least 2Gi (prometheus_retention_size derives from it)."
+  }
+}
+
+variable "grafana_storage_size" {
+  description = "Grafana PVC size (gp3)."
+  type        = string
+  default     = "10Gi"
+}
+
+variable "observability_storage_class" {
+  description = "StorageClass name the monitoring PVCs reference. Default gp3, created by this module (see observability_storage_class_create) because a cluster's default SC may still be the in-tree gp2."
+  type        = string
+  default     = "gp3"
+}
+
+variable "observability_storage_class_create" {
+  description = "Create the gp3 EBS-CSI StorageClass named observability_storage_class. Set false to reference a pre-existing StorageClass of that name instead (avoids clobbering an existing immutable SC)."
+  type        = bool
+  default     = true
+}
+
+variable "observability_instance_categories" {
+  description = "Instance categories for the dedicated monitoring NodePool (Karpenter karpenter.k8s.aws/instance-category). Defaults to general-purpose/memory families; monitoring is memory-bound."
+  type        = list(string)
+  default     = ["c", "m"]
+}
+
+variable "tenant_node_label_key" {
+  description = "Node label key stamped by karpenter-tenant-pools (Experiment01) on tenant nodes; observability relabels it to a `tenant` label on GPU metrics. Keep in sync with the operator's configuration."
+  type        = string
+  default     = "tenantpools.dev/tenant"
+}

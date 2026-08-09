@@ -34,6 +34,12 @@ module "eks" {
   # aws-fsx-csi-driver is NOT listed here — fsx.tf manages it as a standalone
   # aws_eks_addon resource (with a pinned version and its own Pod Identity association).
   ################################################################################
+  # NOTE: the Node Monitoring Agent addon is installed as a standalone
+  # aws_eks_addon (observability.tf), NOT here. Adding an entry to this module
+  # `addons` map re-evaluates the whole module dependency graph and forces the
+  # Karpenter node IAM policy attachments to be replaced (policy ARNs go
+  # "known after apply"), which would momentarily detach live nodes' permissions.
+  # The standalone resource (same pattern as the EFS/FSx CSI addons) avoids that.
   addons = {
     vpc-cni = {
       before_compute = true

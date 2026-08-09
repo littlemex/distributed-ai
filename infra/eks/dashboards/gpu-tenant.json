@@ -1,0 +1,123 @@
+{
+  "title": "GPU Utilization by Tenant",
+  "uid": "gpu-tenant",
+  "schemaVersion": 39,
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["gpu", "dcgm", "tenant"],
+  "templating": {
+    "list": [
+      {
+        "name": "tenant",
+        "label": "Tenant",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(DCGM_FI_DEV_GPU_UTIL, tenant)", "refId": "tenant_var" },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "GPU Count by Tenant",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (tenant) (DCGM_FI_DEV_GPU_UTIL{tenant=~\"$tenant\"})",
+          "legendFormat": "{{tenant}}"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "value_and_name" }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "GPU Utilization (%)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 18, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (tenant, gpu) (DCGM_FI_DEV_GPU_UTIL{tenant=~\"$tenant\"})",
+          "legendFormat": "{{tenant}} / gpu{{gpu}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "GPU Memory Used / Free (MiB)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "mbytes", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (tenant, gpu) (DCGM_FI_DEV_FB_USED{tenant=~\"$tenant\"})",
+          "legendFormat": "used {{tenant}} / gpu{{gpu}}"
+        },
+        {
+          "refId": "B",
+          "expr": "avg by (tenant, gpu) (DCGM_FI_DEV_FB_FREE{tenant=~\"$tenant\"})",
+          "legendFormat": "free {{tenant}} / gpu{{gpu}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "SM Clock",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "hertz", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (tenant, gpu) (DCGM_FI_DEV_SM_CLOCK{tenant=~\"$tenant\"}) * 1e6",
+          "legendFormat": "{{tenant}} / gpu{{gpu}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "GPU Temperature (C)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "celsius", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (tenant, gpu) (DCGM_FI_DEV_GPU_TEMP{tenant=~\"$tenant\"})",
+          "legendFormat": "{{tenant}} / gpu{{gpu}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Power Usage (W)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "watt", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (tenant, gpu) (DCGM_FI_DEV_POWER_USAGE{tenant=~\"$tenant\"})",
+          "legendFormat": "{{tenant}} / gpu{{gpu}}"
+        }
+      ]
+    }
+  ]
+}
