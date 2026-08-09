@@ -42,11 +42,12 @@ locals {
     format("%dGB", floor(tonumber(trimsuffix(var.prometheus_storage_size, "Gi")) * 0.9)),
   )
 
-  # The karpenter-tenant-pools node label, and its Prometheus meta-label form.
-  # Prometheus sanitizes label keys ('.' and '/' -> '_') when exposing node
-  # labels as __meta_kubernetes_node_label_*; derive that form so changing the
-  # key in one variable keeps the relabeling correct instead of silently blank.
-  tenant_meta_label = "__meta_kubernetes_node_label_${replace(replace(var.tenant_node_label_key, ".", "_"), "/", "_")}"
+  # The karpenter-tenant-pools node label in its Prometheus meta-label form.
+  # Prometheus sanitizes any character outside [a-zA-Z0-9_] to '_' when exposing
+  # node labels as __meta_kubernetes_node_label_*; derive that form (regex, not a
+  # ./ -only replace) so any label key — including one with hyphens — keeps the
+  # relabeling correct instead of silently producing a blank tenant label.
+  tenant_meta_label = "__meta_kubernetes_node_label_${replace(var.tenant_node_label_key, "/[^a-zA-Z0-9_]/", "_")}"
 
   # node-role-separation.md: monitoring is a general CPU workload, not a
   # cluster-recovery prerequisite, so it does NOT go on the system sanctuary.
@@ -279,7 +280,9 @@ resource "kubectl_manifest" "nodepool_monitoring" {
     metadata   = { name = "monitoring" }
     spec = {
       template = {
-        metadata = { labels = { "node-role" = "monitoring" } }
+        # Same local the stack's nodeSelector uses, so the pool label and the
+        # selector cannot drift (a mismatch would leave every pod Pending).
+        metadata = { labels = local.observability_node_selector }
         spec = {
           nodeClassRef = {
             group = "karpenter.k8s.aws"
@@ -513,6 +516,95 @@ resource "kubectl_manifest" "dashboard_gpu_tenant" {
     }
     data = {
       "gpu-tenant.json" = file("${path.module}/dashboards/gpu-tenant.json")
+    }
+  })
+
+  depends_on = [helm_release.kube_prometheus_stack]
+}
+
+# --- Node Monitoring Agent (detection only) ----------------------------------
+# EKS Node Monitoring Agent: a systemd-based agent (installed as an EKS add-on)
+# that emits NodeConditions for kernel / container-runtime / networking /
+# storage / accelerated-hardware faults. GPU faults come through NVML (XID,
+# double-bit ECC, NVLink/NVSwitch); this is a health *signal*, distinct from the
+# GPU Operator's DCGM exporter (continuous metrics).
+#
+# Detection only: Karpenter node auto-repair (the NodeRepair feature gate, which
+# would terminate an unhealthy node) is intentionally NOT enabled. On a Capacity
+# Block cluster running tightly-coupled training, an auto-terminate can churn a
+# still-diagnosable, pre-paid GPU node and even re-draw the same faulty host from
+# the reservation. Instead the NodeConditions surface via kube-state-metrics into
+# the Prometheus/Grafana stack above for alerting, and the decision to drain or
+# replace stays with the job layer / an operator. See the reasoning in the blog
+# post referenced by the observability book chapter.
+#
+# Installed as a standalone aws_eks_addon (not a module.eks `addons` entry) on
+# purpose: adding to that map forces the Karpenter node IAM policy attachments to
+# be replaced. Same pattern as the EFS/FSx CSI addons.
+resource "aws_eks_addon" "node_monitoring_agent" {
+  count = var.enable_node_monitoring_agent ? 1 : 0
+
+  cluster_name  = module.eks.cluster_name
+  addon_name    = "eks-node-monitoring-agent"
+  addon_version = var.node_monitoring_agent_version # null => EKS default for the K8s version
+
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = {
+    Environment = var.environment
+    Project     = "distributed-ai"
+  }
+}
+
+# --- Alerting rules for the Node Monitoring Agent's NodeConditions -----------
+# Makes the "surface for alerting" intent real: without a rule the NodeConditions
+# are only visible if someone opens a dashboard. These fire on the condition
+# going False; with alertmanager disabled (kps_values) they still show in the
+# Prometheus UI / Alerts, and enabling alertmanager later routes them with no
+# further change. AcceleratedHardwareReady is critical (a GPU fault kills a
+# tightly-coupled training job); the rest are warnings.
+resource "kubectl_manifest" "node_health_alert_rules" {
+  count = var.enable_node_monitoring_agent && var.enable_observability ? 1 : 0
+
+  yaml_body = yamlencode({
+    apiVersion = "monitoring.coreos.com/v1"
+    kind       = "PrometheusRule"
+    metadata = {
+      name      = "node-monitoring-agent"
+      namespace = local.observability_namespace
+      labels    = { release = "kps" } # release-label discovery
+    }
+    spec = {
+      groups = [{
+        name = "node-monitoring-agent"
+        rules = [
+          {
+            alert = "AcceleratedHardwareUnhealthy"
+            expr  = "kube_node_status_condition{condition=\"AcceleratedHardwareReady\",status=\"true\"} == 0"
+            "for" = "2m"
+            labels = {
+              severity = "critical"
+            }
+            annotations = {
+              summary     = "Accelerated hardware unhealthy on {{ $labels.node }}"
+              description = "The Node Monitoring Agent reports AcceleratedHardwareReady=False (GPU/accelerator fault: XID, ECC, NVLink, etc.). A tightly-coupled job on this node is likely hung; investigate and let the job layer decide to drain/replace."
+            }
+          },
+          {
+            alert = "NodeConditionUnhealthy"
+            expr  = "kube_node_status_condition{condition=~\"KernelReady|ContainerRuntimeReady|NetworkingReady|StorageReady\",status=\"true\"} == 0"
+            "for" = "5m"
+            labels = {
+              severity = "warning"
+            }
+            annotations = {
+              summary     = "{{ $labels.condition }} is False on {{ $labels.node }}"
+              description = "The Node Monitoring Agent reports {{ $labels.condition }}=False for 5m."
+            }
+          },
+        ]
+      }]
     }
   })
 
