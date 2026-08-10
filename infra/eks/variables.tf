@@ -1129,6 +1129,17 @@ variable "observability_instance_categories" {
   default     = ["c", "m"]
 }
 
+variable "observability_zone" {
+  description = "AZ to pin the monitoring NodePool to (topology.kubernetes.io/zone). Prometheus/Grafana hold ReadWriteOnce EBS PVCs that are AZ-local, so every monitoring node must land in the AZ where those volumes live or the stack hangs Pending on a volume node affinity conflict. Leave null to derive the first cluster AZ (azs[0]) — correct for a fresh deploy. If observability was FIRST deployed before this pin existed, its PVCs may already live in another AZ; set this to that AZ (kubectl get pv -o jsonpath of the monitoring PVs) so the pin matches reality instead of stranding the volumes."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.observability_zone == null || can(regex("^[a-z]{2}-[a-z]+-[0-9][a-z]$", var.observability_zone))
+    error_message = "observability_zone must be null or an AZ id like \"us-east-2a\"."
+  }
+}
+
 variable "tenant_node_label_key" {
   description = "Node label key stamped by karpenter-tenant-pools (Experiment01) on tenant nodes; observability relabels it to a `tenant` label on GPU metrics. Keep in sync with the operator's configuration."
   type        = string

@@ -31,22 +31,24 @@ locals {
 
   observability_namespace = "monitoring"
 
+  # AZ the monitoring NodePool is pinned to (see the nodepool zone requirement).
+  # Explicit var.observability_zone wins; otherwise the first cluster AZ.
+  observability_zone = coalesce(var.observability_zone, local.azs[0])
+
   # Tolerations for the Node Monitoring Agent's bundled dcgm-server (reads GPU
-  # health via nv-hostengine). It must land on every GPU node, and this cluster's
-  # GPU nodes can carry TWO taints: the module-owned nvidia.com/gpu device-plugin
-  # taint (karpenter-resources.tf) AND, on Capacity Block nodes, a per-reservation
-  # `capacity-reservation` taint. Missing the latter leaves dcgm-server Pending on
-  # exactly the pre-paid CB GPU nodes that matter most — and, worse, keeps
-  # AcceleratedHardwareReady False there, firing the AcceleratedHardwareUnhealthy
-  # alert forever. This mirrors the GPU Operator / EFA device-plugin toleration
-  # sets in gpu-addons.tf. It stays scoped (not a blanket Exists) so dcgm-server
-  # never leaks onto unrelated tainted nodes; neuron is omitted on purpose since
-  # dcgm-server reads NVIDIA GPUs only. The tenant-pool user taints are Exists-
-  # tolerated by the per-tenant workloads, not by this base component.
-  dcgm_server_tolerations = [
+  # health via nv-hostengine). It must land on every GPU node, which can carry the
+  # module-owned nvidia.com/gpu device-plugin taint (karpenter-resources.tf), a
+  # per-reservation `capacity-reservation` taint on Capacity Block nodes, AND any
+  # user pool taints. Missing the CB taint leaves dcgm-server Pending on exactly the
+  # pre-paid CB GPU nodes that matter most — and worse, keeps AcceleratedHardwareReady
+  # False there, firing AcceleratedHardwareUnhealthy forever; a user taint pool has
+  # the identical failure mode, so we pull those from the shared ledger. neuron is
+  # omitted on purpose (dcgm-server reads NVIDIA GPUs only). Kept scoped (Exists per
+  # known key, not a blanket toleration) so it never leaks onto unrelated tainted nodes.
+  dcgm_server_tolerations = concat([
     { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
     { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
-  ]
+  ], local.user_taint_tolerations)
 
   # Grafana dashboards shipped as sidecar-discovered ConfigMaps. Declaring them as
   # a map (rather than one resource each) keeps "which dashboard, which folder,
@@ -75,7 +77,7 @@ locals {
     }
   }
 
-  # Prometheus/Grafana size their TSDB cap from the PVC unless overridden: derive
+  # Prometheus sizes its TSDB retention cap from the PVC unless overridden: derive
   # ~90% of prometheus_storage_size so raising the PVC does not silently leave the
   # retention cap behind. (Gi -> GB is close enough for a soft cap.)
   prometheus_retention_size = coalesce(
@@ -387,13 +389,30 @@ resource "kubectl_manifest" "nodepool_monitoring" {
               operator = "In"
               values   = ["linux"]
             },
+            {
+              # Pin the pool to a single AZ. Prometheus and Grafana hold ReadWriteOnce
+              # EBS PVCs; an EBS volume is AZ-local. The StorageClass is
+              # WaitForFirstConsumer so a PVC binds in whichever AZ the first node lands —
+              # but if a later node (e.g. a Drift-driven AMI rollout) came up in a
+              # different AZ, that AZ-locked PVC could not attach and the stack would hang
+              # Pending with a volume node affinity conflict. Pinning the AZ makes every
+              # monitoring node land where the PVCs already live. (The accelerator pools
+              # pin AZ too, for EFA/CB reasons — see karpenter-resources.tf.) Defaults to
+              # azs[0] (deterministic for a fresh deploy); var.observability_zone overrides
+              # it when existing PVCs already live in another AZ — see the variable docs.
+              key      = "topology.kubernetes.io/zone"
+              operator = "In"
+              values   = [local.observability_zone]
+            },
           ]
           expireAfter = "Never"
         }
       }
-      # WhenEmpty (not WhenEmptyOrUnderutilized): reclaim only a truly empty node.
-      # consolidateAfter=10m (not Never): if enable_observability is later turned
-      # off, the drained node is cleaned up instead of lingering forever.
+      # WhenEmpty (not WhenEmptyOrUnderutilized): reclaim only a truly empty node,
+      # never one that is merely underutilized — this tier is resident. consolidateAfter=10m
+      # (not Never) still lets Karpenter reclaim a node that legitimately goes empty (a
+      # transient scale-to-zero, or a rollout that briefly leaves the node bare) after a
+      # 10m grace, rather than holding an idle on-demand node forever.
       #
       # No taint is a deliberate trade-off, not a guarantee of isolation. The
       # node-role=monitoring nodeSelector on the stack only pulls the monitoring
@@ -408,6 +427,20 @@ resource "kubectl_manifest" "nodepool_monitoring" {
       disruption = {
         consolidationPolicy = "WhenEmpty"
         consolidateAfter    = "10m"
+        # Drift (e.g. an AMI/nodeclass change) disrupts nodes regardless of
+        # consolidationPolicy. This tier is a single-replica stateful stack on an
+        # AZ-locked EBS PVC, so an involuntary Drift replacement means a monitoring
+        # outage while the volume re-attaches (and, if it re-attaches cleanly, only
+        # because the AZ is now pinned above). Block Drift/underutilization-style
+        # disruption entirely; still allow Emptiness so a truly empty node (e.g. after
+        # enable_observability=false) is reclaimed. AMI updates then happen on our
+        # terms (bump the nodeclass and let the node roll when we choose), not mid-scrape.
+        budgets = [
+          {
+            nodes   = "0"
+            reasons = ["Drifted", "Underutilized"]
+          },
+        ]
       }
       # Safety valve: cap the tier so a runaway never balloons the bill. This is
       # a ~1-2 node tier in practice.
@@ -734,11 +767,14 @@ resource "kubectl_manifest" "node_health_alert_rules" {
           },
           {
             alert = "NodeConditionUnhealthy"
-            # status="true" == 0 means the Ready series is not true, which covers
-            # BOTH False and Unknown (a stale/unreported condition), so it also
-            # catches a node whose NMA stopped reporting — intended for a
-            # detection-only setup. The message says "not True" rather than "False"
-            # so on-call does not go hunting for an explicit False that may be Unknown.
+            # status="true" == 0 means the Ready series is present but not true, i.e. the
+            # NMA actively reported the condition False (or, rarely, Unknown). It does NOT
+            # catch an NMA that has STOPPED reporting: a stale NodeCondition keeps its last
+            # value (Kubernetes has no controller that flips a non-Ready condition to Unknown
+            # when its reporter dies), so the series simply freezes at its last-seen value.
+            # That blind spot is covered by NodeMonitoringAgentDown below, which watches the
+            # DaemonSets directly. The message says "not True" so on-call is not misled into
+            # hunting for an explicit False when the value could be Unknown.
             expr  = "kube_node_status_condition{condition=~\"KernelReady|ContainerRuntimeReady|NetworkingReady|StorageReady\",status=\"true\"} == 0"
             "for" = "5m"
             labels = {
