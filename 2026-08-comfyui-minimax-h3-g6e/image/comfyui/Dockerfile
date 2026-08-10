@@ -19,22 +19,27 @@
 # Everything version-bearing is a build ARG so the image is reproducible AND bumpable
 # from the build Job without editing this file.
 
-ARG CUDA_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+ARG CUDA_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 FROM ${CUDA_IMAGE}
 
 # ── Versions (all overridable at build time) ────────────────────────────────────
 # COMFYUI_REF  : git tag/sha of ComfyUI to bake in. Pin a RELEASE for reproducibility.
-# TORCH_INDEX  : the PyTorch wheel index matching the CUDA base (cu124 for 12.4).
+# TORCH_INDEX  : the PyTorch wheel index matching the CUDA base (cu126 for 12.6).
 # TORCH_*      : pinned torch stack. ComfyUI's requirements.txt lists a BARE `torch` (no
-#                version), so without these pins the build would grab "whatever cu124 has
-#                today" and drift between rebuilds. 2.6.0+cu124 is the newest cu124 wheel set.
+#                version), so without these pins the build would drift between rebuilds.
+#                MUST be torch >= 2.7: ComfyUI v0.31's native comfy_kitchen ops annotate
+#                torch.library custom ops with PEP 585 builtin generics (list[int]), which
+#                torch <= 2.6's infer_schema rejects with "unsupported type list[int]" at
+#                import (verified live on 2.6.0+cu124 — ComfyUI crashed on startup). torch
+#                2.8.0 needs a CUDA >= 12.6 wheel index, hence the cu126 base above. The L40S
+#                node's driver (AL2023 GPU AMI, 570+) is CUDA 12.6/12.8-capable.
 # COMFYUI_MANAGER: bake in ComfyUI-Manager (interactive node management) — optional.
-# All refs below are verified to exist (git ls-remote / the cu124 wheel index) as of 2026-08.
+# All refs verified to exist (git ls-remote / the cu126 wheel index) as of 2026-08.
 ARG COMFYUI_REF=v0.31.1
-ARG TORCH_INDEX=https://download.pytorch.org/whl/cu124
-ARG TORCH_VERSION=2.6.0
-ARG TORCHVISION_VERSION=0.21.0
-ARG TORCHAUDIO_VERSION=2.6.0
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu126
+ARG TORCH_VERSION=2.8.0
+ARG TORCHVISION_VERSION=0.23.0
+ARG TORCHAUDIO_VERSION=2.8.0
 ARG COMFYUI_MANAGER_REF=4.2.2
 ARG COMFYUI_MANAGER=true
 
@@ -65,13 +70,15 @@ WORKDIR /opt/ComfyUI
 
 # PyTorch first (PINNED, from the CUDA-matched index), then ComfyUI's own requirements.
 # Splitting the layers keeps the big torch download cached across ComfyUI requirement bumps.
-# The +cu124 local version tag ties each wheel to this CUDA base.
+# The +<cuda> local version tag is DERIVED from the last path segment of TORCH_INDEX (e.g.
+# cu126), so the wheel's CUDA suffix can never drift from the index it is pulled from.
 ARG HF_HUB_VERSION=0.34.4
 RUN python -m pip install --upgrade pip \
+    && CUDA_TAG="$(basename "${TORCH_INDEX}")" \
     && python -m pip install \
-        "torch==${TORCH_VERSION}+cu124" \
-        "torchvision==${TORCHVISION_VERSION}+cu124" \
-        "torchaudio==${TORCHAUDIO_VERSION}+cu124" \
+        "torch==${TORCH_VERSION}+${CUDA_TAG}" \
+        "torchvision==${TORCHVISION_VERSION}+${CUDA_TAG}" \
+        "torchaudio==${TORCHAUDIO_VERSION}+${CUDA_TAG}" \
         --index-url "${TORCH_INDEX}" \
     && python -m pip install -r requirements.txt \
     # huggingface_hub[hf_transfer] is baked in so the model-fetch Job can reuse THIS image
