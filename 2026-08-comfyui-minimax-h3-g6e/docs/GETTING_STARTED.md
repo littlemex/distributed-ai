@@ -78,13 +78,23 @@ helm template comfyui ./charts/comfyui \
   -s templates/image-build-comfyui.yaml \
   --set imageBuild.enabled=true \
   --set imageBuild.repository="$ECR_URL" \
-  --set imageBuild.tag=v1 | kubectl apply -f -
+  --set imageBuild.tag=v1 \
+  --set imageBuild.gitRef="$(git rev-parse --abbrev-ref HEAD)" | kubectl apply -f -
 
 kubectl -n image-builder wait --for=condition=complete job/build-comfyui-v1 --timeout=45m
 kubectl -n image-builder logs -f job/build-comfyui-v1            # follow the build
 # If the image push failed on auth, inspect the init step:
 #   kubectl -n image-builder logs job/build-comfyui-v1 -c ecr-login
 ```
+
+> **BuildKit fetches the Dockerfile from git, not your local checkout.** `imageBuild.gitRef`
+> must be a ref that is PUSHED to `imageBuild.gitRepo` (default the branch you are on, above) —
+> a local-only commit will build stale. Push first, or point gitRef at the merged branch.
+
+> **Verified toolchain (2026-08):** the image pins ComfyUI v0.31.1 on **torch 2.8.0 + CUDA 12.6**.
+> This is not optional: ComfyUI v0.31's native `comfy_kitchen` ops use PEP 585 `list[int]`
+> annotations that torch <= 2.6 rejects at import (the pod CrashLoops on startup). The Dockerfile
+> defaults already encode this; do not downgrade torch below 2.7.
 
 > Rebuild a new ComfyUI version without editing the Dockerfile: bump the tag and pass the
 > version as a build-arg, e.g. `--set imageBuild.tag=v2 --set imageBuild.buildArgs.COMFYUI_REF=<tag>`.

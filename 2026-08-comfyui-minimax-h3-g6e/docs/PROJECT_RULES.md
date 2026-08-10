@@ -53,13 +53,25 @@
 ## 6. weights はイメージに焼かない
 
 - MiniMax-H3 の約 40GB はイメージ非同梱。共有ファイルシステム（OpenZFS `/shared`）に
-  `model-fetch` Job で一度だけ取得し、Pod 再起動で使い回す。fetch は冪等（存在ファイルは skip）。
+  `model-fetch` Job で一度だけ取得し、Pod 再起動で使い回す。fetch は冪等（size検証つき skip）。
 
-## 7. 手順の正直さ
+## 7. image-cache 機構の取捨は明示する
 
-- 検証できない socket 名で API ワークフローを捏造しない。UI 形式テンプレは UI の
-  Save (API Format) で1回変換する、という最小の手動操作を明示する。
-- 実機未検証の項目は「未検証」と `docs/PROJECT_STATUS.md` に明記する。症状消失を成功と呼ばない。
+- base の image-cache は2層: (a) 並列 pull(`maxParallelImagePulls=8`, accelerator ノードの
+  userData に焼かれ **自動適用**)、(b) `image-prewarm` DaemonSet(per-pool で node-local
+  キャッシュ常駐、opt-in)。
+- 本プロジェクトは **(a) を享受、(b) は未使用**。理由: 単一 Pod・単一ノード・on-demand
+  +do-not-disrupt でノードが基本入れ替わらないため prewarm の便益が薄い。**spot 混在や
+  複数レプリカに拡張するなら prewarm を入れる**(values に repo@digest を渡すだけ)。
+- 取捨を silent にしない(Fable 方針: 「黙って端折る」は不誠実)。
+
+## 8. 手順の正直さ
+
+- 検証できない socket 名で API ワークフローを捏造しない。T2V は live `/object_info` で全 node の
+  input を検証した core-node graph を `workflows/*.api.json` としてコミット済み。I2V/R2V は
+  未整備なので、UI の Save(API Format) で1回変換する手動手順を明示する。
+- 実機検証の結果は `docs/PROJECT_STATUS.md` に事実として記録する（成功/失敗/未検証を区別。
+  torch<=2.6 の起動 crash のような実機発見も隠さず残す）。症状消失を成功と呼ばない。
 
 ## コーディング規約
 

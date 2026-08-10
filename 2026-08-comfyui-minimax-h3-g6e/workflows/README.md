@@ -1,50 +1,66 @@
 # MiniMax-H3 workflows
 
-Pinned copies of the official Comfy-Org MiniMax-H3 templates, plus notes on the one format
-conversion you must do once to drive them from the CLI.
+The pinned official Comfy-Org templates (UI format) plus a ready-to-run **API-format** T2V
+workflow that `../scripts/run_smoke.py` submits directly — no manual UI export needed for T2V.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `video_minimax_h3_t2v.ui.json` | Text-to-video template (**UI format**) |
-| `video_minimax_h3_i2v.ui.json` | Image-to-video template (**UI format**) |
-| `.workflow_templates_sha` | Exact `Comfy-Org/workflow_templates` commit these were pulled from |
+| `video_minimax_h3_t2v.api.json` | **Text-to-video, API format — RUN THIS.** Submit with `run_smoke.py`. |
+| `video_minimax_h3_t2v.ui.json` | Official text-to-video template (UI format, reference) |
+| `video_minimax_h3_i2v.ui.json` | Official image-to-video template (UI format, reference) |
+| `.workflow_templates_sha` | Exact `Comfy-Org/workflow_templates` commit the `.ui.json` files came from |
 
-Pinned to commit `f1604424815ffde8fed20543ac38bf245807fbca` for reproducibility. Re-pull with
-the sha in `.workflow_templates_sha`, not `main`.
+The `.ui.json` files are pinned to commit `f1604424815ffde8fed20543ac38bf245807fbca`.
 
-## UI format vs API format (important)
+## Running the T2V workflow
 
-These templates are in ComfyUI **UI format** (they have `nodes` / `links` / `groups`, and the
-T2V graph wraps its core nodes in a `definitions.subgraphs` **subgraph**). ComfyUI's `/prompt`
-HTTP endpoint — what `../scripts/run_smoke.py` posts to — needs **API format**: a flat
-`{ "<node_id>": { "class_type": ..., "inputs": {...} }, ... }` map with the subgraph expanded.
+```bash
+# ComfyUI reachable via ../scripts/port-forward.sh (http://localhost:8188)
+python3 ../scripts/run_smoke.py video_minimax_h3_t2v.api.json --out ../out \
+  --prompt "your scene + audio description" --prompt-node 104 --seed 77
+```
 
-There is no reliable, offline UI→API converter (socket names and subgraph expansion depend on
-the exact node versions loaded), so the honest one-time step is to let ComfyUI itself export it:
+Verified end to end on a single L40S (g6e.4xlarge): 20 sampling steps, ~10 min for the first
+run (model load included), producing an 864x480 / ~5s H.264 clip with synchronized AAC audio.
 
-1. Port-forward ComfyUI and open the Web UI (see `../docs/GETTING_STARTED.md`).
-2. Menu → **Open** the `.ui.json` template. ComfyUI resolves the subgraph against the nodes
-   actually installed in the running build.
-3. Enable **Settings → Enable Dev mode options**, then menu → **Save (API Format)**.
-4. Save the result here as `video_minimax_h3_t2v.api.json`.
+## How the API workflow was built (and why it is NOT a UI export)
 
-`run_smoke.py` then submits that API-format file headlessly. This is the smallest amount of
-manual interaction that guarantees the node/socket names match the live instance — inventing an
-API graph blind would break the moment a node input was renamed upstream.
+The official `.ui.json` template is **UI format** (`nodes`/`links`/`groups`) and wraps its core
+nodes in a `definitions.subgraphs` **subgraph** that also pulls in two custom nodes
+(`ComfyMathExpression`, `ResolutionSelector`) for resolution/duration math. ComfyUI's `/prompt`
+endpoint needs **API format**: a flat `{ "<id>": { "class_type", "inputs" }, ... }` map.
 
-## Core nodes (T2V)
+Rather than depend on those custom nodes or a fragile blind conversion,
+`video_minimax_h3_t2v.api.json` is a hand-built graph using **only core nodes**, with each
+node's inputs verified against the live instance (`GET /object_info/<node>`) and the resolution
+/ length inlined as literals (864x480, length=124 ≈ 5s on the model's 17k+5 grid). Every node
+was confirmed present and every required input satisfied before the first run.
 
-Confirmed from the template subgraph, so you know what the models feed:
+To regenerate or tweak: edit node `104` (`MiniMaxH3ImageToVideo`) `width`/`height`/`length`, or
+node `9` (`BasicScheduler`) `steps`. `--prompt-node 104` targets the single prompt input; there
+is no negative prompt in this graph.
+
+### If you need I2V or R2V
+
+There is no committed API graph for those yet. Either build one the same way (query
+`/object_info` for the extra nodes and wire by hand), or let ComfyUI export it: open the
+`.ui.json` in the Web UI, enable **Settings → Dev mode options**, then **Save (API Format)**.
+
+## Node topology (T2V)
 
 ```
-UNETLoader(minimax_h3_fl2va_pruned_int8_convrot.safetensors)  ─┐
-CLIPLoader(qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors, minimax)│→ MiniMaxH3ImageToVideo
-VAELoader(minimax_h3_video_vae_fp16.safetensors)  ──────────────┘   → SamplerCustomAdvanced
-VAELoader(minimax_h3_audio_vae_fp32.safetensors)                    → VAEDecode / VAEDecodeAudio
-                                                                    → CreateVideo → SaveVideo
+UNETLoader(minimax_h3_fl2va_pruned_int8_convrot.safetensors) ── model ─┬─ BasicGuider ─┐
+CLIPLoader(qwen3vl_32b_...nvfp4_awq, type=minimax) ─ clip ─┐            │               │
+VAELoader(minimax_h3_video_vae_fp16) ─ vae ────────────────┼─ MiniMaxH3ImageToVideo     │
+                                          (prompt,w,h,len) ─┘   ├─ positive(COND) ───────┘
+                                                                └─ LATENT ─┐
+RandomNoise ─ KSamplerSelect ─ BasicScheduler(model) ───────────── SamplerCustomAdvanced ─ LATENT
+                                                                       ├─ VAEDecode(video vae) ─ IMAGE ─┐
+                                                                       └─ VAEDecodeAudio(audio vae) ─ AUDIO ─┤
+                                                                              CreateVideo(fps=24) ──────────┘ ─ SaveVideo
 ```
 
 The filenames match what `../charts/comfyui` fetches and where it places them, so once the
-weights are on the shared volume the template loads them without edits.
+weights are on the shared volume the workflow loads them without edits.
