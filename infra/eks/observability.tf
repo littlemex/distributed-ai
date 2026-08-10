@@ -346,6 +346,16 @@ resource "kubectl_manifest" "ec2nodeclass_monitoring" {
 resource "kubectl_manifest" "nodepool_monitoring" {
   count = var.enable_observability ? 1 : 0
 
+  # Fail at plan time if observability_zone is not a real cluster AZ. Otherwise a typo
+  # renders a NodePool that can never launch a node, and the only symptom is the helm
+  # release timing out after 900s with the monitoring pods stuck Pending.
+  lifecycle {
+    precondition {
+      condition     = contains(local.azs, local.observability_zone)
+      error_message = "observability_zone (${local.observability_zone}) is not one of the cluster AZs (${join(", ", local.azs)}). Set var.observability_zone to an AZ that has a subnet, or leave it null to use azs[0]."
+    }
+  }
+
   yaml_body = yamlencode({
     apiVersion = "karpenter.sh/v1"
     kind       = "NodePool"
