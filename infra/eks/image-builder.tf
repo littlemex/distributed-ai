@@ -55,6 +55,59 @@ variable "image_builder_repository_name" {
   default     = null
 }
 
+variable "image_builder_additional_ecr_repository_arns" {
+  description = <<-EOT
+    Extra ECR repository ARNs the in-cluster builder's IAM role may push to, in addition to the
+    module's own ddp-sample repo. This exists because the image builder is a GENERIC mechanism
+    ("where you can build"), not tied to one image ("what you build"): a caller that consumes
+    this module as `source = "../../infra/eks"` and builds a DIFFERENT image (e.g. ComfyUI) owns
+    its own `aws_ecr_repository` and passes its ARN here so the shared image-builder
+    ServiceAccount can push to it. The repo's lifecycle and attributes (mutability, scanning,
+    lifecycle policy) stay with the caller — this module only grants push.
+
+    SECURITY NOTE: whatever ARN you pass gets push permission verbatim; scoping it tightly is
+    YOUR responsibility (this is not a security boundary — the caller already runs Terraform).
+    A prefix wildcard like ".../repository/team-*" is a legitimate use. The validation rejects
+    only the two clear footguns — a bare "*" and a whole-account ".../repository/*" — and
+    malformed ARNs (empty region/account/name); it does NOT try to prevent an over-broad but
+    well-formed pattern, because that is a scoping choice, not a typo. Cross-account ARNs
+    additionally need a repository resource policy on the far side to actually work; the IAM
+    allow alone is harmless. Destroying a referenced repo leaves a dangling ARN in the policy,
+    which IAM tolerates (no error).
+
+    Default [] → byte-identical to the previous single-repo policy (verified: an empty concat
+    renders the same JSON, so existing clusters see no plan diff). Requires
+    image_builder_enabled = true — setting ARNs while the builder is off is a plan-time error
+    (there is no role to grant them to).
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    # Light typo/footgun guard only — NOT a security control. Require a well-formed ECR repo ARN
+    # with NON-empty region/account/name (+ not *, so "arn:aws:ecr:::repository/x" is rejected at
+    # plan time rather than at apply). Reject the two account-wide footguns — a bare "*" and a
+    # trailing "/*" — while still allowing a prefix wildcard inside the path (…/repository/team-*).
+    condition = alltrue([
+      for a in var.image_builder_additional_ecr_repository_arns :
+      a != "*" &&
+      !endswith(a, ":repository/*") &&
+      can(regex("^arn:aws[a-z-]*:ecr:[a-z0-9-]+:[0-9]+:repository/.+", a))
+    ])
+    error_message = "Each entry must be a well-formed ECR repository ARN (arn:aws:ecr:<region>:<account>:repository/<name-or-prefix*>) with non-empty region/account/name. A bare \"*\" or a whole-account \".../repository/*\" is rejected; a prefix wildcard like \".../repository/team-*\" is fine."
+  }
+
+  # Cross-variable validation (Terraform >= 1.9, which this module already requires; same form as
+  # the enable_cloudfront/enable_demo_app and gdrcopy checks). Additional ARNs are meaningless
+  # without the builder — there is no role to attach the push permission to, so the request would
+  # be silently dropped and surface only as a build-time AccessDenied, far from the cause. Fail at
+  # plan time instead: the consumer's intent (grant push) plainly contradicts the builder being off.
+  validation {
+    condition     = var.image_builder_enabled || length(var.image_builder_additional_ecr_repository_arns) == 0
+    error_message = "image_builder_additional_ecr_repository_arns is set but image_builder_enabled = false — there is no builder IAM role to grant push to. Enable the builder, or clear the list."
+  }
+}
+
 locals {
   image_builder_repository_name = coalesce(
     var.image_builder_repository_name,
@@ -163,7 +216,13 @@ data "aws_iam_policy_document" "image_builder" {
       "ecr:CompleteLayerUpload",
       "ecr:PutImage",
     ]
-    resources = [aws_ecr_repository.ddp_sample[0].arn]
+    # The module's own ddp-sample repo, plus any repos a consumer passed in. distinct() drops a
+    # duplicate (e.g. the ddp-sample ARN accidentally re-listed); an empty additional list renders
+    # byte-identical to the previous single-element form, so existing clusters see no plan diff.
+    resources = distinct(concat(
+      [aws_ecr_repository.ddp_sample[0].arn],
+      var.image_builder_additional_ecr_repository_arns,
+    ))
   }
 }
 
@@ -227,6 +286,34 @@ resource "aws_eks_pod_identity_association" "image_builder" {
 output "ddp_sample_ecr_url" {
   description = "ECR repository URL for the in-cluster-built ddp-sample image (null when image_builder_enabled=false)."
   value       = var.image_builder_enabled ? aws_ecr_repository.ddp_sample[0].repository_url : null
+}
+
+# ── Image builder identity ─────────────────────────────────────────────────────
+# The builder is a GENERIC mechanism; a consumer module needs its identity to (a) target build
+# Pods at the right namespace/ServiceAccount and (b) reference the role for audit or, if not using
+# image_builder_additional_ecr_repository_arns, attach extra permissions. Publishing these as
+# outputs is why a consumer no longer has to hardcode "<cluster_name>-image-builder" and friends —
+# a magic string that breaks silently the day this module changes them. All null when disabled,
+# matching ddp_sample_ecr_url.
+
+output "image_builder_role_arn" {
+  description = "IAM role ARN the in-cluster BuildKit builder assumes via Pod Identity (null when image_builder_enabled=false)."
+  value       = var.image_builder_enabled ? aws_iam_role.image_builder[0].arn : null
+}
+
+output "image_builder_role_name" {
+  description = "Name of the image-builder IAM role (null when disabled). Use when attaching extra IAM policies to the builder (e.g. a build cache in S3); for ECR push, prefer image_builder_additional_ecr_repository_arns."
+  value       = var.image_builder_enabled ? aws_iam_role.image_builder[0].name : null
+}
+
+output "image_builder_namespace" {
+  description = "Namespace the in-cluster builder's ServiceAccount lives in — the namespace a build Job must run in (null when disabled)."
+  value       = var.image_builder_enabled ? local.image_builder_namespace : null
+}
+
+output "image_builder_service_account_name" {
+  description = "ServiceAccount name bound (via Pod Identity) to the builder role — set serviceAccountName on a build Job to this (null when disabled)."
+  value       = var.image_builder_enabled ? local.image_builder_sa : null
 }
 
 # ── Dedicated builder EC2NodeClass + NodePool (opt-in) ─────────────────────────
