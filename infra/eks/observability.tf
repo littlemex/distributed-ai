@@ -34,6 +34,33 @@ locals {
 
   observability_namespace = "monitoring"
 
+  # Grafana dashboards shipped as sidecar-discovered ConfigMaps. Declaring them as
+  # a map (rather than one resource each) keeps "which dashboard, which folder,
+  # under which condition" in a single readable table and lets a single resource
+  # render them all. Each key is both the ConfigMap suffix and the JSON basename
+  # in dashboards/, so name/key/file agreement is structural, not convention.
+  #   - gpu-tenant        : self-authored per-tenant GPU view (needs a GPU pool)
+  #   - node-exporter-full: grafana.com id 1860 (always available)
+  #   - dcgm-exporter     : grafana.com id 12239 (needs a GPU pool)
+  # The community JSON was normalized for sidecar import: __inputs stripped and
+  # datasource references pinned to the kps Prometheus (uid "prometheus") via
+  # dashboards/normalize.py. EFA and FSx dashboards are intentionally excluded —
+  # no exporter emits those metrics on this cluster yet (see the book chapter).
+  grafana_dashboards = {
+    "gpu-tenant" = {
+      folder  = "GPU"
+      enabled = local.dcgm_sm_enabled
+    }
+    "node-exporter-full" = {
+      folder  = "Nodes"
+      enabled = var.enable_observability
+    }
+    "dcgm-exporter" = {
+      folder  = "GPU"
+      enabled = local.dcgm_sm_enabled
+    }
+  }
+
   # Prometheus/Grafana size their TSDB cap from the PVC unless overridden: derive
   # ~90% of prometheus_storage_size so raising the PVC does not silently leave the
   # retention cap behind. (Gi -> GB is close enough for a soft cap.)
@@ -136,6 +163,16 @@ locals {
           provider = {
             foldersFromFilesStructure = true
           }
+        }
+        datasources = {
+          # Pin the auto-provisioned Prometheus datasource uid to "prometheus"
+          # explicitly. The vendored dashboards reference this uid (see
+          # dashboards/normalize.py); making it a value we set here — rather than
+          # relying on the chart's implicit default — keeps that contract visible
+          # in code, so a chart change to the default uid would surface as a diff.
+          enabled                  = true
+          defaultDatasourceEnabled = true
+          uid                      = "prometheus"
         }
       }
 
@@ -507,48 +544,21 @@ resource "kubectl_manifest" "dcgm_servicemonitor" {
   ]
 }
 
-# --- GPU per-tenant dashboard (picked up by the Grafana sidecar) ------------
-resource "kubectl_manifest" "dashboard_gpu_tenant" {
-  count = local.dcgm_sm_enabled ? 1 : 0
+# --- Grafana dashboards (picked up by the Grafana sidecar) -------------------
+# One resource renders every dashboard declared in local.grafana_dashboards, so
+# adding a dashboard is a one-line map entry plus its JSON in dashboards/. The
+# ConfigMap name, the data key, and the source file all derive from each.key, so
+# the three can never drift out of agreement.
+#
+# server_side_apply is on for all of them: the largest (node-exporter-full, ~460KB)
+# would otherwise overflow the kubectl.kubernetes.io/last-applied-configuration
+# annotation (capped at 262144 bytes); applying it uniformly avoids a per-size
+# branch and keeps the apply behavior identical across dashboards. force_conflicts
+# only takes field ownership from a prior client-side apply — the Grafana sidecar
+# reads these ConfigMaps and never writes them, so there is no real contention.
+resource "kubectl_manifest" "grafana_dashboard" {
+  for_each = { for k, v in local.grafana_dashboards : k => v if v.enabled }
 
-  yaml_body = yamlencode({
-    apiVersion = "v1"
-    kind       = "ConfigMap"
-    metadata = {
-      name      = "grafana-dashboard-gpu-tenant"
-      namespace = local.observability_namespace
-      labels = {
-        grafana_dashboard = "1" # matches sidecar.dashboards.label / labelValue
-      }
-      annotations = {
-        grafana_folder = "GPU" # matches folderAnnotation
-      }
-    }
-    data = {
-      "gpu-tenant.json" = file("${path.module}/dashboards/gpu-tenant.json")
-    }
-  })
-
-  depends_on = [helm_release.kube_prometheus_stack]
-}
-
-# --- Community dashboards (picked up by the Grafana sidecar) -----------------
-# Curated Grafana.com dashboards whose metrics actually exist in this stack:
-#   - Node Exporter Full (grafana.com id 1860): node CPU/mem/disk/network from
-#     the kube-prometheus-stack node-exporter (always present).
-#   - NVIDIA DCGM Exporter Dashboard (grafana.com id 12239): GPU utilization/
-#     memory/temp/power from the GPU Operator's dcgm-exporter (GPU pools only).
-# The JSON was normalized for sidecar import: __inputs stripped and datasource
-# references pinned to the kps Prometheus (uid "prometheus"). EFA and FSx
-# dashboards are intentionally NOT included — no exporter emits those metrics on
-# this cluster yet, so their panels would be empty (see the book chapter).
-resource "kubectl_manifest" "dashboard_node_exporter" {
-  count = var.enable_observability ? 1 : 0
-
-  # Node Exporter Full is a large dashboard (~460KB). Use server-side apply so
-  # the provider does NOT stuff the whole body into the
-  # kubectl.kubernetes.io/last-applied-configuration annotation, which is capped
-  # at 262144 bytes and would otherwise fail this ConfigMap.
   server_side_apply = true
   force_conflicts   = true
 
@@ -556,41 +566,34 @@ resource "kubectl_manifest" "dashboard_node_exporter" {
     apiVersion = "v1"
     kind       = "ConfigMap"
     metadata = {
-      name      = "grafana-dashboard-node-exporter-full"
+      name      = "grafana-dashboard-${each.key}"
       namespace = local.observability_namespace
-      labels    = { grafana_dashboard = "1" }
+      labels    = { grafana_dashboard = "1" } # matches sidecar.dashboards.label
       annotations = {
-        grafana_folder = "Nodes"
+        grafana_folder = each.value.folder # matches sidecar folderAnnotation
       }
     }
     data = {
-      "node-exporter-full.json" = file("${path.module}/dashboards/node-exporter-full.json")
+      "${each.key}.json" = file("${path.module}/dashboards/${each.key}.json")
     }
   })
 
   depends_on = [helm_release.kube_prometheus_stack]
 }
 
-resource "kubectl_manifest" "dashboard_dcgm_exporter" {
-  count = local.dcgm_sm_enabled ? 1 : 0
-
-  yaml_body = yamlencode({
-    apiVersion = "v1"
-    kind       = "ConfigMap"
-    metadata = {
-      name      = "grafana-dashboard-dcgm-exporter"
-      namespace = local.observability_namespace
-      labels    = { grafana_dashboard = "1" }
-      annotations = {
-        grafana_folder = "GPU"
-      }
-    }
-    data = {
-      "dcgm-exporter.json" = file("${path.module}/dashboards/dcgm-exporter.json")
-    }
-  })
-
-  depends_on = [helm_release.kube_prometheus_stack]
+# Migrate the three former per-dashboard resources into the for_each map in place
+# (no destroy/recreate). Harmless to keep; can be dropped after one apply.
+moved {
+  from = kubectl_manifest.dashboard_gpu_tenant[0]
+  to   = kubectl_manifest.grafana_dashboard["gpu-tenant"]
+}
+moved {
+  from = kubectl_manifest.dashboard_node_exporter[0]
+  to   = kubectl_manifest.grafana_dashboard["node-exporter-full"]
+}
+moved {
+  from = kubectl_manifest.dashboard_dcgm_exporter[0]
+  to   = kubectl_manifest.grafana_dashboard["dcgm-exporter"]
 }
 
 # --- Node Monitoring Agent (detection only) ----------------------------------
