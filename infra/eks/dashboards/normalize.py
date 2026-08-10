@@ -38,18 +38,20 @@ def pin_datasource(node):
         # A datasource reference object: {"type": "prometheus", "uid": "..."}.
         if "uid" in node and node.get("type") in (None, "prometheus", "datasource"):
             uid = node["uid"]
-            if isinstance(uid, str) and (uid.startswith("${") or uid == "" or uid.startswith("DS_")):
+            if isinstance(uid, str) and (uid.startswith("${") or uid == ""):
                 node["uid"] = PROM_UID
-        for k, v in node.items():
-            # A datasource-typed template variable: pin its current selection.
-            if k == "type" and v == "datasource":
-                node.setdefault("current", {})
-                node["current"] = {"text": "Prometheus", "value": PROM_UID, "selected": True}
-            node[k] = pin_datasource(v)
+        # A datasource-typed template variable: pin its current selection so the
+        # variable defaults to the real datasource. Done before the recursion (not
+        # inside the items() loop) so adding the "current" key can never mutate the
+        # dict mid-iteration — some grafana.com exports omit it.
+        if node.get("type") == "datasource":
+            node["current"] = {"text": "Prometheus", "value": PROM_UID, "selected": True}
+        for k in list(node.keys()):
+            node[k] = pin_datasource(node[k])
         return node
     if isinstance(node, list):
         return [pin_datasource(v) for v in node]
-    if isinstance(node, str) and (node.startswith("${DS_") or node == "${DS_PROMETHEUS}"):
+    if isinstance(node, str) and node.startswith("${DS_"):
         return PROM_UID
     return node
 
@@ -59,8 +61,10 @@ def main():
     # Drop the import scaffolding; the sidecar imports non-interactively.
     d.pop("__inputs", None)
     d.pop("__requires", None)
-    # A concrete id/uid from the export would collide across clusters; let Grafana
-    # assign one on import. The gnetId (grafana.com origin) is kept for provenance.
+    # Drop the numeric board id so Grafana assigns a fresh one on import. The
+    # dashboard's own top-level uid is deliberately kept — it is the stable URL
+    # path (/d/<uid>) the book links to — and the gnetId records the grafana.com
+    # origin for provenance.
     d.pop("id", None)
     d = pin_datasource(d)
     json.dump(d, sys.stdout, indent=2, ensure_ascii=False)

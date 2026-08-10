@@ -1087,9 +1087,28 @@ variable "prometheus_storage_size" {
 }
 
 variable "grafana_storage_size" {
-  description = "Grafana PVC size (gp3)."
+  description = "Grafana PVC size, as \"<int>Gi\"."
   type        = string
   default     = "10Gi"
+
+  validation {
+    condition     = can(regex("^[0-9]+Gi$", var.grafana_storage_size))
+    error_message = "grafana_storage_size must be \"<int>Gi\" (e.g. \"10Gi\")."
+  }
+}
+
+variable "prometheus_resources" {
+  description = "Prometheus container resource requests/limits. Prometheus memory scales with active series (GPU nodes x DCGM fields + node-exporter), so the default is a starting point, not a ceiling: on a large cluster raise memory to avoid an OOMKill crash-loop. Kept as a variable so the most OOM-prone knob is tunable like retention/storage already are."
+  type = object({
+    cpu_request    = string
+    memory_request = string
+    memory_limit   = string
+  })
+  default = {
+    cpu_request    = "500m"
+    memory_request = "2Gi"
+    memory_limit   = "4Gi"
+  }
 }
 
 variable "observability_storage_class" {
