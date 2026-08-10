@@ -532,6 +532,67 @@ resource "kubectl_manifest" "dashboard_gpu_tenant" {
   depends_on = [helm_release.kube_prometheus_stack]
 }
 
+# --- Community dashboards (picked up by the Grafana sidecar) -----------------
+# Curated Grafana.com dashboards whose metrics actually exist in this stack:
+#   - Node Exporter Full (grafana.com id 1860): node CPU/mem/disk/network from
+#     the kube-prometheus-stack node-exporter (always present).
+#   - NVIDIA DCGM Exporter Dashboard (grafana.com id 12239): GPU utilization/
+#     memory/temp/power from the GPU Operator's dcgm-exporter (GPU pools only).
+# The JSON was normalized for sidecar import: __inputs stripped and datasource
+# references pinned to the kps Prometheus (uid "prometheus"). EFA and FSx
+# dashboards are intentionally NOT included — no exporter emits those metrics on
+# this cluster yet, so their panels would be empty (see the book chapter).
+resource "kubectl_manifest" "dashboard_node_exporter" {
+  count = var.enable_observability ? 1 : 0
+
+  # Node Exporter Full is a large dashboard (~460KB). Use server-side apply so
+  # the provider does NOT stuff the whole body into the
+  # kubectl.kubernetes.io/last-applied-configuration annotation, which is capped
+  # at 262144 bytes and would otherwise fail this ConfigMap.
+  server_side_apply = true
+  force_conflicts   = true
+
+  yaml_body = yamlencode({
+    apiVersion = "v1"
+    kind       = "ConfigMap"
+    metadata = {
+      name      = "grafana-dashboard-node-exporter-full"
+      namespace = local.observability_namespace
+      labels    = { grafana_dashboard = "1" }
+      annotations = {
+        grafana_folder = "Nodes"
+      }
+    }
+    data = {
+      "node-exporter-full.json" = file("${path.module}/dashboards/node-exporter-full.json")
+    }
+  })
+
+  depends_on = [helm_release.kube_prometheus_stack]
+}
+
+resource "kubectl_manifest" "dashboard_dcgm_exporter" {
+  count = local.dcgm_sm_enabled ? 1 : 0
+
+  yaml_body = yamlencode({
+    apiVersion = "v1"
+    kind       = "ConfigMap"
+    metadata = {
+      name      = "grafana-dashboard-dcgm-exporter"
+      namespace = local.observability_namespace
+      labels    = { grafana_dashboard = "1" }
+      annotations = {
+        grafana_folder = "GPU"
+      }
+    }
+    data = {
+      "dcgm-exporter.json" = file("${path.module}/dashboards/dcgm-exporter.json")
+    }
+  })
+
+  depends_on = [helm_release.kube_prometheus_stack]
+}
+
 # --- Node Monitoring Agent (detection only) ----------------------------------
 # EKS Node Monitoring Agent: emits NodeConditions for kernel / container-runtime
 # / networking / storage / accelerated-hardware faults. GPU faults come through
