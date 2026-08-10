@@ -1087,9 +1087,28 @@ variable "prometheus_storage_size" {
 }
 
 variable "grafana_storage_size" {
-  description = "Grafana PVC size (gp3)."
+  description = "Grafana PVC size, as \"<int>Gi\"."
   type        = string
   default     = "10Gi"
+
+  validation {
+    condition     = can(regex("^[0-9]+Gi$", var.grafana_storage_size))
+    error_message = "grafana_storage_size must be \"<int>Gi\" (e.g. \"10Gi\")."
+  }
+}
+
+variable "prometheus_resources" {
+  description = "Prometheus container resource requests/limits. Prometheus memory scales with active series (GPU nodes x DCGM fields + node-exporter), so the default is a starting point, not a ceiling: on a large cluster raise memory to avoid an OOMKill crash-loop. Kept as a variable so the most OOM-prone knob is tunable like retention/storage already are."
+  type = object({
+    cpu_request    = string
+    memory_request = string
+    memory_limit   = string
+  })
+  default = {
+    cpu_request    = "500m"
+    memory_request = "2Gi"
+    memory_limit   = "4Gi"
+  }
 }
 
 variable "observability_storage_class" {
@@ -1108,6 +1127,17 @@ variable "observability_instance_categories" {
   description = "Instance categories for the dedicated monitoring NodePool (Karpenter karpenter.k8s.aws/instance-category). Defaults to general-purpose/memory families; monitoring is memory-bound."
   type        = list(string)
   default     = ["c", "m"]
+}
+
+variable "observability_zone" {
+  description = "AZ to pin the monitoring NodePool to (topology.kubernetes.io/zone). Prometheus/Grafana hold ReadWriteOnce EBS PVCs that are AZ-local, so every monitoring node must land in the AZ where those volumes live or the stack hangs Pending on a volume node affinity conflict. Leave null to derive the first cluster AZ (azs[0]) — correct for a fresh deploy. If observability was FIRST deployed before this pin existed, its PVCs may already live in another AZ; set this to that AZ (kubectl get pv -o jsonpath of the monitoring PVs) so the pin matches reality instead of stranding the volumes."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.observability_zone == null || can(regex("^[a-z]{2}-[a-z]+-[0-9][a-z]$", var.observability_zone))
+    error_message = "observability_zone must be null or an AZ id like \"us-east-2a\"."
+  }
 }
 
 variable "tenant_node_label_key" {

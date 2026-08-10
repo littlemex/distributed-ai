@@ -62,6 +62,38 @@ locals {
   has_neuron_pool = length([for k, p in var.accelerator_pools : k if p.device_plugin == "neuron"]) > 0
   has_efa_pool    = length([for k, e in local.pool_efa : k if e.count > 0]) > 0
 
+  # ── User taint ledger (single source of truth for base-DaemonSet tolerations) ──
+  # accelerator_pools[*].taints lets an operator add arbitrary taints to a pool's
+  # nodes (karpenter-resources.tf appends them after the module-owned device-plugin
+  # taint; the variable docs even suggest "a dedicated team taint"). Every base
+  # component that MUST run on those nodes — the GPU Operator operands, the EFA and
+  # Neuron device plugins, the gdrdrv loader, and the NMA dcgm-server — has to
+  # tolerate them, or it stays Pending exactly on the tainted pool. That would leave
+  # the node with no device-plugin (so nvidia.com/gpu / aws.amazon.com/neuron is
+  # never advertised and tenant pods Pend forever), no metrics, and — via the NMA —
+  # AcceleratedHardwareReady stuck False firing a permanent alert. The module-owned
+  # taints (nvidia.com/gpu, aws.amazon.com/neuron, vpc.amazonaws.com/efa,
+  # capacity-reservation) stay declared per-component because each component knows
+  # which of those it targets; only the OPEN-ENDED user taints need a shared ledger.
+  #
+  # A toleration only grants permission to land on a tainted node; it does not pull a
+  # pod there (nodeAffinity/nodeSelector/instance-type gating still decides), so it is
+  # safe for every base DaemonSet to tolerate every user taint key. We key on
+  # distinct (key, effect) pairs — effect matters because a NoExecute user taint would
+  # otherwise evict these pods. value is omitted with operator=Exists so one toleration
+  # covers a taint whether or not the operator set a value.
+  user_taint_tolerations = [
+    for pair in distinct(flatten([
+      for k, p in var.accelerator_pools : [
+        for t in p.taints : { key = t.key, effect = t.effect }
+      ]
+    ])) : {
+      key      = pair.key
+      operator = "Exists"
+      effect   = pair.effect
+    }
+  ]
+
   # Tags applied to all cluster-owned resources.
   #
   # IMPORTANT: karpenter.sh/discovery is intentionally NOT included here. If it were,

@@ -31,12 +31,14 @@ locals {
   # Tolerations applied to BOTH the operator controller and its per-node operands
   # (device plugin, feature discovery, validator). The operands run on the GPU nodes, so
   # they must tolerate the accelerator taints; the controller is scheduled by the same set
-  # harmlessly. capacity-reservation (value varies per CB) uses operator: Exists.
-  gpu_operator_tolerations = [
+  # harmlessly. capacity-reservation (value varies per CB) uses operator: Exists. The
+  # module-owned taints are listed here; user pool taints come from the shared ledger
+  # (local.user_taint_tolerations) so a tenant taint pool never strands the operands.
+  gpu_operator_tolerations = concat([
     { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
     { key = "vpc.amazonaws.com/efa", operator = "Exists", effect = "NoSchedule" },
     { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
-  ]
+  ], local.user_taint_tolerations)
 
   gpu_operator_values = merge(
     {
@@ -94,14 +96,15 @@ locals {
   # EFA device plugin tolerations. EFA is used by BOTH GPU and Neuron pools, so the DaemonSet
   # must tolerate the nvidia AND neuron accelerator taints, plus the per-CB capacity-reservation
   # taint (value varies per reservation → operator: Exists). Missing the neuron toleration would
-  # keep the plugin off trn2 nodes, so vpc.amazonaws.com/efa is never advertised there.
+  # keep the plugin off trn2 nodes, so vpc.amazonaws.com/efa is never advertised there. User pool
+  # taints come from the shared ledger so an EFA pool with a tenant taint is not stranded either.
   efa_device_plugin_values = merge(
     {
-      tolerations = [
+      tolerations = concat([
         { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
         { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
         { key = "aws.amazon.com/neuron", operator = "Exists", effect = "NoSchedule" },
-      ]
+      ], local.user_taint_tolerations)
     },
     # Only override supportedInstanceLabels when we have types to add; an empty list would
     # blank the chart default and strand the plugin everywhere.
@@ -136,11 +139,14 @@ resource "helm_release" "gpu_operator" {
   # "uninstalling" with a live GPU node present).
   #
   # kube_prometheus_stack dependency: observability.tf's self-managed DCGM ServiceMonitor
-  # needs the servicemonitors CRD (installed by kps) present before it is applied, and the
-  # GPU Operator's own resources must be torn down before kps removes that CRD. Ordering the
-  # operator AFTER kps gives create "monitoring -> GPU" and destroy "GPU -> monitoring".
-  # When enable_observability=false the referenced resource has count=0 (empty), so the
-  # dependency is simply inert.
+  # needs the servicemonitors CRD (installed by kps) present before it is applied. Ordering
+  # the operator AFTER kps gives create order "monitoring -> GPU" (CRD ready first) and, on
+  # destroy, "GPU -> monitoring". Note the destroy edge is about resource ordering, not CRD
+  # lifetime: kps keeps its CRDs under crds/, which `helm uninstall` does NOT delete, so the
+  # servicemonitors CRD survives an observability teardown regardless (a known kps behavior —
+  # the CRDs are left behind and, if unwanted, must be removed manually). When
+  # enable_observability=false the referenced resource has count=0 (empty), so the dependency
+  # is simply inert.
   depends_on = [
     helm_release.karpenter,
     helm_release.kube_prometheus_stack,
@@ -204,11 +210,10 @@ resource "kubectl_manifest" "gdrdrv_loader" {
           # once a node is up; the loader lands only on GPU nodes.
           nodeSelector      = { "nvidia.com/gpu.present" = "true" }
           priorityClassName = "system-node-critical"
-          tolerations = [
-            { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
-            { key = "vpc.amazonaws.com/efa", operator = "Exists", effect = "NoSchedule" },
-            { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
-          ]
+          # Reuse the GPU Operator toleration set (module taints + user-taint ledger)
+          # so the loader lands on exactly the same GPU nodes the operands do — no
+          # separate hand-maintained copy that could drift out of sync.
+          tolerations = local.gpu_operator_tolerations
           # Privileged, host-root work is confined to the initContainer. It exits after
           # loading gdrdrv; if it fails the pod restarts (kubelet backoff) and retries —
           # a fail-closed retry loop, unlike the userData path's fail-open install (the

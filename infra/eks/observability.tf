@@ -11,12 +11,9 @@
 # managed nodegroup. system is a sanctuary for kube-system + Karpenter
 # controller only; a stateful Prometheus (2-4Gi RAM + 50Gi PVC) does not belong
 # there and would break the moment the sanctuary taint is enabled. It is also
-# NOT the shared cpu pool: that pool's consolidateAfter=30s reaped the node the
-# instant the helm admission Job finished, wedging the release at
-# pending-install. A dedicated WhenEmpty pool (consolidateAfter=10m) reclaims a
-# node only once it is truly empty, so the idle gap between the hook Job and the
-# main pods never triggers a reclaim — expressing "resident tier" structurally
-# instead of via a do-not-disrupt annotation (which only guards a Running Pod).
+# NOT the shared cpu pool: that pool's aggressive consolidation would reclaim the
+# node out from under this resident stateful tier. It gets its own WhenEmpty
+# NodePool instead; the full rationale lives at nodepool_monitoring below.
 #
 # Apply/destroy order:
 #   monitoring Namespace (kubectl) -> grafana-admin Secret (kubectl)
@@ -34,7 +31,53 @@ locals {
 
   observability_namespace = "monitoring"
 
-  # Prometheus/Grafana size their TSDB cap from the PVC unless overridden: derive
+  # AZ the monitoring NodePool is pinned to (see the nodepool zone requirement).
+  # Explicit var.observability_zone wins; otherwise the first cluster AZ.
+  observability_zone = coalesce(var.observability_zone, local.azs[0])
+
+  # Tolerations for the Node Monitoring Agent's bundled dcgm-server (reads GPU
+  # health via nv-hostengine). It must land on every GPU node, which can carry the
+  # module-owned nvidia.com/gpu device-plugin taint (karpenter-resources.tf), a
+  # per-reservation `capacity-reservation` taint on Capacity Block nodes, AND any
+  # user pool taints. Missing the CB taint leaves dcgm-server Pending on exactly the
+  # pre-paid CB GPU nodes that matter most — and worse, keeps AcceleratedHardwareReady
+  # False there, firing AcceleratedHardwareUnhealthy forever; a user taint pool has
+  # the identical failure mode, so we pull those from the shared ledger. neuron is
+  # omitted on purpose (dcgm-server reads NVIDIA GPUs only). Kept scoped (Exists per
+  # known key, not a blanket toleration) so it never leaks onto unrelated tainted nodes.
+  dcgm_server_tolerations = concat([
+    { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+    { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
+  ], local.user_taint_tolerations)
+
+  # Grafana dashboards shipped as sidecar-discovered ConfigMaps. Declaring them as
+  # a map (rather than one resource each) keeps "which dashboard, which folder,
+  # under which condition" in a single readable table and lets a single resource
+  # render them all. Each key is both the ConfigMap suffix and the JSON basename
+  # in dashboards/, so name/key/file agreement is structural, not convention.
+  #   - gpu-tenant        : self-authored per-tenant GPU view (needs a GPU pool)
+  #   - node-exporter-full: grafana.com id 1860 (always available)
+  #   - dcgm-exporter     : grafana.com id 12239 (needs a GPU pool)
+  # The community JSON was normalized for sidecar import: __inputs stripped and
+  # datasource references pinned to the kps Prometheus (uid "prometheus") via
+  # dashboards/normalize.py. EFA and FSx dashboards are intentionally excluded —
+  # no exporter emits those metrics on this cluster yet (see the book chapter).
+  grafana_dashboards = {
+    "gpu-tenant" = {
+      folder  = "GPU"
+      enabled = local.dcgm_sm_enabled
+    }
+    "node-exporter-full" = {
+      folder  = "Nodes"
+      enabled = var.enable_observability
+    }
+    "dcgm-exporter" = {
+      folder  = "GPU"
+      enabled = local.dcgm_sm_enabled
+    }
+  }
+
+  # Prometheus sizes its TSDB retention cap from the PVC unless overridden: derive
   # ~90% of prometheus_storage_size so raising the PVC does not silently leave the
   # retention cap behind. (Gi -> GB is close enough for a soft cap.)
   prometheus_retention_size = coalesce(
@@ -50,15 +93,9 @@ locals {
   tenant_meta_label = "__meta_kubernetes_node_label_${replace(var.tenant_node_label_key, "/[^a-zA-Z0-9_]/", "_")}"
 
   # node-role-separation.md: monitoring is a general CPU workload, not a
-  # cluster-recovery prerequisite, so it does NOT go on the system sanctuary.
-  # It gets its own Karpenter NodePool (node-role=monitoring, below) rather than
-  # riding the shared cpu pool. Reason (observed live): the cpu pool's
-  # consolidateAfter=30s reaps the node the instant the helm admission-webhook
-  # Job finishes, before the main Prometheus/Grafana pods are scheduled, and the
-  # release wedges at pending-install. karpenter.sh/do-not-disrupt cannot fix
-  # that — a Pod annotation only protects a node while the Pod is Running, so it
-  # is blind to the idle gap between a Succeeded hook Job and the main pods.
-  # A dedicated WhenEmpty pool expresses "this tier is resident" structurally.
+  # cluster-recovery prerequisite, so it does NOT go on the system sanctuary. It
+  # gets its own Karpenter NodePool (node-role=monitoring, below) rather than
+  # riding the shared cpu pool — see nodepool_monitoring for the full rationale.
   observability_node_selector = {
     "node-role" = "monitoring"
   }
@@ -100,9 +137,14 @@ locals {
           }
         }
 
+        # Prometheus memory scales with active series; raise var.prometheus_resources
+        # on large clusters to avoid an OOMKill crash-loop (see variable docs).
         resources = {
-          requests = { cpu = "500m", memory = "2Gi" }
-          limits   = { memory = "4Gi" }
+          requests = {
+            cpu    = var.prometheus_resources.cpu_request
+            memory = var.prometheus_resources.memory_request
+          }
+          limits = { memory = var.prometheus_resources.memory_limit }
         }
       }
     }
@@ -116,6 +158,16 @@ locals {
       }
 
       defaultDashboardsEnabled = true
+
+      # Recreate (not the chart-default RollingUpdate): Grafana is a single-replica
+      # Deployment on a ReadWriteOnce EBS PVC. RollingUpdate starts the new pod
+      # before terminating the old one; if the new pod lands on a different node in
+      # the monitoring pool, the EBS volume Multi-Attach fails and the new pod hangs
+      # Pending, wedging the next `helm upgrade`. Recreate stops the old pod first so
+      # the single RWO volume is always free for the new one.
+      deploymentStrategy = {
+        type = "Recreate"
+      }
 
       persistence = {
         enabled          = true
@@ -136,6 +188,16 @@ locals {
           provider = {
             foldersFromFilesStructure = true
           }
+        }
+        datasources = {
+          # Pin the auto-provisioned Prometheus datasource uid to "prometheus"
+          # explicitly. The vendored dashboards reference this uid (see
+          # dashboards/normalize.py); making it a value we set here — rather than
+          # relying on the chart's implicit default — keeps that contract visible
+          # in code, so a chart change to the default uid would surface as a diff.
+          enabled                  = true
+          defaultDatasourceEnabled = true
+          uid                      = "prometheus"
         }
       }
 
@@ -243,11 +305,21 @@ resource "kubectl_manifest" "observability_storage_class" {
 }
 
 # --- dedicated monitoring NodePool + EC2NodeClass ----------------------------
-# The monitoring stack is a resident stateful tier. Expressing that with a
-# WhenEmpty NodePool (not the shared cpu pool's WhenEmptyOrUnderutilized /
-# consolidateAfter=30s) is what actually protects it: a WhenEmpty node is only
-# reclaimed once it holds NO pods, so the idle gap between the helm admission
-# Job finishing and the main pods scheduling never triggers a reclaim.
+# The monitoring stack is a resident stateful tier (Prometheus + Grafana on PVCs).
+# It runs on this dedicated WhenEmpty NodePool rather than the shared cpu pool for
+# two reasons:
+#   1. Steady state: a WhenEmpty node is reclaimed only once it holds NO pods, so
+#      a resident stateful tier is never consolidated out from under itself — the
+#      way the shared cpu pool's WhenEmptyOrUnderutilized policy would. This
+#      expresses "resident tier" structurally, not via a do-not-disrupt annotation
+#      (which only guards a node while its Pod is Running).
+#   2. Install time: when this stack was first brought up on the shared cpu pool,
+#      that pool's short consolidateAfter reclaimed the freshly-launched node
+#      during the gap between a helm pre-install hook Job finishing and the main
+#      pods being scheduled, wedging the release at pending-install. (This module
+#      now also disables the kps admission-webhook certgen hook — see
+#      prometheusOperator.admissionWebhooks below — so that specific hook Job no
+#      longer runs; the WhenEmpty pool removes the class of failure regardless.)
 #
 # Reuses local.nodeclass_common / local.cpu_user_data (defined in
 # karpenter-resources.tf) so subnet/SG/instanceProfile/image-pull tuning stay
@@ -273,6 +345,16 @@ resource "kubectl_manifest" "ec2nodeclass_monitoring" {
 
 resource "kubectl_manifest" "nodepool_monitoring" {
   count = var.enable_observability ? 1 : 0
+
+  # Fail at plan time if observability_zone is not a real cluster AZ. Otherwise a typo
+  # renders a NodePool that can never launch a node, and the only symptom is the helm
+  # release timing out after 900s with the monitoring pods stuck Pending.
+  lifecycle {
+    precondition {
+      condition     = contains(local.azs, local.observability_zone)
+      error_message = "observability_zone (${local.observability_zone}) is not one of the cluster AZs (${join(", ", local.azs)}). Set var.observability_zone to an AZ that has a subnet, or leave it null to use azs[0]."
+    }
+  }
 
   yaml_body = yamlencode({
     apiVersion = "karpenter.sh/v1"
@@ -317,19 +399,58 @@ resource "kubectl_manifest" "nodepool_monitoring" {
               operator = "In"
               values   = ["linux"]
             },
+            {
+              # Pin the pool to a single AZ. Prometheus and Grafana hold ReadWriteOnce
+              # EBS PVCs; an EBS volume is AZ-local. The StorageClass is
+              # WaitForFirstConsumer so a PVC binds in whichever AZ the first node lands —
+              # but if a later node (e.g. a Drift-driven AMI rollout) came up in a
+              # different AZ, that AZ-locked PVC could not attach and the stack would hang
+              # Pending with a volume node affinity conflict. Pinning the AZ makes every
+              # monitoring node land where the PVCs already live. (The accelerator pools
+              # pin AZ too, for EFA/CB reasons — see karpenter-resources.tf.) Defaults to
+              # azs[0] (deterministic for a fresh deploy); var.observability_zone overrides
+              # it when existing PVCs already live in another AZ — see the variable docs.
+              key      = "topology.kubernetes.io/zone"
+              operator = "In"
+              values   = [local.observability_zone]
+            },
           ]
           expireAfter = "Never"
         }
       }
-      # WhenEmpty (not WhenEmptyOrUnderutilized): reclaim only a truly empty node.
-      # consolidateAfter=10m (not Never): if enable_observability is later turned
-      # off, the drained node is cleaned up instead of lingering forever.
-      # No taint: the node-role=monitoring nodeSelector on the stack, plus the
-      # cpu-role selectors on other workloads, already keep foreign pods off; a
-      # taint would just force tolerations onto all 4 components + the hook Jobs.
+      # WhenEmpty (not WhenEmptyOrUnderutilized): reclaim only a truly empty node,
+      # never one that is merely underutilized — this tier is resident. consolidateAfter=10m
+      # (not Never) still lets Karpenter reclaim a node that legitimately goes empty (a
+      # transient scale-to-zero, or a rollout that briefly leaves the node bare) after a
+      # 10m grace, rather than holding an idle on-demand node forever.
+      #
+      # No taint is a deliberate trade-off, not a guarantee of isolation. The
+      # node-role=monitoring nodeSelector on the stack only pulls the monitoring
+      # pods ONTO this pool; it does not stop a selector-less pod from being
+      # bin-packed onto the node by kube-scheduler. In this cluster the other
+      # workloads all carry their own node-role/accelerator selectors, so in
+      # practice nothing foreign lands here — but if a truly unconstrained pod is
+      # introduced it could co-locate and, by keeping the node non-empty, defer
+      # WhenEmpty reclaim. If that becomes a real risk, add a node-role=monitoring
+      # taint plus a matching toleration on all monitoring components. We skip it
+      # today to avoid maintaining tolerations across every kps subchart.
       disruption = {
         consolidationPolicy = "WhenEmpty"
         consolidateAfter    = "10m"
+        # Drift (e.g. an AMI/nodeclass change) disrupts nodes regardless of
+        # consolidationPolicy. This tier is a single-replica stateful stack on an
+        # AZ-locked EBS PVC, so an involuntary Drift replacement means a monitoring
+        # outage while the volume re-attaches (and, if it re-attaches cleanly, only
+        # because the AZ is now pinned above). Block Drift/underutilization-style
+        # disruption entirely; still allow Emptiness so a truly empty node (e.g. after
+        # enable_observability=false) is reclaimed. AMI updates then happen on our
+        # terms (bump the nodeclass and let the node roll when we choose), not mid-scrape.
+        budgets = [
+          {
+            nodes   = "0"
+            reasons = ["Drifted", "Underutilized"]
+          },
+        ]
       }
       # Safety valve: cap the tier so a runaway never balloons the bill. This is
       # a ~1-2 node tier in practice.
@@ -361,6 +482,11 @@ resource "kubectl_manifest" "nodepool_monitoring" {
 # rejects on UPDATE. Verified live: without this label node-exporter is denied
 # and the install cannot converge. The label is a no-op when Experiment01 is
 # not installed.
+# This module owns the monitoring namespace. If a namespace of this name already
+# exists on the cluster, Terraform adopts it and `enable_observability=false`
+# (or destroy) will DELETE it along with anything else in it. The name is fixed
+# rather than a variable because several relabelings, selectors, and the book
+# chapters all reference "monitoring"; change it in one place only if you must.
 resource "kubectl_manifest" "monitoring_namespace" {
   count = var.enable_observability ? 1 : 0
 
@@ -507,29 +633,56 @@ resource "kubectl_manifest" "dcgm_servicemonitor" {
   ]
 }
 
-# --- GPU per-tenant dashboard (picked up by the Grafana sidecar) ------------
-resource "kubectl_manifest" "dashboard_gpu_tenant" {
-  count = local.dcgm_sm_enabled ? 1 : 0
+# --- Grafana dashboards (picked up by the Grafana sidecar) -------------------
+# One resource renders every dashboard declared in local.grafana_dashboards, so
+# adding a dashboard is a one-line map entry plus its JSON in dashboards/. The
+# ConfigMap name, the data key, and the source file all derive from each.key, so
+# the three can never drift out of agreement.
+#
+# server_side_apply is on for all of them: the largest (node-exporter-full, ~460KB)
+# would otherwise overflow the kubectl.kubernetes.io/last-applied-configuration
+# annotation (capped at 262144 bytes); applying it uniformly avoids a per-size
+# branch and keeps the apply behavior identical across dashboards. force_conflicts
+# only takes field ownership from a prior client-side apply — the Grafana sidecar
+# reads these ConfigMaps and never writes them, so there is no real contention.
+resource "kubectl_manifest" "grafana_dashboard" {
+  for_each = { for k, v in local.grafana_dashboards : k => v if v.enabled }
+
+  server_side_apply = true
+  force_conflicts   = true
 
   yaml_body = yamlencode({
     apiVersion = "v1"
     kind       = "ConfigMap"
     metadata = {
-      name      = "grafana-dashboard-gpu-tenant"
+      name      = "grafana-dashboard-${each.key}"
       namespace = local.observability_namespace
-      labels = {
-        grafana_dashboard = "1" # matches sidecar.dashboards.label / labelValue
-      }
+      labels    = { grafana_dashboard = "1" } # matches sidecar.dashboards.label
       annotations = {
-        grafana_folder = "GPU" # matches folderAnnotation
+        grafana_folder = each.value.folder # matches sidecar folderAnnotation
       }
     }
     data = {
-      "gpu-tenant.json" = file("${path.module}/dashboards/gpu-tenant.json")
+      "${each.key}.json" = file("${path.module}/dashboards/${each.key}.json")
     }
   })
 
   depends_on = [helm_release.kube_prometheus_stack]
+}
+
+# Migrate the three former per-dashboard resources into the for_each map in place
+# (no destroy/recreate). Harmless to keep; can be dropped after one apply.
+moved {
+  from = kubectl_manifest.dashboard_gpu_tenant[0]
+  to   = kubectl_manifest.grafana_dashboard["gpu-tenant"]
+}
+moved {
+  from = kubectl_manifest.dashboard_node_exporter[0]
+  to   = kubectl_manifest.grafana_dashboard["node-exporter-full"]
+}
+moved {
+  from = kubectl_manifest.dashboard_dcgm_exporter[0]
+  to   = kubectl_manifest.grafana_dashboard["dcgm-exporter"]
 }
 
 # --- Node Monitoring Agent (detection only) ----------------------------------
@@ -554,15 +707,15 @@ resource "kubectl_manifest" "dashboard_gpu_tenant" {
 #
 # The one non-default setting is the dcgm-server toleration. The agent's bundled
 # `dcgm-server` DaemonSet (the nv-hostengine that reads GPU health) ships with NO
-# tolerations, so on this cluster's GPU pools (nvidia.com/gpu:NoSchedule taint)
-# it cannot land on any GPU node and AcceleratedHardwareReady stays stuck False —
-# a detection gap exactly on the nodes that matter (verified live). The add-on
-# exposes dcgmAgent.tolerations in its configurationValues schema (v1.3.0+), so
-# we grant the GPU toleration there. Scoped to nvidia.com/gpu (not a blanket
-# Exists) so it never leaks onto unrelated tainted nodes. This looks like an
-# upstream default oversight (the agent itself tolerates all taints, dcgm-server
-# does not); if AWS fixes the default, this configuration_values block can be
-# dropped.
+# tolerations, so on this cluster's tainted GPU nodes it cannot land and
+# AcceleratedHardwareReady stays stuck False — a detection gap exactly on the
+# nodes that matter. The add-on exposes dcgmAgent.tolerations in its
+# configurationValues schema (v1.3.0+), so we grant the accelerator taints there
+# (local.dcgm_server_tolerations — kept in sync with the GPU node taint ledger,
+# including the Capacity Block `capacity-reservation` taint). Scoped (not a
+# blanket Exists) so it never leaks onto unrelated tainted nodes. This looks like
+# an upstream default oversight (the agent itself tolerates all taints,
+# dcgm-server does not); if AWS fixes the default, this block can be dropped.
 resource "aws_eks_addon" "node_monitoring_agent" {
   count = var.enable_node_monitoring_agent ? 1 : 0
 
@@ -572,11 +725,7 @@ resource "aws_eks_addon" "node_monitoring_agent" {
 
   configuration_values = jsonencode({
     dcgmAgent = {
-      tolerations = [{
-        key      = "nvidia.com/gpu"
-        operator = "Exists"
-        effect   = "NoSchedule"
-      }]
+      tolerations = local.dcgm_server_tolerations
     }
   })
 
@@ -628,6 +777,14 @@ resource "kubectl_manifest" "node_health_alert_rules" {
           },
           {
             alert = "NodeConditionUnhealthy"
+            # status="true" == 0 means the Ready series is present but not true, i.e. the
+            # NMA actively reported the condition False (or, rarely, Unknown). It does NOT
+            # catch an NMA that has STOPPED reporting: a stale NodeCondition keeps its last
+            # value (Kubernetes has no controller that flips a non-Ready condition to Unknown
+            # when its reporter dies), so the series simply freezes at its last-seen value.
+            # That blind spot is covered by NodeMonitoringAgentDown below, which watches the
+            # DaemonSets directly. The message says "not True" so on-call is not misled into
+            # hunting for an explicit False when the value could be Unknown.
             expr  = "kube_node_status_condition{condition=~\"KernelReady|ContainerRuntimeReady|NetworkingReady|StorageReady\",status=\"true\"} == 0"
             "for" = "5m"
             labels = {
@@ -635,8 +792,8 @@ resource "kubectl_manifest" "node_health_alert_rules" {
               component = "node-monitoring-agent"
             }
             annotations = {
-              summary     = "{{ $labels.condition }} is False on {{ $labels.node }}"
-              description = "The Node Monitoring Agent reports {{ $labels.condition }}=False for 5m."
+              summary     = "{{ $labels.condition }} is not True on {{ $labels.node }}"
+              description = "The Node Monitoring Agent reports {{ $labels.condition }} not True (False or Unknown) for 5m."
             }
           },
           {

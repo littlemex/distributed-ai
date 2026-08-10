@@ -29,12 +29,14 @@ locals {
     # contiguous NeuronCore/device IDs are allocated. Toggled by var.neuron_enable_scheduler.
     scheduler = { enabled = var.neuron_enable_scheduler }
 
-    # Device plugin tolerations: run on Neuron nodes and on Capacity Block reserved nodes.
+    # Device plugin tolerations: run on Neuron nodes and on Capacity Block reserved
+    # nodes, plus any user pool taints (shared ledger) so a tainted Neuron pool still
+    # advertises aws.amazon.com/neuron instead of stranding the plugin.
     devicePlugin = {
-      tolerations = [
+      tolerations = concat([
         { key = "aws.amazon.com/neuron", operator = "Exists", effect = "NoSchedule" },
         { key = "capacity-reservation", operator = "Exists", effect = "NoSchedule" },
-      ]
+      ], local.user_taint_tolerations)
     }
   }
 }
