@@ -447,7 +447,14 @@ resource "kubectl_manifest" "dcgm_servicemonitor" {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "ServiceMonitor"
     metadata = {
-      name = "nvidia-dcgm-exporter"
+      # Deliberately NOT named "nvidia-dcgm-exporter": that is the exact name the
+      # GPU Operator uses for its own DCGM ServiceMonitor, and with
+      # dcgmExporter.serviceMonitor.enabled=false the operator reconciles that
+      # name to "should not exist" and DELETES any SM of that name on every
+      # reconcile (verified live: our SM kept vanishing whenever a GPU node was
+      # recycled and the operator re-reconciled). A distinct name keeps it out of
+      # the operator's prune scope.
+      name = "nvidia-dcgm-exporter-tenant"
       # Same namespace the GPU Operator (gpu-addons.tf) installs into, derived
       # from that release so the two cannot drift apart. dcgm_sm_enabled implies
       # has_gpu_pool, so gpu_operator[0] always exists here.
