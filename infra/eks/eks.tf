@@ -34,13 +34,13 @@ module "eks" {
   # aws-fsx-csi-driver is NOT listed here — fsx.tf manages it as a standalone
   # aws_eks_addon resource (with a pinned version and its own Pod Identity association).
   ################################################################################
-  # NOTE: the Node Monitoring Agent is installed via helm_release
-  # (observability.tf), NOT here and NOT as an EKS add-on. The add-on exposes no
-  # tolerations config, so its bundled dcgm-server cannot schedule onto tainted
-  # GPU nodes; the Helm chart's dcgmAgent.tolerations fixes that. Keeping it out
-  # of this module `addons` map also avoids re-evaluating the module dependency
-  # graph (which would force the Karpenter node IAM policy attachments to be
-  # replaced, momentarily detaching live nodes' permissions).
+  # NOTE: the Node Monitoring Agent is installed as a standalone aws_eks_addon
+  # (observability.tf), NOT as an entry in this module `addons` map. Adding it
+  # here re-evaluates the whole module dependency graph and forces the Karpenter
+  # node IAM policy attachments to be replaced (policy ARNs go "known after
+  # apply"), momentarily detaching live nodes' permissions. The standalone
+  # resource (same pattern as the EFS/FSx CSI add-ons) avoids that. Its GPU-taint
+  # toleration is passed via the add-on's configuration_values.
   addons = {
     vpc-cni = {
       before_compute = true

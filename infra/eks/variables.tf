@@ -1043,10 +1043,10 @@ variable "enable_node_monitoring_agent" {
   default     = true
 }
 
-variable "node_monitoring_agent_chart_version" {
-  description = "Helm chart version for eks-node-monitoring-agent (aws.github.io/eks-node-monitoring-agent). Installed via Helm rather than the EKS add-on so dcgmAgent.tolerations can be set (the add-on exposes no tolerations config, and its dcgm-server cannot schedule onto tainted GPU nodes)."
+variable "node_monitoring_agent_version" {
+  description = "Version of the eks-node-monitoring-agent EKS add-on. Leave null to let EKS pick the default for the cluster's Kubernetes version. The dcgm-server GPU-taint toleration is set via the add-on's configuration_values (dcgmAgent.tolerations, available in the schema since v1.3.0)."
   type        = string
-  default     = "1.7.0"
+  default     = null
 }
 
 variable "kube_prometheus_stack_version" {

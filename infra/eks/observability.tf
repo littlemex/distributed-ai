@@ -540,37 +540,30 @@ resource "kubectl_manifest" "dashboard_gpu_tenant" {
 # replace stays with the job layer / an operator. See the reasoning in the blog
 # post referenced by the observability book chapter.
 #
-# Installed via HELM, not the EKS add-on. The add-on's configuration schema is
-# empty, so it gives no way to set tolerations — and its bundled `dcgm-server`
-# DaemonSet (the nv-hostengine that reads GPU health) ships with NO tolerations.
-# On this cluster the GPU pools carry a nvidia.com/gpu:NoSchedule taint, so under
-# the add-on the dcgm-server cannot land on any GPU node (DESIRED=0) and
-# AcceleratedHardwareReady stays stuck False (verified live — a detection gap
-# exactly on the nodes that matter). The Helm chart exposes dcgmAgent.tolerations,
-# so we install via Helm and grant the dcgm-server the GPU toleration explicitly.
-# This looks like an upstream oversight (the NMA agent itself tolerates all taints
-# but the dcgm-server does not); if AWS fixes it, the tolerations block below can
-# simply be dropped. The "cannot use an existing DCGM with the NMA" limitation is
-# tracked as https://github.com/aws/containers-roadmap/issues/2763; a dedicated
-# issue for the dcgm-server missing GPU-taint tolerations was not found — file one
-# and record the number here so this workaround has a clear removal trigger.
-resource "helm_release" "node_monitoring_agent" {
+# Installed as an EKS managed add-on (aws_eks_addon), matching how the other
+# AWS-provided add-ons in this module are managed (EBS/EFS/FSx CSI etc.): EKS
+# tracks K8s-version compatibility, surfaces version/health in the console, and
+# is the supported install path.
+#
+# The one non-default setting is the dcgm-server toleration. The agent's bundled
+# `dcgm-server` DaemonSet (the nv-hostengine that reads GPU health) ships with NO
+# tolerations, so on this cluster's GPU pools (nvidia.com/gpu:NoSchedule taint)
+# it cannot land on any GPU node and AcceleratedHardwareReady stays stuck False —
+# a detection gap exactly on the nodes that matter (verified live). The add-on
+# exposes dcgmAgent.tolerations in its configurationValues schema (v1.3.0+), so
+# we grant the GPU toleration there. Scoped to nvidia.com/gpu (not a blanket
+# Exists) so it never leaks onto unrelated tainted nodes. This looks like an
+# upstream default oversight (the agent itself tolerates all taints, dcgm-server
+# does not); if AWS fixes the default, this configuration_values block can be
+# dropped.
+resource "aws_eks_addon" "node_monitoring_agent" {
   count = var.enable_node_monitoring_agent ? 1 : 0
 
-  name       = "eks-node-monitoring-agent"
-  repository = "https://aws.github.io/eks-node-monitoring-agent"
-  chart      = "eks-node-monitoring-agent"
-  version    = var.node_monitoring_agent_chart_version
-  namespace  = "kube-system"
+  cluster_name  = module.eks.cluster_name
+  addon_name    = "eks-node-monitoring-agent"
+  addon_version = var.node_monitoring_agent_version # null => EKS default for the K8s version
 
-  # The ONLY override is the dcgm-server toleration below — the agent itself
-  # already tolerates all taints by default, so values stays minimal and this
-  # whole block can be deleted once upstream tolerates the GPU taint (see the
-  # comment above). THE FIX: the bundled dcgm-server (nv-hostengine) must
-  # tolerate the GPU taint to land on GPU nodes and read AcceleratedHardwareReady.
-  # Scoped to nvidia.com/gpu (not a blanket Exists) so it never leaks onto
-  # unrelated tainted nodes.
-  values = [yamlencode({
+  configuration_values = jsonencode({
     dcgmAgent = {
       tolerations = [{
         key      = "nvidia.com/gpu"
@@ -578,7 +571,15 @@ resource "helm_release" "node_monitoring_agent" {
         effect   = "NoSchedule"
       }]
     }
-  })]
+  })
+
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = {
+    Environment = var.environment
+    Project     = "distributed-ai"
+  }
 }
 
 # --- Alerting rules for the Node Monitoring Agent's NodeConditions -----------
