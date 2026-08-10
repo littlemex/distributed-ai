@@ -1,0 +1,158 @@
+# values.yaml — ComfyUI + MiniMax-H3 workloads.
+#
+# Every workload is OFF by default; turn on exactly the one you want:
+#
+#   helm template comfyui ./charts/comfyui -n comfyui \
+#     --set comfyui.enabled=true --set comfyui.image=$ECR_URL:v1 \
+#     | kubectl apply -f -
+#
+# Nothing here is region- or account-specific: image URIs and the node-role come from
+# `terraform output`. The MiniMax-H3 weights are pinned by repo + revision for reproducibility.
+
+# Namespace every rendered object is placed in. Create it first (kubectl create ns comfyui).
+# Leave "" to use whatever `-n <x>` you pass to `helm template`; set only to override that.
+namespace: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# sharedStorage — the ReadWriteMany PV/PVC that holds model weights (/models) and
+# outputs (/output). The static PV is Terraform-managed (module.cluster OpenZFS,
+# PV name "openzfs-shared"); the PVC is created ONCE by hand (manifests/shared-pvc.yaml
+# in the base module, or the runbook) so its lifecycle matches the data, not a workload.
+# ─────────────────────────────────────────────────────────────────────────────
+sharedStorage:
+  # PVC name bound to the OpenZFS static PV. REQUIRED for modelFetch and comfyui.
+  # Apply the base module's manifests/shared-pvc.yaml once per namespace, then set this.
+  existingClaimName: shared-claim
+  # Subpaths under the shared volume, kept separate so deleting one never risks another
+  # (especially the expensive-to-re-download weights).
+  modelsSubPath: minimax-h3/models
+  outputSubPath: minimax-h3/output
+  inputSubPath: minimax-h3/input       # I2V/R2V source images uploaded to ComfyUI
+  userSubPath: minimax-h3/user         # saved workflows / UI settings (survive pod restart)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# minimaxH3 — the model weight set. Pinned by Hugging Face repo + revision. These are
+# the Comfy-Org pre-packaged, pre-quantized files that ComfyUI core loads directly:
+#   diffusion int8 (~19.5 GB) + Qwen3-VL-32B text encoder nvfp4/awq (~14.6 GB)
+#   + video VAE fp16 (~4.9 GB) + audio VAE fp32 (~0.6 GB)  ≈ 40 GB total.
+# modelFetch downloads each `file` into models/<targetDir>/ under the shared volume.
+# ─────────────────────────────────────────────────────────────────────────────
+minimaxH3:
+  repo: Comfy-Org/MiniMax-H3
+  # Pin to a commit sha for full reproducibility; "main" is for first iteration. Confirm
+  # the current sha with: huggingface-cli repo info Comfy-Org/MiniMax-H3
+  revision: main
+  files:
+    # The T2V/I2V diffusion model. The R2V variant (ref2va) is listed but not fetched by
+    # default — add it to `extraFiles` if you run a reference-to-video workflow.
+    - { file: diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors, targetDir: diffusion_models }
+    - { file: text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors,        targetDir: text_encoders }
+    - { file: vae/minimax_h3_video_vae_fp16.safetensors,                         targetDir: vae }
+    - { file: vae/minimax_h3_audio_vae_fp32.safetensors,                         targetDir: vae }
+  # Additional files to fetch (e.g. the ref2va diffusion model). Same shape as `files`.
+  extraFiles: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# imageBuild — build the ComfyUI image in-cluster with rootless BuildKit and push to
+# ECR. Reuses the base module's image-builder namespace/ServiceAccount/Pod Identity;
+# the ComfyUI ECR repo + push policy are added by this project's Terraform.
+# ─────────────────────────────────────────────────────────────────────────────
+imageBuild:
+  enabled: false
+  repository: ""          # REQUIRED: terraform output -raw comfyui_ecr_url
+  tag: v1                 # bump (v1->v2) to rebuild instead of deleting the Job
+  # Git context for the Dockerfile: repo#ref:subdir. The subdir holds image/comfyui/Dockerfile.
+  gitRepo: github.com/littlemex/distributed-ai.git
+  gitRef: main            # pin to a release tag/sha for reproducibility
+  contextSubPath: 2026-08-comfyui-minimax-h3-g6e/image/comfyui
+  namespace: image-builder
+  serviceAccountName: image-builder
+  # Docker build-args forwarded to the Dockerfile (all optional; see image/comfyui/Dockerfile).
+  # Bump the ComfyUI version here WITHOUT editing the Dockerfile.
+  buildArgs:
+    COMFYUI_REF: v0.31.0
+  # The ComfyUI runtime image is ~15-20 GB; peak build disk is several× that. 120Gi is
+  # safe on the CPU pool's 150Gi root. Raise + set dedicatedPool for a larger image.
+  ephemeralStorage: 120Gi
+  dedicatedPool:
+    enabled: false
+  # buildkitImage / awsCliImage: pinned by digest in the template; override only to bump.
+  buildkitImage: ""
+  awsCliImage: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# modelFetch — one-shot Job that downloads the MiniMax-H3 weights to the shared volume.
+# Idempotent: a file already present (and non-empty) is skipped, so re-running is cheap
+# and a restarted Job resumes rather than re-downloading 40 GB. Runs on the CPU pool
+# (no GPU needed to download) so it does not tie up the GPU node.
+# ─────────────────────────────────────────────────────────────────────────────
+modelFetch:
+  enabled: false
+  # Image used to download. Leave "" to reuse comfyui.image — the ComfyUI image bakes in
+  # huggingface_hub, so this Job does NOT pip-install at runtime (no PyPI dependency mid-fetch,
+  # same discipline as the ComfyUI pod). Override only to pin a different digest.
+  image: ""
+  # Hugging Face token for gated/private repos. The Comfy-Org/MiniMax-H3 repo is public,
+  # so this is optional. When set to a Secret name, it is mounted as HF_TOKEN.
+  hfTokenSecretName: ""     # e.g. "hf-token" (key: token). Optional — public repo needs none.
+  # Where the CPU pool schedules this. node-role=cpu is the base module's CPU NodePool.
+  nodeRole: cpu
+  # Download tuning. hf_transfer accelerates large-file downloads; disable if it flakes.
+  hfTransfer: true
+  cpu: "2"
+  memory: 4Gi
+  ephemeralStorage: 4Gi     # downloads stream to the mounted PVC, not the root disk
+  backoffLimit: 4
+
+# ─────────────────────────────────────────────────────────────────────────────
+# comfyui — the ComfyUI Deployment + ClusterIP Service (single GPU, stateful).
+# ─────────────────────────────────────────────────────────────────────────────
+comfyui:
+  enabled: false
+  # REQUIRED: the ECR image built above. terraform output -raw comfyui_ecr_url + ":<tag>".
+  # Prefer a NEW tag per rebuild, or a digest (…@sha256:…), so a cached stale image is never run.
+  image: ""
+  # Always re-pull, so reusing a mutable tag after a rebuild picks up the new image. Set to
+  # IfNotPresent only if you always bump the tag / use a digest and want to save a pull.
+  imagePullPolicy: Always
+  # REQUIRED: the accelerator_pools key of the GPU pool (node-role label). Matches
+  # `terraform output -raw comfyui_pool_name` (default "comfyui").
+  nodeRole: comfyui
+  # One L40S. MiniMax-H3 uses ComfyUI's sequential offload to fit ~40 GB in 48 GB VRAM.
+  gpuCount: 1
+  # Container + Service + probe port. LEAVE AT 8188: the image ENTRYPOINT hardcodes
+  # `--port 8188`, so changing only this would move the Service/probes off the port ComfyUI
+  # actually listens on and the pod would never go Ready. To run on another port, also append
+  # `--port=<n>` via comfyui.extraArgs (and update this to match).
+  port: 8188
+  # Container memory (requests == limits). This is the value most likely to bite: the 48 GB-VRAM
+  # path stages weights through host RAM, ComfyUI's sequential offload parks the ~15 GB text
+  # encoder in RAM while the DiT is on the GPU, safetensors mmap adds reclaimable page cache, and
+  # shmSize below is INSIDE this limit. g6e.2xlarge has 64 GiB RAM (~57 GiB allocatable),
+  # g6e.4xlarge 128 GiB (verified via DescribeInstanceTypes — NOT 32 GiB, an easy mistake).
+  # 48Gi holds the encoder + working buffers + shm with headroom on a 2xlarge and avoids the
+  # OOMKill / constant-NFS-re-read failure mode a tight limit causes; requests==limits so
+  # Karpenter still packs it onto a 2xlarge. Raise toward 96Gi on a 4xlarge if offload is tight.
+  # (L40S usable VRAM is ~44.7 GiB, so this path leans on CPU offload, not VRAM alone.)
+  memory: 48Gi
+  cpu: "4"
+  # /dev/shm for the model loader / dataloaders. emptyDir{Memory} counts against `memory`.
+  shmSize: 4Gi
+  # Extra ComfyUI CLI args appended to the entrypoint (e.g. "--lowvram" if VRAM is tight,
+  # or "--reserve-vram 2.0"). ComfyUI auto-detects VRAM by default, so usually empty.
+  extraArgs: ""
+  # Root EBS on the node holds the image; weights live on the PVC. No per-pod override needed.
+  #
+  # Startup: the container starts fast, but the FIRST generation loads ~40 GB from NFS, which
+  # can take minutes. The startupProbe tolerates a long cold start so liveness never kills a
+  # loading pod; readiness gates the Service until ComfyUI's HTTP server answers.
+  startupProbe:
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    failureThreshold: 60      # up to 10 min for the server to come up + first index
+  readinessProbe:
+    periodSeconds: 10
+    failureThreshold: 6
+  livenessProbe:
+    periodSeconds: 30
+    failureThreshold: 6

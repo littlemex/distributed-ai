@@ -1,0 +1,56 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is git-ignored (it may hold an
+# account id / profile name). For a smoke run you can apply with ZERO edits — every
+# value below is shown with its default. Uncomment only what you want to change.
+
+# ── Where + who ───────────────────────────────────────────────────────────────
+# region       = "us-west-2"
+# cluster_name = "comfyui-minimax-h3"
+
+# Named AWS profile. SET THIS if you authenticate via SSO/Isengard/assume-role, and
+# use the SAME profile for `aws eks update-kubeconfig` (else kubectl gets Unauthorized).
+# Leave commented only if your default credential chain already resolves to the
+# principal you apply with.
+# aws_profile = "my-profile"
+
+# STRONGLY recommended: pin the 12-digit account you intend to deploy into. The plan
+# fails before creating anything if the resolved credentials point elsewhere.
+# expected_account_id = "123456789012"
+
+# ── ComfyUI GPU pool ────────────────────────────────────────────────────────────
+# Single L40S (48 GB VRAM) with a larger-RAM fallback. MiniMax-H3's ~40 GB of weights
+# fit 48 GB VRAM with ComfyUI's sequential offload. Do NOT add 24 GB cards here.
+# gpu_instance_types = ["g6e.2xlarge", "g6e.4xlarge"]
+
+# ComfyUI is a stateful single pod (in-memory queue) — On-Demand by default so a Spot
+# reclaim can't lose an in-flight generation. For a cheap interruption-tolerant run:
+# gpu_capacity_types = ["spot", "on-demand"]
+
+# Never voluntarily disrupt the running node (consolidation would evict the single pod
+# mid-generation even on On-Demand). The pod also carries karpenter.sh/do-not-disrupt.
+# gpu_pool_disruption = "protect"
+
+# gpu_node_volume_size = "200Gi"   # room for the 15-20 GB image; weights live on /shared
+# gpu_pool_zone        = ""        # "" derives azs[0], co-located with the OpenZFS filesystem
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+# storage_subnet_index         = 0     # keep aligned with gpu_pool_zone's AZ
+# openzfs_storage_capacity_gib = 256   # ~40 GB weights + outputs + a 2nd revision
+# openzfs_throughput_capacity  = 256
+# fsx_lustre_enabled           = false # no parallel scratch needed for single-node ComfyUI
+
+# ── Extra pools (escape hatch) ──────────────────────────────────────────────────
+# Add a separate 24 GB experiment pool WITHOUT touching the serving path, e.g.:
+# extra_accelerator_pools = {
+#   gpu-24g-experiment = {
+#     instance_types = ["g6.2xlarge"]
+#     device_plugin  = "nvidia"
+#     capacity_types = ["spot", "on-demand"]
+#   }
+# }
+
+# ── Tags ─────────────────────────────────────────────────────────────────────
+# tags = {
+#   Project   = "distributed-ai"
+#   Workload  = "comfyui-minimax-h3"
+#   ManagedBy = "terraform"
+# }
