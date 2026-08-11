@@ -269,17 +269,28 @@ resource "null_resource" "wait_for_node_drain" {
       # finish terminating (observed: still present with Karpenter's controller Pod still
       # Running, several minutes after the NodeClaim step above completed). This wait is
       # best-effort (does NOT fail the destroy on timeout), for a reason discovered live and
-      # not fixable within this module: Karpenter's EC2NodeClass finalizer logic calls IAM
+      # not fixable by waiting: Karpenter's EC2NodeClass finalizer logic calls IAM
       # (ListInstanceProfiles) — and IAM has no regional Interface VPC endpoint (see
       # vpc-endpoints.tf's note on IAM), so if the NAT gateway is already gone by this point,
-      # that call times out FOREVER and the finalizer never clears. Failing the whole destroy
-      # over an object with no billing impact (the underlying EC2 instance is confirmed
-      # terminated by the NodeClaim wait above) would be worse than leaving a stuck
-      # Kubernetes object behind. If this warns, clear it manually:
-      #   kubectl patch ec2nodeclass <name> --type=merge -p '{"metadata":{"finalizers":[]}}'
+      # that call times out FOREVER and the finalizer never clears.
       echo "wait_for_node_drain: waiting for Karpenter to clear EC2NodeClass finalizers (best-effort)..."
       if ! wait_for_empty "ec2nodeclasses.karpenter.k8s.aws" "EC2NodeClass(es)" 60; then
-        echo "wait_for_node_drain: EC2NodeClasses still present after 10 minutes (likely blocked on an IAM call with no NAT/VPC-endpoint path — harmless, the EC2 instance is already gone). Proceeding with destroy; clear the stuck finalizer manually if 'kubectl get ec2nodeclass' still shows it afterward." >&2
+        # Force-clear the stuck finalizers so the destroy can proceed. WHY this is safe AND
+        # necessary (discovered live in ap-northeast-1): the NodeClaim wait above already
+        # confirmed every EC2 instance is terminated, so the only thing this finalizer still
+        # guards is an IAM cleanup that cannot complete without a NAT/VPC-endpoint path — there
+        # is no billing or data impact to clearing it. And it is necessary, not merely tidy:
+        # helm_release.karpenter_crd is destroyed right after this resource, and deleting the
+        # ec2nodeclasses.karpenter.k8s.aws CRD BLOCKS on any surviving CR with a finalizer, so a
+        # left-behind EC2NodeClass wedges `terraform destroy` at the CRD uninstall
+        # ("uninstallation completed with 1 error(s): context deadline exceeded"). Clearing the
+        # finalizers here lets the CRs delete and the CRD uninstall cleanly, in one pass.
+        echo "wait_for_node_drain: EC2NodeClasses still present after 10 minutes (finalizer blocked on an IAM call with no NAT path — the EC2 instances are already gone). Force-clearing the finalizers so the CRD can be deleted..." >&2
+        for nc in $(kubectl get ec2nodeclasses.karpenter.k8s.aws -o name 2>/dev/null); do
+          kubectl patch "$nc" --type=merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 \
+            && echo "wait_for_node_drain: cleared finalizers on $nc" >&2 \
+            || echo "wait_for_node_drain: could not clear finalizers on $nc (continuing)" >&2
+        done
       fi
       exit 0
     EOT

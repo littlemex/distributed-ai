@@ -67,7 +67,13 @@ resource "aws_fsx_lustre_file_system" "training" {
   # client + LNET/EFA config on the node, EFA-capable instance) is NOT set up by this module
   # — see the Basic10 chapter. dynamic{} renders zero blocks when EFA is off, keeping the
   # default TCP filesystem byte-identical to the pre-EFA config.
-  efa_enabled = var.fsx_efa_enabled
+  #
+  # Use `? true : null` (not `? true : false`) so that when EFA is off the attribute is
+  # UNSET, not explicitly false. efa_enabled is ForceNew; a filesystem created by an older
+  # provider carries null in state, and an explicit `= false` in config could be read as a
+  # change and propose a replacement. null means "exactly as if we never wrote it", so an
+  # existing TCP filesystem plans as no-op regardless of how it was originally created.
+  efa_enabled = var.fsx_efa_enabled ? true : null
 
   dynamic "metadata_configuration" {
     for_each = var.fsx_efa_enabled ? [1] : []
@@ -205,6 +211,14 @@ resource "aws_vpc_security_group_ingress_rule" "fsx_self_efa_all" {
 resource "time_sleep" "fsx_sg_propagation" {
   count           = var.fsx_enabled ? 1 : 0
   create_duration = "30s"
+
+  # Re-run the propagation wait whenever EFA is toggled. Enabling EFA on an existing cluster
+  # replaces the filesystem AND adds the self-referencing EFA SG rule; without a trigger the
+  # sleep is already created and does not re-fire, so CreateFileSystem can run before the new
+  # rule propagates to the FSx network-validation service and fail on the first apply.
+  triggers = {
+    fsx_efa_enabled = tostring(var.fsx_efa_enabled)
+  }
 
   depends_on = [
     aws_vpc_security_group_ingress_rule.fsx_self_988,
