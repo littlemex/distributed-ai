@@ -118,6 +118,14 @@ resource "terraform_data" "az_invariants" {
       error_message = "fsx_subnet_index / openzfs_subnet_index must be < the AZ count (${local.num_azs}); they index into the per-AZ private subnets."
     }
     precondition {
+      # FSx-EFA minimums (AWS API): EFA requires USER_PROVISIONED metadata >= 6000 IOPS and
+      # >= 4800 GiB capacity. fsx_metadata_iops's own validation already forbids < 1500 etc.;
+      # this adds the EFA-specific >= 6000 / >= 4800 GiB floor, and only when EFA is enabled.
+      # (Kept here, not as a variable validation, so both fsx vars can be cross-checked.)
+      condition     = !var.fsx_efa_enabled || (var.fsx_metadata_iops >= 6000 && var.fsx_storage_capacity_gib >= 4800)
+      error_message = "fsx_efa_enabled = true requires fsx_metadata_iops >= 6000 and fsx_storage_capacity_gib >= 4800 (EFA-enabled FSx for Lustre minimums). Got iops=${var.fsx_metadata_iops}, capacity=${var.fsx_storage_capacity_gib}."
+    }
+    precondition {
       # DERIVED-EFA × multi-AZ guard (ADR D5). The variable validation catches only an EXPLICIT
       # efa_interface_count > 0 + multi-AZ; it cannot see a pool that leaves efa_interface_count = -1
       # (derive) and sets zones = ["*"] on an EFA instance type, because the resolved topology

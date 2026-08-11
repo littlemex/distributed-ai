@@ -818,6 +818,46 @@ variable "fsx_storage_capacity_gib" {
   }
 }
 
+variable "fsx_efa_enabled" {
+  description = <<-EOT
+    Enable Elastic Fabric Adapter (EFA) on the FSx for Lustre filesystem. EFA gives a single
+    client up to 700 Gbps (vs 100 Gbps over TCP), or up to 1200 Gbps with GPUDirect Storage,
+    by using OS-bypass RDMA over the SRD protocol — worth enabling for large-checkpoint /
+    high-throughput data loading on GPU training clusters.
+
+    IMPORTANT constraints (all enforced or noted here):
+      - EFA can only be set at CREATE time (immutable); flipping this on an existing
+        filesystem forces a replacement (data loss). PERSISTENT_2 only (already the case).
+      - Requires USER_PROVISIONED metadata with >= 6000 IOPS (set via fsx_metadata_iops) and
+        >= 4800 GiB capacity — both validated in az.tf preconditions when this is true.
+      - Requires an EFA-capable instance type (Nitro v4+, e.g. p5en/p6/trn2) for the CLIENT.
+        This flag only configures the FILESYSTEM; the node still needs the EFA driver, the
+        Lustre client, and the LNET/EFA setup applied at boot. This module does NOT install
+        that node-side setup — see the Basic10 chapter and the AWS FSx for Lustre workshop
+        (sections 4-5 EFA / 4-6 EKS+EFA) for the preBootstrap/userData steps required. With
+        this flag on but the node side absent, the filesystem is EFA-enabled but clients
+        mount it over TCP (or fail), so treat this as opt-in for advanced setups.
+    Default false keeps the standard TCP-mounted PERSISTENT_2 filesystem.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "fsx_metadata_iops" {
+  description = <<-EOT
+    User-provisioned metadata IOPS for the FSx for Lustre filesystem. Only used when
+    fsx_efa_enabled = true (EFA requires USER_PROVISIONED metadata mode with >= 6000 IOPS).
+    Valid PERSISTENT_2 SSD values: 1500, 3000, 6000, 12000, or a multiple of 12000 up to
+    192000. Ignored when fsx_efa_enabled = false (metadata is auto-provisioned from capacity).
+  EOT
+  type        = number
+  default     = 6000
+  validation {
+    condition     = contains([1500, 3000, 6000, 12000], var.fsx_metadata_iops) || (var.fsx_metadata_iops > 12000 && var.fsx_metadata_iops % 12000 == 0 && var.fsx_metadata_iops <= 192000)
+    error_message = "fsx_metadata_iops must be 1500, 3000, 6000, 12000, or a multiple of 12000 up to 192000 (PERSISTENT_2 SSD). EFA requires >= 6000."
+  }
+}
+
 variable "fsx_subnet_index" {
   description = <<-EOT
     Index into module.vpc.private_subnets (i.e. into local.azs) for the single-AZ FSx

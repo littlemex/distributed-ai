@@ -55,6 +55,30 @@ if [[ -z "$NAMESPACE" ]]; then
   exit 1
 fi
 
+# ── Verify the kubectl context targets THIS cluster ───────────────────────────
+# Every step below deletes cluster-scoped or namespace-scoped objects (workloads, NodePools)
+# and then destroys AWS infrastructure. If the current kubectl context points at a different
+# cluster (a stale context from earlier work is easy to leave behind), those deletes hit the
+# wrong cluster silently. Resolve the expected cluster name from Terraform output and require
+# the active context to reference it. Same guard tests/run-tests.sh already enforces.
+CLUSTER_NAME=$(cd "$INFRA_DIR" && terraform output -raw cluster_name 2>/dev/null || true)
+if [[ -n "$CLUSTER_NAME" ]]; then
+  CTX=$(kubectl config current-context 2>/dev/null || true)
+  CTX_CLUSTER=$(kubectl config view --minify -o jsonpath='{.clusters[0].name}' 2>/dev/null || true)
+  if [[ "$CTX_CLUSTER" != *"$CLUSTER_NAME"* ]]; then
+    echo "Error: current kubectl context ($CTX) does not target cluster '$CLUSTER_NAME'" >&2
+    echo "       (context cluster: ${CTX_CLUSTER:-none}). Refusing to run destructive steps" >&2
+    echo "       against the wrong cluster. Switch context, e.g.:" >&2
+    echo "         aws eks update-kubeconfig --name $CLUSTER_NAME --region <region>" >&2
+    exit 1
+  fi
+  echo "kubectl context OK: $CTX (cluster: $CLUSTER_NAME)"
+else
+  echo "WARNING: could not read cluster_name from 'terraform output' in $INFRA_DIR." >&2
+  echo "         Skipping the context-safety check — verify 'kubectl config current-context'" >&2
+  echo "         points at the intended cluster before continuing." >&2
+fi
+
 # ── Resolve which NodePools to delete ─────────────────────────────────────────
 # Ask the cluster rather than assuming a name. Every accelerator pool has to be found: leaving
 # one behind means GPU or Neuron instances keep billing after the reader believes teardown ran.
@@ -102,9 +126,15 @@ echo ""
 
 # ── Step 1: Delete GPU workloads ──────────────────────────────────────────────
 echo "Step 1 — Delete GPU pods and workloads in namespace: $NAMESPACE"
-if confirm "  Delete all Deployments, StatefulSets, Jobs, TrainJobs, and MPIJobs in $NAMESPACE?"; then
+if confirm "  Delete all workloads (Deployments, StatefulSets, DaemonSets, Jobs, bare Pods, TrainJobs, MPIJobs) in $NAMESPACE?"; then
   kubectl -n "$NAMESPACE" delete deployment  --all --ignore-not-found=true
   kubectl -n "$NAMESPACE" delete statefulset --all --ignore-not-found=true
+  # DaemonSets and bare Pods too: the book's own accelerator verification manifests
+  # (nccl-sshd, nccl-probe, neuron-probe, image-prewarm, ...) are DaemonSets or standalone
+  # Pods, not Deployments/Jobs, and each pins a GPU/Neuron node. Skipping them leaves the
+  # expensive node "not empty" so WhenEmpty never fires — exactly the leak this script exists
+  # to prevent. --all covers whatever the reader actually created, not a fixed workshop list.
+  kubectl -n "$NAMESPACE" delete daemonset   --all --ignore-not-found=true
   kubectl -n "$NAMESPACE" delete job         --all --ignore-not-found=true
   # TrainJob (Kubeflow Trainer v2) is the book's primary training workload. Delete it too, or its
   # JobSet-managed pods linger and stall NodeClaim drain. Bound the wait so a wedged Trainer
@@ -117,6 +147,9 @@ if confirm "  Delete all Deployments, StatefulSets, Jobs, TrainJobs, and MPIJobs
     done
   fi
   kubectl -n "$NAMESPACE" delete mpijob      --all --ignore-not-found=true 2>/dev/null || true
+  # Bare Pods not owned by any controller above (e.g. a manually-run probe pod) survive all the
+  # --all deletes on higher-level kinds, so sweep them explicitly last.
+  kubectl -n "$NAMESPACE" delete pod         --all --ignore-not-found=true 2>/dev/null || true
 
   echo "  Waiting for pods to terminate..."
   ELAPSED=0
@@ -226,21 +259,36 @@ if [[ "$RUN_DESTROY" == "true" ]]; then
   echo "!!! This cannot be undone.                                                !!!"
   echo ""
   if confirm "  Run terraform destroy in $INFRA_DIR?"; then
-    TFVARS_LOCAL="$INFRA_DIR/terraform.tfvars.local"
-    EXTRA_ARGS=""
-    if [[ -f "$TFVARS_LOCAL" ]]; then
-      EXTRA_ARGS="-var-file=terraform.tfvars.local"
-    fi
+    # Delete EVERY remaining Karpenter NodePool (monitoring, cpu, any leftover), not just the
+    # accelerator ones from Step 2, BEFORE terraform destroy. terraform destroy's internal
+    # wait_for_node_drain polls until ALL NodeClaims reach zero; but a still-present NodePool
+    # keeps Karpenter launching replacement nodes to satisfy pending pods (e.g. the monitoring
+    # stack), so the wait never converges and destroy deadlocks. The monitoring NodePool in
+    # particular is intentionally NOT ordered before the drain-wait in the Terraform graph (it
+    # would form a dependency cycle), so clearing it here — outside the graph — is the fix.
+    # Verified live: without this, terraform destroy hangs on a perpetually-recreated
+    # monitoring NodeClaim. Best-effort: ignore-not-found and never fail teardown over it.
+    echo "  Deleting all remaining Karpenter NodePools so Karpenter stops launching nodes during destroy..."
+    kubectl delete nodepool --all --ignore-not-found=true --timeout=120s 2>/dev/null || {
+      echo "  NodePool delete timed out — clearing finalizers so destroy can proceed."
+      for np in $(kubectl get nodepool -o name 2>/dev/null); do
+        kubectl patch "$np" --type=json -p '[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
+      done
+    }
     cd "$INFRA_DIR"
+    # No explicit -var-file: terraform auto-loads terraform.tfvars and *.auto.tfvars, which is
+    # exactly what `terraform apply` used, so destroy evaluates the same region / cluster_name /
+    # accelerator_pools. (An earlier version referenced a terraform.tfvars.local that no script
+    # ever creates — a dead branch that risked destroying with default var values if it had.)
     # Pass -auto-approve through when --yes was given. Without this, --yes suppresses only THIS
     # script's own prompts and terraform then asks its own "Do you really want to destroy all
     # resources?" on stdin — which in any non-interactive context (nohup, CI, a background run)
     # gets EOF and fails the whole destroy AFTER the Kubernetes cleanup has already happened.
     # That is the worst possible place to stop: the NodePools are gone but the cluster is not.
     if [[ "$AUTO_YES" == "true" ]]; then
-      terraform destroy -auto-approve $EXTRA_ARGS
+      terraform destroy -auto-approve
     else
-      terraform destroy $EXTRA_ARGS
+      terraform destroy
     fi
   else
     echo "  Skipped. Run manually: cd $INFRA_DIR && terraform destroy"
