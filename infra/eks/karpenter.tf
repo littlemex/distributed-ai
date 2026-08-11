@@ -54,6 +54,12 @@ resource "helm_release" "karpenter_crd" {
     value = "false"
   }
 
+  # Give the CRD uninstall more than the 300s helm default. By the time this chart is deleted,
+  # null_resource.wait_for_node_drain has already stripped the nodepools/ec2nodeclasses
+  # finalizers (see that resource), so the delete should be fast — but keep the headroom so a
+  # momentarily slow API server does not trip "context deadline exceeded".
+  timeout = 600
+
   depends_on = [module.eks]
 }
 
@@ -136,9 +142,10 @@ resource "helm_release" "karpenter" {
 # steady state instead of guessing a duration.
 resource "null_resource" "wait_for_node_drain" {
   triggers = {
-    cluster_name = module.eks.cluster_name
-    region       = var.region
-    aws_profile  = var.aws_profile != null ? var.aws_profile : ""
+    cluster_name        = module.eks.cluster_name
+    region              = var.region
+    aws_profile         = var.aws_profile != null ? var.aws_profile : ""
+    karpenter_namespace = local.karpenter_namespace
   }
 
   # Every controller/addon that owns a per-node resource, so all of them are destroyed only
@@ -257,41 +264,78 @@ resource "null_resource" "wait_for_node_drain" {
         return 1
       }
 
+      # ── HARD GATE: never touch any finalizer until this passes ──────────────────
+      # Block until Karpenter has terminated every NodeClaim. A NodeClaim's
+      # karpenter.sh/termination finalizer is the billing guarantee itself: Karpenter holds the
+      # object until it has terminated the backing EC2 instance, then removes the finalizer and
+      # the object disappears. So "nodeclaims = 0" IS "every Karpenter-managed EC2 is terminated".
+      # We NEVER force-strip a NodeClaim finalizer — doing so erases a live instance from the
+      # cluster's view while it keeps billing (observed live in ap-northeast-1: a g5 GPU node was
+      # orphaned exactly this way). If this never reaches zero, we refuse to proceed.
       echo "wait_for_node_drain: waiting for Karpenter to terminate all accelerator NodeClaims..."
       if ! wait_for_empty "nodeclaims.karpenter.sh" "NodeClaim(s)" 180; then
         echo "wait_for_node_drain: NodeClaims still present after 30 minutes. Refusing to proceed — check for a stuck node (kubectl get nodeclaims, aws ec2 describe-instances) and re-run destroy once clear." >&2
         exit 1
       fi
 
-      # Discovered live: kubectl_manifest reports an EC2NodeClass "destroyed" the moment its
-      # delete is accepted, same as NodePool/NodeClaim — but unlike NodePool, its
-      # karpenter.k8s.aws/termination finalizer is NOT cleared until well after NodeClaims
-      # finish terminating (observed: still present with Karpenter's controller Pod still
-      # Running, several minutes after the NodeClaim step above completed). This wait is
-      # best-effort (does NOT fail the destroy on timeout), for a reason discovered live and
-      # not fixable by waiting: Karpenter's EC2NodeClass finalizer logic calls IAM
-      # (ListInstanceProfiles) — and IAM has no regional Interface VPC endpoint (see
-      # vpc-endpoints.tf's note on IAM), so if the NAT gateway is already gone by this point,
-      # that call times out FOREVER and the finalizer never clears.
-      echo "wait_for_node_drain: waiting for Karpenter to clear EC2NodeClass finalizers (best-effort)..."
-      if ! wait_for_empty "ec2nodeclasses.karpenter.k8s.aws" "EC2NodeClass(es)" 60; then
-        # Force-clear the stuck finalizers so the destroy can proceed. WHY this is safe AND
-        # necessary (discovered live in ap-northeast-1): the NodeClaim wait above already
-        # confirmed every EC2 instance is terminated, so the only thing this finalizer still
-        # guards is an IAM cleanup that cannot complete without a NAT/VPC-endpoint path — there
-        # is no billing or data impact to clearing it. And it is necessary, not merely tidy:
-        # helm_release.karpenter_crd is destroyed right after this resource, and deleting the
-        # ec2nodeclasses.karpenter.k8s.aws CRD BLOCKS on any surviving CR with a finalizer, so a
-        # left-behind EC2NodeClass wedges `terraform destroy` at the CRD uninstall
-        # ("uninstallation completed with 1 error(s): context deadline exceeded"). Clearing the
-        # finalizers here lets the CRs delete and the CRD uninstall cleanly, in one pass.
-        echo "wait_for_node_drain: EC2NodeClasses still present after 10 minutes (finalizer blocked on an IAM call with no NAT path — the EC2 instances are already gone). Force-clearing the finalizers so the CRD can be deleted..." >&2
-        for nc in $(kubectl get ec2nodeclasses.karpenter.k8s.aws -o name 2>/dev/null); do
-          kubectl patch "$nc" --type=merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 \
-            && echo "wait_for_node_drain: cleared finalizers on $nc" >&2 \
-            || echo "wait_for_node_drain: could not clear finalizers on $nc (continuing)" >&2
+      # ── Past the gate: nodeclaims == 0, so no Karpenter-managed EC2 instance exists ─────
+      # Now clear the finalizers that block the CRD delete later. NodePool and EC2NodeClass carry
+      # termination finalizers whose controller-side release calls IAM (ListInstanceProfiles).
+      # IAM has no regional Interface VPC endpoint (see vpc-endpoints.tf), so once the NAT gateway
+      # is gone that call times out forever and the finalizer never clears — the karpenter-crd
+      # chart uninstall then hangs to its timeout ("context deadline exceeded"; observed live).
+      #
+      # First give the controller a graceful window to clear them itself: right now the controller
+      # and the NAT are both still alive (this resource is destroyed BEFORE them), so the IAM call
+      # should succeed and finalizers clear on their own in most runs.
+      echo "wait_for_node_drain: waiting for Karpenter to clear NodePool/EC2NodeClass finalizers (graceful)..."
+      np_ok=0; nc_ok=0
+      wait_for_empty "nodepools.karpenter.sh" "NodePool(s)" 30 && np_ok=1
+      wait_for_empty "ec2nodeclasses.karpenter.k8s.aws" "EC2NodeClass(es)" 30 && nc_ok=1
+
+      # If either is still stuck (finalizer wedged on the IAM/NAT timeout), force it. This is SAFE
+      # here and ONLY here: the hard gate above proved there is no backing EC2 instance, so
+      # stripping these finalizers destroys no billing guarantee (unlike NodeClaim finalizers,
+      # which we never touch). Stop the controller first so it cannot re-add what we strip, and
+      # wait for its Pods to actually be gone (a fixed sleep leaves an in-flight reconcile free to
+      # re-add the finalizer right after the patch).
+      if [ "$np_ok" != "1" ] || [ "$nc_ok" != "1" ]; then
+        echo "wait_for_node_drain: finalizers still present (IAM call wedged with no NAT path). Stopping controller and force-clearing NodePool/EC2NodeClass finalizers (safe: no backing EC2 remains)..."
+        kubectl -n "${self.triggers.karpenter_namespace}" scale deploy -l app.kubernetes.io/name=karpenter --replicas=0 >/dev/null 2>&1 || true
+        kubectl -n "${self.triggers.karpenter_namespace}" wait --for=delete pod -l app.kubernetes.io/name=karpenter --timeout=120s >/dev/null 2>&1 || true
+        # nodeclaims intentionally omitted: the gate guarantees there are none, and force-stripping
+        # a NodeClaim finalizer is the exact bug this rewrite removes.
+        for kind in nodepools.karpenter.sh ec2nodeclasses.karpenter.k8s.aws; do
+          for obj in $(kubectl get "$kind" -o name 2>/dev/null); do
+            kubectl patch "$obj" --type=merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 \
+              && echo "wait_for_node_drain: cleared finalizers on $obj" \
+              || echo "wait_for_node_drain: could not clear $obj (continuing)" >&2
+          done
         done
       fi
+
+      # ── FINAL ASSERT: catch API-invisible Karpenter orphans ─────────────────────
+      # kubectl can only see instances Kubernetes still tracks. A NodeClaim lost in a prior
+      # half-finished destroy could leave an EC2 instance running that no CR references. The only
+      # authoritative "no billing" check is EC2 itself. Scope the query to KARPENTER-managed
+      # instances by the karpenter.sh/nodepool tag AND this cluster's ownership tag
+      # (kubernetes.io/cluster/<name>=owned): the EKS managed system node group carries the
+      # cluster ownership tag too but NOT karpenter.sh/nodepool, and those nodes are torn down by
+      # their own managed-nodegroup resource later in this same destroy — filtering on the cluster
+      # tag alone would false-positive on them and abort a healthy teardown (observed live). We
+      # only assert on the pool Karpenter owns, which is where the orphan risk actually lives.
+      echo "wait_for_node_drain: asserting no Karpenter-managed EC2 instances remain (tag-based)..."
+      orphans=$(aws ec2 describe-instances --region "${self.triggers.region}" $${PROFILE_ARGS[@]+"$${PROFILE_ARGS[@]}"} \
+        --filters "Name=tag-key,Values=karpenter.sh/nodepool" \
+                  "Name=tag:kubernetes.io/cluster/${self.triggers.cluster_name},Values=owned" \
+                  "Name=instance-state-name,Values=running,pending" \
+        --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null || true)
+      if [ -n "$orphans" ]; then
+        echo "wait_for_node_drain: ORPHANED Karpenter EC2 instances still running/pending for cluster ${self.triggers.cluster_name}: $orphans" >&2
+        echo "wait_for_node_drain: these are billing but no longer tracked by any NodeClaim. Terminate them (aws ec2 terminate-instances --instance-ids $orphans) and re-run destroy." >&2
+        exit 1
+      fi
+      echo "wait_for_node_drain: no Karpenter-managed EC2 instances remain."
       exit 0
     EOT
   }
