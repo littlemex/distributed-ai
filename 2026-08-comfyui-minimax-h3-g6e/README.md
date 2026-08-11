@@ -78,21 +78,40 @@ image, so a pod restart re-mounts them instead of re-downloading 40 GB.
 
 ## Quick start
 
-The complete, copy-paste runbook — including every `--set` flag and the troubleshooting table —
-is in **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)**. The shape of it:
+### One-shot: `scripts/up.sh`
+
+`scripts/up.sh` runs the entire bring-up in order and is idempotent — safe to re-run after a
+partial failure. It provisions the cluster, builds the ComfyUI image in-cluster, fetches the
+~40 GB of weights, deploys ComfyUI, and finally port-forwards the Web UI. It never changes
+your active kubectl context (every call uses `--context`), and FSx Lustre is off by default.
 
 ```bash
-# 1. Provision the cluster (~15 min: control plane, GPU pool, OpenZFS, ECR).
-cd terraform
-cp terraform.tfvars.example terraform.tfvars     # set aws_profile / expected_account_id
-terraform init && terraform apply
-aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" \
-  --region "$(terraform output -raw region)" --profile <same-as-tfvars>
+cd 2026-08-comfyui-minimax-h3-g6e
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars   # set region / account / profile
+./scripts/up.sh                     # full bring-up, ends by forwarding http://localhost:8188
+```
 
-# 2. Build the ComfyUI image in-cluster, then fetch the weights, then deploy.
-#    (Exact commands + the required --set flags are in the runbook.)
+Useful variants:
 
-# 3. Open the UI and generate a clip.
+```bash
+./scripts/up.sh --no-forward        # do everything except the final port-forward
+IMAGE_TAG=v3 ./scripts/up.sh        # build/deploy a specific image tag (default: v2)
+FSX_LUSTRE=true ./scripts/up.sh     # also create the FSx Lustre scratch filesystem
+AWS_PROFILE=my-profile ./scripts/up.sh
+```
+
+The script reads every name (cluster, ECR repo, GPU pool, storage PV) from `terraform output`,
+skips the image build if the tag is already in ECR, and derives the build's git ref from the
+current pushed branch. First run is ~30 min end to end (control plane ~15 min, image build
+~8 min, weight fetch ~8 min); re-runs are much faster.
+
+### Step by step
+
+Prefer to run one stage at a time, or want the exact `--set` flags and the troubleshooting
+table? The full manual runbook is in **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** —
+`up.sh` is just those steps automated. Generation once the UI is up:
+
+```bash
 ./scripts/port-forward.sh                          # → http://localhost:8188
 python3 scripts/run_smoke.py workflows/video_minimax_h3_t2v.api.json \
   --out ./out --prompt "your scene + audio description" --prompt-node 104
