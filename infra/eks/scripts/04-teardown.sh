@@ -7,16 +7,23 @@
 # Pass --destroy to also run `terraform destroy` (removes the entire cluster).
 #
 # Usage:
-#   ./04-teardown.sh --namespace <ns> [--nodepool <name>...] [--destroy] [--yes]
+#   ./04-teardown.sh --namespace <ns> [--nodepool <name>...] [--delete-pvcs] [--destroy] [--yes]
 #
 # Flags:
-#   --namespace  Kubernetes namespace whose GPU pods to drain (required)
-#   --nodepool   Karpenter NodePool to delete. Repeatable. When omitted, every NodePool
-#                carrying an accelerator device taint is discovered from the cluster.
-#   --destroy    Also run `terraform destroy` after Kubernetes cleanup
-#   --yes        Skip interactive confirmation, including terraform's own destroy approval
-#                (it passes -auto-approve). Required for any non-interactive run — see the
-#                comment at the terraform destroy call for what breaks without it.
+#   --namespace   Kubernetes namespace whose GPU pods to drain (required)
+#   --nodepool    Karpenter NodePool to delete. Repeatable. When omitted, every NodePool
+#                 carrying an accelerator device taint is discovered from the cluster.
+#   --delete-pvcs Also delete every PersistentVolumeClaim in the namespace after the
+#                 workloads are gone. This is storage-agnostic (FSx for Lustre, FSx for
+#                 OpenZFS, EFS — any PVC in the namespace), so it is not tied to one volume.
+#                 The static PVs are Retain, so the underlying filesystem/data is NOT deleted
+#                 by this; only the PVC (the binding) is removed and the PV goes to Released.
+#                 Guarded by its own confirmation because a still-running pod that uses the
+#                 PVC will make the delete hang on the pvc-protection finalizer.
+#   --destroy     Also run `terraform destroy` after Kubernetes cleanup
+#   --yes         Skip interactive confirmation, including terraform's own destroy approval
+#                 (it passes -auto-approve). Required for any non-interactive run — see the
+#                 comment at the terraform destroy call for what breaks without it.
 #
 # The pools are DISCOVERED, not assumed. accelerator_pools is a map the reader defines, so there
 # is no single pool name this script could default to: a hardcoded default silently matches
@@ -32,6 +39,7 @@ NAMESPACE=""
 NODEPOOLS=()
 RUN_DESTROY=false
 AUTO_YES=false
+DELETE_PVCS=false
 
 # Device taints the Terraform module puts on accelerator pools. Extend this if a new device type
 # is added; a pool whose taint is not listed here is not treated as an accelerator pool.
@@ -44,6 +52,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --namespace)   NAMESPACE="$2";        shift 2 ;;
     --nodepool)    NODEPOOLS+=("$2");      shift 2 ;;
+    --delete-pvcs) DELETE_PVCS=true;       shift ;;
     --destroy)     RUN_DESTROY=true;       shift ;;
     --yes)         AUTO_YES=true;          shift ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
@@ -119,9 +128,10 @@ confirm() {
 }
 
 echo "=== Teardown Plan ==="
-echo "  Namespace  : $NAMESPACE"
-echo "  NodePool(s): ${NODEPOOLS[*]:-(none found)}"
-echo "  Destroy    : $RUN_DESTROY"
+echo "  Namespace   : $NAMESPACE"
+echo "  NodePool(s) : ${NODEPOOLS[*]:-(none found)}"
+echo "  Delete PVCs : $DELETE_PVCS"
+echo "  Destroy     : $RUN_DESTROY"
 echo ""
 
 # ── Step 1: Delete GPU workloads ──────────────────────────────────────────────
@@ -177,6 +187,70 @@ print(len(running))
   done
 else
   echo "  Skipped."
+fi
+
+# ── Step 1b: (optional) Delete PVCs ───────────────────────────────────────────
+# Storage-agnostic: removes every PVC in the namespace (FSx for Lustre, FSx for OpenZFS, EFS,
+# whatever the reader created), not a hardcoded FSx claim name. The static PVs are Retain, so
+# this deletes only the binding — the filesystem and its data survive and the PV goes to
+# Released. A PVC delete HANGS on the kubernetes.io/pvc-protection finalizer while any pod
+# still uses it; Step 1 above already deleted the namespace's pods, but a pod that is stuck
+# Terminating (e.g. an orphaned Job pod whose batch/job-tracking finalizer no controller is
+# left to clear) keeps the PVC pinned. So we bound the wait and, on timeout, REPORT the pods
+# still holding the PVC instead of blocking forever — the operator then clears those pods.
+if [[ "$DELETE_PVCS" == "true" ]]; then
+  echo ""
+  echo "Step 1b — Delete PersistentVolumeClaims in namespace: $NAMESPACE"
+  echo "  NOTE: PVs are Retain, so the filesystem/data is NOT deleted — only the PVC binding is"
+  echo "        removed and the PV becomes Released. The underlying FSx/EFS filesystem is managed"
+  echo "        by Terraform and is removed only by 'terraform destroy' (or var.<x>_enabled=false)."
+  if confirm "  Delete ALL PVCs in $NAMESPACE? (this is destructive to the bindings)"; then
+    PVCS=$(kubectl -n "$NAMESPACE" get pvc -o name 2>/dev/null || true)
+    if [[ -z "$PVCS" ]]; then
+      echo "  No PVCs in $NAMESPACE."
+    else
+      echo "$PVCS" | sed 's/^/  found: /'
+      # --wait=false: issue the deletes, then poll, so a finalizer hang is visible and bounded.
+      kubectl -n "$NAMESPACE" delete pvc --all --ignore-not-found=true --wait=false 2>/dev/null || true
+      echo "  Waiting for PVCs to finish deleting..."
+      PVC_ELAPSED=0
+      while true; do
+        REMAINING=$(kubectl -n "$NAMESPACE" get pvc -o name 2>/dev/null | grep -c . || true)
+        if [[ "$REMAINING" -eq 0 ]]; then
+          echo "  All PVCs deleted."
+          break
+        fi
+        if [[ $PVC_ELAPSED -ge 120 ]]; then
+          # Don't block teardown. Surface WHY it is stuck: which pods still hold a PVC. The
+          # operator clears those pods (see the book chapter on stuck Terminating pods), then
+          # re-runs. We deliberately do NOT auto-strip pvc-protection finalizers: that would
+          # orphan a volume still mounted by a live pod.
+          echo "  Warning: $REMAINING PVC(s) still deleting after 2 minutes." >&2
+          echo "  Pods still referencing a PVC in $NAMESPACE (delete these, then re-run):" >&2
+          kubectl -n "$NAMESPACE" get pods -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    pods = json.load(sys.stdin).get('items', [])
+except Exception:
+    pods = []
+hits = []
+for p in pods:
+    for v in p.get('spec', {}).get('volumes', []):
+        if 'persistentVolumeClaim' in v:
+            hits.append('    %s (%s)' % (p['metadata']['name'], p.get('status', {}).get('phase')))
+            break
+print('\n'.join(hits) if hits else '    (none — the PVC finalizer may be clearing; re-check with: kubectl get pvc -n $NAMESPACE)')
+" 2>/dev/null || true
+          break
+        fi
+        echo "  Still $REMAINING PVC(s)... (${PVC_ELAPSED}s)"
+        sleep 10
+        PVC_ELAPSED=$(( PVC_ELAPSED + 10 ))
+      done
+    fi
+  else
+    echo "  Skipped PVC deletion."
+  fi
 fi
 
 # ── Verify GPU release ────────────────────────────────────────────────────────
