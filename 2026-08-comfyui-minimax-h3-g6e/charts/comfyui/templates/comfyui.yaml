@@ -1,0 +1,133 @@
+{{- /*
+comfyui — the ComfyUI Deployment (single L40S) + a ClusterIP Service.
+
+Design choices (per the review):
+  * strategy: Recreate — a single GPU means a RollingUpdate's new pod would deadlock
+    waiting for the GPU the old pod still holds.
+  * karpenter.sh/do-not-disrupt on the pod — consolidation must not evict a stateful
+    single pod mid-generation, even on On-Demand (the NodePool disruption preset
+    "protect" is the pool-level half of the same guard).
+  * long startupProbe — the first generation loads ~40 GB from NFS (minutes); liveness
+    must not kill a loading pod.
+  * ClusterIP only — ComfyUI has no auth and a Web-UI code-execution surface, so it is
+    reached over `kubectl port-forward`, never a public endpoint.
+
+Weights are read from the shared volume (mounted at ComfyUI's models dir) and outputs
+written back to it, so both survive a pod restart. Run model-fetch first.
+
+Render + apply:
+  helm template comfyui ./charts/comfyui -n $NS \
+    -s templates/comfyui.yaml --set comfyui.enabled=true \
+    --set comfyui.image=$ECR_URL:v1 --set comfyui.nodeRole=$POOL | kubectl apply -f -
+  kubectl -n $NS rollout status deploy/comfyui --timeout=15m
+  kubectl -n $NS port-forward svc/comfyui 8188:8188   # open http://localhost:8188
+*/ -}}
+{{- if .Values.comfyui.enabled }}
+{{- $c := .Values.comfyui }}
+{{- $ss := .Values.sharedStorage }}
+{{- if not $c.image }}{{ fail "comfyui.image is required — set it to the ECR image built by imageBuild (terraform output -raw comfyui_ecr_url + \":<tag>\")." }}{{- end }}
+{{- if not $c.nodeRole }}{{ fail "comfyui.nodeRole is required — the accelerator_pools key of the GPU pool (terraform output -raw comfyui_pool_name). Without it the pod gets an empty selector, never schedules, and Karpenter launches node after node." }}{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: comfyui
+  namespace: {{ include "comfyui.namespace" . }}
+  labels:
+    app: comfyui
+spec:
+  replicas: 1
+  # Single GPU: a rolling update would leave the new pod Pending on the GPU the old pod holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: comfyui
+  template:
+    metadata:
+      labels:
+        app: comfyui
+      annotations:
+        # Never let Karpenter consolidation/drift voluntarily disrupt this stateful pod
+        # (its queue is in-memory; a mid-generation eviction loses the in-flight job).
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      # Land on the GPU pool (Karpenter labels its nodes node-role=<pool key>).
+      nodeSelector:
+        node-role: {{ $c.nodeRole }}
+      tolerations:
+        {{- include "comfyui.gpuTolerations" . | nindent 8 }}
+      containers:
+        - name: comfyui
+          image: {{ $c.image }}
+          # IfNotPresent (default) + a MUTABLE tag would silently run a stale cached image after a
+          # rebuild of the same tag. Pin the tag/digest AND make the pull policy explicit: use a
+          # new tag per rebuild (recommended) and Always so a re-pull is guaranteed if you reuse one.
+          imagePullPolicy: {{ $c.imagePullPolicy | default "Always" }}
+          # The image ENTRYPOINT is `python main.py --listen 0.0.0.0 --port 8188`. The shared volume
+          # is mounted directly over models/ and output/ (default paths), so no --output-directory
+          # is needed; we only append optional flags (e.g. --lowvram) from comfyui.extraArgs.
+          {{- if $c.extraArgs }}
+          args:
+            {{- range (splitList " " $c.extraArgs) }}
+            {{- if . }}
+            - {{ . | quote }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - { name: http, containerPort: {{ $c.port | default 8188 }} }
+          resources:
+            limits:
+              nvidia.com/gpu: {{ $c.gpuCount | default 1 | quote }}
+              memory: {{ $c.memory }}
+            requests:
+              cpu: {{ $c.cpu | default "4" | quote }}
+              memory: {{ $c.memory }}
+          # ComfyUI serves HTTP within seconds of start; MODEL LOADING is lazy (deferred to the
+          # first /prompt), so a probe cannot and need not wait for weights. /system_stats is a
+          # light JSON endpoint (cheaper than fetching the full index at /). startupProbe covers a
+          # slow image-cold-start / node warmup; readiness/liveness track the HTTP server's health.
+          startupProbe:
+            httpGet: { path: /system_stats, port: {{ $c.port | default 8188 }} }
+            initialDelaySeconds: {{ $c.startupProbe.initialDelaySeconds | default 20 }}
+            periodSeconds: {{ $c.startupProbe.periodSeconds | default 10 }}
+            failureThreshold: {{ $c.startupProbe.failureThreshold | default 60 }}
+          readinessProbe:
+            httpGet: { path: /system_stats, port: {{ $c.port | default 8188 }} }
+            periodSeconds: {{ $c.readinessProbe.periodSeconds | default 10 }}
+            failureThreshold: {{ $c.readinessProbe.failureThreshold | default 6 }}
+          livenessProbe:
+            httpGet: { path: /system_stats, port: {{ $c.port | default 8188 }} }
+            periodSeconds: {{ $c.livenessProbe.periodSeconds | default 30 }}
+            failureThreshold: {{ $c.livenessProbe.failureThreshold | default 6 }}
+          volumeMounts:
+            # Model weights (read-mostly), outputs, inputs (I2V source images), and user data
+            # (saved workflows/settings) all live on the shared OpenZFS volume under distinct
+            # subPaths so deleting one never risks another (esp. the expensive-to-refetch weights).
+            - { name: shared, mountPath: /opt/ComfyUI/models, subPath: {{ $ss.modelsSubPath }} }
+            - { name: shared, mountPath: /opt/ComfyUI/output, subPath: {{ $ss.outputSubPath }} }
+            - { name: shared, mountPath: /opt/ComfyUI/input,  subPath: {{ $ss.inputSubPath }} }
+            - { name: shared, mountPath: /opt/ComfyUI/user,   subPath: {{ $ss.userSubPath }} }
+            - { name: shm,    mountPath: /dev/shm }
+      volumes:
+        - name: shared
+          persistentVolumeClaim:
+            claimName: {{ include "comfyui.sharedClaimName" . }}
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: {{ $c.shmSize | default "4Gi" }} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: comfyui
+  namespace: {{ include "comfyui.namespace" . }}
+  labels:
+    app: comfyui
+spec:
+  # ClusterIP only — reached via `kubectl port-forward`, never publicly exposed.
+  type: ClusterIP
+  selector:
+    app: comfyui
+  ports:
+    - { name: http, port: {{ $c.port | default 8188 }}, targetPort: {{ $c.port | default 8188 }} }
+{{- end }}

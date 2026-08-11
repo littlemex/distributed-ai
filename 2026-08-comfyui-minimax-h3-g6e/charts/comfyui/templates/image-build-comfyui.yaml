@@ -1,0 +1,123 @@
+{{- /*
+image-build-comfyui — build the ComfyUI image IN-CLUSTER with rootless BuildKit and push to
+ECR, so no local docker/finch is needed. Mirrors the base module's image-build-ddp-sample.yaml:
+the MECHANISM (image-builder namespace/SA, Pod Identity, ECR repo) is Terraform; this is the
+"execution" half. The ComfyUI ECR repo + a push policy for it are added by this project's
+Terraform (comfyui-image-builder.tf), attached to the SAME image-builder role, so the existing
+ServiceAccount can push here too.
+
+Auth is settings-free at IAM (Pod Identity); BuildKit bundles no ECR helper, so an initContainer
+(AWS CLI) mints an ECR login token into a config.json BuildKit reads via DOCKER_CONFIG.
+
+Render + apply (repository from `terraform output -raw comfyui_ecr_url`):
+  helm template comfyui ./charts/comfyui \
+    -s templates/image-build-comfyui.yaml \
+    --set imageBuild.enabled=true \
+    --set imageBuild.repository=$ECR_URL --set imageBuild.tag=v1 | kubectl apply -f -
+  kubectl -n image-builder wait --for=condition=complete job/build-comfyui-v1 --timeout=45m
+  kubectl -n image-builder logs -f job/build-comfyui-v1
+  kubectl -n image-builder logs job/build-comfyui-v1 -c ecr-login   # if the init step failed
+
+Re-building the SAME tag: delete the completed Job first (or bump the tag — recommended):
+  kubectl -n image-builder delete job build-comfyui-{{ .Values.imageBuild.tag }} --ignore-not-found
+*/ -}}
+{{- if .Values.imageBuild.enabled }}
+{{- $ib := .Values.imageBuild }}
+{{- if not $ib.repository }}{{ fail "imageBuild.repository is required (terraform output -raw comfyui_ecr_url)" }}{{- end }}
+{{- /* Registry host = repo URI up to the first "/" (no scheme, no path) — the exact key BuildKit's
+     auth provider matches on. */ -}}
+{{- $registry := (splitList "/" $ib.repository) | first }}
+{{- /* Derive the ECR region from the host (<account>.dkr.ecr.<region>.amazonaws.com) so the login
+     token region always matches the target registry; guard the index for a non-standard host. */ -}}
+{{- $hostParts := splitList "." $registry }}
+{{- $region := "us-west-2" }}
+{{- if and (ge (len $hostParts) 6) (eq (index $hostParts 2) "ecr") }}{{ $region = index $hostParts 3 }}{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-comfyui-{{ $ib.tag }}
+  namespace: {{ $ib.namespace | default "image-builder" }}
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      serviceAccountName: {{ $ib.serviceAccountName | default "image-builder" }}
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        {{- if (($ib.dedicatedPool).enabled) }}
+        node-role: image-builder
+        {{- else }}
+        node-role: cpu
+        {{- end }}
+      {{- if (($ib.dedicatedPool).enabled) }}
+      tolerations:
+        - { key: workload, value: image-build, operator: Equal, effect: NoSchedule }
+      {{- end }}
+      initContainers:
+        - name: ecr-login
+          image: {{ $ib.awsCliImage | default "public.ecr.aws/aws-cli/aws-cli:2.31.13@sha256:dcaa51e37b4b681f77e6fefe0e9702b7dc0c5e2ed035ba31775575144af7463c" }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export HOME=/tmp
+              TOKEN=$(aws ecr get-login-password --region "{{ $region }}")
+              AUTH=$(printf 'AWS:%s' "$TOKEN" | base64 -w0)
+              mkdir -p /dockercfg
+              printf '{"auths":{"%s":{"auth":"%s"}}}' "{{ $registry }}" "$AUTH" > /dockercfg/config.json
+              echo "wrote /dockercfg/config.json for {{ $registry }}"
+          env:
+            - { name: AWS_REGION, value: "{{ $region }}" }
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          volumeMounts:
+            - { name: dockercfg, mountPath: /dockercfg }
+      containers:
+        - name: buildkit
+          image: {{ $ib.buildkitImage | default "moby/buildkit:v0.24.0-rootless@sha256:995077ff90af1afff56ff23018699d7511d122b2b111041f2011bd12afd5c0fe" }}
+          command: ["buildctl-daemonless.sh"]
+          args:
+            - build
+            - --frontend=dockerfile.v0
+            - --opt
+            - context=https://{{ $ib.gitRepo | default "github.com/littlemex/distributed-ai.git" }}#{{ $ib.gitRef | default "main" }}:{{ $ib.contextSubPath | default "2026-08-comfyui-minimax-h3-g6e/image/comfyui" }}
+            - --opt
+            - filename=Dockerfile
+            - --opt
+            - platform=linux/amd64
+            {{- range $k, $v := ($ib.buildArgs | default dict) }}
+            - --opt
+            - build-arg:{{ $k }}={{ $v }}
+            {{- end }}
+            - --output
+            - type=image,name={{ $ib.repository }}:{{ $ib.tag }},push=true
+          env:
+            - { name: BUILDKITD_FLAGS, value: "--oci-worker-no-process-sandbox" }
+            - { name: DOCKER_CONFIG, value: /dockercfg }
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            seccompProfile:
+              type: Unconfined
+          resources:
+            requests:
+              cpu: "4"
+              memory: 8Gi
+              # The ComfyUI image is larger than ddp-sample (CUDA base + torch); peak build disk
+              # is several× the pushed size. 120Gi fits on the CPU pool's 150Gi root; raise +
+              # dedicatedPool for a bigger image.
+              ephemeral-storage: {{ $ib.ephemeralStorage | default "120Gi" }}
+            limits:
+              memory: 8Gi
+              ephemeral-storage: {{ $ib.ephemeralStorage | default "120Gi" }}
+          volumeMounts:
+            - { name: dockercfg, mountPath: /dockercfg }
+            - { name: buildkitd, mountPath: /home/user/.local/share/buildkit }
+      volumes:
+        - { name: dockercfg, emptyDir: {} }
+        - { name: buildkitd, emptyDir: {} }
+{{- end }}

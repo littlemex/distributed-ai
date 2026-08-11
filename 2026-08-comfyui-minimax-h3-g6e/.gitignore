@@ -1,0 +1,6 @@
+# Generated video outputs from scripts/run_smoke.py — regenerable, do not commit.
+out/
+
+# API-format workflows EXPORTED at runtime are fine to keep; the canonical one
+# (video_minimax_h3_t2v.api.json) IS committed. Ignore ad-hoc scratch exports only.
+workflows/*.scratch.json

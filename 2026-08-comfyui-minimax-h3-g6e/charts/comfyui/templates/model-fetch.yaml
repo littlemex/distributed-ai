@@ -1,0 +1,141 @@
+{{- /*
+model-fetch — one-shot Job that downloads the MiniMax-H3 weights onto the shared volume.
+
+Idempotent: each file is skipped if already present and non-empty, so re-running is cheap and
+a restarted Job resumes rather than re-pulling 40 GB. Runs on the CPU pool (no GPU needed to
+download), streaming straight to the mounted PVC so the node root disk is untouched.
+
+Render + apply (claim name / PVC created once beforehand — see the README / scripts/up.sh). The
+image is REQUIRED (this Job reuses the ComfyUI image, which bakes in huggingface_hub — no
+runtime pip), so pass modelFetch.image or comfyui.image:
+  helm template comfyui ./charts/comfyui -n $NS \
+    -s templates/model-fetch.yaml --set modelFetch.enabled=true \
+    --set comfyui.image=$ECR_URL:v1 | kubectl apply -f -
+  kubectl -n $NS wait --for=condition=complete job/comfyui-model-fetch --timeout=60m
+  kubectl -n $NS logs -f job/comfyui-model-fetch
+  # Re-running after the weight set changes: the Job spec is immutable, so delete it first —
+  #   kubectl -n $NS delete job comfyui-model-fetch --ignore-not-found
+*/ -}}
+{{- if .Values.modelFetch.enabled }}
+{{- $mf := .Values.modelFetch }}
+{{- $m := .Values.minimaxH3 }}
+{{- $ss := .Values.sharedStorage }}
+{{- $c := .Values.comfyui }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: comfyui-model-fetch
+  namespace: {{ include "comfyui.namespace" . }}
+  labels:
+    app: comfyui
+    component: model-fetch
+spec:
+  backoffLimit: {{ $mf.backoffLimit | default 4 }}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: comfyui
+        component: model-fetch
+    spec:
+      restartPolicy: OnFailure
+      # Download on the CPU pool — no GPU is needed, and this leaves the GPU node free.
+      nodeSelector:
+        node-role: {{ $mf.nodeRole | default "cpu" }}
+      containers:
+        - name: fetch
+          # Default to the ComfyUI image (huggingface_hub baked in) so this Job does NOT
+          # pip-install at runtime — same no-startup-pip discipline as the ComfyUI pod. Set
+          # modelFetch.image to that ECR image; a bare python image would need runtime pip.
+          image: {{ $mf.image | default $c.image | required "modelFetch.image (or comfyui.image) must be set to the ComfyUI ECR image, which bakes in huggingface_hub — see the README" }}
+          env:
+            - { name: HF_HUB_ENABLE_HF_TRANSFER, value: {{ ternary "1" "0" ($mf.hfTransfer | default true) | quote }} }
+            # Reduce xet/api throttling under a single downloader; harmless for a public repo.
+            - { name: HF_HUB_DISABLE_XET, value: "1" }
+            # Cache under the MODELS subtree (not the shared-volume root) so residue is contained.
+            - { name: HF_HOME, value: /models/{{ $ss.modelsSubPath }}/.hf-cache }
+            - { name: MODELS_ROOT, value: /models/{{ $ss.modelsSubPath }} }
+            - { name: HF_REPO, value: {{ $m.repo | quote }} }
+            - { name: HF_REVISION, value: {{ $m.revision | quote }} }
+            {{- if $mf.hfTokenSecretName }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $mf.hfTokenSecretName }}
+                  key: token
+                  optional: true
+            {{- end }}
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              mkdir -p "$MODELS_ROOT"
+              python - <<'PY'
+              import os, shutil
+              from huggingface_hub import hf_hub_download, HfApi
+
+              repo = os.environ["HF_REPO"]
+              rev  = os.environ["HF_REVISION"]
+              root = os.environ["MODELS_ROOT"]
+              token = os.environ.get("HF_TOKEN") or None
+              api = HfApi()
+
+              # (repo-relative file, target subdir under MODELS_ROOT)
+              files = [
+              {{- range concat $m.files $m.extraFiles }}
+                  ({{ .file | quote }}, {{ .targetDir | quote }}),
+              {{- end }}
+              ]
+
+              # Expected sizes from the repo metadata at this revision. Used to verify a present
+              # file is COMPLETE (not truncated) and to detect a revision change (a file whose
+              # size no longer matches is re-fetched) — os.path.getsize>0 alone catches neither.
+              try:
+                  info = api.repo_info(repo, revision=rev, files_metadata=True, token=token)
+                  expected = {s.rfilename: s.size for s in (info.siblings or []) if s.size}
+              except Exception as e:
+                  print(f"[warn] could not read repo metadata ({e}); falling back to size>0 checks", flush=True)
+                  expected = {}
+
+              for rel, subdir in files:
+                  dest_dir = os.path.join(root, subdir)
+                  os.makedirs(dest_dir, exist_ok=True)
+                  fname = os.path.basename(rel)
+                  final = os.path.join(dest_dir, fname)
+                  want = expected.get(rel)
+                  if os.path.exists(final):
+                      have = os.path.getsize(final)
+                      if (want is not None and have == want) or (want is None and have > 0):
+                          print(f"[skip] {subdir}/{fname} present and complete ({have} bytes)", flush=True)
+                          continue
+                      print(f"[re  ] {subdir}/{fname} size {have} != expected {want}; re-fetching", flush=True)
+                  print(f"[get ] {repo}@{rev} :: {rel} -> {dest_dir}", flush=True)
+                  staging = dest_dir + ".dl"
+                  p = hf_hub_download(repo_id=repo, filename=rel, revision=rev, token=token,
+                                      local_dir=staging)
+                  os.replace(p, final)   # atomic within the same NFS filesystem
+                  shutil.rmtree(staging, ignore_errors=True)  # drop staging + .cache residue
+                  got = os.path.getsize(final)
+                  if want is not None and got != want:
+                      raise SystemExit(f"[fail] {subdir}/{fname} downloaded {got} bytes, expected {want}")
+                  print(f"[done] {subdir}/{fname} ({got} bytes)", flush=True)
+
+              # Drop the HF metadata cache so only the weight files remain on the shared volume.
+              shutil.rmtree(os.path.join(root, ".hf-cache"), ignore_errors=True)
+              print("[all ] MiniMax-H3 weights present under", root, flush=True)
+              PY
+          resources:
+            requests:
+              cpu: {{ $mf.cpu | default "2" | quote }}
+              memory: {{ $mf.memory | default "4Gi" }}
+              ephemeral-storage: {{ $mf.ephemeralStorage | default "4Gi" }}
+            limits:
+              memory: {{ $mf.memory | default "4Gi" }}
+              ephemeral-storage: {{ $mf.ephemeralStorage | default "4Gi" }}
+          volumeMounts:
+            - { name: models, mountPath: /models }
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "comfyui.sharedClaimName" . }}
+{{- end }}

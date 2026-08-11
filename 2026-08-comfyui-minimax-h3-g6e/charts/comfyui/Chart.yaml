@@ -1,0 +1,21 @@
+apiVersion: v2
+name: comfyui
+description: |
+  ComfyUI + MiniMax-H3 video generation for the distributed-ai EKS reference cluster,
+  sized for a single NVIDIA L40S (g6e). Renders three things, each toggled independently:
+
+    * imageBuild — a rootless-BuildKit Job that builds the ComfyUI image in-cluster and
+      pushes it to ECR (reuses the base module's image-builder ServiceAccount + Pod Identity).
+    * modelFetch — a one-shot Job that downloads the four MiniMax-H3 weight files from the
+      Comfy-Org Hugging Face repo onto the shared filesystem (idempotent; skips files present).
+    * comfyui — the ComfyUI Deployment (Recreate, do-not-disrupt, long startupProbe) + Service,
+      reading weights from the shared filesystem and writing outputs back to it.
+
+  Applied by hand with `helm template ... | kubectl apply -f -`, matching the base module's
+  charts/experiments convention. This chart lives in the workload project, NOT in the reusable
+  infra/eks module, so the base module stays untouched. ComfyUI has no auth and exposes a
+  Web-UI code-execution surface, so it is reached over `kubectl port-forward`, never a public
+  endpoint — the chart deliberately renders only a ClusterIP Service.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -344,6 +344,61 @@ Two components commonly paired with GPU/Neuron inference are deliberately
 
 ---
 
+## In-cluster image builder (BuildKit → ECR)
+
+On by default (`image_builder_enabled = true`). Builds container images *inside* the
+cluster with rootless BuildKit and pushes to ECR — no local docker/finch needed. This
+module provisions only the **mechanism** (an ECR repo for the workshop's `ddp-sample`
+image, an IAM role, a Pod Identity association, and an `image-builder` namespace +
+ServiceAccount); the build itself is a catalog Job
+(`charts/experiments/templates/image-build-ddp-sample.yaml`), applied with
+`helm template … | kubectl apply`. See `image-builder.tf`.
+
+The builder is a **generic mechanism, not tied to one image.** A module that consumes
+this one (`source = "…/infra/eks"`) and builds a *different* image reuses the same
+builder ServiceAccount by (1) creating its own ECR repository and (2) granting the
+builder push to it via `image_builder_additional_ecr_repository_arns`:
+
+```hcl
+# In the consumer root module:
+resource "aws_ecr_repository" "my_app" {
+  name         = "${var.cluster_name}-my-app"
+  force_delete = true
+}
+
+module "cluster" {
+  source = "…/infra/eks"
+  # …
+  image_builder_additional_ecr_repository_arns = [aws_ecr_repository.my_app.arn]
+}
+```
+
+The consumer owns the repo (its mutability, scanning, and lifecycle are the consumer's
+call); this module only extends the builder's push permission to it. Whatever ARN you
+pass gets push access verbatim, so scope it yourself — a wildcard *inside* a repository
+path (`…/repository/team-*`) is fine, a bare `"*"` is rejected. The builder's identity is
+surfaced for consumers that need it:
+
+```bash
+terraform output image_builder_role_arn         # for IAM audit / attaching extra policies
+terraform output image_builder_namespace        # where a build Job must run
+terraform output image_builder_service_account_name  # serviceAccountName for the build Job
+terraform output ddp_sample_ecr_url              # the module's own ddp-sample repo URL
+```
+
+> **Design note:** `ddp_sample` is a *sample* (a "what you build"), not part of the
+> mechanism, yet it currently lives in `image-builder.tf`. It predates the generic
+> `image_builder_additional_ecr_repository_arns` path; ideally it would be split out and
+> become just another consumer of that path. It is kept in place for backward
+> compatibility (moving it would change resource addresses and force a repo re-create).
+
+For a **large** image (pushed size in the tens of GB), turn on
+`image_builder_dedicated_pool = true`: a tainted, NVMe-RAID0 Karpenter pool that Karpenter
+spins up only while a build Job exists and consolidates back to zero after — so the big
+local disk is billed only during the build (peak build disk ≈ pushed size × 4–5).
+
+---
+
 ## CloudFront → ALB → EKS demo endpoint (opt-in)
 
 Off by default (`enable_demo_app = false`). Setting it to `true` provisions
