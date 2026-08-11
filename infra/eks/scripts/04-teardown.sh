@@ -74,7 +74,9 @@ CLUSTER_NAME=$(cd "$INFRA_DIR" && terraform output -raw cluster_name 2>/dev/null
 if [[ -n "$CLUSTER_NAME" ]]; then
   CTX=$(kubectl config current-context 2>/dev/null || true)
   CTX_CLUSTER=$(kubectl config view --minify -o jsonpath='{.clusters[0].name}' 2>/dev/null || true)
-  if [[ "$CTX_CLUSTER" != *"$CLUSTER_NAME"* ]]; then
+  # Match the EKS ARN suffix "cluster/<NAME>", not a bare substring: a substring test would
+  # let "train" match a stale "train-staging" context and pass the guard on the wrong cluster.
+  if [[ "$CTX_CLUSTER" != *"cluster/$CLUSTER_NAME" && "$CTX_CLUSTER" != "$CLUSTER_NAME" ]]; then
     echo "Error: current kubectl context ($CTX) does not target cluster '$CLUSTER_NAME'" >&2
     echo "       (context cluster: ${CTX_CLUSTER:-none}). Refusing to run destructive steps" >&2
     echo "       against the wrong cluster. Switch context, e.g.:" >&2
@@ -83,9 +85,19 @@ if [[ -n "$CLUSTER_NAME" ]]; then
   fi
   echo "kubectl context OK: $CTX (cluster: $CLUSTER_NAME)"
 else
+  # Could not resolve the cluster name (no terraform init/state, or output missing). This is
+  # exactly when the guard matters most, so do NOT silently proceed: fail in non-interactive
+  # runs, and require an explicit confirmation interactively.
   echo "WARNING: could not read cluster_name from 'terraform output' in $INFRA_DIR." >&2
-  echo "         Skipping the context-safety check — verify 'kubectl config current-context'" >&2
+  echo "         The context-safety check cannot run. Verify 'kubectl config current-context'" >&2
   echo "         points at the intended cluster before continuing." >&2
+  if [[ "$AUTO_YES" == "true" ]]; then
+    echo "Error: refusing to run destructive steps with --yes while the cluster context is" >&2
+    echo "       unverifiable. Run 'terraform init' in $INFRA_DIR, or drop --yes to confirm." >&2
+    exit 1
+  fi
+  read -rp "Continue against context '$(kubectl config current-context 2>/dev/null)'? [y/N] " ANS
+  [[ "${ANS,,}" == "y" ]] || { echo "Aborted."; exit 1; }
 fi
 
 # ── Resolve which NodePools to delete ─────────────────────────────────────────
@@ -136,16 +148,23 @@ echo ""
 
 # ── Step 1: Delete GPU workloads ──────────────────────────────────────────────
 echo "Step 1 — Delete GPU pods and workloads in namespace: $NAMESPACE"
-if confirm "  Delete all workloads (Deployments, StatefulSets, DaemonSets, Jobs, bare Pods, TrainJobs, MPIJobs) in $NAMESPACE?"; then
-  kubectl -n "$NAMESPACE" delete deployment  --all --ignore-not-found=true
-  kubectl -n "$NAMESPACE" delete statefulset --all --ignore-not-found=true
-  # DaemonSets and bare Pods too: the book's own accelerator verification manifests
+if confirm "  Delete all workloads (Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, bare Pods, TrainJobs, MPIJobs) in $NAMESPACE?"; then
+  # --wait=false on every delete: kubectl delete defaults to --wait=true, which blocks until
+  # the objects are gone. A pod stuck Terminating on a finalizer (exactly the orphaned-Job-pod
+  # case handled below) would then hang THIS command forever, before we ever reach the bounded
+  # "wait for pods to terminate" poll loop. Issue the deletes async and let that loop observe.
+  kubectl -n "$NAMESPACE" delete deployment  --all --ignore-not-found=true --wait=false
+  kubectl -n "$NAMESPACE" delete statefulset --all --ignore-not-found=true --wait=false
+  # DaemonSets, ReplicaSets, and bare Pods too: the book's own accelerator verification manifests
   # (nccl-sshd, nccl-probe, neuron-probe, image-prewarm, ...) are DaemonSets or standalone
-  # Pods, not Deployments/Jobs, and each pins a GPU/Neuron node. Skipping them leaves the
-  # expensive node "not empty" so WhenEmpty never fires — exactly the leak this script exists
-  # to prevent. --all covers whatever the reader actually created, not a fixed workshop list.
-  kubectl -n "$NAMESPACE" delete daemonset   --all --ignore-not-found=true
-  kubectl -n "$NAMESPACE" delete job         --all --ignore-not-found=true
+  # Pods, not Deployments/Jobs, and each pins a GPU/Neuron node. A bare ReplicaSet would also
+  # recreate its pods after a pod-only sweep, keeping the node non-empty. Skipping any of these
+  # leaves the expensive node "not empty" so WhenEmpty never fires — exactly the leak this
+  # script exists to prevent. --all covers whatever the reader actually created.
+  kubectl -n "$NAMESPACE" delete daemonset   --all --ignore-not-found=true --wait=false
+  kubectl -n "$NAMESPACE" delete replicaset  --all --ignore-not-found=true --wait=false 2>/dev/null || true
+  kubectl -n "$NAMESPACE" delete cronjob      --all --ignore-not-found=true --wait=false 2>/dev/null || true
+  kubectl -n "$NAMESPACE" delete job         --all --ignore-not-found=true --wait=false
   # TrainJob (Kubeflow Trainer v2) is the book's primary training workload. Delete it too, or its
   # JobSet-managed pods linger and stall NodeClaim drain. Bound the wait so a wedged Trainer
   # controller (unable to clear finalizers) cannot block teardown forever; if the delete times
@@ -156,10 +175,10 @@ if confirm "  Delete all workloads (Deployments, StatefulSets, DaemonSets, Jobs,
       kubectl -n "$NAMESPACE" patch "$tj" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
     done
   fi
-  kubectl -n "$NAMESPACE" delete mpijob      --all --ignore-not-found=true 2>/dev/null || true
+  kubectl -n "$NAMESPACE" delete mpijob      --all --ignore-not-found=true --wait=false 2>/dev/null || true
   # Bare Pods not owned by any controller above (e.g. a manually-run probe pod) survive all the
   # --all deletes on higher-level kinds, so sweep them explicitly last.
-  kubectl -n "$NAMESPACE" delete pod         --all --ignore-not-found=true 2>/dev/null || true
+  kubectl -n "$NAMESPACE" delete pod         --all --ignore-not-found=true --wait=false 2>/dev/null || true
 
   echo "  Waiting for pods to terminate..."
   ELAPSED=0
@@ -191,25 +210,46 @@ fi
 
 # ── Step 1b: (optional) Delete PVCs ───────────────────────────────────────────
 # Storage-agnostic: removes every PVC in the namespace (FSx for Lustre, FSx for OpenZFS, EFS,
-# whatever the reader created), not a hardcoded FSx claim name. The static PVs are Retain, so
-# this deletes only the binding — the filesystem and its data survive and the PV goes to
-# Released. A PVC delete HANGS on the kubernetes.io/pvc-protection finalizer while any pod
-# still uses it; Step 1 above already deleted the namespace's pods, but a pod that is stuck
-# Terminating (e.g. an orphaned Job pod whose batch/job-tracking finalizer no controller is
-# left to clear) keeps the PVC pinned. So we bound the wait and, on timeout, REPORT the pods
-# still holding the PVC instead of blocking forever — the operator then clears those pods.
+# whatever the reader created), not a hardcoded FSx claim name. Whether the DATA survives a PVC
+# delete depends on the bound PV's persistentVolumeReclaimPolicy, NOT on this script: Retain
+# (this module's static PVs) keeps the volume and moves the PV to Released; Delete (e.g. a
+# dynamically-provisioned gp3 PVC) deletes the backing volume and its data. So we inspect each
+# PVC's reclaim policy first and warn loudly if any is Delete — never print an unconditional
+# "data is safe". A PVC delete also HANGS on the kubernetes.io/pvc-protection finalizer while a
+# pod still uses it; Step 1 deleted the namespace's pods, but one stuck Terminating (an orphaned
+# Job pod whose batch/job-tracking finalizer no controller clears) keeps the PVC pinned, so we
+# bound the wait and, on timeout, REPORT the holding pods instead of blocking forever.
 if [[ "$DELETE_PVCS" == "true" ]]; then
   echo ""
   echo "Step 1b — Delete PersistentVolumeClaims in namespace: $NAMESPACE"
-  echo "  NOTE: PVs are Retain, so the filesystem/data is NOT deleted — only the PVC binding is"
-  echo "        removed and the PV becomes Released. The underlying FSx/EFS filesystem is managed"
-  echo "        by Terraform and is removed only by 'terraform destroy' (or var.<x>_enabled=false)."
-  if confirm "  Delete ALL PVCs in $NAMESPACE? (this is destructive to the bindings)"; then
-    PVCS=$(kubectl -n "$NAMESPACE" get pvc -o name 2>/dev/null || true)
-    if [[ -z "$PVCS" ]]; then
-      echo "  No PVCs in $NAMESPACE."
+  PVCS=$(kubectl -n "$NAMESPACE" get pvc -o name 2>/dev/null || true)
+  if [[ -z "$PVCS" ]]; then
+    echo "  No PVCs in $NAMESPACE. Nothing to delete."
+  else
+    # Enumerate each PVC with the reclaim policy of its bound PV so the operator sees exactly
+    # which deletions destroy data. HAS_DELETE flips the confirmation to an explicit red flag.
+    echo "  PVCs in $NAMESPACE (and the reclaim policy of the bound PV):"
+    HAS_DELETE=false
+    while IFS= read -r pvc; do
+      [[ -z "$pvc" ]] && continue
+      pvc_name="${pvc#persistentvolumeclaim/}"
+      pv=$(kubectl -n "$NAMESPACE" get pvc "$pvc_name" -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
+      policy=""
+      [[ -n "$pv" ]] && policy=$(kubectl get pv "$pv" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}' 2>/dev/null || true)
+      if [[ "$policy" == "Delete" ]]; then
+        echo "    $pvc_name  (PV: ${pv:-none}, reclaim: Delete)  <-- DATA WILL BE DELETED"
+        HAS_DELETE=true
+      else
+        echo "    $pvc_name  (PV: ${pv:-none}, reclaim: ${policy:-unknown})"
+      fi
+    done <<< "$PVCS"
+    if [[ "$HAS_DELETE" == "true" ]]; then
+      echo "  WARNING: one or more PVCs are bound to a PV with reclaimPolicy=Delete." >&2
+      echo "           Deleting those PVCs DESTROYS the underlying volume and its data." >&2
     else
-      echo "$PVCS" | sed 's/^/  found: /'
+      echo "  All bound PVs are Retain: deleting the PVCs removes only the binding (PV -> Released)."
+    fi
+    if confirm "  Delete ALL PVCs in $NAMESPACE? (destructive — see reclaim policies above)"; then
       # --wait=false: issue the deletes, then poll, so a finalizer hang is visible and bounded.
       kubectl -n "$NAMESPACE" delete pvc --all --ignore-not-found=true --wait=false 2>/dev/null || true
       echo "  Waiting for PVCs to finish deleting..."
@@ -247,9 +287,9 @@ print('\n'.join(hits) if hits else '    (none — the PVC finalizer may be clear
         sleep 10
         PVC_ELAPSED=$(( PVC_ELAPSED + 10 ))
       done
+    else
+      echo "  Skipped PVC deletion."
     fi
-  else
-    echo "  Skipped PVC deletion."
   fi
 fi
 
