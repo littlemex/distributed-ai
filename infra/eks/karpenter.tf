@@ -188,14 +188,21 @@ resource "null_resource" "wait_for_node_drain" {
         exit 1
       }
       PROFILE_ARGS=()
-      [ -n "${self.triggers.aws_profile}" ] && PROFILE_ARGS=(--profile "${self.triggers.aws_profile}")
+      if [ -n "${self.triggers.aws_profile}" ]; then PROFILE_ARGS=(--profile "${self.triggers.aws_profile}"); fi
+      # Expand as $${PROFILE_ARGS[@]+"$${PROFILE_ARGS[@]}"}: this yields ZERO arguments when
+      # the array is empty (no aws_profile — the default-profile / assumed-role case) and the
+      # real --profile <name> args when set, and is safe under `set -u` on bash 3.2+ (macOS).
+      # A plain "$${PROFILE_ARGS[@]}" trips "unbound variable" on old bash when empty, and the
+      # "$${PROFILE_ARGS[@]:-}" workaround is WORSE: it passes a single empty-string argument
+      # to the aws CLI, which fails with exit 252 — so the drain-wait would abort before it
+      # polls NodeClaims (verified live in ap-northeast-1). Use the [@]+ form.
       KCONF=$(mktemp)
       trap 'rm -f "$KCONF"' EXIT
-      if ! aws eks describe-cluster --name "${self.triggers.cluster_name}" --region "${self.triggers.region}" "$${PROFILE_ARGS[@]}" >/dev/null 2>&1; then
+      if ! aws eks describe-cluster --name "${self.triggers.cluster_name}" --region "${self.triggers.region}" $${PROFILE_ARGS[@]+"$${PROFILE_ARGS[@]}"} >/dev/null 2>&1; then
         echo "wait_for_node_drain: cluster ${self.triggers.cluster_name} no longer exists, skipping drain wait"
         exit 0
       fi
-      aws eks update-kubeconfig --name "${self.triggers.cluster_name}" --region "${self.triggers.region}" "$${PROFILE_ARGS[@]}" --kubeconfig "$KCONF" >/dev/null 2>&1 \
+      aws eks update-kubeconfig --name "${self.triggers.cluster_name}" --region "${self.triggers.region}" $${PROFILE_ARGS[@]+"$${PROFILE_ARGS[@]}"} --kubeconfig "$KCONF" >/dev/null 2>&1 \
         || { echo "wait_for_node_drain: cluster exists but update-kubeconfig failed — cannot verify drain. Check for orphaned EC2 instances manually." >&2; exit 1; }
       export KUBECONFIG="$KCONF"
 

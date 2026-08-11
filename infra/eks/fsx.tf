@@ -58,6 +58,25 @@ resource "aws_fsx_lustre_file_system" "training" {
 
   storage_type = "SSD"
 
+  # EFA (opt-in, var.fsx_efa_enabled): OS-bypass RDMA over SRD for up to 700 Gbps/client
+  # (1200 with GPUDirect Storage) vs 100 Gbps over TCP. EFA can only be set at create time,
+  # so toggling this replaces the filesystem. It requires USER_PROVISIONED metadata with
+  # >= 6000 IOPS (an EFA API requirement); when EFA is off we omit metadata_configuration
+  # entirely so FSx auto-provisions it from capacity. az.tf preconditions enforce the
+  # >= 4800 GiB / >= 6000 IOPS minimums when EFA is on. The CLIENT side (EFA driver + Lustre
+  # client + LNET/EFA config on the node, EFA-capable instance) is NOT set up by this module
+  # — see the Basic10 chapter. dynamic{} renders zero blocks when EFA is off, keeping the
+  # default TCP filesystem byte-identical to the pre-EFA config.
+  efa_enabled = var.fsx_efa_enabled
+
+  dynamic "metadata_configuration" {
+    for_each = var.fsx_efa_enabled ? [1] : []
+    content {
+      mode = "USER_PROVISIONED"
+      iops = var.fsx_metadata_iops
+    }
+  }
+
   # Lustre-specific configuration.
   data_compression_type = "LZ4"
 
@@ -154,6 +173,31 @@ resource "aws_vpc_security_group_egress_rule" "fsx_egress_all" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
+# EFA (SRD) traffic is OS-bypass and not expressible as TCP port rules, so AWS requires the
+# EFA-enabled filesystem's security group to allow ALL traffic to/from ITSELF (self-referencing
+# all-protocols ingress; egress is already all via fsx_egress_all). This is a separate
+# requirement from the Lustre 988/1018-1023 port rules above and is only needed when EFA is on.
+# See the FSx for Lustre EFA workshop (4-5) and efa-file-systems docs.
+#
+# INCOMPLETE ON ITS OWN: a self-referencing rule only permits traffic between ENIs that are
+# MEMBERS of this SG. The FSx ENIs are, but this cluster's nodes use module.eks
+# node_security_group_id / the NCCL efa_node SG — they are NOT in this SG. So SRD traffic
+# node<->FSx does not flow until the client's EFA interface is either put in this SG or given
+# a mutual all-traffic rule with it. This module does NOT wire that up (it only prepares the
+# filesystem side); the node-side EFA/LNET setup and this SG membership must be added together
+# when enabling EFA end to end. See the Basic10 chapter.
+#
+# EFA is also single-AZ: with fsx_efa_enabled the client accelerator pool's zone MUST equal
+# this filesystem's AZ (var.fsx_subnet_index), since EFA/SRD cannot cross AZs — a cross-AZ
+# mount that merely "works with inter-AZ charges" over TCP does not apply to the EFA path.
+resource "aws_vpc_security_group_ingress_rule" "fsx_self_efa_all" {
+  count                        = var.fsx_enabled && var.fsx_efa_enabled ? 1 : 0
+  security_group_id            = aws_security_group.fsx[0].id
+  description                  = "All traffic within the FSx security group for EFA/SRD (self-referencing)"
+  ip_protocol                  = "-1"
+  referenced_security_group_id = aws_security_group.fsx[0].id
+}
+
 # Propagation delay so the FSx security-group rules above are visible to the FSx network
 # validation service before CreateFileSystem runs (see the comment on the filesystem's
 # depends_on). 30s is empirically enough; it only runs on first create (create_duration is
@@ -168,6 +212,7 @@ resource "time_sleep" "fsx_sg_propagation" {
     aws_vpc_security_group_ingress_rule.fsx_from_nodes_988,
     aws_vpc_security_group_ingress_rule.fsx_from_nodes_high_ports,
     aws_vpc_security_group_egress_rule.fsx_egress_all,
+    aws_vpc_security_group_ingress_rule.fsx_self_efa_all,
   ]
 }
 
