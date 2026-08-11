@@ -83,7 +83,7 @@ spec:
             - build
             - --frontend=dockerfile.v0
             - --opt
-            - context=https://{{ $ib.gitRepo | default "github.com/littlemex/distributed-ai.git" }}#{{ $ib.gitRef | default "main" }}:{{ $ib.contextSubPath | default "2026-08-comfyui-minimax-h3-g6e/image/comfyui" }}
+            - context=https://{{ $ib.gitRepo | default "github.com/littlemex/distributed-ai.git" }}#{{ $ib.gitRef | default "main" }}:{{ $ib.contextSubPath | default "2026-08-12-comfyui-minmax-h3/image/comfyui" }}
             - --opt
             - filename=Dockerfile
             - --opt

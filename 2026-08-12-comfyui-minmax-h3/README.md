@@ -58,7 +58,7 @@ image, so a pod restart re-mounts them instead of re-downloading 40 GB.
 ## Repository layout
 
 ```
-2026-08-comfyui-minimax-h3-g6e/
+2026-08-12-comfyui-minmax-h3/
 ├── terraform/            Thin root module. Sources ../../infra/eks, defines the ComfyUI GPU
 │                         pool + OpenZFS storage, and creates the ComfyUI ECR repo (whose ARN
 │                         it hands to the builder). Its own isolated Terraform state.
@@ -83,7 +83,7 @@ partial failure. It provisions the cluster, builds the ComfyUI image in-cluster,
 your active kubectl context (every call uses `--context`), and FSx Lustre is off by default.
 
 ```bash
-cd 2026-08-comfyui-minimax-h3-g6e
+cd 2026-08-12-comfyui-minmax-h3
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars   # set region / account / profile
 ./scripts/up.sh                     # full bring-up, ends by forwarding http://localhost:8188
 ```

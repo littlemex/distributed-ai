@@ -64,7 +64,7 @@ imageBuild:
   # Git context for the Dockerfile: repo#ref:subdir. The subdir holds image/comfyui/Dockerfile.
   gitRepo: github.com/littlemex/distributed-ai.git
   gitRef: main            # pin to a release tag/sha for reproducibility
-  contextSubPath: 2026-08-comfyui-minimax-h3-g6e/image/comfyui
+  contextSubPath: 2026-08-12-comfyui-minmax-h3/image/comfyui
   namespace: image-builder
   serviceAccountName: image-builder
   # Docker build-args forwarded to the Dockerfile (all optional; see image/comfyui/Dockerfile).
