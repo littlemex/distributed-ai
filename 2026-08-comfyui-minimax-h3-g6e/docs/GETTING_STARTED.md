@@ -31,6 +31,22 @@ account. Confirm you are pointed at the right account **before** creating anythi
 aws sts get-caller-identity          # is this the account (and region intent) you meant?
 ```
 
+## 0. One-shot bring-up (optional)
+
+`scripts/up.sh` runs every step below in order — `terraform apply` → in-cluster image build
+→ weight fetch → deploy → port-forward — and is idempotent, so it is safe to re-run after a
+partial failure. It never changes your active kubectl context (every call uses `--context`),
+and FSx Lustre is off by default:
+
+```bash
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars   # set region/account first
+./scripts/up.sh                     # full bring-up, ends by forwarding http://localhost:8188
+./scripts/up.sh --no-forward        # everything except the final port-forward
+```
+
+The rest of this guide is the manual, step-by-step version of what `up.sh` automates — read it
+to understand each stage or to run a single step on its own.
+
 ## 1. Provision the cluster
 
 ```bash
