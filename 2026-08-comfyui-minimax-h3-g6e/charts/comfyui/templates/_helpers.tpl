@@ -19,7 +19,7 @@ pod that mounts nothing.
 */}}
 {{- define "comfyui.sharedClaimName" -}}
 {{- if not .Values.sharedStorage.existingClaimName -}}
-{{ fail "sharedStorage.existingClaimName is required — apply the base module's manifests/shared-pvc.yaml once (bound to the openzfs-shared PV) and pass its name here. See docs/GETTING_STARTED.md." }}
+{{ fail "sharedStorage.existingClaimName is required — apply the base module's manifests/shared-pvc.yaml once (bound to the openzfs-shared PV) and pass its name here. See the project README." }}
 {{- end -}}
 {{- .Values.sharedStorage.existingClaimName -}}
 {{- end -}}

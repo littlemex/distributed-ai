@@ -20,9 +20,9 @@ wrapper custom node is required, which is why the image bakes in only ComfyUI-Ma
 ## How it is built
 
 In-cluster with rootless BuildKit (no local docker/finch), pushed to the ComfyUI ECR
-repo. See `../../charts/comfyui/templates/image-build-comfyui.yaml` and the runbook in
-`../../docs/GETTING_STARTED.md`. To build a different ComfyUI version, bump the tag and
-pass `--set imageBuild.buildArgs.COMFYUI_REF=<tag>` — do not edit the Dockerfile.
+repo. See `../../charts/comfyui/templates/image-build-comfyui.yaml`, and `../../scripts/up.sh`
+for the exact build command. To build a different ComfyUI version, bump the tag and pass
+`--set imageBuild.buildArgs.COMFYUI_REF=<tag>` — do not edit the Dockerfile.
 
 ## Why weights are not in the image
 

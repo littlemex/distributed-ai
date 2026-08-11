@@ -12,13 +12,11 @@ transformer, then the VAEs), so no single stage has to fit in VRAM all at once.
 
 > **This project reuses `infra/eks` as a child module — it never copies or edits it.** Its
 > Terraform state is isolated in [`terraform/`](terraform/), so the pre-existing `us-east-2`
-> cluster is never touched. The design invariants are documented in
-> [docs/PROJECT_RULES.md](docs/PROJECT_RULES.md).
+> cluster is never touched.
 
 This has been verified end to end on real hardware (us-west-2): `terraform apply` → in-cluster
 image build → 40 GB weight fetch → ComfyUI up → an 864×480 / ~5 s H.264 clip with AAC audio,
-generated in about 4 minutes once the model is resident. See
-[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full verification log.
+generated in about 4 minutes once the model is resident.
 
 ---
 
@@ -70,8 +68,7 @@ image, so a pod restart re-mounts them instead of re-downloading 40 GB.
 │                         image build (BuildKit → ECR), model fetch, and the ComfyUI Deployment.
 ├── workflows/            The runnable API-format T2V workflow, plus the pinned official
 │                         UI-format templates for reference. See workflows/README.md.
-├── scripts/              port-forward.sh and run_smoke.py (submit a workflow, poll, download).
-└── docs/                 GETTING_STARTED (the full runbook), PROJECT_STATUS, PROJECT_RULES.
+└── scripts/              up.sh (one-shot bring-up), port-forward.sh, run_smoke.py.
 ```
 
 ---
@@ -107,9 +104,11 @@ current pushed branch. First run is ~30 min end to end (control plane ~15 min, i
 
 ### Step by step
 
-Prefer to run one stage at a time, or want the exact `--set` flags and the troubleshooting
-table? The full manual runbook is in **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** —
-`up.sh` is just those steps automated. Generation once the UI is up:
+To run one stage at a time — or to see the exact `helm template ... --set` flags and `kubectl`
+commands each step uses — read **[`scripts/up.sh`](scripts/up.sh)**. It is written to be read: the
+six numbered steps (terraform apply → in-cluster image build → shared PVC → weight fetch →
+deploy → port-forward) each carry the full command, so you can copy any single stage out of it.
+Generation once the UI is up:
 
 ```bash
 ./scripts/port-forward.sh                          # → http://localhost:8188
@@ -162,8 +161,23 @@ cd terraform && terraform destroy
 ```
 
 The base module's README **Cost** and **Known limitations** sections apply in full — in
-particular, `terraform destroy` drains the GPU node first and can take ~10 minutes, and the
-runbook deletes the Deployment before destroy so the `do-not-disrupt` pod cannot stall it.
+particular, `terraform destroy` drains the GPU node first and can take ~10 minutes. Delete the
+Deployment before destroy (`kubectl -n comfyui delete deploy comfyui`) so the `do-not-disrupt`
+pod cannot stall it.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `kubectl` → `Unauthorized` | kubectl runs as a different principal than the applying one. Re-run `aws eks update-kubeconfig` with the same `--profile`; confirm with `aws sts get-caller-identity`. |
+| ComfyUI pod stuck `Pending` | GPU node still launching (`kubectl get nodeclaims`), or `comfyui.memory` exceeds the node's allocatable — lower it, or add a larger `gpu_instance_types` entry. |
+| Pod OOM / CUDA OOM on first generation | The 48 GB path is tight with the text encoder + VAE decode. Add `--set comfyui.extraArgs="--lowvram"`, or use `g6e.4xlarge` (more host RAM for offload). |
+| Pod `CrashLoopBackOff` at startup | Almost always torch too old for ComfyUI v0.31 (`unsupported type list[int]` at import). Use image tag `v2`+ (torch 2.8.0 / CUDA 12.6); do not downgrade torch below 2.7. |
+| model-fetch slow / HF 429 | Rerun — it is idempotent and resumes. It sets `HF_HUB_DISABLE_XET=1`; for a private repo set `modelFetch.hfTokenSecretName`. |
+| `/prompt` rejects the workflow | You posted a UI-format template. Use the committed `workflows/video_minimax_h3_t2v.api.json`, or export API format from the Web UI. See [workflows/README.md](workflows/README.md). |
+| Generated video has no audio | Confirm both VAEs were fetched (`vae/minimax_h3_audio_vae_fp32.safetensors`) and the workflow's audio branch is intact. |
 
 ---
 

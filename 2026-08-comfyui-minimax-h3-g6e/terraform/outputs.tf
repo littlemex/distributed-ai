@@ -1,5 +1,5 @@
 ################################################################################
-# Root-module outputs. Everything the runbook (docs/GETTING_STARTED.md) and the
+# Root-module outputs. Everything scripts/up.sh and the
 # helper scripts need, so no value is ever reconstructed by hand.
 ################################################################################
 

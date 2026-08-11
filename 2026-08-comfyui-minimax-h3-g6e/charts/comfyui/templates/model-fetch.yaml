@@ -5,7 +5,7 @@ Idempotent: each file is skipped if already present and non-empty, so re-running
 a restarted Job resumes rather than re-pulling 40 GB. Runs on the CPU pool (no GPU needed to
 download), streaming straight to the mounted PVC so the node root disk is untouched.
 
-Render + apply (claim name / PVC created once beforehand — see docs/GETTING_STARTED.md). The
+Render + apply (claim name / PVC created once beforehand — see the README / scripts/up.sh). The
 image is REQUIRED (this Job reuses the ComfyUI image, which bakes in huggingface_hub — no
 runtime pip), so pass modelFetch.image or comfyui.image:
   helm template comfyui ./charts/comfyui -n $NS \
@@ -47,7 +47,7 @@ spec:
           # Default to the ComfyUI image (huggingface_hub baked in) so this Job does NOT
           # pip-install at runtime — same no-startup-pip discipline as the ComfyUI pod. Set
           # modelFetch.image to that ECR image; a bare python image would need runtime pip.
-          image: {{ $mf.image | default $c.image | required "modelFetch.image (or comfyui.image) must be set to the ComfyUI ECR image, which bakes in huggingface_hub — see docs/GETTING_STARTED.md" }}
+          image: {{ $mf.image | default $c.image | required "modelFetch.image (or comfyui.image) must be set to the ComfyUI ECR image, which bakes in huggingface_hub — see the README" }}
           env:
             - { name: HF_HUB_ENABLE_HF_TRANSFER, value: {{ ternary "1" "0" ($mf.hfTransfer | default true) | quote }} }
             # Reduce xet/api throttling under a single downloader; harmless for a public repo.
