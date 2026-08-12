@@ -1,0 +1,17 @@
+# Copy this file to backend.tf ONLY when you want to migrate this working
+# directory from local state to S3.
+#
+# Default behavior is unchanged: if backend.tf does not exist, a plain
+# `terraform init` keeps using the local backend exactly as before.
+#
+# This block is shipped as an example file, not as active config, because
+# Terraform 1.9 treats an empty committed `backend "s3" {}` as a real S3 backend
+# and fails `init` until bucket/key are supplied via `-backend-config`.
+#
+# Opt-in flow: copy this file to backend.tf, create backend.hcl from
+# backend.hcl.example, then run:
+#
+#   terraform init -backend-config=backend.hcl -migrate-state
+terraform {
+  backend "s3" {}
+}

@@ -516,8 +516,10 @@ deletes FSx/EFS and their contents (regenerable caches) — see below.
 - **CRD upgrades:** the `karpenter-crd` chart is installed separately so CRDs
   track the chart version; still review CRD changes when bumping versions.
 - **Terraform state contains secrets** (the CloudFront `X-Origin-Verify` value,
-  transient ECR tokens). Use an encrypted remote backend (S3 + KMS) for anything
-  beyond local experimentation.
+  transient ECR tokens). For an opt-in encrypted S3 + KMS backend that keeps
+  local state as the default, see [bootstrap/](./bootstrap/README.md) and
+  [docs/remote-state.md](./docs/remote-state.md). If you want to stay on local
+  state for experiments, do nothing.
 - **Teardown deletes data:** FSx/EFS have no `prevent_destroy` (so the
   environment is disposable). Set it, or back up, before storing anything you
   cannot regenerate.
