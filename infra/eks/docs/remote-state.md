@@ -15,24 +15,14 @@ Terraform state here is also sensitive. It contains secrets such as the
 CloudFront `X-Origin-Verify` value and transient ECR tokens, so the remote
 backend enforces encryption at rest and TLS in transit.
 
-## Local state is still the default
+## Local state is the default
 
-Nothing changes unless an operator deliberately opts in.
-
-`infra/eks` does **not** commit an active `backend "s3" {}` block, because
-Terraform `1.9` treats even an empty S3 backend block as a real remote backend
-and fails a plain `terraform init` until `bucket` and `key` are provided.
-To preserve the existing local-state workflow, the backend block is shipped as
-`backend.tf.example`, not as active `.tf` config:
-
-1. If you do nothing, `terraform init` keeps using local state exactly as it
-   does today.
-2. If you want S3, copy `backend.tf.example` to ignored `backend.tf`.
-3. Create ignored `backend.hcl` from `backend.hcl.example`.
-4. Run `terraform init -backend-config=backend.hcl -migrate-state`.
-
-That design keeps local experimentation unchanged while making remote state an
-explicit operator choice.
+`terraform init` with no backend configuration uses local state; remote state is
+an explicit opt-in. The module ships the backend as `backend.tf.example` rather
+than an active `backend "s3" {}` block, because Terraform `1.9` treats even an
+empty S3 backend block as a real remote backend and fails a plain
+`terraform init` until `bucket` and `key` are provided. Leaving
+`backend.tf.example` un-copied keeps local state in effect.
 
 ## Opt-in flow
 
@@ -40,7 +30,7 @@ explicit operator choice.
 2. In `infra/eks/`, copy `backend.tf.example` to `backend.tf`.
 3. Fill in `backend.hcl` from `backend.hcl.example`, or generate it during the bootstrap step with `terraform output -raw backend_hcl > ../backend.hcl` from `infra/eks/bootstrap/`.
 4. Run `terraform init -backend-config=backend.hcl -migrate-state`.
-5. Run `terraform state list` to confirm the migrated state is readable, then run `terraform plan` and confirm it does not look like a first apply.
+5. Run `terraform state list` to confirm the migrated state is readable, then run `terraform plan` and confirm it does not propose recreating existing resources.
 
 `backend.hcl` should stay environment-specific and untracked. The committed
 example files contain placeholders only; no real bucket names, regions, table
@@ -81,9 +71,3 @@ aws s3api get-object \
   --version-id <good-version-id> \
   /tmp/terraform.tfstate.recovery
 ```
-
-## Staying on local state
-
-Do nothing. Leave `backend.tf.example` un-copied, do not create `backend.hcl`,
-and keep running `terraform init` as before. Local state remains the default
-behavior until an operator explicitly opts into S3.

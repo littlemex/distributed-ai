@@ -4,9 +4,8 @@ This standalone root module creates the S3 bucket and DynamoDB lock table that
 the parent `infra/eks` working directory can use when you opt into remote
 state.
 
-It intentionally uses **local state** itself. That is the chicken-and-egg
-constraint: the bucket and lock table do not exist yet, so the bootstrap step
-cannot store its own state in them until after it creates them.
+It intentionally uses **local state** itself: the bucket and lock table cannot
+store their own state before they exist.
 
 ## What it creates
 
@@ -21,8 +20,8 @@ cannot store its own state in them until after it creates them.
   `noncurrent_version_expiration_days` (default `90`) so history does not grow
   without bound.
 - A DynamoDB lock table for Terraform `>= 1.9`. Terraform `>= 1.10` can use
-  `use_lockfile = true`, but the parent module still supports `1.9`, so this
-  module creates the table by default.
+  native S3 state locking (`use_lockfile = true`); the parent module targets
+  `>= 1.9`, so this module creates a DynamoDB lock table by default.
 
 ## Bootstrap and migrate
 
@@ -45,7 +44,7 @@ scripts/bootstrap-remote-state.sh -b <state-bucket-name> -r <aws-region> [-t <lo
 6. `cd ..`
 7. `cp backend.tf.example backend.tf`
 8. `terraform init -backend-config=backend.hcl -migrate-state`
-9. `terraform state list` should show your existing resources, and a follow-up `terraform plan` should not look like a first apply.
+9. `terraform state list` should show your existing resources, and a follow-up `terraform plan` should not propose recreating existing resources.
 
 `backend.hcl` and the copied `backend.tf` stay untracked; both are git-ignored.
 If you want to keep using local state, do not create either file.
