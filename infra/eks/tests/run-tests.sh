@@ -96,6 +96,8 @@ source "$SCRIPT_DIR/cases/base.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/gpu.sh"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/image-build.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/registry.sh"
 register_all_tests
 

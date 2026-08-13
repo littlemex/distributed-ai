@@ -418,6 +418,29 @@ terraform output ddp_sample_ecr_url              # the module's own ddp-sample r
 > become just another consumer of that path. It is kept in place for backward
 > compatibility (moving it would change resource addresses and force a repo re-create).
 
+### Build execution: one reusable Job, thin per-image callers
+
+The build itself (the "execution" half) is a single reusable Helm template,
+`experiments.imageBuildJob` (`charts/experiments/templates/_image-build.tpl`). Each image is a
+**thin caller** that supplies only its identity; `image-build-ddp-sample.yaml` is the reference
+caller for the workshop image. To build another image *in this chart*, add a caller that passes
+its `jobName` and either a git build-context sub-path or a ConfigMap — you do not copy the Job.
+
+The builder supports two build-context sources:
+
+- **`git`** (default) — clone `gitRepo#gitRef`, build root `contextSubPath`. Auditable and
+  reproducible (`repo#ref` is in the Job spec, git-side review applies); use it for production
+  images.
+- **`configMap`** — build from a ConfigMap staged into an `emptyDir`, with no clone and no git
+  push, for ad-hoc/experiment images not committed to a repo. It trades away provenance and
+  git-side controls, and ConfigMap-create in the builder namespace becomes ECR-push-equivalent —
+  so keep production images on the git path.
+
+Misconfiguration (an unknown context source, a ConfigMap name set under `git`, an unsafe
+filename, a missing Dockerfile) fails at render time rather than building the wrong thing. See
+[`docs/image-builder.md`](docs/image-builder.md) for the full design, the caller contract, and
+the ConfigMap constraints.
+
 For a **large** image (pushed size in the tens of GB), turn on
 `image_builder_dedicated_pool = true`: a tainted, NVMe-RAID0 Karpenter pool that Karpenter
 spins up only while a build Job exists and consolidates back to zero after — so the big
