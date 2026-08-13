@@ -10,13 +10,19 @@ suite_rank() {
   esac
 }
 
+# 'neuron' is a standalone suite, not part of the baseline<coverage<full ladder: it needs Trainium
+# capacity (a region-specific Capacity Block) that most environments lack, so it must never be
+# pulled in by the regular suites. It has no rank.
 valid_suite() {
-  suite_rank "$1" >/dev/null 2>&1
+  case "$1" in
+    baseline | coverage | full | neuron) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 valid_layer() {
   case "$1" in
-    static | live-ro | live-mut | gpu) return 0 ;;
+    static | live-ro | live-mut | gpu | neuron) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -26,6 +32,14 @@ test_selected() {
   for skip_layer in $SKIP_LAYERS; do
     [ "$skip_layer" = "$layer" ] && return 1
   done
+  # The 'neuron' suite runs ONLY the opt-in neuron layer; every other suite never runs it. This
+  # keeps the Trainium-only, region-dependent test out of baseline/coverage/full while letting
+  # `--suite neuron` run it alone.
+  if [ "$SUITE" = neuron ]; then
+    [ "$layer" = neuron ]
+    return
+  fi
+  [ "$layer" = neuron ] && return 1
   for extra_layer in $EXTRA_LAYERS; do
     [ "$extra_layer" = "$layer" ] && return 0
   done

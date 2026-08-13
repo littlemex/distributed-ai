@@ -1,0 +1,118 @@
+{{- /*
+neuron-serving-vllm-plugin — vLLM OpenAI-compatible server on a Trainium node via the vLLM Neuron
+plugin. Verified on trn2.3xlarge with Qwen/Qwen3-VL-4B-Instruct (multimodal). This is Basic09.
+
+Prereqs: a Trainium node (a Capacity-Block managed nodegroup) with the Neuron device plugin.
+
+Render + apply:
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set neuronVllmPlugin.enabled=true \
+    --set neuronVllmPlugin.model=Qwen/Qwen3-VL-4B-Instruct | kubectl apply -f -
+Verify:
+  kubectl -n $NS rollout status deploy/neuron-vllm --timeout=40m
+  kubectl -n $NS port-forward svc/neuron-vllm 8000:8000 &
+  curl localhost:8000/v1/models
+*/ -}}
+{{- if .Values.neuronVllmPlugin.enabled }}
+{{- $v := .Values.neuronVllmPlugin }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neuron-vllm
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: neuron-vllm
+spec:
+  replicas: 1
+  # The node has a single Trainium device, so a RollingUpdate surge pod cannot co-schedule with the
+  # old one — Recreate frees the device first. (Same reasoning as the single-GPU note in gpuServingVllm.)
+  strategy:
+    type: Recreate
+  # First run pulls a multi-GB DLC, downloads the model, and compiles to NEFF; that exceeds the
+  # default 600s progress deadline (kubectl rollout status would give up mid-compile).
+  progressDeadlineSeconds: {{ $v.progressDeadlineSeconds | default 2400 }}
+  selector:
+    matchLabels:
+      app: neuron-vllm
+  template:
+    metadata:
+      labels:
+        app: neuron-vllm
+    spec:
+      {{- if $v.nodeRole }}
+      # Optional: pin to a labeled Neuron pool. Omitted by default — the device request below is
+      # enough to land on the (only) Trainium node.
+      nodeSelector:
+        node-role: {{ $v.nodeRole }}
+      {{- end }}
+      tolerations:
+        - { key: aws.amazon.com/neuron, operator: Exists, effect: NoSchedule }
+        - { key: capacity-reservation,  operator: Exists, effect: NoSchedule }
+      containers:
+        - name: vllm
+          image: {{ $v.image }}
+          # The plugin auto-selects the neuron platform once the pod has a Neuron device (no
+          # --device flag). vllm is on PATH in the DLC; the model is the positional serve arg.
+          command: ["vllm", "serve", {{ $v.model | quote }}]
+          args:
+            - --tensor-parallel-size={{ $v.tpSize }}
+            - --max-num-seqs={{ $v.maxNumSeqs | default 4 }}
+            - --max-model-len={{ $v.maxModelLen | default 8192 }}
+            - --no-async-scheduling
+            - --port={{ $v.port | default 8000 }}
+          env:
+            # vLLM's compile cache (NEFF on Neuron).
+            - name: VLLM_CACHE_ROOT
+              value: {{ $v.cacheRoot | default "/work/neuron_cache" | quote }}
+            # Skip EFA affinity handling on a non-EFA (single-node) setup.
+            - name: NEURON_SKIP_EFA_AFFINITY
+              value: "1"
+            # HF token for gated models (optional; ungated models need no token).
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+                  optional: true
+          securityContext:
+            # Neuron runtime (libnrt) requires IPC_LOCK; privileged is not needed.
+            capabilities:
+              add: ["IPC_LOCK"]
+          ports:
+            - { name: http, containerPort: {{ $v.port | default 8000 }} }
+          resources:
+            # Whole-device request (NOT aws.amazon.com/neuroncore — see values.yaml).
+            limits:
+              aws.amazon.com/neuron: {{ $v.neuronDevices | default 1 | quote }}
+              memory: {{ $v.memory | default "96Gi" }}
+            requests:
+              aws.amazon.com/neuron: {{ $v.neuronDevices | default 1 | quote }}
+              cpu: {{ $v.cpu | default "8" | quote }}
+              memory: {{ $v.memoryRequest | default "24Gi" }}
+          readinessProbe:
+            httpGet: { path: /health, port: {{ $v.port | default 8000 }} }
+            initialDelaySeconds: {{ $v.readinessInitialDelaySeconds | default 120 }}
+            periodSeconds: {{ $v.readinessPeriodSeconds | default 15 }}
+            failureThreshold: {{ $v.readinessFailureThreshold | default 240 }}
+          volumeMounts:
+            - { name: cache, mountPath: {{ $v.cacheRoot | default "/work/neuron_cache" | quote }} }
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: cache
+          emptyDir: {}
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: {{ $v.shmSize | default "8Gi" }} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neuron-vllm
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app: neuron-vllm
+spec:
+  selector:
+    app: neuron-vllm
+  ports:
+    - { name: http, port: {{ $v.port | default 8000 }}, targetPort: {{ $v.port | default 8000 }} }
+{{- end }}

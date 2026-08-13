@@ -1,0 +1,5 @@
+# Basic09 scenario values: Qwen3-VL on the vLLM Neuron plugin.
+# The chart (charts/experiments values.yaml, neuronVllmPlugin) holds the configuration; here we
+# only enable the workload. Override model/tpSize/etc. below if your node or model differs.
+neuronVllmPlugin:
+  enabled: true
