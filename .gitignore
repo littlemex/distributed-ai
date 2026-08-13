@@ -227,3 +227,13 @@ __marimo__/
 # could not run the tests. Re-include that directory explicitly.
 !infra/eks/tests/lib/
 !infra/eks/tests/lib/**
+
+# Local Terraform artifacts for infra/eks and its remote-state bootstrap helper.
+infra/eks/.terraform/
+infra/eks/*.tfstate
+infra/eks/*.tfstate.*
+infra/eks/backend.hcl
+infra/eks/backend.tf
+infra/eks/bootstrap/.terraform/
+infra/eks/bootstrap/*.tfstate
+infra/eks/bootstrap/*.tfstate.*

@@ -1,0 +1,17 @@
+# Copy this file to backend.hcl, fill in the environment-specific values, and
+# keep the copy untracked. It is consumed only after you deliberately opt in by
+# copying backend.tf.example to backend.tf.
+#
+# Terraform 1.9-compatible locking uses DynamoDB. On Terraform 1.10+, you may
+# replace `dynamodb_table` with `use_lockfile = true` if you prefer S3-native
+# locking.
+
+bucket         = "replace-with-state-bucket-name"
+key            = "replace-with-state-object-key"
+region         = "replace-with-aws-region"
+dynamodb_table = "replace-with-lock-table-name"
+
+encrypt = true
+# Use a customer-managed KMS key ARN/alias here, or `alias/aws/s3` to use the
+# AWS-managed key.
+kms_key_id = "replace-with-kms-key-arn-or-alias"

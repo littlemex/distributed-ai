@@ -247,6 +247,32 @@ Generate an inputs/outputs reference with
 
 ---
 
+## State management
+
+This module uses local Terraform state by default: a plain `terraform init` with
+no backend configuration keeps state in `terraform.tfstate`, which is convenient
+for short-lived experiments.
+
+An encrypted S3 + KMS backend with DynamoDB locking is available as an opt-in. It
+adds state versioning (recover a prior version if a write goes bad), locking
+(prevent concurrent applies from racing), and encryption at rest — worthwhile for
+any long-lived or shared cluster, since state contains secrets (the CloudFront
+`X-Origin-Verify` value and transient ECR tokens).
+
+Enable it with one command from `infra/eks/`:
+
+```bash
+scripts/bootstrap-remote-state.sh -b <state-bucket-name> -r <aws-region>
+```
+
+This provisions the state bucket and lock table, writes `backend.hcl`, installs
+`backend.tf`, and prints the `terraform init -migrate-state` command. To stay on
+local state, do nothing. See [bootstrap/](./bootstrap/README.md) and
+[docs/remote-state.md](./docs/remote-state.md) for the full flow and version
+recovery.
+
+---
+
 ## Quick start (no Capacity Block)
 
 `accelerator_pools` defaults to empty, so the base cluster is Region-agnostic
@@ -516,8 +542,8 @@ deletes FSx/EFS and their contents (regenerable caches) — see below.
 - **CRD upgrades:** the `karpenter-crd` chart is installed separately so CRDs
   track the chart version; still review CRD changes when bumping versions.
 - **Terraform state contains secrets** (the CloudFront `X-Origin-Verify` value,
-  transient ECR tokens). Use an encrypted remote backend (S3 + KMS) for anything
-  beyond local experimentation.
+  transient ECR tokens). Use the opt-in encrypted S3 + KMS backend for any
+  long-lived or shared cluster (see [State management](#state-management)).
 - **Teardown deletes data:** FSx/EFS have no `prevent_destroy` (so the
   environment is disposable). Set it, or back up, before storing anything you
   cannot regenerate.
