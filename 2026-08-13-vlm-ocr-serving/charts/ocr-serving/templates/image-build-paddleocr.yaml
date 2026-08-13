@@ -1,0 +1,14 @@
+{{- /*
+Build the paddleocr image in-cluster (rootless BuildKit -> ECR). Thin caller of the shared
+image-builder.job define; it supplies paddleocr's identity (build-ocr-paddleocr) + its
+Dockerfile (Dockerfile.paddleocr) from the shared build context.
+
+Vendor the library chart once before rendering:  helm dependency build ./charts/ocr-serving
+Render + apply:
+  helm template ocr ./charts/ocr-serving -s templates/image-build-paddleocr.yaml \
+    --set imageBuild.enabled=true --set imageBuild.repository=$ECR_URL | kubectl apply -f -
+  kubectl -n image-builder wait --for=condition=complete job/build-ocr-paddleocr-paddle-v1 --timeout=45m
+*/ -}}
+{{- if .Values.imageBuild.enabled }}
+{{- include "ocr.imageBuild" (dict "root" $ "key" "paddleocr" "build" .Values.paddleocr.build) }}
+{{- end }}

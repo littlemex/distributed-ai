@@ -1,0 +1,15 @@
+{{- /*
+Build the dots-ocr image in-cluster (rootless BuildKit -> ECR). Thin caller of the shared
+image-builder.job define; supplies dots-ocr's identity (build-ocr-dots-ocr) + its Dockerfile
+(Dockerfile.dots-ocr). This image bakes in the ~3B model, so its build is the heaviest —
+raise dotsOcr.build.ephemeralStorage (or set dedicatedPool) if the CPU pool's disk is tight.
+
+Vendor the library chart once before rendering:  helm dependency build ./charts/ocr-serving
+Render + apply:
+  helm template ocr ./charts/ocr-serving -s templates/image-build-dots-ocr.yaml \
+    --set imageBuild.enabled=true --set imageBuild.repository=$ECR_URL | kubectl apply -f -
+  kubectl -n image-builder wait --for=condition=complete job/build-ocr-dots-ocr-dots-v1 --timeout=60m
+*/ -}}
+{{- if .Values.imageBuild.enabled }}
+{{- include "ocr.imageBuild" (dict "root" $ "key" "dots-ocr" "build" .Values.dotsOcr.build) }}
+{{- end }}

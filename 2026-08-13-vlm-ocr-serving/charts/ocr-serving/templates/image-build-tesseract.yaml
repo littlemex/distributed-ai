@@ -1,0 +1,14 @@
+{{- /*
+Build the tesseract image in-cluster (rootless BuildKit -> ECR). Thin caller of the shared
+image-builder.job define; supplies tesseract's identity (build-ocr-tesseract) + its Dockerfile
+(Dockerfile.tesseract). Small CPU image, fast build.
+
+Vendor the library chart once before rendering:  helm dependency build ./charts/ocr-serving
+Render + apply:
+  helm template ocr ./charts/ocr-serving -s templates/image-build-tesseract.yaml \
+    --set imageBuild.enabled=true --set imageBuild.repository=$ECR_URL | kubectl apply -f -
+  kubectl -n image-builder wait --for=condition=complete job/build-ocr-tesseract-tess-v1 --timeout=20m
+*/ -}}
+{{- if .Values.imageBuild.enabled }}
+{{- include "ocr.imageBuild" (dict "root" $ "key" "tesseract" "build" .Values.tesseract.build) }}
+{{- end }}

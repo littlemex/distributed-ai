@@ -1,0 +1,12 @@
+# Vendored Helm library dependency (image-builder-lib) — re-vendored on demand with
+# `helm dependency build ./charts/ocr-serving`, so a rebuild always tracks the current
+# library instead of a committed stale copy.
+charts/ocr-serving/charts/
+charts/ocr-serving/Chart.lock
+
+# Python bytecode from local smoke runs / import checks.
+__pycache__/
+*.pyc
+
+# Local smoke outputs.
+out/

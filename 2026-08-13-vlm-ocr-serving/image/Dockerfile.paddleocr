@@ -1,0 +1,63 @@
+# PaddleOCR serving image (CPU). PP-OCR detection + angle + recognition.
+#
+# Build context is the project's image/ directory (contextSubPath=.../image) so this
+# Dockerfile can COPY the shared harness (common/) and its engine module.
+#
+# CPU, not GPU: the GPU wheel (paddlepaddle-gpu) pulls pinned nvidia-*-cu12 build deps that are
+# NOT resolvable from the paddle wheel index alone, and PP-OCR's mobile detector/recognizer run
+# fast enough on CPU for document extraction. The CPU wheel (paddlepaddle) resolves cleanly from
+# PyPI with no CUDA build deps, which makes this image reproducible and quick to build. A GPU
+# variant can be reintroduced later on the official paddlepaddle/paddle GPU image (CUDA prebaked).
+FROM python:3.11-slim
+
+ARG PADDLE_VERSION=3.1.0
+ARG PADDLEOCR_VERSION=3.1.0
+# paddleocr 3.1.0 calls PaddlePredictorOption() with a positional arg that a newer paddlex
+# (3.7.x) removed -> "takes 1 positional argument but 2 were given" at construct time. Pin the
+# contemporaneous paddlex so the pipeline builds; bump both together if upgrading paddleocr.
+ARG PADDLEX_VERSION=3.1.0
+ARG FASTAPI_VERSION=0.115.6
+ARG UVICORN_VERSION=0.34.0
+ARG PYDANTIC_VERSION=2.10.4
+ARG PILLOW_VERSION=11.0.0
+ARG MULTIPART_VERSION=0.0.20
+# Language pack baked into the image so the recognizer's models are prefetched at build,
+# never downloaded at pod startup (no model-host dependency mid-serve).
+ARG PADDLE_LANG=en
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PADDLE_LANG=${PADDLE_LANG}
+
+# libgl1/libglib/libgomp are the OpenCV runtime libs PaddleOCR (cv2) needs; the slim base omits them.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 libgomp1 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU paddle from PyPI (clean deps), then PaddleOCR + the serving deps.
+RUN python -m pip install --upgrade pip \
+    && python -m pip install "paddlepaddle==${PADDLE_VERSION}" \
+    && python -m pip install \
+        "paddleocr==${PADDLEOCR_VERSION}" \
+        "paddlex==${PADDLEX_VERSION}" \
+        "fastapi==${FASTAPI_VERSION}" \
+        "uvicorn[standard]==${UVICORN_VERSION}" \
+        "pydantic==${PYDANTIC_VERSION}" \
+        "pillow==${PILLOW_VERSION}" \
+        "python-multipart==${MULTIPART_VERSION}"
+
+WORKDIR /app
+COPY common/ /app/common/
+COPY paddleocr-vl/engine.py /app/engine.py
+
+ENV ENGINE_MODULE=engine \
+    PYTHONPATH=/app
+
+# Prefetch the det/cls/rec models into the image so pod startup does no network fetch.
+# PaddleOCR 3.x takes lang + sensible defaults (no use_angle_cls/show_log kwargs — those are 2.x).
+RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(lang='${PADDLE_LANG}')"
+
+EXPOSE 8000
+ENTRYPOINT ["python", "-m", "uvicorn", "common.serve:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

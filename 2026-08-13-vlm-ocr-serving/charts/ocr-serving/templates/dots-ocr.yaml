@@ -1,0 +1,14 @@
+{{- /*
+dots-ocr serving Deployment + ClusterIP Service (single GPU). Thin caller of ocr.workload.
+The Deployment/Service are named "dots-ocr" (DNS-1123); its values live under `dotsOcr`.
+
+Render + apply:
+  helm template ocr ./charts/ocr-serving -n $NS -s templates/dots-ocr.yaml \
+    --set dotsOcr.enabled=true --set dotsOcr.image=$ECR_URL:dots-v1 \
+    --set dotsOcr.nodeRole=$GPU_POOL | kubectl apply -f -
+  kubectl -n $NS rollout status deploy/dots-ocr --timeout=20m
+  kubectl -n $NS port-forward svc/dots-ocr 8000:8000   # POST /extract
+*/ -}}
+{{- if .Values.dotsOcr.enabled }}
+{{- include "ocr.workload" (dict "root" $ "key" "dots-ocr" "cfg" .Values.dotsOcr "gpu" true) }}
+{{- end }}

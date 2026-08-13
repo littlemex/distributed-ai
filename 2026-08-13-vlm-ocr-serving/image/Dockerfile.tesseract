@@ -1,0 +1,46 @@
+# Tesseract OCR serving image (CPU). Small, fast to build, no GPU.
+#
+# Build context is the project's image/ directory (contextSubPath=.../image), so this
+# Dockerfile can COPY both the shared harness (common/) and its own engine module. Build
+# it via the in-cluster BuildKit builder (charts/ocr-serving) or locally:
+#   docker build -f Dockerfile.tesseract -t tesseract-ocr .
+#
+# Everything version-bearing is a build ARG so the image is reproducible and bumpable from
+# the build Job without editing this file.
+FROM python:3.11-slim
+
+ARG FASTAPI_VERSION=0.115.6
+ARG UVICORN_VERSION=0.34.0
+ARG PYDANTIC_VERSION=2.10.4
+ARG PILLOW_VERSION=11.0.0
+ARG MULTIPART_VERSION=0.0.20
+ARG PYTESSERACT_VERSION=0.3.13
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# tesseract-ocr is the engine binary; eng traineddata ships with the ubuntu/debian package.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip \
+    && python -m pip install \
+        "fastapi==${FASTAPI_VERSION}" \
+        "uvicorn[standard]==${UVICORN_VERSION}" \
+        "pydantic==${PYDANTIC_VERSION}" \
+        "pillow==${PILLOW_VERSION}" \
+        "python-multipart==${MULTIPART_VERSION}" \
+        "pytesseract==${PYTESSERACT_VERSION}"
+
+WORKDIR /app
+COPY common/ /app/common/
+COPY tesseract/engine.py /app/engine.py
+
+ENV ENGINE_MODULE=engine \
+    PYTHONPATH=/app
+
+EXPOSE 8000
+ENTRYPOINT ["python", "-m", "uvicorn", "common.serve:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

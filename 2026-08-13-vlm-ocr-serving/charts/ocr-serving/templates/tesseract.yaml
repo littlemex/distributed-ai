@@ -1,0 +1,13 @@
+{{- /*
+tesseract serving Deployment + ClusterIP Service (CPU, no GPU). Thin caller of ocr.workload
+with gpu=false, so it lands on the cpu pool with no gpu limit and no accelerator tolerations.
+
+Render + apply:
+  helm template ocr ./charts/ocr-serving -n $NS -s templates/tesseract.yaml \
+    --set tesseract.enabled=true --set tesseract.image=$ECR_URL:tess-v1 | kubectl apply -f -
+  kubectl -n $NS rollout status deploy/tesseract --timeout=10m
+  kubectl -n $NS port-forward svc/tesseract 8000:8000   # POST /extract
+*/ -}}
+{{- if .Values.tesseract.enabled }}
+{{- include "ocr.workload" (dict "root" $ "key" "tesseract" "cfg" .Values.tesseract "gpu" false) }}
+{{- end }}

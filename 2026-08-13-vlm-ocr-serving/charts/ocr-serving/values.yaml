@@ -1,0 +1,125 @@
+# values.yaml — bbox-grounded OCR / document-VLM serving.
+#
+# Every engine is OFF by default; turn on exactly the ones you want. Build first, then serve:
+#
+#   # build the tesseract image in-cluster and push to ECR
+#   helm template ocr ./charts/ocr-serving -n ocr-serving \
+#     -s templates/image-build-tesseract.yaml \
+#     --set imageBuild.enabled=true --set imageBuild.repository=$ECR_URL | kubectl apply -f -
+#
+#   # serve it
+#   helm template ocr ./charts/ocr-serving -n ocr-serving \
+#     -s templates/tesseract.yaml \
+#     --set tesseract.enabled=true --set tesseract.image=$ECR_URL:tess-v1 | kubectl apply -f -
+#
+# Nothing here is region- or account-specific: the ECR repo comes from `terraform output`
+# (this project's terraform/) or from borrowing the base module's builder repo.
+
+# Namespace every rendered object is placed in. Create it first (kubectl create ns ocr-serving).
+# Leave "" to use whatever `-n <x>` you pass to `helm template`.
+namespace: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# imageBuild — shared build context for all three engine images. The per-engine
+# identity (Job name, tag, Dockerfile) is added by each thin caller from the engine's
+# own `.build` block below; this block holds only what every build shares.
+#
+# One build context (contextSubPath=.../image) serves all three Dockerfiles: each caller
+# selects its Dockerfile by filename (Dockerfile.<engine>), and every image COPYs the shared
+# common/ harness plus its own engine module from that single context.
+# ─────────────────────────────────────────────────────────────────────────────
+imageBuild:
+  enabled: false
+  # REQUIRED at build time: the ECR repo URI the images push to. Either this project's
+  # dedicated repos (terraform output) or the base module's builder repo borrowed with
+  # distinct per-engine tags. A per-engine `build.repository` overrides this.
+  repository: ""
+  # Git context for the Dockerfiles: repo#ref:contextSubPath. The ref MUST be pushed
+  # (BuildKit clones it) — pin a tag/sha for reproducibility.
+  gitRepo: github.com/littlemex/distributed-ai.git
+  gitRef: main
+  contextSubPath: 2026-08-13-vlm-ocr-serving/image
+  namespace: image-builder
+  serviceAccountName: image-builder
+  # buildkitImage / awsCliImage: pinned by digest in the library template; override to bump.
+  buildkitImage: ""
+  awsCliImage: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# paddleocr — PP-OCR detection+recognition, CPU. Quad boxes + per-line score.
+# ─────────────────────────────────────────────────────────────────────────────
+paddleocr:
+  enabled: false
+  # REQUIRED to serve: the ECR image built below, "repository:tag" (default tag paddle-v2).
+  image: ""
+  imagePullPolicy: Always
+  # CPU pool — PP-OCR runs on CPU (the GPU wheel's CUDA build deps do not resolve cleanly).
+  # distai-eks CPU NodePool label is node-role=cpu.
+  nodeRole: cpu
+  cpu: "2"
+  memory: 4Gi
+  port: 8000
+  build:
+    tag: paddle-v2                 # bump (paddle-v2 -> paddle-v3) to rebuild instead of deleting the Job
+    filename: Dockerfile.paddleocr
+    repository: ""                 # optional: dedicated ECR repo; default imageBuild.repository
+    cpu: "2"
+    ephemeralStorage: 30Gi         # PP-OCR image + baked models are modest
+    dedicatedPool: { enabled: false }
+  # First model load (det+cls+rec) is quick; startupProbe covers image-cold-start/node warmup.
+  startupProbe: { initialDelaySeconds: 10, periodSeconds: 10, failureThreshold: 60 }
+  readinessProbe: { periodSeconds: 10, failureThreshold: 6 }
+  livenessProbe: { periodSeconds: 30, failureThreshold: 6 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# dotsOcr — dots.ocr document VLM (~3B), GPU. Layout blocks with bbox + text.
+# ─────────────────────────────────────────────────────────────────────────────
+dotsOcr:
+  enabled: false
+  image: ""
+  imagePullPolicy: Always
+  nodeRole: gpu-ddp
+  gpuCount: 1
+  # cpu <= the GPU pool's largest node (g6.2xlarge/g5.2xlarge = 8 vCPU); 6 leaves room for the
+  # node's system daemons so Karpenter can actually place the pod (8 would exceed allocatable).
+  cpu: "6"
+  # The ~3B model + activations; 24Gi holds weights (bf16) + KV + working buffers with headroom.
+  memory: 24Gi
+  shmSize: 2Gi
+  port: 8000
+  build:
+    tag: dots-v2
+    filename: Dockerfile.dots-ocr
+    repository: ""
+    cpu: "4"
+    # The image bakes in the ~3B weights (~6-7 GB) + torch/CUDA; peak build disk is several×.
+    ephemeralStorage: 60Gi
+    dedicatedPool: { enabled: false }
+  # The ~3B model loads from baked-in files; readiness waits on that. Generous startupProbe.
+  startupProbe: { initialDelaySeconds: 20, periodSeconds: 10, failureThreshold: 90 }
+  readinessProbe: { periodSeconds: 10, failureThreshold: 6 }
+  livenessProbe: { periodSeconds: 30, failureThreshold: 6 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# tesseract — classic CPU OCR. Word boxes + per-word confidence. The independent,
+# non-VLM channel (its errors are uncorrelated with the VLM readers').
+# ─────────────────────────────────────────────────────────────────────────────
+tesseract:
+  enabled: false
+  image: ""
+  imagePullPolicy: Always
+  # CPU pool — no GPU. distai-eks CPU NodePool label is node-role=cpu.
+  nodeRole: cpu
+  cpu: "2"
+  memory: 2Gi
+  port: 8000
+  build:
+    tag: tess-v1
+    filename: Dockerfile.tesseract
+    repository: ""
+    cpu: "2"
+    ephemeralStorage: 10Gi         # small CPU image
+    dedicatedPool: { enabled: false }
+  startupProbe: { initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 30 }
+  readinessProbe: { periodSeconds: 10, failureThreshold: 6 }
+  livenessProbe: { periodSeconds: 30, failureThreshold: 6 }

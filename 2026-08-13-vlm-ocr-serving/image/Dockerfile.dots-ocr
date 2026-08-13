@@ -1,0 +1,81 @@
+# dots.ocr serving image (GPU). Document VLM: layout blocks with bbox + text.
+#
+# Build context is the project's image/ directory (contextSubPath=.../image) so this
+# Dockerfile can COPY the shared harness (common/) and its engine module.
+#
+# Base: NVIDIA CUDA 12.6 runtime to match the torch cu126 wheels (same stack comfyui uses),
+# so the wheel's CUDA userspace matches the g6/g6e node driver. flash-attn is intentionally
+# NOT installed (long/fragile source build); the engine falls back to SDPA attention, which
+# is correct just slower. Add flash-attn later via a build ARG if throughput matters.
+ARG CUDA_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
+FROM ${CUDA_IMAGE}
+
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu126
+ARG TORCH_VERSION=2.8.0
+ARG TORCHVISION_VERSION=0.23.0
+ARG TRANSFORMERS_VERSION=4.51.3
+ARG ACCELERATE_VERSION=1.2.1
+ARG QWEN_VL_UTILS_VERSION=0.0.11
+ARG FASTAPI_VERSION=0.115.6
+ARG UVICORN_VERSION=0.34.0
+ARG PYDANTIC_VERSION=2.10.4
+ARG PILLOW_VERSION=11.0.0
+ARG MULTIPART_VERSION=0.0.20
+ARG HF_HUB_VERSION=0.34.4
+# The model to bake in. Pinned by repo; set DOTS_REVISION to a commit sha for full reproducibility.
+# The Hugging Face repo name is "dots.ocr" — the "." breaks transformers' trust_remote_code
+# dynamic import (it derives a Python module path from the repo/dir name, and "dots.ocr" is read
+# as a submodule "ocr" under "dots", raising ModuleNotFoundError). The documented fix is to load
+# from a LOCAL directory whose name has NO dot; we snapshot the repo into /models/DotsOCR and
+# point the runtime load path (DOTS_MODEL_ID) there.
+ARG DOTS_HF_REPO=rednote-hilab/dots.ocr
+ARG DOTS_REVISION=main
+ARG DOTS_LOCAL_DIR=/models/DotsOCR
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DOTS_MODEL_ID=${DOTS_LOCAL_DIR} \
+    HF_HUB_ENABLE_HF_TRANSFER=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip git \
+        libgl1 libglib2.0-0 ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python
+
+# torch first (pinned, CUDA-matched index), then the VLM + serving stack. The +<cuda> local
+# tag is derived from the index's last path segment so it can never drift from the index.
+RUN python -m pip install --upgrade pip \
+    && CUDA_TAG="$(basename "${TORCH_INDEX}")" \
+    && python -m pip install \
+        "torch==${TORCH_VERSION}+${CUDA_TAG}" \
+        "torchvision==${TORCHVISION_VERSION}+${CUDA_TAG}" \
+        --index-url "${TORCH_INDEX}" \
+    && python -m pip install \
+        "transformers==${TRANSFORMERS_VERSION}" \
+        "accelerate==${ACCELERATE_VERSION}" \
+        "qwen-vl-utils==${QWEN_VL_UTILS_VERSION}" \
+        "huggingface_hub[hf_transfer]==${HF_HUB_VERSION}" \
+        "fastapi==${FASTAPI_VERSION}" \
+        "uvicorn[standard]==${UVICORN_VERSION}" \
+        "pydantic==${PYDANTIC_VERSION}" \
+        "pillow==${PILLOW_VERSION}" \
+        "python-multipart==${MULTIPART_VERSION}"
+
+WORKDIR /app
+COPY common/ /app/common/
+COPY dots-ocr/engine.py /app/engine.py
+
+ENV ENGINE_MODULE=engine \
+    PYTHONPATH=/app
+
+# Bake the ~3B model into the image (no startup download; stateless pod, no PVC needed).
+# Snapshot into a DOT-FREE local dir (see the DOTS_LOCAL_DIR note above) so the runtime
+# trust_remote_code import resolves. local_dir_use_symlinks=False writes real files into the
+# image layer rather than a cache-symlink tree. The model is loaded at pod startup by common.serve.
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('${DOTS_HF_REPO}', revision='${DOTS_REVISION}', local_dir='${DOTS_LOCAL_DIR}', local_dir_use_symlinks=False)"
+
+EXPOSE 8000
+ENTRYPOINT ["python", "-m", "uvicorn", "common.serve:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -1,0 +1,14 @@
+{{- /*
+paddleocr serving Deployment + ClusterIP Service (CPU). Thin caller of the shared ocr.workload
+define with gpu=false, so it lands on the cpu pool with no gpu limit and no accelerator
+tolerations. PP-OCR's mobile models run on CPU; this keeps the image free of CUDA build deps.
+
+Render + apply:
+  helm template ocr ./charts/ocr-serving -n $NS -s templates/paddleocr.yaml \
+    --set paddleocr.enabled=true --set paddleocr.image=$ECR_URL:paddle-v2 | kubectl apply -f -
+  kubectl -n $NS rollout status deploy/paddleocr --timeout=15m
+  kubectl -n $NS port-forward svc/paddleocr 8000:8000   # POST /extract
+*/ -}}
+{{- if .Values.paddleocr.enabled }}
+{{- include "ocr.workload" (dict "root" $ "key" "paddleocr" "cfg" .Values.paddleocr "gpu" false) }}
+{{- end }}
