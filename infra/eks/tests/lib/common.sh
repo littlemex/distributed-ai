@@ -13,34 +13,49 @@ log_pass()  { printf "[OK]   %s\n" "$*"; }
 log_fail()  { printf "[NG]   %s\n" "$*"; }
 log_skip()  { printf "[SKIP] %s\n" "$*"; }
 
+tf_console() {
+  "$SCRIPT_DIR/../scripts/tf-console.sh" "$SCRIPT_DIR/.." "$1"
+}
+
+tf_console_fixture() {
+  "$SCRIPT_DIR/../scripts/tf-console.sh" "$SCRIPT_DIR/.." -var-file=tests/fixtures/accelerator-pools.tfvars "$1"
+}
+
 run_test() {
   local name="$1" timeout_sec="$2" func="$3"
   local start end elapsed rc
   start=$(date +%s)
   set +e
-  # Enforce timeout_sec without a sub-shell: run the test function in the background (it keeps
-  # this shell's functions/vars — aws_cmd, apply_manifest, CLUSTER_NAME, ...) and kill it if it
-  # outlives the deadline. A hung kubectl/aws (e.g. unreachable API server) is aborted with
-  # rc=124 instead of hanging forever. Before this, timeout_sec was accepted but never applied
-  # and the rc==124 branch below was dead code.
+  # Enforce timeout_sec by running the test in its own process group and killing the whole group on
+  # deadline — a hung kubectl/aws child is terminated too, not just the subshell (orphaned mutating
+  # calls must not fire after teardown). `set -m` makes the backgrounded job a process-group leader
+  # on bash 3.2 (macOS) and Linux alike; the fence is closed immediately so job-control side effects
+  # do not leak. The test keeps this shell's functions/vars (aws_cmd, apply_manifest, ...).
+  set -m
   ( set -e; $func ) &
   local test_pid=$!
-  ( sleep "$timeout_sec"; kill -0 "$test_pid" 2>/dev/null && kill -TERM "$test_pid" 2>/dev/null ) &
+  set +m
+  ( sleep "$timeout_sec"; kill -0 "$test_pid" 2>/dev/null && kill -TERM -- -"$test_pid" 2>/dev/null ) &
   local watcher_pid=$!
   wait "$test_pid" 2>/dev/null
   rc=$?
   # Stop the watcher if the test finished first.
   kill -TERM "$watcher_pid" 2>/dev/null; wait "$watcher_pid" 2>/dev/null
-  # A killed test returns 143 (128+SIGTERM); normalize to 124 so the timeout branch below fires.
-  [ $rc -eq 143 ] && rc=124
   set -e
   end=$(date +%s)
   elapsed=$((end - start))
+  # A watchdog-killed test returns 143 (128+SIGTERM); map to 124 (timeout) only when the deadline
+  # actually elapsed, so a test failing via an unrelated SIGTERM is not mislabeled as a timeout.
+  if [ "$rc" -eq 143 ] && [ "$elapsed" -ge "$timeout_sec" ]; then rc=124; fi
 
   if [ $rc -eq 0 ]; then
     log_pass "$name (${elapsed}s)"
     RESULTS+=("PASS|$name|${elapsed}s")
     PASS_COUNT=$((PASS_COUNT + 1))
+  elif [ $rc -eq 2 ]; then
+    log_skip "$name — not applicable (${elapsed}s)"
+    RESULTS+=("SKIP|$name|not applicable")
+    SKIP_COUNT=$((SKIP_COUNT + 1))
   elif [ $rc -eq 124 ]; then
     log_fail "$name (TIMEOUT after ${timeout_sec}s)"
     RESULTS+=("FAIL|$name|TIMEOUT")
@@ -67,7 +82,9 @@ print_summary() {
   echo "=============================="
   printf "%-8s %-35s %s\n" "STATUS" "TEST" "DETAIL"
   echo "--------------------------------------------------------------"
-  for r in "${RESULTS[@]}"; do
+  # Guard empty-array expansion: on bash 3.2 (macOS) under `set -u`, "${RESULTS[@]}" is an unbound
+  # variable error when no test ran (e.g. every layer skipped).
+  for r in ${RESULTS[@]+"${RESULTS[@]}"}; do
     IFS='|' read -r status name detail <<< "$r"
     printf "%-8s %-35s %s\n" "$status" "$name" "$detail"
   done
