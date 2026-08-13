@@ -36,12 +36,14 @@ Usage: ./run-tests.sh [options]
 
 Suites:
   --suite baseline|coverage|full  Select the tiered suite (default: baseline)
+  --suite neuron                 Standalone Trainium (vLLM Neuron plugin) suite; runs ONLY the
+                                 neuron layer and is never included in baseline/coverage/full
   --with-gpu                     Compatibility alias: include the gpu layer
   --with-hardening               Compatibility alias: run at least coverage
   --skip-static                  Compatibility alias: skip the static layer
 
 Options:
-  --skip-layer LAYER             Skip static, live-ro, live-mut, or gpu (repeatable)
+  --skip-layer LAYER             Skip static, live-ro, live-mut, gpu, or neuron (repeatable)
   --list                         Print the registry table and exit
   --keep-ns                      Keep the test namespace for inspection
   --namespace NAME               Test namespace
@@ -95,6 +97,8 @@ source "$SCRIPT_DIR/cases/static.sh"
 source "$SCRIPT_DIR/cases/base.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/gpu.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/neuron.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/image-build.sh"
 # shellcheck disable=SC1091
@@ -268,7 +272,7 @@ main() {
   log_info "=== EKS Infra Regression Tests ==="
   log_info "cluster: $CLUSTER_NAME, namespace: $NAMESPACE, suite: $SUITE, gpu-count: $GPU_COUNT"
 
-  if selected_layer_present live-mut || selected_layer_present gpu; then
+  if selected_layer_present live-mut || selected_layer_present gpu || selected_layer_present neuron; then
     setup_namespace
   fi
 

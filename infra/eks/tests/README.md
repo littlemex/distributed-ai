@@ -12,6 +12,14 @@ Suites are cumulative: `baseline ⊂ coverage ⊂ full`. Each test declares the 
 | `coverage` | Everything in `baseline`, plus the static and isolated live-mutating checks that feature PRs register | Regression coverage for a feature without launching accelerator nodes |
 | `full` | Everything in `coverage`, plus GPU launch, `nvidia-smi`, CUDA, and GPU storage | End-to-end accelerator validation |
 
+There is one standalone suite outside this ladder:
+
+| Suite | Includes | Purpose |
+|---|---|---|
+| `neuron` | Only the `neuron` layer (Trainium serving via the vLLM Neuron plugin) | Validate a Trainium node end to end, in isolation |
+
+`neuron` is intentionally NOT part of `baseline`/`coverage`/`full`: it requires a Trainium node backed by a region-specific Capacity Block, which most environments lack, so bundling it into the tiered suites would make them fail wherever that capacity is absent. Run it on its own with `--suite neuron`; it self-skips (reported `SKIP`) when no Trainium node is present.
+
 Registration order in `registry.sh` is execution order. Section headers are emitted automatically at layer boundaries.
 
 ## Requirements
@@ -95,4 +103,4 @@ Live-mutating tests create namespaced resources only in `${NAMESPACE}`. Cluster-
 
 This harness ships the workshop smoke tests: Terraform validation, control plane / system nodes / Karpenter / CSI drivers / device plugins / Trainer readiness, storage mount over cloned FSx and OpenZFS PVs, and GPU node launch + `nvidia-smi` + CUDA + GPU storage. Feature-specific tests (for example accelerator hardening) are added by their own PRs through the registry.
 
-EFA workload execution and Capacity Blocks are excluded: they require instance capacity that is not reliably available on demand in a test environment.
+EFA workload execution is excluded from the tiered suites: it requires instance capacity that is not reliably available on demand. Capacity-Block-backed Trainium serving is covered by the standalone `neuron` suite (see above), which is opt-in precisely because that capacity is region specific.
