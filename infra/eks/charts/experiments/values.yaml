@@ -64,6 +64,22 @@ imageBuild:
   enabled: false          # like every catalog workload, opt in with --set
   repository: ""          # REQUIRED: terraform output -raw ddp_sample_ecr_url
   tag: v1                 # bump (v1→v2) to rebuild instead of deleting the Job
+  # Build context source: "git" (default) clones gitRepo#gitRef and uses contextSubPath as the
+  # build root; "configMap" stages a ConfigMap into an emptyDir and builds from that (no clone, no
+  # git push) — for ad-hoc/experiment images not committed to a repo, or when pushing is blocked.
+  # An unknown value is a hard error (never a silent git fallback). With contextSource=configMap set
+  # contextConfigMap to a ConfigMap in imageBuild.namespace whose keys are the Dockerfile (filename)
+  # + small context files: keys are FLAT (no sub-dirs), the whole context must fit ~1 MiB, files are
+  # 0644 (chmod in the Dockerfile if a script needs +x). TRADE-OFF: the configMap path bypasses the
+  # git path's provenance and git-side controls (review/branch protection/Code Defender) — the ECR
+  # image has no auditable source, so keep production images on the git path. Prefer an immutable
+  # ConfigMap so the tag's meaning can't drift mid-build. RBAC: whoever can create a ConfigMap in
+  # imageBuild.namespace can push an arbitrary image to ECR via the builder SA through this path —
+  # treat ConfigMap-create in that namespace as ECR-push-equivalent.
+  contextSource: git
+  contextSubPath: infra/eks/manifests/ddp-sample   # git build root sub-dir (contextSource=git)
+  contextConfigMap: ""    # ConfigMap name holding Dockerfile + context (contextSource=configMap)
+  filename: Dockerfile    # Dockerfile name within the context (either source)
   gitRepo: github.com/littlemex/distributed-ai.git
   gitRef: main            # pin to a release tag/sha for reproducibility; main is for iteration
   region: us-west-2       # ECR region for the initContainer's `aws ecr get-login-password`

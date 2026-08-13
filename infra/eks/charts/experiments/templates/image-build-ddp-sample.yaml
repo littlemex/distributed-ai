@@ -20,6 +20,19 @@ Render + apply (repository from `terraform output -raw ddp_sample_ecr_url`):
     -s templates/image-build-ddp-sample.yaml \
     --set imageBuild.enabled=true \
     --set imageBuild.repository=$ECR_URL --set imageBuild.tag=v1 | kubectl apply -f -
+
+Non-git context (build from a ConfigMap — no clone, no git push; for ad-hoc/experiment images).
+TRADE-OFF: this deliberately bypasses the git path's provenance (no repo#ref in the Job spec) and
+any git-side controls (branch protection, review, Code Defender). The image baked into ECR then has
+no auditable source. Use it for throwaway/experiment images; keep production images on the git path.
+Also a privilege note: anyone who can create a ConfigMap in imageBuild.namespace can push an
+arbitrary image to ECR through the builder SA via this path — treat ConfigMap-create there as
+ECR-push-equivalent and scope that namespace's RBAC accordingly.
+  kubectl -n image-builder create configmap my-ctx --from-file=Dockerfile --from-file=app.py
+  kubectl -n image-builder patch configmap my-ctx -p '{"immutable":true}'   # so it can't drift mid-build
+  helm template exp ./charts/experiments -s templates/image-build-ddp-sample.yaml \
+    --set imageBuild.enabled=true --set imageBuild.repository=$ECR_URL --set imageBuild.tag=v1 \
+    --set imageBuild.contextSource=configMap --set imageBuild.contextConfigMap=my-ctx | kubectl apply -f -
   kubectl -n image-builder wait --for=condition=complete job/build-ddp-sample-v1 --timeout=30m
   kubectl -n image-builder logs -f job/build-ddp-sample-v1              # build (main container)
   kubectl -n image-builder logs job/build-ddp-sample-v1 -c ecr-login   # if the init step failed
@@ -31,6 +44,26 @@ Re-building the SAME tag: delete the completed Job first
 {{- if .Values.imageBuild.enabled }}
 {{- $ib := .Values.imageBuild }}
 {{- if not $ib.repository }}{{ fail "imageBuild.repository is required (terraform output -raw ddp_sample_ecr_url)" }}{{- end }}
+{{- /* Build context source, validated once and reused (avoid duplicating the eq test in args/
+     volumes). An UNKNOWN value must NOT fall through to git: a typo like "configmap"/"cm" would
+     silently build from the WRONG context and push a wrong image to ECR — the exact silent-wrong
+     -build this chart's discipline forbids (cf. the push=true "silent no-op" note below). Fail loud. */ -}}
+{{- $cs := $ib.contextSource | default "git" }}
+{{- if not (or (eq $cs "git") (eq $cs "configMap")) }}{{ fail (printf "imageBuild.contextSource must be \"git\" or \"configMap\", got %q" $cs) }}{{- end }}
+{{- $useCM := eq $cs "configMap" }}
+{{- if and $useCM (not $ib.contextConfigMap) }}{{ fail "imageBuild.contextConfigMap is required when contextSource=configMap" }}{{- end }}
+{{- /* The inverse footgun: contextConfigMap set while contextSource is still git means the user
+     wrote the ConfigMap name but forgot to switch the source — we would silently clone git and push
+     a DIFFERENT image under a name that implies a ConfigMap build. Same silent-wrong-build class as
+     an unknown contextSource; fail loud rather than honor the git path. */ -}}
+{{- if and (not $useCM) $ib.contextConfigMap }}{{ fail "imageBuild.contextConfigMap is set but contextSource is not \"configMap\" (add --set imageBuild.contextSource=configMap, or clear contextConfigMap)" }}{{- end }}
+{{- /* Validate the two values that get spliced verbatim into buildctl arg-list items, so a stray
+     newline (via --set) can't inject a separate flag / break the YAML. Constrain to the characters
+     a real Dockerfile name / repo sub-path uses. */ -}}
+{{- $fn := $ib.filename | default "Dockerfile" }}
+{{- if not (regexMatch "^[A-Za-z0-9._-]+$" $fn) }}{{ fail (printf "imageBuild.filename must match ^[A-Za-z0-9._-]+$ (a flat filename), got %q" $fn) }}{{- end }}
+{{- $subPath := $ib.contextSubPath | default "infra/eks/manifests/ddp-sample" }}
+{{- if and (not $useCM) (not (regexMatch "^[A-Za-z0-9._/-]+$" $subPath)) }}{{ fail (printf "imageBuild.contextSubPath must match ^[A-Za-z0-9._/-]+$, got %q" $subPath) }}{{- end }}
 {{- /* Registry host = the ECR repo URI up to the first "/" (no scheme, no path). This is the exact
      key BuildKit's auth provider matches on; a scheme prefix would make it miss and push anon. */ -}}
 {{- $registry := (splitList "/" $ib.repository) | first }}
@@ -100,6 +133,35 @@ spec:
             runAsGroup: 1000
           volumeMounts:
             - { name: dockercfg, mountPath: /dockercfg }
+{{- if $useCM }}
+        # ── initContainer: materialize the ConfigMap into REAL files for the build context ────────
+        # A ConfigMap volume is "..data" + per-key symlinks, not plain files; cp -L dereferences the
+        # key symlinks into the /workspace emptyDir. The `* .[!.]*` glob copies normal keys AND
+        # dotfile keys like .dockerignore, while skipping the projection dirs "..data"/"..<ts>"
+        # (they start with two dots). UID 1000 so the (also-1000) rootless builder can read them.
+        - name: stage-context
+          image: {{ $ib.awsCliImage | default "public.ecr.aws/aws-cli/aws-cli:2.31.13@sha256:dcaa51e37b4b681f77e6fefe0e9702b7dc0c5e2ed035ba31775575144af7463c" }}
+          command: ["/bin/sh","-c"]
+          # `--` guards a key that begins with "-" from being read as a cp flag. The glob skips the
+          # "..data"/"..<ts>" projection dirs; note a (rare) key literally starting with ".." is
+          # skipped too — the Dockerfile existence check below turns any such silent drop of the
+          # Dockerfile into a loud failure instead of a confusing buildkit "no Dockerfile" later.
+          args:
+            - |
+              set -e
+              cd /cm
+              for f in * .[!.]*; do [ -e "$f" ] || continue; cp -L -- "$f" /workspace/; done
+              [ -f "/workspace/$FN" ] || { echo "ERROR: Dockerfile '$FN' not found among ConfigMap keys (keys are flat; keys starting with '..' are skipped)"; ls -la /workspace; exit 1; }
+              echo "staged context files:"; ls -la /workspace
+          env:
+            - { name: FN, value: "{{ $fn }}" }
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          volumeMounts:
+            - { name: cmsrc, mountPath: /cm }
+            - { name: workspace, mountPath: /workspace }
+{{- end }}
       containers:
         - name: buildkit
           # Rootless BuildKit, pinned by digest for reproducibility (same discipline as the old
@@ -110,13 +172,34 @@ spec:
           args:
             - build
             - --frontend=dockerfile.v0
+{{- if $useCM }}
+            # NON-git context: build from the /workspace emptyDir that the "stage-context"
+            # initContainer fills with REAL files copied (cp -L) out of the ConfigMap. We do NOT
+            # point --local at the ConfigMap mount directly: a K8s ConfigMap mount is not real files
+            # but a "..data" dir plus per-key symlinks, so `COPY .` would drag "..data" into the
+            # image and the context hash would jitter with the projection timestamp. cp -L into an
+            # emptyDir (same emptyDir discipline as dockercfg/buildkitd below) flattens that to real
+            # files. Use this for ad-hoc / experiment images NOT committed to git, or when pushing
+            # the context to the repo is blocked. Constraints (ConfigMap-imposed): keys are FLAT
+            # (no sub-directories, so no nested COPY paths), the whole context must fit the ~1 MiB
+            # ConfigMap budget (a Dockerfile + small scripts, not large/binary context — use the git
+            # path for those), and files land 0644 (no exec bit — chmod in the Dockerfile if needed).
+            - --local
+            - context=/workspace
+            - --local
+            - dockerfile=/workspace
+            - --opt
+            - filename={{ $fn }}
+{{- else }}
             # git context; "#<ref>:<subdir>" makes <subdir> the build root — exact equivalent of
             # Kaniko's --context-sub-path, so the Dockerfile's relative COPYs are unchanged. Must be
-            # https:// (GitHub removed the git:// protocol in 2022).
+            # https:// (GitHub removed the git:// protocol in 2022). contextSubPath selects the
+            # sub-dir so this same chart can build a DIFFERENT image from another path in the repo.
             - --opt
-            - context=https://{{ $ib.gitRepo | default "github.com/littlemex/distributed-ai.git" }}#{{ $ib.gitRef | default "main" }}:infra/eks/manifests/ddp-sample
+            - context=https://{{ $ib.gitRepo | default "github.com/littlemex/distributed-ai.git" }}#{{ $ib.gitRef | default "main" }}:{{ $subPath }}
             - --opt
-            - filename=Dockerfile
+            - filename={{ $fn }}
+{{- end }}
             # Fail-fast if somehow scheduled on a non-amd64 node (no cross-build here).
             - --opt
             - platform=linux/amd64
@@ -164,7 +247,23 @@ spec:
             # BuildKit's snapshot/state. On the container overlayfs it would fall back to the slow
             # native snapshotter (overlay-on-overlay is not allowed); an emptyDir avoids that.
             - { name: buildkitd, mountPath: /home/user/.local/share/buildkit }
+{{- if $useCM }}
+            # The staged build context (real files, filled by the stage-context initContainer).
+            - { name: workspace, mountPath: /workspace }
+{{- end }}
       volumes:
         - { name: dockercfg, emptyDir: {} }
         - { name: buildkitd, emptyDir: {} }
+{{- if $useCM }}
+        # cmsrc = the raw ConfigMap (symlink projection); workspace = the flattened real-file
+        # context the builder actually reads. Recommend an immutable ConfigMap so it can't change
+        # mid-build: `kubectl create configmap <name> --from-file=... && kubectl patch configmap
+        # <name> -p '{"immutable":true}'`. Editing the ConfigMap and re-running the SAME tag would
+        # silently change what that tag means — bump the tag instead (same discipline as git ref pin).
+        - name: cmsrc
+          configMap:
+            name: {{ $ib.contextConfigMap | quote }}
+        # sizeLimit tracks the ConfigMap budget — the staged context is a copy of a <=1 MiB source.
+        - { name: workspace, emptyDir: { sizeLimit: 2Mi } }
+{{- end }}
 {{- end }}
