@@ -94,6 +94,10 @@ source "$SCRIPT_DIR/cases/static.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/base.sh"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/hardening.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/neuron-cache.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/gpu.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/image-build.sh"

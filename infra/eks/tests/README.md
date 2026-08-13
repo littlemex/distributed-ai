@@ -1,16 +1,14 @@
 # EKS Regression Tests
 
-This directory is the regression test harness for the Terraform and Karpenter module in `infra/eks`. It organizes the cluster smoke tests into a tiered, declarative suite (a registry of tests tagged by suite and layer) that feature PRs extend by adding their own tests — one function plus one registry line. Execution is namespace-isolated.
+This directory contains the regression test suite for the Terraform and Karpenter module in `infra/eks`. The suite extends the original smoke harness with static checks and opt-in hardening coverage while keeping the same namespace-isolated execution model.
 
 ## Suites
 
-Suites are cumulative: `baseline ⊂ coverage ⊂ full`. Each test declares the smallest suite that includes it.
-
 | Suite | Includes | Purpose |
 |---|---|---|
-| `baseline` | Static Terraform validation, read-only cluster checks, and the workshop smoke tests (Karpenter, CSI, device plugins, Trainer, storage mount) | Fast confidence that the workshop path still works |
-| `coverage` | Everything in `baseline`, plus the static and isolated live-mutating checks that feature PRs register | Regression coverage for a feature without launching accelerator nodes |
-| `full` | Everything in `coverage`, plus GPU launch, `nvidia-smi`, CUDA, and GPU storage | End-to-end accelerator validation |
+| `baseline` | Static Terraform validation, read-only cluster checks, and the original smoke tests | Fast confidence that the workshop path still works |
+| `coverage` | Everything in `baseline`, plus hardening static checks and isolated live-mutating checks | Regression coverage for kubelet headroom rendering, stuck-node reaper safety, and the Neuron compile-cache EFS PVC (dynamic access points) |
+| `full` | Everything in `coverage`, plus GPU launch, CUDA, GPU storage, and live kubelet headroom checks | End-to-end accelerator validation |
 
 Registration order in `registry.sh` is execution order. Section headers are emitted automatically at layer boundaries.
 
@@ -28,10 +26,10 @@ cd infra/eks/tests
 # Default: baseline suite.
 ./run-tests.sh --profile <profile>
 
-# Coverage suite (static + isolated live-mutating checks), no GPU nodes.
+# Hardening coverage without GPU tests.
 ./run-tests.sh --suite coverage --profile <profile>
 
-# Full suite, including GPU node launch.
+# Full suite, including GPU launch and live kubelet checks.
 ./run-tests.sh --suite full --profile <profile>
 
 # Print the registry without requiring a cluster.
@@ -70,7 +68,7 @@ Common flags:
 | `static` | Runs Terraform console, Terraform validate, Python unit tests, or Helm render checks without touching the cluster |
 | `live-ro` | Reads cluster state only |
 | `live-mut` | Creates isolated resources in the test namespace, plus namespace-derived test PVs |
-| `gpu` | Launches a GPU node via Karpenter and schedules GPU workloads in the test namespace |
+| `gpu` | Schedules GPU workloads in the test namespace and reads kubelet `/configz` from selected nodes |
 
 ## Adding a Test
 
@@ -83,16 +81,20 @@ The registry handles suite selection, layer skipping, optional-tool skips, secti
 
 ## Value Derivation
 
-The harness avoids cluster-specific literals. Cluster name and region come from Terraform outputs or explicit flags. The GPU NodePool is selected from the live cluster, with `var.accelerator_pools` used only as a last-resort fallback. Storage clone sources are selected by CSI driver, and test PV names are derived from the test namespace.
+The suite avoids cluster-specific literals. Cluster name and region come from Terraform outputs or explicit flags. The GPU NodePool is selected from the live cluster, with `var.accelerator_pools` used only as a last-resort fallback. The stuck-node reaper namespace is discovered from the live CronJob name rendered by Terraform. Storage clone sources are selected by CSI driver, and test PV names are derived from the test namespace.
 
 If a future test needs an AWS account ID, derive it at runtime with `aws sts get-caller-identity`; do not place account IDs in test source.
 
 ## Isolation
 
-Live-mutating tests create namespaced resources only in `${NAMESPACE}`. Cluster-scoped PVs are namespace-derived test clones and are pre-bound in both directions: the PV has a `claimRef`, and the PVC has a `volumeName`. The harness only ever deletes a namespace or PV carrying `app.kubernetes.io/managed-by=eks-regression-tests`, so pointing `--namespace` at a pre-existing workload never tears it down. A feature test that must create a resource outside `${NAMESPACE}` should clean it up with an `EXIT`/`TERM` trap (see the guidance in the case files).
+Live-mutating tests create namespaced resources only in `${NAMESPACE}`. Cluster-scoped PVs are namespace-derived test clones and are pre-bound in both directions: the PV has a `claimRef`, and the PVC has a `volumeName`.
+
+The Neuron compile-cache tests provision dynamic EFS access points via namespaced PVCs in `${NAMESPACE}`; each is cleaned up only if the released PV's `claimRef` still points back at the test PVC, and the backing EFS access point is deleted afterward.
+
+The reaper dry-run job is the only live-mutating test outside `${NAMESPACE}` because it must run from the reaper CronJob namespace. It uses a unique Job name, requires dry-run mode, captures NodeClaims before and after, asserts they are unchanged, and deletes the Job afterward.
 
 ## Scope and Exclusions
 
-This harness ships the workshop smoke tests: Terraform validation, control plane / system nodes / Karpenter / CSI drivers / device plugins / Trainer readiness, storage mount over cloned FSx and OpenZFS PVs, and GPU node launch + `nvidia-smi` + CUDA + GPU storage. Feature-specific tests (for example accelerator hardening) are added by their own PRs through the registry.
+The suite covers the core workshop path, storage smoke tests, GPU smoke tests, kubelet headroom rendering and live application, stuck-node reaper safety, and the Neuron compile-cache EFS PVC (dynamic access points, shared by serving and training) rendering and binding.
 
-EFA workload execution and Capacity Blocks are excluded: they require instance capacity that is not reliably available on demand in a test environment.
+EFA workload execution and Capacity Blocks are excluded. They require instance capacity that is not reliably available on demand in a test environment. Reaper tests target a standard spot or on-demand GPU pool rather than a Capacity Block pool.

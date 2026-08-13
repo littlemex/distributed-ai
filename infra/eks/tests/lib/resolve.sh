@@ -59,6 +59,17 @@ $(kubectl get ec2nodeclass "$nodeclass" -o jsonpath='{.metadata.name}{"\n"}{.spe
   printf '%s\n' "$combined" | tr '[:upper:]' '[:lower:]' | grep -Eq 'nvidia|nvidia\.com/gpu|instance-gpu-manufacturer.*nvidia'
 }
 
+reaper_name() {
+  tf_console 'local.accelerator_stuck_node_reaper_name'
+}
+
+resolve_reaper_namespace() {
+  local name
+  name="$(reaper_name)" || return 1
+  kubectl get cronjob -A -o json 2>/dev/null \
+    | jq -r --arg name "$name" '[.items[] | select(.metadata.name == $name)][0].metadata.namespace // empty'
+}
+
 resolve_clone_source_pv_by_driver() {
   local driver="$1"
   kubectl get pv -l 'app.kubernetes.io/managed-by!=eks-regression-tests' -o jsonpath="{range .items[?(@.spec.csi.driver==\"$driver\")]}{.metadata.name}{\"\\n\"}{end}" 2>/dev/null \
@@ -70,9 +81,10 @@ safe_name() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr -cs 'a-z0-9-' '-' | sed 's/^-//; s/-$//'
 }
 
-# Single source of truth for the cluster-scoped test PV names (the FSx/OpenZFS storage-mount clones).
-# Derived from the namespace so runs with different --namespace values never collide, and referenced
-# by both the storage test (as clone targets) and the setup/teardown cleanup, so the two never drift.
+# Single source of truth for the cluster-scoped test PV names. Derived from the namespace so runs
+# with different --namespace values never collide, and referenced by both the storage tests (as
+# clone targets) and the setup/teardown cleanup, so the two can never drift apart. The Neuron cache
+# tests provision dynamic EFS access points (no static clone PV), so no cache PV name is listed.
 test_pv_names() {
   local suffix
   suffix="$(safe_name "$NAMESPACE")"
@@ -118,3 +130,18 @@ resolve_storage_vars() {
   export FSX_TEST_PV_NAME OPENZFS_TEST_PV_NAME FSX_VOLUME_HANDLE FSX_DNS_NAME FSX_MOUNT_NAME OPENZFS_VOLUME_HANDLE OPENZFS_DNS_NAME
 }
 
+# Discover the dynamic EFS access-point StorageClass for the Neuron cache tests. Sets EFS_SC_NAME to
+# the chart's documented "efs-shared" StorageClass, and ONLY that one — the tests create and delete
+# access points, so falling back to an arbitrary efs-ap StorageClass could target an unrelated (e.g.
+# production) filesystem. Leaves EFS_SC_NAME empty when efs-shared is absent (the caller then skips,
+# rather than fails — EFS is opt-in). An explicit EFS_SC_NAME override is trusted as-is.
+resolve_efs_storage_class() {
+  if [ -n "${EFS_SC_NAME:-}" ]; then
+    export EFS_SC_NAME
+    return 0
+  fi
+  EFS_SC_NAME="$(kubectl get sc efs-shared -o json 2>/dev/null | jq -r '
+    select(.provisioner == "efs.csi.aws.com" and .parameters.provisioningMode == "efs-ap")
+    | .metadata.name // empty')"
+  export EFS_SC_NAME
+}
