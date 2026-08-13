@@ -6,14 +6,45 @@
 
 _cc_chart() { printf '%s' "$SCRIPT_DIR/../charts/experiments"; }
 
+# True if the first non-comment, non-blank line strictly after a top-level 'limits:' key contains
+# <needle> at exactly (limits-indent + 2) spaces — i.e. <needle> is really the first key inside the
+# limits: mapping, not merely present somewhere in the text. A plain `grep -q <needle>` would still
+# pass if the resources block's indentation got shifted (e.g. the accel line de-indented out of the
+# mapping): the string survives, the manifest no longer parses as the resources block we intend.
+# This has no cluster/schema-validation dependency (avoids needing kubectl/PyYAML against a live
+# API server, which chart-contract deliberately runs without).
+_cc_assert_nested_under_limits() {
+  local render="$1" needle="$2"
+  printf '%s\n' "$render" | awk -v needle="$needle" '
+    /^ *limits:[ \t]*$/ {
+      line = $0
+      gsub(/[^ ].*/, "", line)
+      want = length(line) + 2
+      armed = 1
+      next
+    }
+    armed && /^[ \t]*(#|$)/ { next }
+    armed {
+      armed = 0
+      line = $0
+      gsub(/[^ ].*/, "", line)
+      n = length(line)
+      if (n == want && index($0, needle) == n + 1) { found = 1 }
+      exit
+    }
+    END { exit !found }
+  '
+}
+
 # Assert a rendered workload: non-empty, a Deployment + Service, no unresolved template values, the
-# expected accelerator resource request, and a Service port. Args: <render> <accel-resource>
+# expected accelerator resource request nested where it belongs, and a Service port.
+# Args: <render> <accel-resource>
 _cc_assert_serving() {
   local render="$1" accel="$2"
   printf '%s\n' "$render" | grep -q '^kind: Deployment$' || { echo "no Deployment"; return 1; }
   printf '%s\n' "$render" | grep -q '^kind: Service$' || { echo "no Service"; return 1; }
   if printf '%s\n' "$render" | grep -q '<no value>'; then echo "unresolved template (<no value>)"; return 1; fi
-  printf '%s\n' "$render" | grep -q "$accel" || { echo "missing accelerator request: $accel"; return 1; }
+  _cc_assert_nested_under_limits "$render" "$accel" || { echo "accelerator request missing/misplaced under resources.limits: $accel"; return 1; }
   printf '%s\n' "$render" | grep -qE '^\s+- \{ name: http, port: [0-9]+' || { echo "no Service http port"; return 1; }
 }
 

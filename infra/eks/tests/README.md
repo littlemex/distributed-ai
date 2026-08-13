@@ -25,7 +25,7 @@ There is one standalone suite outside this ladder:
 |---|---|---|
 | `neuron` | Only the `neuron` layer (the Basic09 Trainium-serving scenario, vLLM Neuron plugin) | Validate a Trainium node end to end, in isolation |
 
-`neuron` is intentionally NOT part of `baseline`/`coverage`/`full`: it requires a Trainium node backed by a region-specific Capacity Block, which most environments lack, so bundling it into the tiered suites would make them fail wherever that capacity is absent. Run it on its own with `--suite neuron`; it self-skips (reported `SKIP`) when no Trainium node is present. Its chart (`neuronVllmPlugin`) is still covered on every PR by the static contract check above.
+`neuron` is intentionally NOT part of `baseline`/`coverage`/`full`: it requires a Trainium node backed by a region-specific Capacity Block, which most environments lack, so bundling it into the tiered suites would make them fail wherever that capacity is absent. Run it on its own with `--suite neuron`. Because that invocation is explicit, it does not silently skip when the prerequisite is missing: if no node advertises `aws.amazon.com/neuron`, the test fails with an actionable message (bring up a Capacity-Block trn2 nodegroup first). Its chart (`neuronVllmPlugin`) is still covered on every PR by the static contract check above.
 
 Registration order in `registry.sh` is execution order. Section headers are emitted automatically at layer boundaries.
 
@@ -46,8 +46,11 @@ cd infra/eks/tests
 # Coverage suite (static + isolated live-mutating checks), no GPU nodes.
 ./run-tests.sh --suite coverage --profile <profile>
 
-# Full suite, including GPU node launch.
+# Full suite, including GPU node launch and the Basic07 GPU-serving scenario.
 ./run-tests.sh --suite full --profile <profile>
+
+# Standalone Trainium suite (Basic09), for a cluster with a trn2 Capacity-Block node.
+./run-tests.sh --suite neuron --profile <profile>
 
 # Print the registry without requiring a cluster.
 ./run-tests.sh --list
@@ -65,8 +68,8 @@ Common flags:
 
 | Flag | Description |
 |---|---|
-| `--suite <baseline\|coverage\|full>` | Selects the suite |
-| `--skip-layer <static\|live-ro\|live-mut\|gpu>` | Skips a layer; repeatable |
+| `--suite <baseline\|coverage\|full\|neuron>` | Selects the suite (`neuron` is standalone; see above) |
+| `--skip-layer <static\|live-ro\|live-mut\|gpu\|neuron>` | Skips a layer; repeatable |
 | `--namespace NAME` | Uses a test namespace; all namespaced live-mutating resources stay there |
 | `--cluster-name NAME` | Overrides Terraform-derived cluster name |
 | `--region REGION` | Overrides Terraform-derived AWS region |
@@ -86,6 +89,7 @@ Common flags:
 | `live-ro` | Reads cluster state only |
 | `live-mut` | Creates isolated resources in the test namespace, plus namespace-derived test PVs |
 | `gpu` | Launches a GPU node via Karpenter and schedules GPU workloads in the test namespace |
+| `neuron` | Runs the Trainium serving scenario on an existing trn2 node; selected only by `--suite neuron` |
 
 ## Adding a Test
 
