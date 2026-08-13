@@ -9,7 +9,7 @@ spec:
   resources:
     requests:
       storage: 4800Gi
-  volumeName: fsx-training-test
+  volumeName: ${FSX_TEST_PV_NAME}
   storageClassName: ""
 ---
 apiVersion: v1
@@ -23,5 +23,5 @@ spec:
   resources:
     requests:
       storage: 256Gi
-  volumeName: openzfs-shared-test
+  volumeName: ${OPENZFS_TEST_PV_NAME}
   storageClassName: ""

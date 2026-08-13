@@ -1,7 +1,9 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: fsx-training-test
+  name: ${FSX_TEST_PV_NAME}
+  labels:
+    app.kubernetes.io/managed-by: eks-regression-tests
 spec:
   capacity:
     storage: 4800Gi

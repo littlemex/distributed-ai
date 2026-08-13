@@ -1,98 +1,129 @@
 #!/usr/bin/env bash
-# run-tests.sh — EKS infra-layer smoke tests
-# Usage: ./run-tests.sh [--with-gpu] [--keep-ns] [--namespace NAME]
-#        [--cluster-name NAME] [--region REGION] [--profile PROFILE]
-#        [--gpu-count N]
+# run-tests.sh — EKS infra-layer regression tests
+# shellcheck disable=SC2034
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/common.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/suites.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/resolve.sh"
 
 NAMESPACE="${NAMESPACE:-distai-test}"
-# Cluster name, region and GPU pool are DERIVED from the Terraform state in ../ by default, not
-# hardcoded: a hardcoded cluster name made this script abort immediately for anyone whose cluster
-# is not named the same as the author's ("current kubectl context does not target ..."), and a
-# hardcoded GPU pool name pointed at a pool the module does not create. Both are resolved below,
-# after argument parsing, so an explicit --cluster-name / --region / --gpu-nodepool still wins
-# and the script still works when run without Terraform available.
 CLUSTER_NAME="${CLUSTER_NAME:-}"
 AWS_REGION_OPT="${AWS_REGION:-}"
 AWS_PROFILE_OPT="${AWS_PROFILE:-}"
-WITH_GPU=false
+SUITE="baseline"
+EXTRA_LAYERS=""
+SKIP_LAYERS=""
 KEEP_NS=false
+LIST_ONLY=false
+TIMEOUT_STATIC=120
 TIMEOUT_BASE=60
 TIMEOUT_GPU=600
 GPU_COUNT=1
-GPU_NODEPOOL=""
+GPU_NODEPOOL="${GPU_NODEPOOL:-}"
 
-# Manifest envsubst target variables (explicit list to avoid clobbering $TOKEN etc in Pod scripts)
-ENVSUBST_VARS='${NAMESPACE} ${FSX_VOLUME_HANDLE} ${FSX_DNS_NAME} ${FSX_MOUNT_NAME} ${OPENZFS_VOLUME_HANDLE} ${OPENZFS_DNS_NAME} ${GPU_COUNT} ${GPU_NODEPOOL}'
+# Manifest envsubst target variables (explicit list to avoid clobbering $TOKEN in Pod scripts).
+# shellcheck disable=SC2016
+ENVSUBST_VARS='${NAMESPACE} ${FSX_VOLUME_HANDLE} ${FSX_DNS_NAME} ${FSX_MOUNT_NAME} ${OPENZFS_VOLUME_HANDLE} ${OPENZFS_DNS_NAME} ${GPU_COUNT} ${GPU_NODEPOOL} ${FSX_TEST_PV_NAME} ${OPENZFS_TEST_PV_NAME}'
 
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --with-gpu)     WITH_GPU=true; shift ;;
-    --keep-ns)      KEEP_NS=true; shift ;;
-    --namespace)    NAMESPACE="$2"; shift 2 ;;
-    --cluster-name) CLUSTER_NAME="$2"; shift 2 ;;
-    --region)       AWS_REGION_OPT="$2"; shift 2 ;;
-    --profile)      AWS_PROFILE_OPT="$2"; shift 2 ;;
-    --gpu-count)    GPU_COUNT="$2"; shift 2 ;;
-    --gpu-nodepool) GPU_NODEPOOL="$2"; shift 2 ;;
-    --timeout-base) TIMEOUT_BASE="$2"; shift 2 ;;
-    --timeout-gpu)  TIMEOUT_GPU="$2"; shift 2 ;;
-    *) echo "Unknown option: $1"; exit 1 ;;
+usage() {
+  cat <<'USAGE'
+Usage: ./run-tests.sh [options]
+
+Suites:
+  --suite baseline|coverage|full  Select the tiered suite (default: baseline)
+  --with-gpu                     Compatibility alias: include the gpu layer
+  --with-hardening               Compatibility alias: run at least coverage
+  --skip-static                  Compatibility alias: skip the static layer
+
+Options:
+  --skip-layer LAYER             Skip static, live-ro, live-mut, or gpu (repeatable)
+  --list                         Print the registry table and exit
+  --keep-ns                      Keep the test namespace for inspection
+  --namespace NAME               Test namespace
+  --cluster-name NAME            Override derived cluster name
+  --region REGION                Override derived AWS region
+  --profile PROFILE              AWS CLI profile
+  --gpu-count N                  GPU count requested by the smoke pod
+  --gpu-nodepool NAME            Override derived NVIDIA NodePool
+  --timeout-static SEC           Static test timeout
+  --timeout-base SEC             Base live test timeout
+  --timeout-gpu SEC              GPU test timeout
+USAGE
+}
+
+need_arg() {
+  if [ "$#" -lt 2 ] || [ -z "${2:-}" ] || [[ "$2" == --* ]]; then
+    echo "Missing argument for $1" >&2
+    usage >&2
+    exit 1
+  fi
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --suite)          need_arg "$@"; SUITE="$2"; shift 2 ;;
+    --with-gpu)       EXTRA_LAYERS="$EXTRA_LAYERS gpu"; shift ;;
+    --with-hardening) [ "$(suite_rank "$SUITE")" -lt "$(suite_rank coverage)" ] && SUITE=coverage; shift ;;
+    --skip-static)    SKIP_LAYERS="$SKIP_LAYERS static"; shift ;;
+    --skip-layer)     need_arg "$@"; valid_layer "$2" || { echo "Unknown layer: $2 (expected static|live-ro|live-mut|gpu)" >&2; exit 1; }; SKIP_LAYERS="$SKIP_LAYERS $2"; shift 2 ;;
+    --list)           LIST_ONLY=true; shift ;;
+    --keep-ns)        KEEP_NS=true; shift ;;
+    --namespace)      need_arg "$@"; NAMESPACE="$2"; shift 2 ;;
+    --cluster-name)   need_arg "$@"; CLUSTER_NAME="$2"; shift 2 ;;
+    --region)         need_arg "$@"; AWS_REGION_OPT="$2"; shift 2 ;;
+    --profile)        need_arg "$@"; AWS_PROFILE_OPT="$2"; shift 2 ;;
+    --gpu-count)      need_arg "$@"; GPU_COUNT="$2"; shift 2 ;;
+    --gpu-nodepool)   need_arg "$@"; GPU_NODEPOOL="$2"; shift 2 ;;
+    --timeout-static) need_arg "$@"; TIMEOUT_STATIC="$2"; shift 2 ;;
+    --timeout-base)   need_arg "$@"; TIMEOUT_BASE="$2"; shift 2 ;;
+    --timeout-gpu)    need_arg "$@"; TIMEOUT_GPU="$2"; shift 2 ;;
+    --help|-h)        usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
 done
 
-# ── Resolve the values not given on the command line from Terraform ───────────────────────────
-# terraform output is authoritative for the cluster this checkout manages. If Terraform is not
-# usable here (no state, no binary), fall back to whatever the current kubectl context points at
-# so the script degrades to "test the cluster I am pointed at" rather than failing outright.
-tf_out() { (cd "$SCRIPT_DIR/.." && terraform output -raw "$1" 2>/dev/null) || true; }
+valid_suite "$SUITE" || { echo "Unknown suite: $SUITE" >&2; exit 1; }
 
-if [ -z "$CLUSTER_NAME" ]; then
-  CLUSTER_NAME="$(tf_out cluster_name)"
-  if [ -z "$CLUSTER_NAME" ]; then
-    # Last resort: the cluster name embedded in an EKS context ARN (.../cluster/<name>).
-    CLUSTER_NAME="$(kubectl config current-context 2>/dev/null | sed -n 's|.*/cluster/||p')"
-  fi
-  [ -n "$CLUSTER_NAME" ] && log_info "cluster-name resolved to $CLUSTER_NAME"
-fi
-if [ -z "$CLUSTER_NAME" ]; then
-  echo "Error: could not determine the cluster name. Run from infra/eks/tests with Terraform" >&2
-  echo "  state present, or pass --cluster-name <name>." >&2
-  exit 1
-fi
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/static.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/base.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/gpu.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/registry.sh"
+register_all_tests
 
-if [ -z "$AWS_REGION_OPT" ]; then
-  AWS_REGION_OPT="$(tf_out region)"
-  [ -z "$AWS_REGION_OPT" ] && AWS_REGION_OPT="${AWS_DEFAULT_REGION:-us-west-2}"
-fi
+list_tests() {
+  printf "%-34s %-34s %-10s %-8s %-8s %s\n" "TEST" "FUNCTION" "MIN_SUITE" "LAYER" "TIMEOUT" "TOOLS"
+  printf '%s\n' "---------------------------------------------------------------------------------------------------------------"
+  local i
+  for i in "${!TEST_NAMES[@]}"; do
+    printf "%-34s %-34s %-10s %-8s %-8s %s\n" \
+      "${TEST_NAMES[$i]}" "${TEST_FUNCS[$i]}" "${TEST_MIN_SUITES[$i]}" "${TEST_LAYERS[$i]}" "${TEST_TIMEOUTS[$i]}" "${TEST_TOOLS[$i]}"
+  done
+}
 
-# GPU pool: pick the first accelerator pool that advertises NVIDIA GPUs. Only needed for
-# --with-gpu, so a cluster with no GPU pool is not an error here.
-if [ -z "$GPU_NODEPOOL" ] && [ "$WITH_GPU" = true ]; then
-  GPU_NODEPOOL="$(kubectl get nodepool -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
-    | grep -vx cpu | head -1 || true)"
-  if [ -z "$GPU_NODEPOOL" ]; then
-    echo "Error: --with-gpu was given but no non-cpu NodePool exists. Define an accelerator pool" >&2
-    echo "  in terraform.tfvars (Basic04) first, or pass --gpu-nodepool <name>." >&2
-    exit 1
-  fi
-  log_info "gpu-nodepool resolved to $GPU_NODEPOOL"
+if [ "$LIST_ONLY" = true ]; then
+  list_tests
+  exit 0
 fi
-
-export NAMESPACE GPU_COUNT GPU_NODEPOOL
 
 aws_cmd() {
   local args=("$@")
   [ -n "$AWS_PROFILE_OPT" ] && args+=(--profile "$AWS_PROFILE_OPT")
-  args+=(--region "$AWS_REGION_OPT")
+  [ -n "$AWS_REGION_OPT" ] && args+=(--region "$AWS_REGION_OPT")
   aws "${args[@]}"
 }
 
 require_tools() {
-  for cmd in kubectl aws envsubst timeout; do
+  local cmd
+  for cmd in kubectl aws envsubst; do
     command -v "$cmd" >/dev/null || { log_fail "required tool not found: $cmd"; exit 1; }
   done
 }
@@ -101,24 +132,65 @@ ensure_context() {
   local ctx cluster
   ctx=$(kubectl config current-context 2>/dev/null || true)
   cluster=$(kubectl config view --minify -o jsonpath='{.clusters[0].name}' 2>/dev/null || true)
-  if [[ "$cluster" != *"$CLUSTER_NAME"* ]]; then
+  # EKS context cluster names are ARNs (arn:aws:eks:...:cluster/<name>); take the last path segment
+  # and compare it exactly so "prod" cannot match "prod-legacy". For a non-ARN name (no slash) the
+  # strip is a no-op — a plain equality check, since this namespace-deleting harness must be certain
+  # of its target cluster.
+  if [ "${cluster##*/}" != "$CLUSTER_NAME" ]; then
     log_fail "current kubectl context ($ctx) does not target $CLUSTER_NAME (got: $cluster)"
     exit 1
   fi
   log_info "kubectl context: $ctx (cluster: $CLUSTER_NAME)"
 }
 
+selected_layer_present() {
+  local wanted="$1" i
+  for i in "${!TEST_NAMES[@]}"; do
+    if [ "${TEST_LAYERS[$i]}" = "$wanted" ] && test_selected "${TEST_MIN_SUITES[$i]}" "${TEST_LAYERS[$i]}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# The harness only ever deletes a namespace it owns (one created with the managed-by label below),
+# so pointing --namespace at a pre-existing workload namespace can never tear it down.
+namespace_is_ours() {
+  [ "$(kubectl get namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null)" \
+    = eks-regression-tests ]
+}
+
+delete_test_pvs() {
+  local name owner
+  for name in $(test_pv_names); do
+    owner="$(kubectl get pv "$name" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)"
+    [ "$owner" = eks-regression-tests ] || continue
+    kubectl delete pv "$name" --wait=false 2>/dev/null || true
+  done
+}
+
 setup_namespace() {
   if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-    log_info "namespace $NAMESPACE already exists — cleaning up"
+    if ! namespace_is_ours; then
+      log_fail "namespace $NAMESPACE already exists and is not owned by the test harness"
+      log_fail "  (missing label app.kubernetes.io/managed-by=eks-regression-tests) — refusing to"
+      log_fail "  delete it. Pass a fresh --namespace."
+      exit 1
+    fi
+    log_info "namespace $NAMESPACE already exists (test-owned) — recreating"
     kubectl delete namespace "$NAMESPACE" --wait=true --timeout=90s 2>/dev/null || true
-    kubectl delete pv fsx-training-test openzfs-shared-test --wait=false 2>/dev/null || true
+    delete_test_pvs
     local deadline=$(($(date +%s) + 60))
     while kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; do
-      [ "$(date +%s)" -ge "$deadline" ] && break
+      if [ "$(date +%s)" -ge "$deadline" ]; then
+        log_fail "namespace $NAMESPACE stuck Terminating past 60s; not recreating over it"
+        exit 1
+      fi
       sleep 3
     done
   fi
+  # shellcheck disable=SC2016
   envsubst '$NAMESPACE' < "$SCRIPT_DIR/manifests/namespace.yaml" | kubectl apply -f -
 }
 
@@ -127,186 +199,79 @@ teardown_namespace() {
     log_info "keeping namespace $NAMESPACE for inspection (--keep-ns)"
     return
   fi
-  log_info "cleaning up namespace $NAMESPACE"
-  kubectl delete namespace "$NAMESPACE" --wait=false 2>/dev/null || true
-  kubectl delete pv fsx-training-test openzfs-shared-test --wait=false 2>/dev/null || true
-}
-
-resolve_storage_vars() {
-  FSX_VOLUME_HANDLE=$(kubectl get pv fsx-training -o jsonpath='{.spec.csi.volumeHandle}')
-  FSX_DNS_NAME=$(kubectl get pv fsx-training -o jsonpath='{.spec.csi.volumeAttributes.dnsname}')
-  FSX_MOUNT_NAME=$(kubectl get pv fsx-training -o jsonpath='{.spec.csi.volumeAttributes.mountname}')
-  OPENZFS_VOLUME_HANDLE=$(kubectl get pv openzfs-shared -o jsonpath='{.spec.csi.volumeHandle}')
-  OPENZFS_DNS_NAME=$(kubectl get pv openzfs-shared -o jsonpath='{.spec.csi.volumeAttributes.DNSName}')
-  [ -n "$FSX_VOLUME_HANDLE" ] && [ -n "$OPENZFS_VOLUME_HANDLE" ] || { log_fail "production PVs (fsx-training / openzfs-shared) not found"; return 1; }
-  export FSX_VOLUME_HANDLE FSX_DNS_NAME FSX_MOUNT_NAME OPENZFS_VOLUME_HANDLE OPENZFS_DNS_NAME
+  # Only tear down what we own: if setup aborted on a foreign namespace, leave everything untouched.
+  if namespace_is_ours; then
+    log_info "cleaning up namespace $NAMESPACE"
+    kubectl delete namespace "$NAMESPACE" --wait=false 2>/dev/null || true
+    delete_test_pvs
+  fi
 }
 
 apply_manifest() {
   envsubst "$ENVSUBST_VARS" < "$SCRIPT_DIR/manifests/$1" | kubectl apply -f -
 }
 
-# --- Base tests ---
+run_registry() {
+  local i name func min_suite layer timeout tools last_layer rc gpu_launch_failed=false
+  for i in "${!TEST_NAMES[@]}"; do
+    name="${TEST_NAMES[$i]}"
+    func="${TEST_FUNCS[$i]}"
+    min_suite="${TEST_MIN_SUITES[$i]}"
+    layer="${TEST_LAYERS[$i]}"
+    timeout="${TEST_TIMEOUTS[$i]}"
+    tools="${TEST_TOOLS[$i]}"
 
-test_control_plane() {
-  aws_cmd eks describe-cluster --name "$CLUSTER_NAME" \
-    --query 'cluster.status' --output text | grep -qx ACTIVE
-  kubectl get --raw /healthz | grep -q ok
-}
-
-test_system_nodes() {
-  local count
-  count=$(kubectl get nodes -l 'eks.amazonaws.com/nodegroup' --no-headers 2>/dev/null | wc -l | tr -d ' ')
-  [ "$count" -ge 2 ] || return 1
-  ! kubectl get nodes -l 'eks.amazonaws.com/nodegroup' -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -qv True
-}
-
-test_karpenter() {
-  local running
-  running=$(kubectl get pods -n karpenter -l app.kubernetes.io/name=karpenter --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')
-  [ "$running" -ge 2 ] || return 1
-  ! kubectl get nodepool -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -qv True || return 1
-  local nc_count nc_ready
-  nc_count=$(kubectl get ec2nodeclass --no-headers 2>/dev/null | wc -l | tr -d ' ')
-  nc_ready=$(kubectl get ec2nodeclass -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null | grep -c True || true)
-  [ "$nc_count" -gt 0 ] && [ "$nc_ready" -eq "$nc_count" ] || return 1
-}
-
-test_trainer() {
-  # Kubeflow Trainer v2 control plane (replaces the old Training Operator v1). Installed by
-  # trainer.tf as the "kubeflow-trainer" Helm release into kubeflow-system, with JobSet as a
-  # bundled subchart. Assert BOTH the Trainer manager and the JobSet controller have a Running
-  # pod — the manager alone would accept a TrainJob but the JobSet controller is what actually
-  # creates the worker pods, so a missing JobSet controller is a silent "TrainJob never schedules".
-  kubectl get pods -n kubeflow-system -l app.kubernetes.io/instance=kubeflow-trainer \
-    --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q . || return 1
-  # JobSet is a bundled subchart, so its instance label differs from the parent release; match on
-  # the pod name (fullnameOverride: jobset) to stay robust across chart-label changes.
-  kubectl get pods -n kubeflow-system --field-selector=status.phase=Running --no-headers 2>/dev/null \
-    | grep -q jobset
-}
-
-test_csi_drivers() {
-  for ds in ebs-csi-node efs-csi-node fsx-csi-node fsx-openzfs-csi-node; do
-    local desired ready
-    desired=$(kubectl get daemonset "$ds" -n kube-system -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null)
-    ready=$(kubectl get daemonset "$ds" -n kube-system -o jsonpath='{.status.numberReady}' 2>/dev/null)
-    [ "$desired" -gt 0 ] && [ "$desired" = "$ready" ] || return 1
-  done
-  for dep in ebs-csi-controller efs-csi-controller fsx-csi-controller fsx-openzfs-csi-controller; do
-    local replicas avail
-    replicas=$(kubectl get deployment "$dep" -n kube-system -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
-    avail=$(kubectl get deployment "$dep" -n kube-system -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)
-    [ "$replicas" -gt 0 ] && [ "$replicas" = "$avail" ] || return 1
-  done
-}
-
-# Accelerator device plugins: the NVIDIA GPU device plugin (GPU Operator), the EFA device
-# plugin, and the Neuron device plugin. Each is only present/scheduled when the matching pool
-# type exists, so this asserts "if the DaemonSet exists and wants pods, they are all Ready" and
-# treats a missing or zero-desired DaemonSet as not-applicable (a cluster with no GPU/EFA/Neuron
-# pool legitimately runs none of these). This closes the gap where a broken device plugin —
-# the mechanism that advertises nvidia.com/gpu / vpc.amazonaws.com/efa / aws.amazon.com/neuron —
-# went entirely untested even though EFA dynamic derivation and Neuron support are core features.
-test_device_plugins() {
-  # ns:name pairs. GPU device plugin lives in gpu-operator; EFA/Neuron plugins in kube-system.
-  for entry in \
-    "gpu-operator:nvidia-device-plugin-daemonset" \
-    "kube-system:aws-efa-k8s-device-plugin" \
-    "kube-system:neuron-device-plugin-daemonset" \
-    "kube-system:neuron-device-plugin"; do
-    local ns="${entry%%:*}" ds="${entry##*:}" desired ready
-    desired=$(kubectl get daemonset "$ds" -n "$ns" -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "")
-    # Absent DaemonSet (no such pool) or zero desired → not applicable, skip this one.
-    [ -z "$desired" ] && continue
-    [ "$desired" -eq 0 ] && continue
-    ready=$(kubectl get daemonset "$ds" -n "$ns" -o jsonpath='{.status.numberReady}' 2>/dev/null || echo 0)
-    if [ "$desired" != "$ready" ]; then
-      log_info "device plugin $ns/$ds: desired=$desired ready=$ready (not all pods Ready)"
-      return 1
+    test_selected "$min_suite" "$layer" || continue
+    if [ "$layer" = gpu ] && [ "$gpu_launch_failed" = true ]; then
+      skip_test "$name" "gpu node did not launch"
+      continue
+    fi
+    # shellcheck disable=SC2086
+    if [ -n "$tools" ] && ! tools_available $tools; then
+      skip_test "$name" "missing optional tool: $tools"
+      continue
+    fi
+    if [ "${last_layer:-}" != "$layer" ]; then
+      log_info "--- $layer tests ---"
+      last_layer="$layer"
+    fi
+    # run_test toggles the shell's errexit state internally, so guard the call with `|| rc=$?`
+    # (immune to set -e regardless of that state) instead of a set +e/set -e fence, which a
+    # non-zero return would otherwise escape and abort the whole run.
+    rc=0
+    run_test "$name" "$timeout" "$func" || rc=$?
+    if [ "$name" = gpu-node-launch ] && [ "$rc" -ne 0 ]; then
+      gpu_launch_failed=true
     fi
   done
-  return 0
 }
-
-test_storage_mount() {
-  resolve_storage_vars || return 1
-  apply_manifest storage-test-pv-fsx.yaml
-  apply_manifest storage-test-pv-openzfs.yaml
-  apply_manifest storage-test-pvc.yaml
-  local deadline=$(($(date +%s) + 30))
-  while true; do
-    local fsx_status openzfs_status
-    fsx_status=$(kubectl get pvc fsx-claim-test -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-    openzfs_status=$(kubectl get pvc openzfs-claim-test -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-    [ "$fsx_status" = "Bound" ] && [ "$openzfs_status" = "Bound" ] && break
-    [ "$(date +%s)" -ge "$deadline" ] && return 1
-    sleep 3
-  done
-  apply_manifest storage-mount-pod.yaml
-  wait_for_pod "$NAMESPACE" storage-mount-test Succeeded 120
-}
-
-# --- GPU tests ---
-
-test_gpu_node_launch() {
-  apply_manifest gpu-smoke-pod.yaml
-  wait_for_pod "$NAMESPACE" gpu-smoke-test Succeeded "$TIMEOUT_GPU"
-}
-
-test_nvidia_smi() {
-  local gpu_lines
-  gpu_lines=$(kubectl logs gpu-smoke-test -n "$NAMESPACE" 2>/dev/null | grep -cE "^\| +[0-9]+ " || true)
-  [ "$gpu_lines" -ge "$GPU_COUNT" ] || return 1
-}
-
-test_cuda_vector_add() {
-  apply_manifest gpu-vectoradd-job.yaml
-  wait_for_job "$NAMESPACE" cuda-vectoradd "$TIMEOUT_GPU"
-  kubectl logs job/cuda-vectoradd -n "$NAMESPACE" 2>/dev/null | grep -q "Test PASSED"
-}
-
-test_gpu_fsx_mount() {
-  apply_manifest gpu-fsx-mount-pod.yaml
-  wait_for_pod "$NAMESPACE" gpu-fsx-mount-test Succeeded "$TIMEOUT_GPU"
-}
-
-# --- Main ---
 
 main() {
   require_tools
+  resolve_cluster_name
+  [ -n "$CLUSTER_NAME" ] || { echo "Error: could not determine cluster name; pass --cluster-name." >&2; exit 1; }
+  resolve_region
+  [ -n "$AWS_REGION_OPT" ] || { echo "Error: could not determine region; pass --region or set AWS_DEFAULT_REGION." >&2; exit 1; }
+  # Validate the kubectl context BEFORE any cluster reads (e.g. NVIDIA pool derivation), so a pool
+  # is never derived from the wrong cluster.
   ensure_context
+  if selected_layer_present gpu; then
+    resolve_gpu_nodepool
+    [ -n "$GPU_NODEPOOL" ] || { echo "Error: gpu layer selected but no NVIDIA accelerator pool was derived; pass --gpu-nodepool." >&2; exit 1; }
+  fi
+  export NAMESPACE GPU_COUNT GPU_NODEPOOL
+
   trap teardown_namespace EXIT
 
-  log_info "=== EKS Infra Smoke Tests ==="
-  log_info "cluster: $CLUSTER_NAME, namespace: $NAMESPACE, with-gpu: $WITH_GPU, gpu-count: $GPU_COUNT"
+  log_info "=== EKS Infra Regression Tests ==="
+  log_info "cluster: $CLUSTER_NAME, namespace: $NAMESPACE, suite: $SUITE, gpu-count: $GPU_COUNT"
 
-  setup_namespace
-
-  log_info "--- Base Tests ---"
-  run_test "control-plane" "$TIMEOUT_BASE" test_control_plane || true
-  run_test "system-nodes" "$TIMEOUT_BASE" test_system_nodes || true
-  run_test "karpenter" "$TIMEOUT_BASE" test_karpenter || true
-  run_test "trainer" "$TIMEOUT_BASE" test_trainer || true
-  run_test "csi-drivers" "$TIMEOUT_BASE" test_csi_drivers || true
-  run_test "device-plugins" "$TIMEOUT_BASE" test_device_plugins || true
-  run_test "storage-mount" 120 test_storage_mount || true
-
-  if [ "$WITH_GPU" = true ]; then
-    log_info "--- GPU Tests ---"
-    if run_test "gpu-node-launch+nvidia-smi" "$TIMEOUT_GPU" test_gpu_node_launch; then
-      run_test "nvidia-smi-check" "$TIMEOUT_BASE" test_nvidia_smi || true
-      run_test "cuda-vector-add" "$TIMEOUT_GPU" test_cuda_vector_add || true
-      run_test "gpu-fsx-mount" "$TIMEOUT_GPU" test_gpu_fsx_mount || true
-    else
-      skip_test "nvidia-smi-check" "gpu node did not launch"
-      skip_test "cuda-vector-add" "gpu node did not launch"
-      skip_test "gpu-fsx-mount" "gpu node did not launch"
-    fi
+  if selected_layer_present live-mut || selected_layer_present gpu; then
+    setup_namespace
   fi
 
+  run_registry
   print_summary
-
   [ "$FAIL_COUNT" -eq 0 ]
 }
 

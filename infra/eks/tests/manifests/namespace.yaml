@@ -2,3 +2,7 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: ${NAMESPACE}
+  labels:
+    # Ownership marker: the harness only ever deletes a namespace carrying this label, so pointing
+    # --namespace at a pre-existing user namespace cannot cause it to be torn down.
+    app.kubernetes.io/managed-by: eks-regression-tests
