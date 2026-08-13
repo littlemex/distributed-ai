@@ -1,0 +1,28 @@
+{{- /* Neuron compile-cache PVC. Dynamic EFS access point via the configured StorageClass
+       (default "efs-shared"). No volumeName: the CSI provisioner creates a dedicated access point
+       per PVC, so there is no 1:1 static-PV contention (see values.yaml neuronCache). */ -}}
+{{- $c := .Values.neuronCache }}
+{{- if $c.create }}
+{{- if not $c.pvcName }}{{ fail "neuronCache.create=true requires neuronCache.pvcName." }}{{- end }}
+{{- if not $c.storageClassName }}{{ fail "neuronCache.create=true requires neuronCache.storageClassName (dynamic provisioning only)." }}{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $c.pvcName }}
+  namespace: {{ include "experiments.namespace" . }}
+  labels:
+    app.kubernetes.io/part-of: experiments
+  annotations:
+    # Retain the compiled NEFFs on `helm uninstall`. NOTE this only applies under Helm release
+    # management; the chart's documented `helm template | kubectl apply` flow leaves the PVC
+    # kubectl-managed, where it simply persists until explicitly deleted. Either way, deleting the
+    # PVC provisions a fresh (empty) access point on re-create, so keep the PVC to reuse the cache.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: {{ $c.storageClassName | quote }}
+  resources:
+    requests:
+      storage: {{ $c.size }}
+{{- end }}

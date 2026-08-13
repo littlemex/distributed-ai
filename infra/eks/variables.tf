@@ -81,12 +81,26 @@ variable "kubernetes_version" {
 #                        Empty otherwise; the selector term is omitted for on-demand/spot.
 #   cb_end_date          Optional RFC3339 CB expiry; schedules a per-pool pre-expiry SNS alert.
 #   volume_size          Root EBS volume size (e.g. "200Gi").
+#   kubelet_system_reserved_memory  Accelerator-node kubelet systemReserved.memory. Unset (null)
+#                        by default: an untouched pool renders the shared default userData verbatim.
+#   kubelet_eviction_hard_memory_available  Optional accelerator-node kubelet
+#                        evictionHard["memory.available"]. Empty default omits the field, matching
+#                        today's render byte-for-byte.
 #   expire_after         Karpenter NodePool expireAfter ("Never" or a Go duration).
 #   termination_grace_period  NodePool terminationGracePeriod (Go duration); caps graceful drain.
 #   consolidate_after    Karpenter empty-node consolidation delay ("5m", "Never", or "" to use
 #                        the per-capacity_type default: on-demand/spot consolidate to limit idle
 #                        cost, reserved keeps nodes for the reservation window).
 #   cpu_limit / memory_limit  Karpenter NodePool spec.limits caps.
+#   stuck_node_reaper_enabled  Opt-in steady-state cleanup for a NodeClaim already stuck deleting on
+#                        a NotReady node. Default false keeps every existing pool unchanged.
+#   stuck_node_reaper_notready_threshold  How long the node's Ready condition must stay False/Unknown
+#                        before the reaper may terminate its backing EC2 instance. Accepts a
+#                        restricted subset of Go duration syntax: <int>s|m|h. Only used when the
+#                        reaper is enabled.
+#   stuck_node_reaper_dry_run  Reaper dry-run mode. Default true keeps it observe-only, and
+#                        because the reaper is one cluster-wide CronJob, any enabled pool left at
+#                        true keeps the shared reaper in dry-run mode.
 variable "accelerator_pools" {
   description = "Map of accelerated Karpenter NodePools (GPU and/or Neuron). See the field reference above."
   type = map(object({
@@ -121,7 +135,7 @@ variable "accelerator_pools" {
     efa_interface_count = optional(number, -1)
     efa_multi_card      = optional(bool, null)
     # Capacity Block: cb_reservation_id (cr-...) is required for capacity_type "reserved".
-    # cb_end_date (RFC3339) optionally schedules a pre-expiry alert for THIS pool.
+    # cb_end_date (RFC3339) optionally schedules a pre-expiry alert for this pool.
     # (LEGACY single reservation; capacity_reservations (below) is the new multi-reservation form.)
     cb_reservation_id = optional(string, "")
     cb_end_date       = optional(string, "")
@@ -146,6 +160,13 @@ variable "accelerator_pools" {
     ami_alias                = optional(string, "al2023@latest")
     ami_ssm_parameter        = optional(string, "")
     volume_size              = optional(string, "200Gi")
+    # Accelerator-node kubelet host-memory guardrails. Both default to unset (null / "") so an
+    # untouched pool renders the shared default userData verbatim. The override branch is entered
+    # when EITHER field is set; setting eviction alone is valid and systemReserved then falls back to
+    # the shared default (2Gi). This is absence-based, not value-based: the defaults are not copies of
+    # the shared "2Gi" that could drift out of sync.
+    kubelet_system_reserved_memory         = optional(string)
+    kubelet_eviction_hard_memory_available = optional(string, "")
     # expire_after: Go duration ("24h") or "Never". Node lifetime.
     expire_after = optional(string, "Never")
     # termination_grace_period: Go duration. Upper bound on graceful drain when a NodeClaim is
@@ -188,6 +209,16 @@ variable "accelerator_pools" {
     # accelerator hosts (e.g. GB200 / p6e-gb200); an amd64-only requirement would otherwise
     # leave an arm64 instance type stuck Pending with a requirements mismatch.
     arch = optional(string, "amd64")
+    # Opt-in recovery for a NodeClaim already stuck deleting because its node went NotReady and the
+    # kubelet cannot drain it. The in-cluster reaper terminates the EC2 instance first, waits for
+    # it to disappear, then removes the NodeClaim finalizer and deletes the dead Node object.
+    stuck_node_reaper_enabled = optional(bool, false)
+    # Accepts a restricted subset of Go duration syntax: <int>s|m|h.
+    stuck_node_reaper_notready_threshold = optional(string, "20m")
+    # dry_run defaults to `true`: on first enable the reaper only logs the terminate+finalizer
+    # decision it would take. Because the CronJob is cluster-wide, any enabled pool left at
+    # `true` keeps the shared reaper observe-only. Set false to arm it.
+    stuck_node_reaper_dry_run = optional(bool, true)
   }))
   # Default is empty: the module deploys a control plane + system nodes with no accelerator
   # pools, so it is Region-agnostic (no hardcoded AZ). The quick start supplies one pool via
@@ -466,6 +497,26 @@ variable "accelerator_pools" {
     condition     = alltrue([for k, p in var.accelerator_pools : contains(["amd64", "arm64"], p.arch)])
     error_message = "Each accelerator pool's arch must be \"amd64\" or \"arm64\"."
   }
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      p.kubelet_system_reserved_memory == null ? true :
+      can(regex("^(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+|(?:n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei))?$", p.kubelet_system_reserved_memory))
+    ])
+    error_message = "kubelet_system_reserved_memory must be a Kubernetes quantity when set (for example \"8Gi\" or \"500Mi\")."
+  }
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      p.kubelet_eviction_hard_memory_available == "" ? true :
+      can(regex("^(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+|(?:n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei))?$", p.kubelet_eviction_hard_memory_available))
+    ])
+    error_message = "kubelet_eviction_hard_memory_available must be a Kubernetes quantity when set (for example \"4Gi\" or \"500Mi\")."
+  }
+  validation {
+    condition = alltrue([for k, p in var.accelerator_pools :
+      can(regex("^[0-9]+[smh]$", p.stuck_node_reaper_notready_threshold))
+    ])
+    error_message = "stuck_node_reaper_notready_threshold must use the restricted duration form <int>s, <int>m, or <int>h (for example \"20m\")."
+  }
   # (The former "cb_reservation_id on a non-reserved pool" check is now folded into the
   # reservation-requires-reserved validation above, which also covers capacity_reservations.)
 }
@@ -510,7 +561,7 @@ variable "expected_account_id" {
     filesystems that have no name uniqueness). Leave unset (null, the default) to skip the
     check — but pinning it is strongly recommended for any long-lived cluster. Note the
     value is descriptive, not a credential: it only asserts "these creds had better resolve
-    to THIS account".
+    to this account".
   EOT
   type        = string
   default     = null
@@ -1170,7 +1221,7 @@ variable "observability_instance_categories" {
 }
 
 variable "observability_zone" {
-  description = "AZ to pin the monitoring NodePool to (topology.kubernetes.io/zone). Prometheus/Grafana hold ReadWriteOnce EBS PVCs that are AZ-local, so every monitoring node must land in the AZ where those volumes live or the stack hangs Pending on a volume node affinity conflict. Leave null to derive the first cluster AZ (azs[0]) — correct for a fresh deploy. If observability was FIRST deployed before this pin existed, its PVCs may already live in another AZ; set this to that AZ (kubectl get pv -o jsonpath of the monitoring PVs) so the pin matches reality instead of stranding the volumes."
+  description = "AZ to pin the monitoring NodePool to (topology.kubernetes.io/zone). Prometheus/Grafana hold ReadWriteOnce EBS PVCs that are AZ-local, so every monitoring node must land in the AZ where those volumes live or the stack hangs Pending on a volume node affinity conflict. Leave null to derive the first cluster AZ (azs[0]) — correct for a fresh deploy. If observability was first deployed before this pin existed, its PVCs may already live in another AZ; set this to that AZ (kubectl get pv -o jsonpath of the monitoring PVs) so the pin matches reality instead of stranding the volumes."
   type        = string
   default     = null
 

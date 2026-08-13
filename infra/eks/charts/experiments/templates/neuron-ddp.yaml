@@ -51,6 +51,9 @@ EFA NIC RDMA-write counters incremented symmetrically.
 */ -}}
 {{- if .Values.neuronDdp.enabled }}
 {{- $v := .Values.neuronDdp }}
+{{- $cache := .Values.neuronCache }}
+{{- include "experiments.neuronCacheValidate" $cache }}
+{{- if not $v.nodeRole }}{{ fail "neuronDdp.nodeRole is required — set it to the accelerator_pools key of the target Neuron pool (Karpenter labels its nodes node-role=<pool key>). Without it the pods get an empty selector, never schedule, and Karpenter keeps launching nodes trying to satisfy them." }}{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -98,6 +101,13 @@ spec:
           add: ["IPC_LOCK"]
       env:
         {{- include "experiments.neuronDdpEnv" $v | nindent 8 }}
+        {{- if $cache.enabled }}
+        # torch-neuronx persistent compile cache. NOT NEURON_COMPILED_ARTIFACTS (a serving-side
+        # load path); a dedicated env avoids clobbering user-supplied NEURON_CC_FLAGS. This cache is
+        # content-addressed (hash keys), so it uses its own subdir and can share the FS with serving.
+        - name: NEURON_COMPILE_CACHE_URL
+          value: {{ printf "%s/neuron-cc" $cache.mountPath | quote }}
+        {{- end }}
       resources:
         limits:
           aws.amazon.com/neuron: {{ $v.neuronDevices | quote }}   # whole Neuron devices
@@ -112,9 +122,15 @@ spec:
         - { name: test,      mountPath: /opt/test }
         - { name: shm,       mountPath: /dev/shm }
         - { name: hugepages, mountPath: /dev/hugepages }
+        {{- if $cache.enabled }}
+        {{- include "experiments.neuronCacheVolumeMount" $cache | nindent 8 }}
+        {{- end }}
   volumes:
     - { name: test,      configMap: { name: neuron-ddp-test } }
     - { name: shm,       emptyDir: { medium: Memory, sizeLimit: {{ $v.shmSize }} } }
     - { name: hugepages, emptyDir: { medium: HugePages } }
+    {{- if $cache.enabled }}
+    {{- include "experiments.neuronCacheVolume" $cache | nindent 4 }}
+    {{- end }}
 {{- end }}
 {{- end }}

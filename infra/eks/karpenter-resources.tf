@@ -216,6 +216,49 @@ locals {
           strategy: Raid0
   EOT
 
+  # Per-pool accelerator nodeadm. The default branch returns the exact shared heredoc above so
+  # every existing pool keeps a byte-identical userData render. Only a pool that explicitly
+  # overrides the kubelet host-memory guardrails takes the custom branch.
+  accelerator_user_data_base_by_pool = {
+    for k, p in var.accelerator_pools : k => (
+      # Default (byte-identical) path only when BOTH host-memory knobs are unset. Setting either one
+      # alone takes the custom branch; systemReserved falls back to the shared default so an
+      # eviction-only override still renders a complete, valid kubelet stanza.
+      p.kubelet_system_reserved_memory == null && p.kubelet_eviction_hard_memory_available == ""
+      ? local.accelerator_user_data
+      : join("\n", concat(
+        [
+          "---",
+          "apiVersion: node.eks.aws/v1alpha1",
+          "kind: NodeConfig",
+          "spec:",
+          "  containerd:",
+          "    config: |",
+          "      [plugins.\"io.containerd.cri.v1.images\"]",
+          "        discard_unpacked_layers = false",
+          "        max_concurrent_downloads = ${local.image_pull_max_concurrent_downloads}",
+          "  kubelet:",
+          "    config:",
+          "      systemReserved:",
+          "        memory: \"${coalesce(p.kubelet_system_reserved_memory, local.accelerator_system_reserved_memory)}\"",
+        ],
+        p.kubelet_eviction_hard_memory_available != "" ? [
+          "      evictionHard:",
+          "        memory.available: \"${p.kubelet_eviction_hard_memory_available}\"",
+        ] : [],
+        [
+          "      serializeImagePulls: false",
+          "      maxParallelImagePulls: ${local.image_pull_max_parallel}",
+          "      imageMaximumGCAge: \"${local.image_maximum_gc_age}\"",
+          "  instance:",
+          "    localStorage:",
+          "      strategy: Raid0",
+          "",
+        ]
+      ))
+    )
+  }
+
   # gdrcopy (gdrdrv) install script, folded into a GPU pool's userData when
   # var.gdrcopy_mode == "userdata". AL2023 ships gdrcopy-kmod as a native dkms package
   # plus a gdrcopy.service systemd unit that loads gdrdrv AFTER nvidia and recreates
@@ -252,21 +295,23 @@ locals {
   #   aws ec2 describe-instance-attribute --instance-id <id> --attribute userData
   # (base64 -d) — a Karpenter merge-order change cannot be caught at plan time.
   gdrcopy_mime_boundary = "==tenantpools-gdrcopy-boundary=="
-  accelerator_user_data_mime = join("\n", [
-    "MIME-Version: 1.0",
-    "Content-Type: multipart/mixed; boundary=\"${local.gdrcopy_mime_boundary}\"",
-    "",
-    "--${local.gdrcopy_mime_boundary}",
-    "Content-Type: text/x-shellscript; charset=\"utf-8\"",
-    "",
-    trimspace(local.gdrcopy_install_script),
-    "--${local.gdrcopy_mime_boundary}",
-    "Content-Type: application/node.eks.aws",
-    "",
-    trimspace(local.accelerator_user_data),
-    "--${local.gdrcopy_mime_boundary}--",
-    "",
-  ])
+  accelerator_user_data_mime_by_pool = {
+    for k, p in var.accelerator_pools : k => join("\n", [
+      "MIME-Version: 1.0",
+      "Content-Type: multipart/mixed; boundary=\"${local.gdrcopy_mime_boundary}\"",
+      "",
+      "--${local.gdrcopy_mime_boundary}",
+      "Content-Type: text/x-shellscript; charset=\"utf-8\"",
+      "",
+      trimspace(local.gdrcopy_install_script),
+      "--${local.gdrcopy_mime_boundary}",
+      "Content-Type: application/node.eks.aws",
+      "",
+      trimspace(local.accelerator_user_data_base_by_pool[k]),
+      "--${local.gdrcopy_mime_boundary}--",
+      "",
+    ])
+  }
 
   # Per-pool effective userData: only nvidia GPU pools get the gdrcopy install script folded
   # in (Neuron pools have no gdrdrv and would just log a spurious dnf failure every boot).
@@ -275,8 +320,8 @@ locals {
   accelerator_user_data_by_pool = {
     for k, p in var.accelerator_pools : k => (
       var.gdrcopy_mode == "userdata" && p.device_plugin == "nvidia"
-      ? local.accelerator_user_data_mime
-      : local.accelerator_user_data
+      ? local.accelerator_user_data_mime_by_pool[k]
+      : local.accelerator_user_data_base_by_pool[k]
     )
   }
 

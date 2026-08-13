@@ -83,7 +83,7 @@ imageBuild:
   # Peak build disk ~= pushed image size x4-5. Guide: 3GB→30Gi (default), 10GB→60Gi,
   # 25GB→150Gi (+ dedicatedPool). Must be <= the target node's allocatable ephemeral-storage.
   ephemeralStorage: 30Gi
-  # zstd-compress the layers THIS build adds (the external base layers keep their original
+  # zstd-compress the layers this build adds (the external base layers keep their original
   # compression and digests, so sharing and cache hits survive). Off by default: it trades push
   # time and CPU for faster decompression on the node, which only pays off when a cold pull is
   # dominated by unpacking rather than downloading. Measure first — the image-cache chapter shows
@@ -461,9 +461,33 @@ neuronServingVllm:
   # pool's own comment says schedulable EFA = physical cards - 1 (15 on trn2.48xlarge); this
   # workload requesting 16 would make it permanently Unschedulable against that same
   # allocatable, for a resource it does not even use. Bump above 0 only if you multi-node this
-  # (untested — no CB available to verify at review time).
+  # (untested here).
   efaCount: 0
+  # 48 vCPU leaves room for kube/system overhead on trn2.48xlarge while keeping compile/helper threads off the CPU throttle path.
+  cpu: "48"
+  # memory is used for BOTH requests and limits. Keep enough headroom for first-run Neuron graph
+  # compilation as well as steady-state serving: large-model compile forks can peak far above the
+  # final runtime footprint, and a too-small request can make Karpenter chase a bigger node or
+  # leave the kubelet exposed to host-memory pressure before cgroup limits bite.
   memory: 512Gi
+# ─────────────────────────────────────────────────────────────────────────────
+# 8b) neuronCache — shared Neuron NEFF compile cache (EFS dynamic access points).
+# ─────────────────────────────────────────────────────────────────────────────
+# Mounted by both neuronServingVllm and neuronDdp. Backed by dynamic EFS access points
+# (StorageClass "efs-shared" from efs.tf, module efs_enabled=true): each PVC gets its own access
+# point, so multiple cache PVCs can coexist and bind across AZs — unlike the single static OpenZFS
+# PV, which is single-AZ and binds to exactly one claim at a time.
+# reclaimPolicy is Retain and the PVC carries helm.sh/resource-policy: keep. Deleting the PVC does
+# not delete the EFS data, but a re-created PVC provisions a NEW access point and starts empty, so
+# keep the PVC alive to reuse compiled NEFFs.
+neuronCache:
+  enabled: false            # wire the cache volume/env into the neuron workloads (serving + training)
+  create: false             # render the PVC. enabled=true + create=false references a pre-existing
+                            # PVC; create=true + enabled=false pre-provisions the PVC without wiring.
+  pvcName: neuron-cache
+  storageClassName: efs-shared
+  size: 100Gi               # EFS is elastic; the value is required by the PVC API, not enforced
+  mountPath: /mnt/neuron-cache
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 9) vllmRay — two-node tensor-parallel vLLM over a Ray head+worker (GPU).

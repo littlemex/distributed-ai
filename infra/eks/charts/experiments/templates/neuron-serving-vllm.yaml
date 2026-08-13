@@ -5,18 +5,22 @@ Requests all Neuron devices on the node (one whole trn2). Counterpart to gpu-ser
 tensor-parallel-size = neuronServingVllm.tpSize (default 32 for trn2 = 16 devices x LNC=2).
 Override for other generations.
 
-Requires a PVC `neuron-cache-pvc` for compiled-NEFF persistence (create separately, e.g.
-from the EFS RWX StorageClass) and, for gated models, an `hf-token` secret.
+Set `neuronCache.enabled=true` to mount the shared Neuron compile cache (EFS-backed; see the
+neuronCache block in values.yaml). For gated models, add an `hf-token` secret too.
 
 Render + apply:
   helm template exp ./charts/experiments --set namespace=$NS \
     --set neuronServingVllm.enabled=true --set neuronServingVllm.nodeRole=trn2 \
-    --set neuronServingVllm.model=$MODEL | kubectl apply -f -
+    --set neuronServingVllm.model=$MODEL \
+    --set neuronCache.enabled=true --set neuronCache.create=true | kubectl apply -f -
 Verify:
   kubectl -n $NS rollout status deploy/neuron-vllm --timeout=30m   # first run compiles NEFF
 */ -}}
 {{- if .Values.neuronServingVllm.enabled }}
 {{- $v := .Values.neuronServingVllm }}
+{{- $cache := .Values.neuronCache }}
+{{- include "experiments.neuronCacheValidate" $cache }}
+{{- if not $v.nodeRole }}{{ fail "neuronServingVllm.nodeRole is required — set it to the accelerator_pools key of the target Neuron pool (Karpenter labels its nodes node-role=<pool key>). Without it the pod gets an empty selector, never schedules, and Karpenter keeps launching nodes trying to satisfy it." }}{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,7 +56,11 @@ spec:
             - --port=8000
           env:
             - { name: VLLM_NEURON_FRAMEWORK, value: "neuronx-distributed-inference" }
-            - { name: NEURON_COMPILED_ARTIFACTS, value: "/mnt/neuron-cache" }
+            {{- if $cache.enabled }}
+            # Namespaced per model + TP: NEURON_COMPILED_ARTIFACTS is a per-model artifact directory
+            # (not content-addressed), so multiple serving models must not share one cache root.
+            - { name: NEURON_COMPILED_ARTIFACTS, value: {{ printf "%s/vllm/%s/tp%v" $cache.mountPath ($v.model | replace "/" "--") $v.tpSize | quote }} }
+            {{- end }}
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -72,7 +80,7 @@ spec:
               memory: {{ $v.memory }}
             requests:
               aws.amazon.com/neuron: {{ $v.neuronDevices | quote }}
-              cpu: "48"
+              cpu: {{ $v.cpu | default "48" | quote }}
               memory: {{ $v.memory }}
           readinessProbe:
             httpGet: { path: /health, port: 8000 }
@@ -81,12 +89,14 @@ spec:
             periodSeconds: 15
             failureThreshold: 120
           volumeMounts:
-            - { name: neuron-cache, mountPath: /mnt/neuron-cache }
+            {{- if $cache.enabled }}
+            {{- include "experiments.neuronCacheVolumeMount" $cache | nindent 12 }}
+            {{- end }}
             - { name: shm, mountPath: /dev/shm }
       volumes:
-        - name: neuron-cache
-          persistentVolumeClaim:
-            claimName: neuron-cache-pvc
+        {{- if $cache.enabled }}
+        {{- include "experiments.neuronCacheVolume" $cache | nindent 8 }}
+        {{- end }}
         - name: shm
           emptyDir: { medium: Memory, sizeLimit: 8Gi }
 ---
