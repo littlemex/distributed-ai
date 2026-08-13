@@ -1,0 +1,36 @@
+{{- /*
+image-build-custom — generic caller for the in-cluster image builder (experiments.imageBuildJob,
+templates/_image-build.tpl). Use this to build ANY image that does not have its own dedicated
+caller: you supply the identity (imageBuild.jobName) and the context, everything else is the same
+mechanism as the ddp-sample build. This is the intended path for a contextSource=configMap build
+(an ad-hoc/experiment image not committed to a repo), which by definition has no fixed caller.
+
+Unlike image-build-ddp-sample.yaml, this caller does NOT bake in an identity — it passes the
+imageBuild values through as-is, so jobName / repository / contextSubPath / contextConfigMap all
+come from you. jobName is required (the Job is named <jobName>-<tag>); the underlying builder
+validates it as a DNS-1123 label.
+
+ConfigMap context (no git clone/push; see docs/image-builder.md for constraints + trade-offs):
+  kubectl -n image-builder create configmap my-ctx --from-file=Dockerfile --from-file=app.py
+  kubectl -n image-builder patch configmap my-ctx -p '{"immutable":true}'
+  helm template exp ./charts/experiments -s templates/image-build-custom.yaml \
+    --set imageBuild.enabled=true \
+    --set imageBuild.jobName=build-my-app \
+    --set imageBuild.repository=$MY_APP_ECR_URL --set imageBuild.tag=v1 \
+    --set imageBuild.contextSource=configMap --set imageBuild.contextConfigMap=my-ctx \
+    | kubectl apply -f -
+  kubectl -n image-builder wait --for=condition=complete job/build-my-app-v1 --timeout=30m
+
+git context from another sub-path in the repo: add --set imageBuild.contextSubPath=path/to/app
+(and point imageBuild.repository at that image's own ECR repo).
+
+SELECTOR: this caller renders only when BOTH imageBuild.enabled AND imageBuild.jobName are set.
+jobName is how you select this generic caller — the ddp-sample caller injects its own identity and
+leaves imageBuild.jobName empty, so with the default (empty) jobName this template renders nothing
+and never collides with, or breaks the render of, image-build-ddp-sample.yaml. (helm renders every
+template before applying -s/--show-only, so this file must be a no-op on the default values that
+the ddp-sample build uses; hence a selector rather than a fail.)
+*/ -}}
+{{- if and .Values.imageBuild.enabled .Values.imageBuild.jobName }}
+{{- include "experiments.imageBuildJob" .Values.imageBuild }}
+{{- end }}

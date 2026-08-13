@@ -18,6 +18,11 @@ register_test() {
 register_all_tests() {
   register_test static-terraform-validate test_static_terraform_validate baseline static "$TIMEOUT_STATIC" terraform
 
+  register_test image-build-ddp-sample-golden test_image_build_ddp_sample_golden baseline static "$TIMEOUT_STATIC" helm
+  register_test image-build-custom-render     test_image_build_custom_render     baseline static "$TIMEOUT_STATIC" helm
+  register_test image-build-callers-exclusive test_image_build_callers_exclusive baseline static "$TIMEOUT_STATIC" helm
+  register_test image-build-guards            test_image_build_guards            baseline static "$TIMEOUT_STATIC" helm
+
   register_test control-plane   test_control_plane   baseline live-ro "$TIMEOUT_BASE"
   register_test system-nodes    test_system_nodes    baseline live-ro "$TIMEOUT_BASE"
   register_test karpenter       test_karpenter       baseline live-ro "$TIMEOUT_BASE"

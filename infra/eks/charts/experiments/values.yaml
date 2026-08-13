@@ -64,6 +64,17 @@ imageBuild:
   enabled: false          # like every catalog workload, opt in with --set
   repository: ""          # REQUIRED: terraform output -raw ddp_sample_ecr_url
   tag: v1                 # bump (v1→v2) to rebuild instead of deleting the Job
+  jobName: ""             # Job name <jobName>-<tag>; REQUIRED only for the generic image-build-custom.yaml
+                          # caller. image-build-ddp-sample.yaml sets its own (build-ddp-sample); ignored there.
+  # Build context source: "git" (default) clones gitRepo#gitRef; "configMap" builds from a ConfigMap
+  # staged into an emptyDir (no clone, no git push) — for ad-hoc/experiment images. An unknown value
+  # is a hard error (never a silent git fallback). The configMap path has flat-key/~1 MiB/0644
+  # constraints and trades away provenance + git-side controls (ConfigMap-create in the namespace
+  # becomes ECR-push-equivalent) — keep production images on git. Full design, constraints, and
+  # trade-offs: docs/image-builder.md.
+  contextSource: git
+  contextConfigMap: ""    # ConfigMap name holding Dockerfile + context (contextSource=configMap)
+  filename: Dockerfile    # Dockerfile name within the context (either source)
   gitRepo: github.com/littlemex/distributed-ai.git
   gitRef: main            # pin to a release tag/sha for reproducibility; main is for iteration
   region: us-west-2       # ECR region for the initContainer's `aws ecr get-login-password`
