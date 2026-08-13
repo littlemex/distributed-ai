@@ -420,11 +420,13 @@ terraform output ddp_sample_ecr_url              # the module's own ddp-sample r
 
 ### Build execution: one reusable Job, thin per-image callers
 
-The build itself (the "execution" half) is a single reusable Helm template,
-`experiments.imageBuildJob` (`charts/experiments/templates/_image-build.tpl`). Each image is a
-**thin caller** that supplies only its identity; `image-build-ddp-sample.yaml` is the reference
-caller for the workshop image. To build another image *in this chart*, add a caller that passes
-its `jobName` and either a git build-context sub-path or a ConfigMap — you do not copy the Job.
+The build itself (the "execution" half) is a single reusable Helm template, `image-builder.job`,
+defined once in the **`image-builder-lib` library chart** and shared by every chart that builds an
+image (declared as a dependency). Each image is a **thin caller** that supplies only its identity;
+`image-build-ddp-sample.yaml` is the reference caller for the workshop image, and a workload
+project (e.g. `comfyui`) reuses the same builder by depending on the library and adding its own
+one-line caller. To build another image you do not copy the Job. See
+[`docs/image-builder.md`](docs/image-builder.md) for the library dependency and the caller contract.
 
 The builder supports two build-context sources:
 

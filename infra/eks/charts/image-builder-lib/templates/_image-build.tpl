@@ -1,5 +1,5 @@
 {{- /*
-experiments.imageBuildJob — the generic in-cluster image builder, factored out of the
+image-builder.job — the generic in-cluster image builder, factored out of the
 ddp-sample workshop Job so any image reuses the SAME build/push mechanism instead of copying
 this template per image. Callers are thin templates that pass their image's identity (jobName,
 and — for a git context — contextSubPath) alongside the imageBuild values; see
@@ -42,19 +42,19 @@ context, contextSubPath). Canonical caller form (see image-build-ddp-sample.yaml
   {{- $args := deepCopy .Values.imageBuild -}}
   {{- $_ := set $args "jobName" "build-foo" -}}
   {{- $_ := set $args "contextSubPath" "path/to/foo" -}}   # git context only
-  {{- include "experiments.imageBuildJob" $args }}
+  {{- include "image-builder.job" $args }}
 A generic caller that takes jobName from values (for images with no fixed identity, e.g. a
 ConfigMap context) is image-build-custom.yaml.
 */ -}}
-{{- define "experiments.imageBuildJob" -}}
+{{- define "image-builder.job" -}}
 {{- $ib := . -}}
-{{- if not $ib.repository }}{{ fail "imageBuild.repository is required (terraform output -raw ddp_sample_ecr_url)" }}{{- end }}
-{{- if not $ib.jobName }}{{ fail "imageBuildJob: jobName is required — the caller supplies its image identity" }}{{- end }}
+{{- if not $ib.repository }}{{ fail "imageBuild.repository is required (the ECR repo URI, e.g. terraform output -raw <image>_ecr_url)" }}{{- end }}
+{{- if not $ib.jobName }}{{ fail "image-builder.job: jobName is required — the caller supplies its image identity" }}{{- end }}
 {{- /* Every value spliced verbatim into a buildctl arg-list item, the Job name, or a YAML value is
      validated so a stray comma/newline/space (via --set) cannot inject a separate buildctl option
      (e.g. tag "v1,push=false" into type=image,name=...:<tag>,push=true), break the Job name, or
      break the YAML. filename/contextSubPath are validated further below. */ -}}
-{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $ib.jobName) }}{{ fail (printf "imageBuildJob: jobName must be a DNS-1123 label (lowercase alphanumeric and -), got %q" $ib.jobName) }}{{- end }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $ib.jobName) }}{{ fail (printf "image-builder.job: jobName must be a DNS-1123 label (lowercase alphanumeric and -), got %q" $ib.jobName) }}{{- end }}
 {{- /* The Job is named <jobName>-<tag>, which must be a DNS-1123 label (<=63 chars). Validating the
      COMBINED name at render time catches an uppercase/dotted/underscored/comma'd tag here rather
      than at apply, and the comma check is exactly what stops "v1,push=false" from injecting a
@@ -82,7 +82,7 @@ ConfigMap context) is image-build-custom.yaml.
 {{- if not (regexMatch "^[A-Za-z0-9._-]+$" $fn) }}{{ fail (printf "imageBuild.filename must match ^[A-Za-z0-9._-]+$ (a flat filename), got %q" $fn) }}{{- end }}
 {{- $subPath := $ib.contextSubPath }}
 {{- if not $useCM }}
-{{-   if not $subPath }}{{ fail "imageBuildJob: contextSubPath is required for a git context (the caller supplies it)" }}{{- end }}
+{{-   if not $subPath }}{{ fail "image-builder.job: contextSubPath is required for a git context (the caller supplies it)" }}{{- end }}
 {{-   if not (regexMatch "^[A-Za-z0-9._/-]+$" $subPath) }}{{ fail (printf "contextSubPath must match ^[A-Za-z0-9._/-]+$, got %q" $subPath) }}{{- end }}
 {{- /* gitRepo and gitRef are spliced into the buildctl git context arg. */ -}}
 {{-   if not (regexMatch "^[A-Za-z0-9._/-]+$" ($ib.gitRepo | default "github.com/littlemex/distributed-ai.git")) }}{{ fail (printf "imageBuild.gitRepo must be a host/path with no scheme/space/comma, got %q" $ib.gitRepo) }}{{- end }}
@@ -217,6 +217,16 @@ spec:
             # Fail-fast if somehow scheduled on a non-amd64 node (no cross-build here).
             - --opt
             - platform=linux/amd64
+            {{- /* Optional Docker build-args (e.g. pin a version without editing the Dockerfile). Each
+                 becomes one --opt build-arg:KEY=VALUE. Empty by default, so this renders nothing.
+                 KEY is constrained to an env-var-like identifier, and the whole build-arg:KEY=VALUE
+                 is emitted as ONE quoted scalar so a VALUE containing a newline / ":" / "#" cannot
+                 inject a separate arg-list item or break the YAML. */ -}}
+            {{- range $k, $v := ($ib.buildArgs | default dict) }}
+            {{-   if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $k) }}{{ fail (printf "imageBuild.buildArgs key %q must be an identifier (^[A-Za-z_][A-Za-z0-9_]*$)" $k) }}{{- end }}
+            - --opt
+            - {{ printf "build-arg:%s=%s" $k ($v | toString) | quote }}
+            {{- end }}
             # WITHOUT push=true the build "succeeds" but nothing lands in ECR — the classic silent
             # no-op. name is the full ECR ref.
             - --output
@@ -246,7 +256,7 @@ spec:
               type: Unconfined
           resources:
             requests:
-              cpu: "2"
+              cpu: {{ $ib.cpu | default "2" | quote }}
               memory: 8Gi
               # Peak build disk ~= pushed image size x4-5 (base unpacked + snapshot, uncompressed);
               # the buildkit state emptyDir counts against this too. 30Gi fits ddp-sample on the

@@ -18,28 +18,57 @@ the TrainJob is a catalog workload):
   `image_builder_additional_ecr_repository_arns`.
 - **Execution (Helm catalog):** the build Job, rendered with `helm template … | kubectl apply`.
 
-## One reusable Job, thin per-image callers
+## One reusable Job (library chart), thin per-image callers
 
-The Job is a single reusable named template, `experiments.imageBuildJob`
-(`charts/experiments/templates/_image-build.tpl`). Each image is a **thin caller** that supplies
-only its identity and includes the define; the reference caller is the workshop image,
-`charts/experiments/templates/image-build-ddp-sample.yaml`:
+The Job is a single reusable named template, **`image-builder.job`**, defined once in the
+**`image-builder-lib` library chart** (`charts/image-builder-lib/templates/_image-build.tpl`). A
+chart that builds an image declares that library as a dependency and calls the define from a
+**thin caller** that supplies only its identity — no chart copies the Job. The reference caller is
+the workshop image, `charts/experiments/templates/image-build-ddp-sample.yaml`:
+
+```yaml
+{{- if and .Values.imageBuild.enabled (not .Values.imageBuild.jobName) }}
+{{- $args := deepCopy .Values.imageBuild -}}
+{{- $_ := set $args "jobName" "build-ddp-sample" -}}
+{{- $_ := set $args "contextSubPath" (.Values.imageBuild.contextSubPath | default "infra/eks/manifests/ddp-sample") -}}
+{{- include "image-builder.job" $args }}
+{{- end }}
+```
+
+To build another image you do not copy the Job. Within `charts/experiments`, either add a
+dedicated caller like the above (when the image has a fixed identity worth naming), or use the
+ready-made generic caller `image-build-custom.yaml`, which takes `jobName` (and the context) from
+values so it can build any image — the intended path for a `configMap` context (which by
+definition has no dedicated caller).
+
+### Using the builder from another chart (library dependency)
+
+Any chart — including a workload project outside `infra/eks` — reuses the builder by depending on
+the library chart and adding a small thin caller. This is how the `comfyui` project builds its
+image (`build-comfyui`). In the consumer's `Chart.yaml`:
+
+```yaml
+dependencies:
+  - name: image-builder-lib
+    version: 0.1.0
+    repository: "file://<relative-path>/infra/eks/charts/image-builder-lib"
+```
+
+Vendor it with `helm dependency update --skip-refresh ./charts/<name>` before `helm template` (re-run after the library changes)
+(the file:// dependency needs no network; the vendored `charts/*.tgz` is gitignored, so re-running
+the build always tracks the current library — no stale-copy drift). Then a thin caller
+(`templates/image-build-<image>.yaml`) injects the identity:
 
 ```yaml
 {{- if .Values.imageBuild.enabled }}
 {{- $args := deepCopy .Values.imageBuild -}}
-{{- $_ := set $args "jobName" "build-ddp-sample" -}}
-{{- $_ := set $args "contextSubPath" (.Values.imageBuild.contextSubPath | default "infra/eks/manifests/ddp-sample") -}}
-{{- include "experiments.imageBuildJob" $args }}
+{{- $_ := set $args "jobName" "build-<image>" -}}
+{{- include "image-builder.job" $args }}
 {{- end }}
 ```
 
-To build another image in this chart you do not copy the Job. Either add a dedicated caller like
-the above (when the image has a fixed identity worth naming), or use the ready-made generic caller
-`image-build-custom.yaml`, which takes `jobName` (and the context) from values so it can build any
-image — this is the intended path for a `configMap` context, which by definition has no dedicated
-caller. (An image in a *separate* consumer chart keeps its own caller there and grants push via the
-Terraform ARN path above.)
+The consumer still owns its ECR repo and grants the shared builder push to it via the Terraform
+`image_builder_additional_ecr_repository_arns` path above; the base module stays untouched.
 
 ### Caller contract
 
@@ -58,6 +87,8 @@ caller-injected identity):
 | `gitRepo` / `gitRef` | no | git context source and ref |
 | `namespace` / `serviceAccountName` | no | default `image-builder` |
 | `region` | no | ECR login region; derived from the repo host when standard |
+| `buildArgs` | no | map of Docker build-args (`KEY: VALUE`) → `--opt build-arg:KEY=VALUE`; KEY must be an identifier |
+| `cpu` | no (`"2"`) | build container CPU request (a heavy image, e.g. ComfyUI, sets `"4"`) |
 | `ephemeralStorage` / `zstd` / `dedicatedPool` | no | build sizing / compression / node pool |
 | `buildkitImage` / `awsCliImage` | no | digest-pinned image overrides |
 

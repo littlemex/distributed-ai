@@ -1,0 +1,14 @@
+apiVersion: v2
+name: image-builder-lib
+description: |
+  Library chart providing the reusable in-cluster image builder template
+  "image-builder.job" (rootless BuildKit -> ECR). It renders nothing on its own; a consuming
+  chart declares it as a dependency and calls the define from a thin per-image caller, instead of
+  copying the build Job. The Terraform "mechanism" half (ECR repo, IAM, Pod Identity, image-builder
+  namespace + SA) lives in infra/eks/image-builder.tf; this chart is only the "execution" half.
+  Consumers: infra/eks charts/experiments (ddp-sample + generic caller) and workload projects
+  (e.g. the comfyui project) that add `dependencies: [{name: image-builder-lib, repository:
+  "file://<relative>/infra/eks/charts/image-builder-lib"}]` and run `helm dependency build`.
+type: library
+version: 0.1.0
+appVersion: "0.1.0"

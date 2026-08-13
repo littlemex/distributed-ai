@@ -237,3 +237,9 @@ infra/eks/backend.tf
 infra/eks/bootstrap/.terraform/
 infra/eks/bootstrap/*.tfstate
 infra/eks/bootstrap/*.tfstate.*
+
+# Vendored Helm chart dependencies (rebuilt from file:// source via 'helm dependency build')
+infra/eks/charts/experiments/charts/
+2026-08-12-comfyui-minmax-h3/charts/comfyui/charts/
+infra/eks/charts/experiments/Chart.lock
+2026-08-12-comfyui-minmax-h3/charts/comfyui/Chart.lock

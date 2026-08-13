@@ -19,3 +19,12 @@ description: |
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+
+# The in-cluster image builder Job is the shared image-builder-lib library chart (defined once in
+# the base module). Run `helm dependency build ./charts/comfyui` once to vendor it before
+# `helm template`. This crosses into the base module's chart on purpose (the workload reuses the
+# builder); the base module itself stays untouched.
+dependencies:
+  - name: image-builder-lib
+    version: 0.1.0
+    repository: "file://../../../infra/eks/charts/image-builder-lib"
