@@ -197,3 +197,37 @@ Expects the neuronDdp values map as the context (.).
 - { name: NEURON_RT_DBG_ZEROCOPY, value: "0" }
 {{- end }}
 {{- end -}}
+
+{{/*
+Neuron compile-cache wiring, shared by serving (neuron-serving-vllm) and training (neuron-ddp) so a
+third workload cannot drift. Each expects the neuronCache values map as the context (.). The env
+vars differ per workload (NEURON_COMPILED_ARTIFACTS vs NEURON_COMPILE_CACHE_URL) and stay inline.
+*/}}
+{{- define "experiments.neuronCacheValidate" -}}
+{{- if and .enabled (not .pvcName) }}{{ fail "neuronCache.enabled=true requires neuronCache.pvcName." }}{{- end }}
+{{- if and .enabled (not .mountPath) }}{{ fail "neuronCache.enabled=true requires neuronCache.mountPath (an empty path writes the cache to the container overlay and recompiles on every start)." }}{{- end }}
+{{- end -}}
+
+{{/*
+Cache volume. Caller guards on enablement and supplies indentation:
+  volumes:
+    {{- if $cache.enabled }}
+    {{- include "experiments.neuronCacheVolume" $cache | nindent 4 }}
+    {{- end }}
+*/}}
+{{- define "experiments.neuronCacheVolume" -}}
+- name: neuron-cache
+  persistentVolumeClaim:
+    claimName: {{ .pvcName | quote }}
+{{- end -}}
+
+{{/*
+Cache volumeMount. Caller guards on enablement and supplies indentation:
+  volumeMounts:
+    {{- if $cache.enabled }}
+    {{- include "experiments.neuronCacheVolumeMount" $cache | nindent 4 }}
+    {{- end }}
+*/}}
+{{- define "experiments.neuronCacheVolumeMount" -}}
+- { name: neuron-cache, mountPath: {{ .mountPath | quote }} }
+{{- end -}}

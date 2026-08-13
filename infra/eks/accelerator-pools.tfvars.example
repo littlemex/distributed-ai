@@ -63,5 +63,14 @@ accelerator_pools = {
   #   cb_reservation_id = "cr-REPLACE_ME"
   #   ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
   #   volume_size       = "500Gi"
+  #   # Optional host-memory guardrails for large-model first-run compilation.
+  #   # kubelet_system_reserved_memory         = "8Gi"
+  #   # kubelet_eviction_hard_memory_available = "4Gi"
+  #   # Optional steady-state recovery for a dead kubelet on this pool only.
+  #   # dry_run defaults to true, and because the reaper is one cluster-wide CronJob any
+  #   # enabled pool left at true keeps the shared reaper observe-only.
+  #   # stuck_node_reaper_enabled            = true
+  #   # stuck_node_reaper_notready_threshold = "20m"
+  #   # stuck_node_reaper_dry_run            = true
   # }
 }

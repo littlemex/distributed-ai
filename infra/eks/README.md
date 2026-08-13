@@ -134,7 +134,9 @@ topology.
 | `cb_reservation_id` | `cr-…` — required when `capacity_type = "reserved"`. |
 | `cb_end_date` | Optional RFC3339 expiry → schedules a per-pool pre-expiry SNS alert. |
 | `ami_alias` / `ami_ssm_parameter` | AMI selection. `ami_ssm_parameter` (e.g. the Neuron AL2023 AMI SSM path) overrides `ami_alias`. |
+| `kubelet_system_reserved_memory` / `kubelet_eviction_hard_memory_available` | Optional per-pool accelerator kubelet host-memory guardrails. Values must use Kubernetes quantity syntax (for example `8Gi` or `500Mi`). Unset keeps the current render (`systemReserved.memory = 2Gi`, no `evictionHard`). |
 | `volume_size`, `expire_after`, `consolidate_after`, `cpu_limit`, `memory_limit` | Root EBS size, node lifetime, empty-node consolidation delay (defaults per capacity type), and NodePool limits. |
+| `stuck_node_reaper_enabled` / `stuck_node_reaper_notready_threshold` / `stuck_node_reaper_dry_run` | Opt-in steady-state recovery for a `NodeClaim` already stuck deleting on a NotReady node. `stuck_node_reaper_notready_threshold` accepts `<int>s|m|h`. `stuck_node_reaper_dry_run` defaults to `true` (observe-only), and because the reaper is one cluster-wide CronJob, any enabled pool still left at `true` keeps the whole reaper observe-only. |
 
 Validations enforce: RFC1123 pool keys, non-empty `instance_types`,
 `device_plugin ∈ {nvidia, neuron}`, `capacity_type ∈ {reserved, on-demand, spot}`,
@@ -185,6 +187,8 @@ accelerator_pools = {
     cb_reservation_id = "cr-REPLACE_ME"        # zone comes from this reservation
     ami_ssm_parameter = "/aws/service/eks/optimized-ami/1.35/amazon-linux-2023/x86_64/neuron/recommended/image_id"
     volume_size       = "500Gi"
+    # Optional kubelet guardrails and stuck-node-reaper knobs: see
+    # accelerator-pools.tfvars.example's trn2-serving example.
   }
 }
 ```

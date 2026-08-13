@@ -21,6 +21,8 @@ Always pass the namespace with `-n` (the standard Helm flag) or `--set namespace
 **not both differently** (see Known Issues). `-n` is the recommended form; it also matches
 your subsequent `kubectl -n my-experiment ...` commands.
 
+Breaking change: `neuronServingVllm` now fails template rendering when `nodeRole` is empty; older revisions rendered an unschedulable Deployment instead.
+
 ## Workload catalog
 
 | values key | enables | verified on | status |
@@ -32,7 +34,7 @@ your subsequent `kubectl -n my-experiment ...` commands.
 | `torchrunTrain` | single-node MNIST MLP DDP via `torchrun` (batch/v1 Job, zero operator) | c6a.large (CPU/gloo, single-node) / g5.24xlarge (GPU path reviewed, not yet run) | gloo verified via the two-node gloo probe below; nccl path untested |
 | `trainjobTrain` | two-node MNIST MLP DDP via Kubeflow Trainer v2 TrainJob (`trainer.kubeflow.org/v1alpha1`), on the cluster runtime `torch-distributed-eks` | r5a.large x2 (CPU/gloo) | migrated from the verified `pytorchjobTrain` (PyTorchJob) — identical DDP mechanics (`[rank 0/2]`+`[rank 1/2]` gloo, synchronized grads, checkpoint to the shared mount by rank 0); the TrainJob wrapper itself not yet re-run on a live cluster; nccl path reviewed, not yet run on a GPU cluster |
 | `gpuServingVllm` | single-GPU vLLM OpenAI-compatible serving | g5.24xlarge (A10G x4) node bring-up verified (`nvidia-smi` confirmed the GPU); vLLM serving itself not yet exercised through this chart | partially verified |
-| `neuronServingVllm` | Neuron vLLM serving (whole trn2 node) | — | untested (no `neuron-cache-pvc` provisioned during review) |
+| `neuronServingVllm` | Neuron vLLM serving (whole trn2 node) | — | untested |
 | `vllmRay` | two-node pipeline-parallel vLLM via Ray | — | untested |
 
 A **two-node CPU gloo all-reduce** (`ALL 10 STEPS OK. world_size=2`, `DONE - SUCCESS`) was
@@ -53,7 +55,7 @@ Every workload's failure mode for a missing prerequisite is the same: the Pod/Jo
 |---|---|---|---|
 | `torchrunTrain`, `trainjobTrain` | `sharedStorage.existingClaimName` set to a PVC you already applied via `manifests/shared-pvc.yaml` (this chart does not create it) | `kubectl get pvc shared-claim` | render fails with a `required` error (`existingClaimName is required`) if unset; if set to a PVC that doesn't exist yet, the workload's Pod stays Pending |
 | `torchrunTrain`, `trainjobTrain` | `trainjobTrain.image` / `torchrunTrain.image` set to a real image (PyTorch + `ddp.py` MNIST MLP; see `manifests/ddp-sample/` in the module root for the build) | — | render itself fails with a `required` error (not a Pending — this one fails loud) |
-| `neuronServingVllm` | PVC `neuron-cache-pvc` (RWX; not created by this chart — bind it to your own EFS/FSx StorageClass or a static PV before enabling) | `kubectl get pvc neuron-cache-pvc` | Deployment's Pod stays Pending |
+| `neuronServingVllm` | The Deployment always references PVC `neuronServingVllm.cache.pvcName`; set `cache.create=true` plus `cache.volumeName` to have the chart create and statically bind it in the workload namespace, otherwise that PVC must already exist | `kubectl get pvc <cache.pvcName> -n <namespace>` | Deployment's Pod stays Pending |
 | `gpuServingVllm`, `neuronServingVllm` | (optional) Secret `hf-token` with key `token`, for gated HF models | `kubectl get secret hf-token` | fine if ungated model; gated model pull fails at container start |
 | any GPU workload | a `device_plugin="nvidia"` accelerator pool exists in `accelerator_pools` (terraform.tfvars) | `kubectl get nodepool` | Pod stays Pending, no matching node-role |
 | any Neuron workload | a `device_plugin="neuron"` accelerator pool exists | `kubectl get nodepool` | Pod stays Pending |
