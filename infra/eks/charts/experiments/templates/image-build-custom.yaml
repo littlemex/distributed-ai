@@ -1,6 +1,6 @@
 {{- /*
-image-build-custom — generic caller for the in-cluster image builder (experiments.imageBuildJob,
-templates/_image-build.tpl). Use this to build ANY image that does not have its own dedicated
+image-build-custom — generic caller for the in-cluster image builder (image-builder.job,
+image-builder-lib chart). Use this to build ANY image that does not have its own dedicated
 caller: you supply the identity (imageBuild.jobName) and the context, everything else is the same
 mechanism as the ddp-sample build. This is the intended path for a contextSource=configMap build
 (an ad-hoc/experiment image not committed to a repo), which by definition has no fixed caller.
@@ -32,5 +32,5 @@ template before applying -s/--show-only, so this file must be a no-op on the def
 the ddp-sample build uses; hence a selector rather than a fail.)
 */ -}}
 {{- if and .Values.imageBuild.enabled .Values.imageBuild.jobName }}
-{{- include "experiments.imageBuildJob" .Values.imageBuild }}
+{{- include "image-builder.job" .Values.imageBuild }}
 {{- end }}

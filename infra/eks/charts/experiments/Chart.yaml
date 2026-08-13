@@ -18,3 +18,12 @@ type: application
 version: 0.1.0
 # appVersion tracks nothing external; these are cluster-local sample workloads.
 appVersion: "0.1.0"
+
+# The in-cluster image builder Job template (image-builder.job) is a library chart shared with
+# workload projects, so it is defined once. The vendored charts/*.tgz is gitignored; run
+# `helm dependency update --skip-refresh charts/experiments` before `helm template` (re-run after
+# the library changes). The test harness does this automatically.
+dependencies:
+  - name: image-builder-lib
+    version: 0.1.0
+    repository: "file://../image-builder-lib"

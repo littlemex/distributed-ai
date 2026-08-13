@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # In-cluster image builder (rootless BuildKit -> ECR) static tests. The build/push Job is the
-# reusable experiments.imageBuildJob define (charts/experiments/templates/_image-build.tpl); the
+# reusable image-builder.job define (image-builder-lib library chart, a file:// dependency); the
 # ddp-sample workshop image is a thin caller (image-build-ddp-sample.yaml) and image-build-custom.yaml
 # is the generic caller. These render chart sources with `helm template` (static layer, no cluster)
 # to lock what the workshop/book depend on and to check the generic path + the fail-loud guards.
@@ -10,7 +10,21 @@ _ib_chart="$SCRIPT_DIR/../charts/experiments"
 _ib_repo="111122223333.dkr.ecr.ap-northeast-1.amazonaws.com/distai-eks-ddp-sample"
 _ib_golden="$SCRIPT_DIR/golden/image-build-ddp-sample.git.yaml"
 
-_ib_helm() { helm template exp "$_ib_chart" "$@" 2>&1; }
+# The build Job define lives in the image-builder-lib library chart, pulled in as a file://
+# dependency whose vendored charts/*.tgz is gitignored. Re-vendor from source UNCONDITIONALLY once
+# per run (not "only if a .tgz is missing" — a stale .tgz left in a workspace after editing the
+# library would otherwise make the test pass against the OLD define, the very drift we removed).
+# --skip-refresh keeps it offline (file:// dep); an update failure is surfaced, not swallowed.
+_ib_deps_ready=""
+_ib_helm() {
+  if [ -z "$_ib_deps_ready" ]; then
+    local _derr
+    _derr=$(helm dependency update --skip-refresh "$_ib_chart" 2>&1) \
+      || printf 'helm dependency update failed:\n%s\n' "$_derr" >&2
+    _ib_deps_ready=1
+  fi
+  helm template exp "$_ib_chart" "$@" 2>&1
+}
 
 # BEHAVIOR LOCK: the ddp-sample git render must stay byte-identical (the book cites this Job's name
 # and the helm command). A full golden diff catches ANY drift (name, args, resources, securityContext),
@@ -44,6 +58,16 @@ test_image_build_custom_render() {
   printf '%s\n' "$out" | grep -q "name: build-my-app-v1" || { echo "custom: Job not named for the image"; return 1; }
   printf '%s\n' "$out" | grep -q "name: stage-context"   || { echo "custom: stage-context initContainer missing"; return 1; }
   printf '%s\n' "$out" | grep -q "context=/workspace"    || { echo "custom: local build context missing"; return 1; }
+
+  # buildArgs + cpu (a git build, as a heavier workload like comfyui uses them)
+  out=$(_ib_helm -s templates/image-build-custom.yaml \
+        --set imageBuild.enabled=true --set imageBuild.jobName=build-heavy \
+        --set imageBuild.repository="$_ib_repo" --set imageBuild.tag=v1 \
+        --set imageBuild.contextSubPath=path/to/app --set imageBuild.cpu=4 \
+        --set imageBuild.buildArgs.APP_REF=v1.2.3) \
+    || { printf 'buildArgs/cpu render failed:\n%s\n' "$out"; return 1; }
+  printf '%s\n' "$out" | grep -q 'build-arg:APP_REF=v1.2.3' || { echo "buildArgs not rendered"; return 1; }
+  printf '%s\n' "$out" | grep -q 'cpu: "4"'                || { echo "cpu override not rendered"; return 1; }
 
   # No jobName -> the selector renders nothing. helm --show-only on an empty render exits non-zero
   # ("could not find template … in chart"); that is the no-op, so we assert only that no Job appears.

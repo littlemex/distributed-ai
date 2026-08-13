@@ -1,7 +1,7 @@
 {{- /*
 image-build-ddp-sample — build the workshop's ddp-sample image IN-CLUSTER with rootless BuildKit
 and push to ECR, so the workshop needs no local docker/finch. This is a THIN CALLER: the actual
-build/push Job is the reusable "experiments.imageBuildJob" define (templates/_image-build.tpl);
+build/push Job is the reusable "image-builder.job" define (image-builder-lib chart);
 this file supplies only ddp-sample's identity (its Job name and its git build-context sub-path).
 Any other image reuses the same builder with its own thin caller (own jobName / contextSubPath),
 instead of copying this template. The Terraform "mechanism" half (ECR repo, IAM role, Pod Identity,
@@ -36,5 +36,5 @@ image builder docs (docs/image-builder.md); that is not ddp-sample's path.
 {{- $args := deepCopy .Values.imageBuild -}}
 {{- $_ := set $args "jobName" "build-ddp-sample" -}}
 {{- $_ := set $args "contextSubPath" (.Values.imageBuild.contextSubPath | default "infra/eks/manifests/ddp-sample") -}}
-{{- include "experiments.imageBuildJob" $args }}
+{{- include "image-builder.job" $args }}
 {{- end }}
