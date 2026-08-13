@@ -1,0 +1,9 @@
+# Basic07 scenario values: a small ungated model served by vLLM on a GPU. The chart
+# (charts/experiments values.yaml, gpuServingVllm) holds the rest; nodeRole is cluster-specific
+# and passed at deploy time (--set gpuServingVllm.nodeRole=$NODE_ROLE).
+gpuServingVllm:
+  enabled: true
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  memory: 8Gi
+  shmSize: 2Gi
+  cpu: "2"

@@ -466,6 +466,44 @@ neuronServingVllm:
   memory: 512Gi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 8b) neuronVllmPlugin — Neuron serving via the vLLM Neuron plugin (Deployment + Service).
+# ─────────────────────────────────────────────────────────────────────────────
+# The modern, plugin-based path (distinct from neuronServingVllm above, which is the legacy
+# optimum-neuron/NxDI DLC). Uses the vLLM Neuron plugin DLC; the plugin auto-selects the neuron
+# platform once the pod has a Neuron device. This is what Basic09 uses. Configurable per model.
+neuronVllmPlugin:
+  enabled: false
+  # Optional: the accelerator_pools key of the target Neuron pool (Karpenter labels its nodes
+  # node-role=<key>). Leave "" to rely solely on the device request below to land on the Neuron
+  # node — a Capacity-Block managed nodegroup has no such label, so "" is the common case here.
+  nodeRole: ""
+  model: Qwen/Qwen3-VL-4B-Instruct
+  image: public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.21.0.1.0.0-neuronx-py313-sdk2.31.0-ubuntu24.04
+  # Request the whole Trainium DEVICE (aws.amazon.com/neuron), NOT individual neuroncores: a
+  # neuroncore request injects NEURON_RT_VISIBLE_CORES, which the plugin's tensor-parallel
+  # (multiprocessing) worker rejects. neuronDevices maps to the aws.amazon.com/neuron request.
+  neuronDevices: 1
+  # tensor-parallel-size = logical NeuronCores. trn2.3xlarge with LNC=2 exposes 4 logical cores;
+  # if a node advertises aws.amazon.com/neuroncore: 8 (LNC=1), set this to 8.
+  tpSize: 4
+  maxModelLen: 8192
+  maxNumSeqs: 4
+  cpu: "8"
+  memoryRequest: 24Gi
+  # memory is the container limit; keep headroom for the first-run NEFF compile fork.
+  memory: 96Gi
+  port: 8000
+  # vLLM's compile cache (NEFF on Neuron). emptyDir here; point at a PVC to persist across pods.
+  cacheRoot: /work/neuron_cache
+  shmSize: 8Gi
+  # First run pulls a multi-GB DLC, downloads the model, and compiles to NEFF — beyond the default
+  # 600s Deployment progress deadline. readiness tolerates ~1h; the deadline caps the whole rollout.
+  progressDeadlineSeconds: 2400
+  readinessInitialDelaySeconds: 120
+  readinessPeriodSeconds: 15
+  readinessFailureThreshold: 240
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 9) vllmRay — two-node tensor-parallel vLLM over a Ray head+worker (GPU).
 # ─────────────────────────────────────────────────────────────────────────────
 vllmRay:

@@ -7,6 +7,21 @@ test_gpu_node_launch() {
   wait_for_pod "$NAMESPACE" gpu-smoke-test Succeeded "$TIMEOUT_GPU"
 }
 
+# Basic07 end to end: run the SAME workshop scenario (charts/experiments gpuServingVllm) that the
+# book documents — deploy -> verify (/v1/models + a chat completion) -> teardown. This is the live
+# counterpart to the static gpu-serving contract check.
+test_gpu_serving_vllm() {
+  local sc="$SCRIPT_DIR/scenarios/basic07-gpu-vllm"
+  resolve_gpu_nodepool
+  [ -n "$GPU_NODEPOOL" ] || return 2   # SKIP: no NVIDIA pool derived
+  # shellcheck disable=SC2064
+  trap "NAMESPACE='$NAMESPACE' NODE_ROLE='$GPU_NODEPOOL' bash '$sc/teardown.sh' >/dev/null 2>&1 || true" EXIT
+  # shellcheck disable=SC2064
+  trap "NAMESPACE='$NAMESPACE' NODE_ROLE='$GPU_NODEPOOL' bash '$sc/teardown.sh' >/dev/null 2>&1 || true; exit 143" TERM
+  NAMESPACE="$NAMESPACE" NODE_ROLE="$GPU_NODEPOOL" bash "$sc/deploy.sh" || return 1
+  NAMESPACE="$NAMESPACE" bash "$sc/verify.sh" || return 1
+}
+
 test_nvidia_smi() {
   local gpu_lines
   gpu_lines=$(kubectl logs gpu-smoke-test -n "$NAMESPACE" 2>/dev/null | grep -cE "^\| +[0-9]+ " || true)
