@@ -9,6 +9,13 @@
 #
 # Gated OFF by default: S3 Files is EFS-backed and billed for the active-set high-performance
 # storage, so it is opt-in per campaign, like the MLflow App.
+#
+# CROSS-STATE DESTROY ORDER (must): destroy infra/eks BEFORE this module. The fs here cannot be
+# deleted while infra/eks's mount target exists; a data-layer-first destroy deletes the access
+# point (instant outage on live analysis-mcp pods) and then fails on the fs, leaving a half-broken
+# state. This is enforceable only operationally (the mount target lives in another state); document
+# it in any teardown runbook. Re-creating later mints a NEW AccessPointId, so every consumer's
+# volumeHandle (s3files_volume_handle output) changes and charts must be re-applied.
 
 variable "s3files_enabled" {
   description = <<-EOT

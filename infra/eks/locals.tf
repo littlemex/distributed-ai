@@ -20,13 +20,13 @@ locals {
         ? p.efa_interface_count
         : (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_supported
           ? coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_maximum_interfaces, 0)
-          : 0)
+        : 0)
       )
       multi_card = (
         p.efa_multi_card != null
         ? p.efa_multi_card
         : (data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_supported &&
-           coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_maximum_interfaces, 0) > 1)
+        coalesce(data.aws_ec2_instance_type.pool_rep[local.pool_rep_instance_type[k]].efa_maximum_interfaces, 0) > 1)
       )
     }
   }
@@ -87,7 +87,7 @@ locals {
       for k, p in var.accelerator_pools : [
         for t in p.taints : { key = t.key, effect = t.effect }
       ]
-    ])) : {
+      ])) : {
       key      = pair.key
       operator = "Exists"
       effect   = pair.effect

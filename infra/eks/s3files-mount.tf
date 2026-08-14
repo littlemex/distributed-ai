@@ -17,17 +17,19 @@
 #
 # There is no aws_s3files_* resource yet, but AWS::S3Files::MountTarget is a Cloud Control
 # type, so the mount target is managed declaratively via aws_cloudcontrolapi_resource.
+#
+# CROSS-STATE DESTROY ORDER (must): tear down infra/eks BEFORE infra/data-layer. This stack's
+# mount target must be gone before data-layer destroys the S3 Files file system — an EFS-backed fs
+# cannot be deleted while a mount target exists, so a data-layer-first destroy deletes the access
+# point (instant I/O outage on live pods), then FAILS on the fs, leaving a half-torn-down,
+# service-down state. The dependency cannot be expressed in Terraform (this state only holds the
+# fs id as a plain var), so it is enforced operationally (teardown runbook), not by code.
 ################################################################################
 
 variable "s3files_enabled" {
-  description = "Create the in-VPC S3 Files mount target + the S3 Files IAM for the EFS CSI driver, so analysis-mcp can mount the trace bucket. Default OFF. Requires the data-layer S3 Files file system (pass its id/bucket/kms below)."
+  description = "Create the in-VPC S3 Files mount target + the S3 Files IAM for the EFS CSI driver, so analysis-mcp can mount the trace bucket. Default OFF. Requires the data-layer S3 Files file system (pass its id below). The file_system_id-required check is a precondition on the mount target (not a variable validation), so this stack still validates under Terraform < 1.9 — matching the data-layer's choice (R4)."
   type        = bool
   default     = false
-
-  validation {
-    condition     = var.s3files_enabled == false || var.s3files_file_system_id != ""
-    error_message = "s3files_enabled is true but s3files_file_system_id is empty — set it to infra/data-layer's s3files_file_system_id output."
-  }
 }
 
 variable "s3files_file_system_id" {
@@ -36,71 +38,38 @@ variable "s3files_file_system_id" {
   default     = ""
 }
 
-variable "s3files_trace_bucket_arn" {
-  description = "ARN of the trace bucket the S3 Files fs is over (for the node's direct-read policy). Required when s3files_enabled."
-  type        = string
-  default     = ""
-}
-
-variable "s3files_kms_key_arn" {
-  description = "KMS CMK ARN encrypting the trace bucket (SSE-KMS). Empty => no KMS statement (SSE-S3 bucket)."
-  type        = string
-  default     = ""
-}
-
 variable "s3files_subnet_index" {
-  description = "Index into module.vpc.private_subnets for the S3 Files mount target (single-AZ, like fsx_subnet_index). Pods reading the mount should run in this AZ; add more mount targets for multi-AZ."
+  description = "Index into module.vpc.private_subnets for the S3 Files mount target (single-AZ, like fsx_subnet_index). The mount is reachable only from this AZ, so charts pin their pods to it via the PV nodeAffinity (s3files_mount_target_az output). Add more mount targets for multi-AZ."
   type        = number
   default     = 0
 }
 
 locals {
-  # s3files:ClientMount/ClientWrite/ClientRootAccess + Describe*, scoped to the account's S3 Files.
-  # This is all the CONTROLLER needs (it attaches the volume; it does not read object bytes or
-  # decrypt them).
-  s3files_client_statement = {
-    Sid    = "S3FilesClient"
-    Effect = "Allow"
-    Action = ["s3files:ClientMount", "s3files:ClientWrite", "s3files:ClientRootAccess",
-      "s3files:DescribeMountTargets", "s3files:DescribeFileSystems",
-    "s3files:DescribeAccessPoints", "s3files:GetAccessPoint", "s3files:ListAccessPoints"]
-    Resource = "*"
-  }
-  # Direct S3 read + KMS decrypt are needed ONLY by the NODE plugin, which performs the mount and
-  # reads/decrypts the objects. Keeping them off the controller role is least-privilege (the
-  # controller's shared grant previously handed it S3+KMS it never uses).
-  s3files_direct_read_statement = {
-    Sid      = "S3DirectRead"
-    Effect   = "Allow"
-    Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:ListBucket"]
-    Resource = [var.s3files_trace_bucket_arn, "${var.s3files_trace_bucket_arn}/*"]
-  }
-  s3files_kms_statement = var.s3files_kms_key_arn == "" ? [] : [{
-    Sid      = "KmsRead"
-    Effect   = "Allow"
-    Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
-    Resource = [var.s3files_kms_key_arn]
-  }]
-  # efs-utils on the node writes mount logs/metrics to CloudWatch; without this you lose exactly
-  # the `mount.nfs4: access denied` diagnostics this file's header says were debugged live (B3).
-  s3files_node_logging_statement = {
-    Sid    = "EfsUtilsLogs"
-    Effect = "Allow"
-    Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents",
-    "logs:DescribeLogStreams"]
-    Resource = "*"
-  }
-
-  # Controller: client actions only.
-  s3files_controller_policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = [local.s3files_client_statement]
-  })
-  # Node: client + direct S3 read + KMS + efs-utils logging.
-  s3files_node_policy = jsonencode({
+  # The CSI plugin authorizes the NFS mount with THIS role's credential (not the pod's). Per the S3
+  # Files docs, s3files:ClientMount WITHOUT s3files:ClientWrite yields a READ-ONLY mount, enforced
+  # on every mount — this is exactly the AWS managed AmazonS3FilesClientReadOnlyAccess vs
+  # ...ClientFullAccess split ("ClientWrite ... not required for read-only connections"). Unlike
+  # EFS, S3 Files has NO file-system-policy resource (AWS::S3Files::FileSystem exposes no policy
+  # property), so the client IAM action IS the enforcement; there is nothing else to attach.
+  # Because this node-plugin role authorizes ALL S3 Files mounts on the cluster, no pod can obtain a
+  # RW mount regardless of its PV — that is what keeps the "only the janitor deletes" invariant from
+  # being bypassed via the NFS path. Deliberately NO ClientWrite/ClientRootAccess.
+  #
+  # Also deliberately NO s3:GetObject/KMS: the docs list a direct-S3-read inline policy only as an
+  # optional READ-PERFORMANCE optimization (read-only; no Delete, so it does not re-open the
+  # invariant). Omitted for least privilege; add s3:GetObject/GetObjectVersion/ListBucket (+
+  # kms:Decrypt for SSE-KMS) on the node role only if read-throughput measurements justify it.
+  # Controller and node share this one minimal read-only policy.
+  s3files_client_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = concat([local.s3files_client_statement, local.s3files_direct_read_statement,
-    local.s3files_node_logging_statement], local.s3files_kms_statement)
+    Statement = [{
+      Sid    = "S3FilesClientMountReadOnly"
+      Effect = "Allow"
+      Action = ["s3files:ClientMount",
+        "s3files:DescribeMountTargets", "s3files:DescribeFileSystems",
+      "s3files:DescribeAccessPoints", "s3files:GetAccessPoint", "s3files:ListAccessPoints"]
+      Resource = "*"
+    }]
   })
 }
 
@@ -131,6 +100,13 @@ resource "aws_cloudcontrolapi_resource" "s3files_mt" {
     SubnetId       = module.vpc.private_subnets[var.s3files_subnet_index]
     SecurityGroups = [aws_security_group.s3files_mt[0].id]
   })
+
+  lifecycle {
+    precondition {
+      condition     = var.s3files_file_system_id != ""
+      error_message = "s3files_enabled=true but s3files_file_system_id is empty — set it to infra/data-layer's s3files_file_system_id output. (precondition, not a variable validation, so this stack validates under Terraform < 1.9 — R4.)"
+    }
+  }
 }
 
 # --- S3 Files IAM for the EFS CSI driver ------------------------------------------------------
@@ -140,7 +116,7 @@ resource "aws_iam_role_policy" "efs_csi_s3files" {
   count  = var.s3files_enabled ? 1 : 0
   name   = "s3files-client"
   role   = aws_iam_role.efs_csi.id
-  policy = local.s3files_controller_policy
+  policy = local.s3files_client_policy
 }
 
 # Node plugin: its own role + Pod Identity for efs-csi-node-sa (do NOT rely on the node instance
@@ -168,7 +144,17 @@ resource "aws_iam_role_policy" "efs_csi_node_s3files" {
   count  = var.s3files_enabled ? 1 : 0
   name   = "s3files-client"
   role   = aws_iam_role.efs_csi_node[0].id
-  policy = local.s3files_node_policy
+  policy = local.s3files_client_policy
+}
+
+# Pod Identity replaces the SA's credential for ALL its AWS calls, so once efs-csi-node-sa is
+# associated with this role, the node plugin no longer uses the node instance role for its EXISTING
+# EFS work either. Without the EFS CSI managed policy here, enabling S3 Files (and restarting the
+# DaemonSet) would break every current EFS mount with `access denied` (N1). Carry both.
+resource "aws_iam_role_policy_attachment" "efs_csi_node_efs" {
+  count      = var.s3files_enabled ? 1 : 0
+  role       = aws_iam_role.efs_csi_node[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy"
 }
 
 resource "aws_eks_pod_identity_association" "efs_csi_node" {
@@ -179,7 +165,27 @@ resource "aws_eks_pod_identity_association" "efs_csi_node" {
   role_arn        = aws_iam_role.efs_csi_node[0].arn
 }
 
+# ENABLE-DAY STEP (R3, not enforceable in pure TF): EKS Pod Identity credentials are injected by a
+# mutating webhook at POD CREATE time, so the efs-csi-node DaemonSet pods already running when this
+# association is created keep using the node INSTANCE role until restarted — and mount as
+# `access denied by server` on those nodes. After the first `apply` that flips s3files_enabled=true,
+# run:  kubectl rollout restart ds/efs-csi-node -n kube-system
+# New (Karpenter) nodes pick up the credential automatically; only pre-existing nodes need this.
+
 output "s3files_mount_target_ip" {
   description = "S3 Files mount target IPv4 (null when s3files_enabled=false)."
   value       = var.s3files_enabled ? jsondecode(aws_cloudcontrolapi_resource.s3files_mt[0].properties).Ipv4Address : null
+}
+
+data "aws_subnet" "s3files_mt" {
+  count = var.s3files_enabled ? 1 : 0
+  id    = module.vpc.private_subnets[var.s3files_subnet_index]
+}
+
+output "s3files_mount_target_az" {
+  description = "Availability zone of the single S3 Files mount target. The mount is reachable ONLY from this AZ (NFS DNS resolves per-AZ), so pass it to charts as s3files.zone to pin the PV nodeAffinity — otherwise a pod scheduled in another AZ hangs in ContainerCreating (lifecycle B3). null when disabled."
+  # Read the SUBNET's real AZ, not azs[subnet_index] — the private_subnets<->azs index mapping is
+  # not 1:1 when there is more than one private subnet per AZ, and a wrong AZ here would pin every
+  # pod to an AZ the mount can't reach (the worst form of B3).
+  value = var.s3files_enabled ? data.aws_subnet.s3files_mt[0].availability_zone : null
 }
