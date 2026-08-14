@@ -56,31 +56,51 @@ variable "s3files_subnet_index" {
 
 locals {
   # s3files:ClientMount/ClientWrite/ClientRootAccess + Describe*, scoped to the account's S3 Files.
-  s3files_client_statements = [
-    {
-      Sid      = "S3FilesClient"
-      Effect   = "Allow"
-      Action   = ["s3files:ClientMount", "s3files:ClientWrite", "s3files:ClientRootAccess",
-                  "s3files:DescribeMountTargets", "s3files:DescribeFileSystems",
-                  "s3files:DescribeAccessPoints", "s3files:GetAccessPoint", "s3files:ListAccessPoints"]
-      Resource = "*"
-    },
-    {
-      Sid      = "S3DirectRead"
-      Effect   = "Allow"
-      Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:ListBucket"]
-      Resource = [var.s3files_trace_bucket_arn, "${var.s3files_trace_bucket_arn}/*"]
-    },
-  ]
+  # This is all the CONTROLLER needs (it attaches the volume; it does not read object bytes or
+  # decrypt them).
+  s3files_client_statement = {
+    Sid    = "S3FilesClient"
+    Effect = "Allow"
+    Action = ["s3files:ClientMount", "s3files:ClientWrite", "s3files:ClientRootAccess",
+      "s3files:DescribeMountTargets", "s3files:DescribeFileSystems",
+    "s3files:DescribeAccessPoints", "s3files:GetAccessPoint", "s3files:ListAccessPoints"]
+    Resource = "*"
+  }
+  # Direct S3 read + KMS decrypt are needed ONLY by the NODE plugin, which performs the mount and
+  # reads/decrypts the objects. Keeping them off the controller role is least-privilege (the
+  # controller's shared grant previously handed it S3+KMS it never uses).
+  s3files_direct_read_statement = {
+    Sid      = "S3DirectRead"
+    Effect   = "Allow"
+    Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:ListBucket"]
+    Resource = [var.s3files_trace_bucket_arn, "${var.s3files_trace_bucket_arn}/*"]
+  }
   s3files_kms_statement = var.s3files_kms_key_arn == "" ? [] : [{
     Sid      = "KmsRead"
     Effect   = "Allow"
     Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
     Resource = [var.s3files_kms_key_arn]
   }]
-  s3files_policy = jsonencode({
+  # efs-utils on the node writes mount logs/metrics to CloudWatch; without this you lose exactly
+  # the `mount.nfs4: access denied` diagnostics this file's header says were debugged live (B3).
+  s3files_node_logging_statement = {
+    Sid    = "EfsUtilsLogs"
+    Effect = "Allow"
+    Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents",
+    "logs:DescribeLogStreams"]
+    Resource = "*"
+  }
+
+  # Controller: client actions only.
+  s3files_controller_policy = jsonencode({
     Version   = "2012-10-17"
-    Statement = concat(local.s3files_client_statements, local.s3files_kms_statement)
+    Statement = [local.s3files_client_statement]
+  })
+  # Node: client + direct S3 read + KMS + efs-utils logging.
+  s3files_node_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat([local.s3files_client_statement, local.s3files_direct_read_statement,
+    local.s3files_node_logging_statement], local.s3files_kms_statement)
   })
 }
 
@@ -120,7 +140,7 @@ resource "aws_iam_role_policy" "efs_csi_s3files" {
   count  = var.s3files_enabled ? 1 : 0
   name   = "s3files-client"
   role   = aws_iam_role.efs_csi.id
-  policy = local.s3files_policy
+  policy = local.s3files_controller_policy
 }
 
 # Node plugin: its own role + Pod Identity for efs-csi-node-sa (do NOT rely on the node instance
@@ -148,7 +168,7 @@ resource "aws_iam_role_policy" "efs_csi_node_s3files" {
   count  = var.s3files_enabled ? 1 : 0
   name   = "s3files-client"
   role   = aws_iam_role.efs_csi_node[0].id
-  policy = local.s3files_policy
+  policy = local.s3files_node_policy
 }
 
 resource "aws_eks_pod_identity_association" "efs_csi_node" {

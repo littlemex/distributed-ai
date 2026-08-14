@@ -67,6 +67,10 @@ resource "aws_iam_role_policy" "producer" {
       {
         # PutObject to upload; GetObject because upload_finalized verifies via HeadObject
         # (HeadObject requires s3:GetObject) — without this every verified upload 403s in prod.
+        # Deliberately NO s3:DeleteObject: the producer is write-only for traces. store.log's
+        # failed-upload cleanup path (delete_prefix) is best-effort and degrades to a logged
+        # warning + an orphan prefix that the janitor (which holds the scoped Delete role below)
+        # collects — so a compromised producer can neither erase run history nor other runs' blobs.
         Effect   = "Allow"
         Action   = ["s3:PutObject", "s3:GetObject"]
         Resource = [for b in aws_s3_bucket.traces : "${b.arn}/*"]
@@ -148,6 +152,48 @@ resource "aws_iam_role_policy" "mcp_reader" {
         Effect   = "Allow"
         Action   = ["kms:Decrypt"]
         Resource = [aws_kms_key.data.arn]
+      },
+    ]
+  })
+}
+
+# --- janitor role: GC orphaned trace blobs (the ONLY role holding s3:DeleteObject on traces) ----
+# Lives in the data-layer (the record of record) regardless of where the janitor's compute runs:
+# a cluster teardown must never take the delete-capable identity with it. Trust is EKS Pod Identity
+# so a CronJob can assume it; a Lambda placement would swap this principal for lambda.amazonaws.com.
+# It reads MLflow authoritatively (GetRun/SearchRuns) to decide orphans and lists/deletes S3 —
+# deliberately NOT mcp-reader (readers must stay Delete-less) and NOT the producer (write-only).
+resource "aws_iam_role" "janitor" {
+  name               = "${var.name_prefix}-janitor"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
+  tags               = var.tags
+}
+
+resource "aws_iam_role_policy" "janitor" {
+  name = "janitor-gc"
+  role = aws_iam_role.janitor.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # Scan run prefixes (ListBucket), read the retention marker (HeadObject needs GetObject),
+        # and delete orphan blobs. Scoped to the trace buckets only.
+        Effect = "Allow"
+        Action = ["s3:ListBucket", "s3:GetObject", "s3:DeleteObject"]
+        Resource = concat(
+          [for b in aws_s3_bucket.traces : b.arn],
+          [for b in aws_s3_bucket.traces : "${b.arn}/*"],
+        )
+      },
+      {
+        # Authoritative run lookups to classify orphans (fail-closed on any other MLflow error).
+        Effect = "Allow"
+        Action = [
+          "sagemaker-mlflow:GetExperiment",
+          "sagemaker-mlflow:GetRun",
+          "sagemaker-mlflow:SearchRuns",
+        ]
+        Resource = var.mlflow_app_arn != "" ? [var.mlflow_app_arn] : ["*"]
       },
     ]
   })

@@ -87,8 +87,8 @@ resource "aws_iam_role_policy" "s3files" {
         Action = ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt", "kms:ReEncryptFrom", "kms:ReEncryptTo"]
         Condition = {
           StringLike = {
-            "kms:ViaService"                     = "s3.${var.region}.amazonaws.com"
-            "kms:EncryptionContext:aws:s3:arn"   = [
+            "kms:ViaService" = "s3.${var.region}.amazonaws.com"
+            "kms:EncryptionContext:aws:s3:arn" = [
               aws_s3_bucket.traces[var.s3files_trace_region].arn,
               "${aws_s3_bucket.traces[var.s3files_trace_region].arn}/*",
             ]
@@ -115,8 +115,8 @@ resource "aws_iam_role_policy" "s3files" {
 
 # --- The S3 Files file system + access point (via Cloud Control) -------------------------------
 resource "aws_cloudcontrolapi_resource" "s3files_fs" {
-  count       = var.s3files_enabled ? 1 : 0
-  type_name   = "AWS::S3Files::FileSystem"
+  count     = var.s3files_enabled ? 1 : 0
+  type_name = "AWS::S3Files::FileSystem"
   desired_state = jsonencode({
     Bucket              = aws_s3_bucket.traces[var.s3files_trace_region].arn
     RoleArn             = aws_iam_role.s3files[0].arn
@@ -125,11 +125,26 @@ resource "aws_cloudcontrolapi_resource" "s3files_fs" {
     Tags                = [for k, v in var.tags : { Key = k, Value = v }]
   })
   depends_on = [aws_iam_role_policy.s3files]
+
+  # Guard the "magic region" default: s3files_trace_region must name a real trace bucket AND match
+  # this data-layer's region — a mismatch would silently build a cross-region S3 Files fs whose
+  # regional mount target (infra/eks) can't reach it. (precondition, not a cross-variable
+  # validation block, so no Terraform >= 1.9 requirement — see M10.)
+  lifecycle {
+    precondition {
+      condition     = contains(var.trace_regions, var.s3files_trace_region)
+      error_message = "s3files_trace_region (${var.s3files_trace_region}) must be one of trace_regions (${join(", ", var.trace_regions)})."
+    }
+    precondition {
+      condition     = var.s3files_trace_region == var.region
+      error_message = "s3files_trace_region (${var.s3files_trace_region}) must match this data-layer's region (${var.region}); S3 Files mount targets are regional."
+    }
+  }
 }
 
 resource "aws_cloudcontrolapi_resource" "s3files_ap" {
-  count       = var.s3files_enabled ? 1 : 0
-  type_name   = "AWS::S3Files::AccessPoint"
+  count     = var.s3files_enabled ? 1 : 0
+  type_name = "AWS::S3Files::AccessPoint"
   desired_state = jsonencode({
     FileSystemId  = jsondecode(aws_cloudcontrolapi_resource.s3files_fs[0].properties).FileSystemId
     RootDirectory = { Path = "/" }
