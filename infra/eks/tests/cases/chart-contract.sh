@@ -6,6 +6,48 @@
 
 _cc_chart() { printf '%s' "$SCRIPT_DIR/../charts/experiments"; }
 
+# Vendor the chart's subchart dependencies (image-builder-lib) so `helm template` can render. The
+# vendored charts/ dir and Chart.lock are gitignored, so on a fresh checkout (CI, a reviewer's first
+# run) they are absent and every render below fails with a "dependency missing" error. Run at most
+# once per process (guarded): `helm dependency build` rewrites charts/*.tgz (and Chart.lock), so
+# calling it concurrently would race on those files. `update` is a fallback for the rare Chart.lock
+# / Chart.yaml digest mismatch. The current dependency is a local path (file://), so this needs no
+# network — a future remote dependency would change that. A vendoring failure is fatal and its
+# output surfaced: swallowing it would resurface downstream as a confusing render error with no
+# vendoring context (same reasoning as scenarios/*/deploy.sh). Callers must use `|| return 1`.
+_cc_ensure_deps() {
+  [ -n "${_CC_DEPS_DONE:-}" ] && return 0
+  local chart out; chart="$(_cc_chart)"
+  if ! out="$(helm dependency build "$chart" 2>&1)"; then
+    out="$(helm dependency update "$chart" 2>&1)" || { echo "chart dependency vendoring failed: $out"; return 1; }
+  fi
+  _CC_DEPS_DONE=1
+}
+
+# Render a single template from the chart with the given --set flags, failing the test with the
+# helm error if the render fails. Ensures deps are vendored first. Args: <template-file> [--set ...]
+_cc_render() {
+  local tmpl="$1"; shift
+  _cc_ensure_deps || return 1
+  helm template cc "$(_cc_chart)" --show-only "templates/$tmpl" "$@"
+}
+
+# Assert a component renders NOTHING when disabled. `helm template --show-only` on a template that
+# evaluated to empty exits non-zero with "could not find template ... in chart"; that specific error
+# is the success signal here. Any OTHER failure (a missing dependency, a template execution error
+# from a default-values regression) must fail the test loudly rather than be misread as "correctly
+# disabled" — otherwise a change that breaks `helm install` at defaults would slip through this P0.
+# Args: <template-file>
+_cc_assert_absent_when_disabled() {
+  local tmpl="$1" err
+  _cc_ensure_deps || return 1
+  if err="$(helm template cc "$(_cc_chart)" --show-only "templates/$tmpl" 2>&1)"; then
+    echo "$tmpl rendered while disabled"; return 1
+  fi
+  printf '%s' "$err" | grep -q 'could not find template' \
+    || { echo "unexpected failure rendering disabled $tmpl: $err"; return 1; }
+}
+
 # True if the first non-comment, non-blank line strictly after a top-level 'limits:' key contains
 # <needle> at exactly (limits-indent + 2) spaces — i.e. <needle> is really the first key inside the
 # limits: mapping, not merely present somewhere in the text. A plain `grep -q <needle>` would still
@@ -50,12 +92,9 @@ _cc_assert_serving() {
 
 # gpuServingVllm (Basic07): renders nothing by default; with nodeRole it is a GPU vLLM Deployment.
 test_static_gpu_serving_contract() {
-  local chart render
-  chart="$(_cc_chart)"
-  if helm template cc "$chart" --show-only templates/gpu-serving-vllm.yaml >/dev/null 2>&1; then
-    echo "gpuServingVllm rendered while disabled"; return 1
-  fi
-  render="$(helm template cc "$chart" --show-only templates/gpu-serving-vllm.yaml \
+  local render
+  _cc_assert_absent_when_disabled gpu-serving-vllm.yaml || return 1
+  render="$(_cc_render gpu-serving-vllm.yaml \
     --set gpuServingVllm.enabled=true --set gpuServingVllm.nodeRole=test-pool)" || return 1
   _cc_assert_serving "$render" 'nvidia.com/gpu:' || return 1
   # nodeRole must be wired into the nodeSelector.
@@ -65,12 +104,9 @@ test_static_gpu_serving_contract() {
 # neuronVllmPlugin (Basic09): renders nothing by default; with enabled it is a Neuron vLLM plugin
 # Deployment that requests the whole device and uses the Recreate strategy.
 test_static_neuron_plugin_contract() {
-  local chart render
-  chart="$(_cc_chart)"
-  if helm template cc "$chart" --show-only templates/neuron-serving-vllm-plugin.yaml >/dev/null 2>&1; then
-    echo "neuronVllmPlugin rendered while disabled"; return 1
-  fi
-  render="$(helm template cc "$chart" --show-only templates/neuron-serving-vllm-plugin.yaml \
+  local render
+  _cc_assert_absent_when_disabled neuron-serving-vllm-plugin.yaml || return 1
+  render="$(_cc_render neuron-serving-vllm-plugin.yaml \
     --set neuronVllmPlugin.enabled=true)" || return 1
   # Device request, NOT neuroncore (the whole point — a neuroncore request breaks TP multiproc).
   _cc_assert_serving "$render" 'aws.amazon.com/neuron:' || return 1
