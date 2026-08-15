@@ -18,7 +18,7 @@ mcps:
   - name: analysis
     transport: http
     image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/xprof", tag: latest }
-    command: ["python", "-m", "analysis_mcp.server"]
+    command: ["xprof-analysis-mcp"]
     serviceAccountName: mcp-reader
     env:
       MCP_MLFLOW_TRACKING_URI: "<mlflow-app-arn>"
@@ -36,4 +36,4 @@ mcps:
   - name: knowledge
     transport: http
     image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/xprof-knowledge", tag: latest }
-    command: ["python", "-m", "knowledge_mcp.server"]
+    command: ["xprof-knowledge-mcp"]
