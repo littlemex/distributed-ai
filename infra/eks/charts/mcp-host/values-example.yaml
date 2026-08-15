@@ -13,12 +13,12 @@ mcps:
       MLFLOW_MCP_TOOLS: "ml"
       AWS_REGION: "<region>"
 
-  # Analysis MCP (littlemex/xprof image) — resolves a run to its profile files on the S3 Files mount
+  # Analysis MCP (littlemex/accelprof image) — resolves a run to its profile files on the S3 Files mount
   # and analyzes them. Needs the mount and the mcp-reader Pod Identity.
   - name: analysis
     transport: http
-    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/xprof", tag: latest }
-    command: ["xprof-analysis-mcp"]
+    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof", tag: latest }
+    command: ["accelprof-analysis-mcp"]
     serviceAccountName: mcp-reader
     env:
       MCP_MLFLOW_TRACKING_URI: "<mlflow-app-arn>"
@@ -31,9 +31,9 @@ mcps:
       mountBase: "/traces"
       zone: "<mount-target-az>"
 
-  # Knowledge MCP (littlemex/xprof-knowledge image) — GPU/Neuron/common tuning playbooks. No mount,
+  # Knowledge MCP (littlemex/accelprof-knowledge image) — GPU/Neuron/common tuning playbooks. No mount,
   # no AWS credentials (curated content only).
   - name: knowledge
     transport: http
-    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/xprof-knowledge", tag: latest }
-    command: ["xprof-knowledge-mcp"]
+    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof-knowledge", tag: latest }
+    command: ["accelprof-knowledge-mcp"]

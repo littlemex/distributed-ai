@@ -7,8 +7,8 @@ no template change. A laptop reaches each over `kubectl port-forward` as a strea
 ## Two transports
 
 - **`transport: http`** — the server speaks streamable-http natively (the
-  [xprof](https://github.com/littlemex/xprof) analysis MCP, the
-  [xprof-knowledge](https://github.com/littlemex/xprof-knowledge) MCP). The chart runs its
+  [accelprof](https://github.com/littlemex/accelprof) analysis MCP, the
+  [accelprof-knowledge](https://github.com/littlemex/accelprof-knowledge) MCP). The chart runs its
   `command` directly.
 - **`transport: stdio`** — a stdio-only MCP wrapped by supergateway (the official MLflow MCP). The
   chart runs `supergateway --stdio "<stdioCommand>" --outputTransport streamableHttp --port <p>`;
@@ -17,8 +17,8 @@ no template change. A laptop reaches each over `kubectl port-forward` as a strea
 ## The platform's three MCPs
 
 See [`values-example.yaml`](values-example.yaml): **mlflow** (stdio; run search, needs `mcp-reader`
-Pod Identity), **analysis** (http; xprof image; resolves runs to profile files on the S3 Files
-mount, needs the mount + `mcp-reader`), and **knowledge** (http; xprof-knowledge image; tuning
+Pod Identity), **analysis** (http; accelprof image; resolves runs to profile files on the S3 Files
+mount, needs the mount + `mcp-reader`), and **knowledge** (http; accelprof-knowledge image; tuning
 playbooks, no mount, no credentials). Each is one responsibility; together they cover find →
 resolve/analyze → diagnose.
 

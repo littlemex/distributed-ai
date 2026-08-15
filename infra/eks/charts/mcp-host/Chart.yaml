@@ -3,8 +3,8 @@ name: mcp-host
 description: |
   Host any number of MCP servers on CPU Pods in the "mcp" namespace, driven by a values list.
   Each entry in `mcps` renders one Deployment + Service; an entry is either `transport: http`
-  (a server that speaks streamable-http natively, e.g. the xprof analysis MCP or the
-  xprof-knowledge MCP) or `transport: stdio` (a stdio-only MCP wrapped by supergateway, e.g. the
+  (a server that speaks streamable-http natively, e.g. the accelprof analysis MCP or the
+  accelprof-knowledge MCP) or `transport: stdio` (a stdio-only MCP wrapped by supergateway, e.g. the
   official MLflow MCP). Adding an MCP is adding an entry — no template change. A laptop reaches
   each over `kubectl port-forward` as a streamable-http endpoint.
 
