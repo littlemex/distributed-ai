@@ -1,0 +1,39 @@
+# Example: the three-MCP platform. Copy, fill the <...> from `terraform output`, and
+#   helm dependency build charts/mcp-host && helm install mcp charts/mcp-host -f values-example.yaml
+mcps:
+  # MLflow MCP — stdio, bridged by supergateway. Reads the SageMaker-managed MLflow via SigV4, so it
+  # needs the mcp-reader Pod Identity. Image bundles mlflow[mcp] + sagemaker-mlflow + supergateway.
+  - name: mlflow
+    transport: stdio
+    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/remote-mcp-bridge", tag: latest }
+    stdioCommand: ["mlflow", "mcp", "run"]
+    serviceAccountName: mcp-reader
+    env:
+      MLFLOW_TRACKING_URI: "<mlflow-app-arn>"
+      MLFLOW_MCP_TOOLS: "ml"
+      AWS_REGION: "<region>"
+
+  # Analysis MCP (littlemex/xprof image) — resolves a run to its profile files on the S3 Files mount
+  # and analyzes them. Needs the mount and the mcp-reader Pod Identity.
+  - name: analysis
+    transport: http
+    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/xprof", tag: latest }
+    command: ["python", "-m", "analysis_mcp.server"]
+    serviceAccountName: mcp-reader
+    env:
+      MCP_MLFLOW_TRACKING_URI: "<mlflow-app-arn>"
+      MCP_AWS_REGION: "<region>"
+      MCP_TRACE_BUCKET: "<trace-bucket>"
+      MCP_MOUNT_BASE: "/traces"
+    s3files:
+      enabled: true
+      volumeHandle: "s3files:<FileSystemId>::<AccessPointId>"
+      mountBase: "/traces"
+      zone: "<mount-target-az>"
+
+  # Knowledge MCP (littlemex/xprof-knowledge image) — GPU/Neuron/common tuning playbooks. No mount,
+  # no AWS credentials (curated content only).
+  - name: knowledge
+    transport: http
+    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/xprof-knowledge", tag: latest }
+    command: ["python", "-m", "knowledge_mcp.server"]

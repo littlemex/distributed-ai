@@ -1,0 +1,139 @@
+{{- $ns := include "mcphost.namespace" . -}}
+{{- $defaults := .Values.defaults | default dict -}}
+{{- range $mcp := .Values.mcps }}
+{{- /* --- validation (fail loud at render, not at runtime) --- */ -}}
+{{- if not $mcp.name }}{{ fail "each mcps[] entry needs a name (a DNS-1123 label)" }}{{- end }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $mcp.name) }}{{ fail (printf "mcp name %q must be a DNS-1123 label" $mcp.name) }}{{- end }}
+{{- if not (and $mcp.image $mcp.image.repository) }}{{ fail (printf "mcp %q: image.repository is required" $mcp.name) }}{{- end }}
+{{- $transport := $mcp.transport | default "http" }}
+{{- if not (or (eq $transport "http") (eq $transport "stdio")) }}{{ fail (printf "mcp %q: transport must be 'http' or 'stdio'" $mcp.name) }}{{- end }}
+{{- $port := $mcp.port | default 8080 }}
+{{- $blockImds := true }}
+{{- if hasKey $defaults "blockImds" }}{{ $blockImds = $defaults.blockImds }}{{- end }}
+{{- if hasKey $mcp "blockImds" }}{{ $blockImds = $mcp.blockImds }}{{- end }}
+{{- $s3 := $mcp.s3files | default dict }}
+{{- if and $s3.enabled (not (hasPrefix "s3files:" ($s3.volumeHandle | default ""))) }}{{ fail (printf "mcp %q: s3files.enabled but volumeHandle is not \"s3files:<fs>::<ap>\"" $mcp.name) }}{{- end }}
+{{- if and $s3.enabled (not $s3.zone) }}{{ fail (printf "mcp %q: s3files.zone is required when s3files.enabled (the single mount target is reachable only from its AZ)" $mcp.name) }}{{- end }}
+{{- /* --- stdio: POSIX single-quote each argv token for supergateway --stdio (a shell string) --- */ -}}
+{{- $stdioStr := "" }}
+{{- if eq $transport "stdio" }}
+{{-   if not $mcp.stdioCommand }}{{ fail (printf "mcp %q: transport stdio needs stdioCommand (argv list)" $mcp.name) }}{{- end }}
+{{-   $q := list }}
+{{-   range $a := $mcp.stdioCommand }}
+{{-     if contains "'" $a }}{{ fail (printf "mcp %q: stdioCommand token %q contains a single quote, which cannot be shell-quoted safely" $mcp.name $a) }}{{- end }}
+{{-     $q = append $q (squote $a) }}
+{{-   end }}
+{{-   $stdioStr = join " " $q }}
+{{- else }}
+{{-   if not $mcp.command }}{{ fail (printf "mcp %q: transport http needs command (argv list, e.g. [\"python\",\"-m\",\"analysis_mcp.server\"])" $mcp.name) }}{{- end }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $mcp.name }}
+  namespace: {{ $ns }}
+  labels: { app: {{ $mcp.name }}, role: mcp-host }
+spec:
+  replicas: {{ $mcp.replicas | default 1 }}
+  selector:
+    matchLabels: { app: {{ $mcp.name }} }
+  template:
+    metadata:
+      labels: { app: {{ $mcp.name }}, role: mcp-host }
+    spec:
+      {{- if $mcp.serviceAccountName }}
+      serviceAccountName: {{ $mcp.serviceAccountName | quote }}
+      {{- end }}
+      nodeSelector: {{ toYaml ($mcp.nodeSelector | default $defaults.nodeSelector | default (dict "node-role" "cpu")) | nindent 8 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: {{ $mcp.name }}
+          image: "{{ $mcp.image.repository }}:{{ $mcp.image.tag | default "latest" }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          {{- if eq $transport "http" }}
+          command:
+            {{- range $mcp.command }}
+            - {{ . | quote }}
+            {{- end }}
+            {{- with $mcp.args }}
+            {{- range . }}
+            - {{ . | quote }}
+            {{- end }}
+            {{- end }}
+          {{- else }}
+          command:
+            {{- range ($mcp.supergatewayCommand | default (list "supergateway")) }}
+            - {{ . | quote }}
+            {{- end }}
+          args:
+            - "--stdio"
+            - {{ $stdioStr | quote }}
+            - "--outputTransport"
+            - "streamableHttp"
+            - "--port"
+            - {{ $port | quote }}
+          {{- end }}
+          env:
+            - { name: HOME, value: /tmp }
+            - { name: MCP_PORT, value: {{ $port | quote }} }
+            {{- range $k, $v := ($mcp.env | default dict) }}
+            - { name: {{ $k | quote }}, value: {{ $v | quote }} }
+            {{- end }}
+          ports:
+            - { name: http, containerPort: {{ $port }} }
+          readinessProbe:
+            tcpSocket: { port: {{ $port }} }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{ toYaml ($mcp.resources | default $defaults.resources | default dict) | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            {{- if $s3.enabled }}
+            - { name: traces, mountPath: {{ $s3.mountBase | default "/traces" | quote }}, readOnly: true }
+            {{- end }}
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        {{- if $s3.enabled }}
+        - name: traces
+          persistentVolumeClaim: { claimName: {{ printf "%s-traces" $mcp.name | quote }}, readOnly: true }
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $mcp.name }}
+  namespace: {{ $ns }}
+  labels: { app: {{ $mcp.name }} }
+spec:
+  selector: { app: {{ $mcp.name }} }
+  ports:
+    - { name: http, port: {{ $port }}, targetPort: {{ $port }} }
+{{- if $s3.enabled }}
+---
+{{ include "s3files.pv-pvc" (dict "name" (printf "%s-traces" $mcp.name) "namespace" $ns "volumeHandle" $s3.volumeHandle "zone" $s3.zone) }}
+{{- end }}
+{{- if $blockImds }}
+---
+# Deny egress to the node IMDS (169.254.169.254) so a hosted MCP cannot steal the node role; all
+# other egress (incl. the Pod Identity agent at 169.254.170.23) is allowed. Egress NetworkPolicy is
+# enforced only by a CNI that supports it; pair with IMDSv2 hop-limit=1 on the nodes for untrusted MCPs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-block-imds" $mcp.name }}
+  namespace: {{ $ns }}
+spec:
+  podSelector: { matchLabels: { app: {{ $mcp.name }} } }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock: { cidr: 0.0.0.0/0, except: ["169.254.169.254/32"] }
+{{- end }}
+{{- end }}
