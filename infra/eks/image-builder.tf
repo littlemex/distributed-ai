@@ -223,6 +223,9 @@ data "aws_iam_policy_document" "image_builder" {
     # scope is deliberately account+region ECR, NOT a blanket "*": it cannot reach other accounts,
     # other regions, or non-ECR services. The consumer var below still exists ONLY for CROSS-ACCOUNT
     # / cross-region repos the base grant can't reach (and keeps its footgun validation for those).
+    # ASSUMPTION (must hold): this is a dedicated / single-team account. Anything that can assume the
+    # builder role can PutImage to ANY repo in this account+region, so in a shared account with other
+    # teams' production repos this is an image-poisoning path — narrow it to a name prefix there.
     resources = distinct(concat(
       ["arn:${data.aws_partition.current.partition}:ecr:${var.region}:${data.aws_caller_identity.current.account_id}:repository/*"],
       [aws_ecr_repository.ddp_sample[0].arn],
