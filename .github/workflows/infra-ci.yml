@@ -1,0 +1,76 @@
+name: infra-ci
+
+# Machine-free checks for everything under infra/: Terraform validation and Helm chart
+# lint/render. No AWS credentials, no cluster — the cluster/apply-dependent tests live in
+# infra/eks/tests (run-tests.sh) and are run against a real cluster out of band.
+on:
+  pull_request:
+    paths: ["infra/**", ".github/workflows/infra-ci.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/infra-ci.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: terraform fmt (advisory)
+        continue-on-error: true
+        run: terraform fmt -check -recursive infra
+      - name: terraform validate (each root; no backend, no credentials)
+        run: |
+          set -euo pipefail
+          # A root module is a directory containing versions.tf or providers.tf. -backend=false
+          # avoids any remote state, and `validate` needs no AWS credentials.
+          find infra -type f \( -name versions.tf -o -name providers.tf \) -exec dirname {} \; \
+            | sort -u | while read -r d; do
+            echo "::group::validate $d"
+            terraform -chdir="$d" init -backend=false -input=false -no-color >/dev/null
+            terraform -chdir="$d" validate -no-color
+            echo "::endgroup::"
+          done
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.0"
+      - name: helm lint + template (each chart)
+        run: |
+          set -euo pipefail
+          find infra -name Chart.yaml -exec dirname {} \; | sort -u | while read -r c; do
+            echo "::group::helm $c"
+            grep -q 'file://' "$c/Chart.yaml" && helm dependency build "$c" >/dev/null || true
+            helm lint "$c"
+            # library charts are not installable — lint only
+            if ! grep -qE '^type:[[:space:]]*library' "$c/Chart.yaml"; then
+              helm template ci "$c" >/dev/null
+            fi
+            echo "::endgroup::"
+          done
+      - name: mcp-host renders a pinned entry (skipped if the chart is absent on this ref)
+        run: |
+          set -euo pipefail
+          c=infra/eks/charts/mcp-host
+          [ -d "$c" ] || { echo "mcp-host not present on this ref; skipping"; exit 0; }
+          helm dependency build "$c" >/dev/null
+          helm template ci "$c" \
+            --set 'mcps[0].name=demo' \
+            --set 'mcps[0].image.repository=example.com/demo' \
+            --set 'mcps[0].image.tag=v1' \
+            --set 'mcps[0].command[0]=demo-mcp' >/dev/null
+          echo "mcp-host pinned-entry render OK"
