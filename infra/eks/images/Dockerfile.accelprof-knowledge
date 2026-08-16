@@ -1,0 +1,14 @@
+# Deployment image for the accelprof-knowledge MCP, hosted by the mcp-host chart. The package is
+# published to PyPI and is the source of truth; this image installs it at a pinned version and runs
+# the console script. The playbooks travel inside the package, so no content is baked here.
+#
+# Build (context = infra/eks/images):
+#   finch build --platform linux/amd64 -f Dockerfile.accelprof-knowledge -t $ECR/accelprof-knowledge:v1 .
+FROM python:3.12-slim
+RUN pip install --no-cache-dir "accelprof-knowledge==0.1.0"
+RUN useradd -u 1000 -m mcp
+ENV HOME=/tmp MCP_PORT=8080
+USER 1000
+EXPOSE 8080
+# The mcp-host chart sets command=["accelprof-knowledge-mcp"]; this CMD is for standalone runs.
+CMD ["accelprof-knowledge-mcp"]

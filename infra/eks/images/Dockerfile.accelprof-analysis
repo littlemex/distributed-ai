@@ -1,0 +1,20 @@
+# Deployment image for the accelprof analysis MCP, hosted by the mcp-host chart. The package is
+# published to PyPI and is the source of truth; this image installs it (with the [mcp] extra) at a
+# pinned version and runs the console script. Owning the image — the version pin and any layered
+# analyzer tools — is the deployment's responsibility; the accelprof repo ships the package and its
+# own reference Dockerfile.
+#
+# This base carries only the builtin 'inventory' analyzer. To register a real tool (e.g. `nsys stats`
+# for GPU or `neuron-explorer` for Neuron), layer FROM this image, add the tool, and set the entry's
+# MCP_ANALYZERS — kept out of the base so it stays small and tool-agnostic.
+#
+# Build (context = infra/eks/images):
+#   finch build --platform linux/amd64 -f Dockerfile.accelprof-analysis -t $ECR/accelprof:v1 .
+FROM python:3.12-slim
+RUN pip install --no-cache-dir "accelprof[mcp,sagemaker]==0.1.0"
+RUN useradd -u 1000 -m mcp
+ENV HOME=/tmp MCP_PORT=8080
+USER 1000
+EXPOSE 8080
+# The mcp-host chart sets command=["accelprof-analysis-mcp"]; this CMD is for standalone runs.
+CMD ["accelprof-analysis-mcp"]

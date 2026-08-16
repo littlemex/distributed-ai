@@ -1,0 +1,22 @@
+apiVersion: v2
+name: s3files-lib
+description: |
+  Library chart providing the reusable named template "s3files.pv-pvc": a static PersistentVolume
+  + PersistentVolumeClaim that binds an AWS S3 Files file system to a namespace via the EFS CSI
+  driver. It renders nothing on its own; a consuming chart declares it as a dependency and calls
+  the define from a thin per-consumer caller, instead of copying the PV/PVC block (which had
+  already drifted between analysis-mcp and remote-mcp).
+
+  The live-cluster-verified gotcha it encodes ONCE: volumeHandle MUST be
+  "s3files:<FileSystemId>::<AccessPointId>" — a bare EFS fs-id makes the driver take the EFS
+  resolution path and the mount fails; an access point is mandatory. accessModes is
+  ReadWriteMany (the driver does not implement ReadOnlyMany); the read-only guarantee comes from
+  the PVC/pod volume readOnly flag. The Terraform "mechanism" half (S3 Files fs/access point,
+  MountTarget, CSI node Pod Identity) lives in infra/eks/s3files-mount.tf + data-layer/s3files.tf.
+
+  Consumers: charts/analysis-mcp and charts/remote-mcp add
+    dependencies: [{name: s3files-lib, version: 0.1.0, repository: "file://../s3files-lib"}]
+  and run `helm dependency build` before `helm template`/`install`.
+type: library
+version: 0.1.0
+appVersion: "0.1.0"

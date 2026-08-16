@@ -1,0 +1,34 @@
+# Verification example: host both accelprof MCPs (the namespace is hardcoded to "mcp").
+# Fill <...> from `terraform output` — infra/data-layer for the S3 Files / MLflow / mcp-reader,
+# infra/eks for the mount. Pin images by digest for reproducibility.
+mcps:
+  - name: knowledge
+    transport: http
+    image:
+      repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof-knowledge"
+      digest: "sha256:<knowledge-digest>"
+    command: ["accelprof-knowledge-mcp"]
+
+  - name: analysis
+    transport: http
+    image:
+      # the base image serves the builtin `inventory` analyzer; for a real `nsys-stats` run use the
+      # nsys-layered variant (Dockerfile.accelprof-analysis-nsys) and its digest here.
+      repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof"
+      digest: "sha256:<analysis-digest>"
+    command: ["accelprof-analysis-mcp"]
+    serviceAccountName: mcp-reader          # infra/eks iam-mcp: Pod Identity -> data-layer mcp_reader role
+    env:
+      MCP_MLFLOW_TRACKING_URI: "<mlflow-app-arn>"   # data-layer: terraform output -raw mlflow_app_arn
+      MCP_AWS_REGION: "<region>"
+      MCP_TRACE_BUCKET: "<trace-bucket>"            # data-layer: pick your region's bucket from the trace_buckets map output
+      MCP_MOUNT_BASE: "/traces"
+    resources:                                       # bound an untrusted analyzer's footprint
+      requests: { cpu: "250m", memory: "512Mi" }
+      limits: { memory: "2Gi" }
+    # tmpSizeLimit: "4Gi"                            # cap the scratch emptyDir (nsys .sqlite); default 4Gi
+    s3files:
+      enabled: true
+      volumeHandle: "<s3files-volume-handle>"       # data-layer: terraform output -raw s3files_volume_handle
+      mountBase: "/traces"
+      zone: "<mount-target-az>"                      # AZ of the infra/eks S3 Files mount target

@@ -1,0 +1,26 @@
+# mcp-host renders one Deployment + Service per entry in `mcps`. It ships empty — add entries (see
+# values-example.yaml for the three-MCP platform wiring: mlflow / analysis / knowledge). The
+# namespace is fixed to "mcp" in templates/_helpers.tpl.
+
+# Applied to every entry unless the entry overrides them.
+defaults:
+  nodeSelector: { node-role: cpu }
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits: { memory: "1Gi" }
+  # Ship a NetworkPolicy denying egress to the node IMDS (169.254.169.254). Enforced only by a CNI
+  # that supports egress NetworkPolicy; pair with IMDSv2 hop-limit=1 on the nodes for untrusted MCPs.
+  blockImds: true
+
+# Each entry:
+#   name            (required)  DNS-1123 label; also the Service name
+#   image           (required)  { repository, tag }
+#   transport       "http" (default; server speaks streamable-http) | "stdio" (wrapped by supergateway)
+#   port            default 8080
+#   command         (http)      argv list, e.g. ["python","-m","analysis_mcp.server"]
+#   stdioCommand    (stdio)     the upstream MCP's argv, e.g. ["mlflow","mcp","run"]
+#   env             map of NAME->value
+#   serviceAccountName          set to a Pod-Identity SA (e.g. mcp-reader) only for an MCP that needs AWS creds
+#   s3files         { enabled, volumeHandle: "s3files:<fs>::<ap>", mountBase, zone }  (an MCP that reads traces)
+#   nodeSelector / resources / replicas / blockImds   per-entry overrides
+mcps: []

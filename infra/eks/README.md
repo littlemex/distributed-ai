@@ -67,6 +67,11 @@ without editing resource blocks. You add a workload by adding a map entry.
   a base cluster never stands up an internet-facing endpoint.
 - **Capacity Block lifecycle.** Helper scripts for offerings/purchase and a
   one-shot EventBridge alarm per reserved pool before its reservation expires.
+- **In-cluster image builder — no local Docker/finch.** Build container images
+  *inside* the cluster with rootless BuildKit and push straight to ECR, rendered
+  from a reusable Helm Job (`image-builder-lib`). A workshop reader or CI job
+  needs no local container runtime; this is the canonical way to build any image
+  this cluster runs. See [In-cluster image builder](#in-cluster-image-builder-buildkit--ecr).
 
 ---
 

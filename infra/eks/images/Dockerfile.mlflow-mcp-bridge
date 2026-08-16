@@ -1,0 +1,29 @@
+# MLflow stdio-MCP bridge image — wrap the official MLflow MCP (`mlflow mcp run`, stdio) as
+# streamable-http via supergateway, for an mcp-host `transport: stdio` entry. supergateway is BAKED
+# IN (not `npx -y ...` at pod start): npx would fetch from the npm registry on every launch and
+# write ~/.npm, which fails on a no-egress subnet or a HOME-less/read-only image. The chart's
+# supergatewayCommand defaults to ["supergateway"], which resolves to the global install below.
+#
+# sagemaker-mlflow is installed so `mlflow mcp run` authenticates (SigV4) against a SageMaker
+# MLflow App ARN. To bridge a DIFFERENT stdio MCP, layer FROM this base, add it (pip/npm), and set
+# that entry's stdioCommand; this base only guarantees Node + supergateway + a writable HOME.
+#
+# Build with the in-cluster BuildKit builder (context = infra/eks/images):
+#   ... imageBuild.filename=Dockerfile.mlflow-mcp-bridge imageBuild.repository=$ECR_URL ...
+FROM python:3.12-slim
+
+# Node (for supergateway) — nodejs+npm from Debian is sufficient; supergateway is pure JS.
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g supergateway@3 \
+    && npm cache clean --force
+
+RUN pip install --no-cache-dir "mlflow[mcp]" sagemaker-mlflow
+
+# Non-root with a WRITABLE HOME so any residual tool cache write (npm/mlflow) has somewhere to go.
+RUN useradd -u 1000 -m bridge
+ENV HOME=/home/bridge
+USER 1000
+
+# No ENTRYPOINT/CMD: the mcp-host chart sets command=["supergateway"] and
+# args=[--stdio "<argv>" --outputTransport streamableHttp --port <p>]; stdioCommand=["mlflow","mcp","run"].
