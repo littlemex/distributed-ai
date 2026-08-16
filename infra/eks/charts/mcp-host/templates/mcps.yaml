@@ -52,7 +52,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: {{ $mcp.name }}
-          image: "{{ $mcp.image.repository }}:{{ $mcp.image.tag | default "latest" }}"
+          image: "{{ $mcp.image.repository }}{{ if $mcp.image.digest }}@{{ $mcp.image.digest }}{{ else }}:{{ $mcp.image.tag | default "latest" }}{{ end }}"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

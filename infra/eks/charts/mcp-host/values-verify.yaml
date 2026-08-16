@@ -1,0 +1,28 @@
+# Verification example: host both accelprof MCPs (the namespace is hardcoded to "mcp").
+# Fill <...> from `terraform output` — infra/data-layer for the S3 Files / MLflow / mcp-reader,
+# infra/eks for the mount. Pin images by digest for reproducibility.
+mcps:
+  - name: knowledge
+    transport: http
+    image:
+      repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof-knowledge"
+      digest: "sha256:<knowledge-digest>"
+    command: ["accelprof-knowledge-mcp"]
+
+  - name: analysis
+    transport: http
+    image:
+      repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof"
+      digest: "sha256:<analysis-digest>"
+    command: ["accelprof-analysis-mcp"]
+    serviceAccountName: mcp-reader          # infra/eks iam-mcp: Pod Identity -> data-layer mcp_reader role
+    env:
+      MCP_MLFLOW_TRACKING_URI: "<mlflow-app-arn>"   # data-layer: terraform output -raw mlflow_app_arn
+      MCP_AWS_REGION: "<region>"
+      MCP_TRACE_BUCKET: "<trace-bucket>"            # data-layer: terraform output trace_buckets
+      MCP_MOUNT_BASE: "/traces"
+    s3files:
+      enabled: true
+      volumeHandle: "<s3files-volume-handle>"       # data-layer: terraform output -raw s3files_volume_handle
+      mountBase: "/traces"
+      zone: "<mount-target-az>"                      # AZ of the infra/eks S3 Files mount target
