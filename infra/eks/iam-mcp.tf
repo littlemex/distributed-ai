@@ -37,9 +37,25 @@ variable "mcp_reader_role_arn" {
   }
 }
 
+variable "mcp_producer_role_arn" {
+  description = <<-EOT
+    ARN of the producer IAM role from the SEPARATE infra/data-layer state
+    (`terraform output -raw producer_role_arn` there). Provisions the "producer" ServiceAccount in
+    the mcp namespace and its Pod Identity association so a producer Pod (which writes traces to the
+    trace bucket and logs runs to MLflow via store.log) can authenticate. OPTIONAL: leave empty if no
+    in-cluster producer runs here. Only takes effect when analysis_mcp_enabled = true (the SA lives in
+    the same mcp namespace this module creates).
+  EOT
+  type        = string
+  default     = ""
+}
+
 locals {
-  mcp_namespace       = "mcp"
-  mcp_service_account = "mcp-reader"
+  mcp_namespace            = "mcp"
+  mcp_service_account      = "mcp-reader"
+  producer_service_account = "producer"
+  # Wire the producer SA only when the mcp namespace is being created AND a role ARN was handed in.
+  create_producer = var.analysis_mcp_enabled && var.mcp_producer_role_arn != ""
 }
 
 resource "kubectl_manifest" "mcp_namespace" {
@@ -71,6 +87,29 @@ resource "aws_eks_pod_identity_association" "mcp_reader" {
   service_account = local.mcp_service_account
   role_arn        = var.mcp_reader_role_arn
   depends_on      = [kubectl_manifest.mcp_reader_sa]
+}
+
+# --- producer side: the workload that writes traces + logs MLflow runs via store.log -----------
+# Mirrors the mcp-reader wiring above. The IAM role lives in infra/data-layer
+# (aws_iam_role.producer, `terraform output -raw producer_role_arn`); this module only binds the
+# fixed "producer" SA in the mcp namespace to it via Pod Identity.
+resource "kubectl_manifest" "producer_sa" {
+  count = local.create_producer ? 1 : 0
+  yaml_body = yamlencode({
+    apiVersion = "v1"
+    kind       = "ServiceAccount"
+    metadata   = { name = local.producer_service_account, namespace = local.mcp_namespace }
+  })
+  depends_on = [kubectl_manifest.mcp_namespace]
+}
+
+resource "aws_eks_pod_identity_association" "producer" {
+  count           = local.create_producer ? 1 : 0
+  cluster_name    = module.eks.cluster_name
+  namespace       = local.mcp_namespace
+  service_account = local.producer_service_account
+  role_arn        = var.mcp_producer_role_arn
+  depends_on      = [kubectl_manifest.producer_sa]
 }
 
 output "mcp_namespace" {
