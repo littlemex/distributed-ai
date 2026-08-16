@@ -123,6 +123,31 @@ resource "aws_iam_role_policy" "openzfs_csi_describe" {
   policy = data.aws_iam_policy_document.openzfs_csi_describe.json
 }
 
+# Optional DYNAMIC-provisioning permissions. Static (fixed-volumeHandle) PVs never need these;
+# dynamic per-PVC child-volume provisioning (multi-tenant) requires create/delete. Gated by
+# var.openzfs_dynamic_provisioning_enabled so the default footprint stays describe-only.
+# FSx does not support ARN-scoped resource permissions, so this is Resource "*".
+data "aws_iam_policy_document" "openzfs_csi_dynamic" {
+  count = var.openzfs_dynamic_provisioning_enabled ? 1 : 0
+  statement {
+    actions = [
+      "fsx:CreateVolume",
+      "fsx:DeleteVolume",
+      "fsx:TagResource",
+      "fsx:UntagResource",
+      "fsx:CreateVolumeFromSnapshot",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "openzfs_csi_dynamic" {
+  count  = var.openzfs_dynamic_provisioning_enabled ? 1 : 0
+  name   = "openzfs-dynamic-provisioning"
+  role   = aws_iam_role.openzfs_csi.id
+  policy = data.aws_iam_policy_document.openzfs_csi_dynamic[0].json
+}
+
 # ---------------------------------------------------------------------------
 # Pod Identity association — binds the role to the controller SA the Helm chart creates.
 # Created unconditionally (mirrors the ALB controller pattern in alb-controller.tf); EKS

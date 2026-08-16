@@ -898,6 +898,18 @@ variable "openzfs_enabled" {
   default     = true
 }
 
+variable "openzfs_dynamic_provisioning_enabled" {
+  description = <<-EOT
+    Grant the FSx for OpenZFS CSI controller role the create/delete permissions needed to
+    DYNAMICALLY provision per-PVC child volumes (multi-tenant: each PVC gets its own isolated
+    child volume with its own quota under an existing filesystem). Static mounting only needs
+    describe, so this is OFF by default; when enabled it adds fsx:CreateVolume / DeleteVolume /
+    TagResource / UntagResource / CreateVolumeFromSnapshot to the openzfs-csi role.
+  EOT
+  type    = bool
+  default = false
+}
+
 variable "openzfs_csi_driver_chart_version" {
   description = "Version of the aws-fsx-openzfs-csi-driver Helm chart (kubernetes-sigs). Not an EKS managed add-on. 1.2.0 is the latest published chart in the kubernetes-sigs index (1.3.0 does not exist)."
   type        = string
