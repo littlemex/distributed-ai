@@ -216,10 +216,18 @@ data "aws_iam_policy_document" "image_builder" {
       "ecr:CompleteLayerUpload",
       "ecr:PutImage",
     ]
-    # The module's own ddp-sample repo, plus any repos a consumer passed in. distinct() drops a
-    # duplicate (e.g. the ddp-sample ARN accidentally re-listed); an empty additional list renders
-    # byte-identical to the previous single-element form, so existing clusters see no plan diff.
+    # Base grant: EVERY ECR repo in THIS cluster's account+region. The image builder is a generic,
+    # single-purpose mechanism — new platform images (analysis-mcp, neuron-cc, remote-mcp-bridge,
+    # …) get their own ECR repo, and scoping the builder to one repo (or a hand-maintained list)
+    # meant each new image 403'd on push until someone re-applied. That recurred; this ends it. The
+    # scope is deliberately account+region ECR, NOT a blanket "*": it cannot reach other accounts,
+    # other regions, or non-ECR services. The consumer var below still exists ONLY for CROSS-ACCOUNT
+    # / cross-region repos the base grant can't reach (and keeps its footgun validation for those).
+    # ASSUMPTION (must hold): this is a dedicated / single-team account. Anything that can assume the
+    # builder role can PutImage to ANY repo in this account+region, so in a shared account with other
+    # teams' production repos this is an image-poisoning path — narrow it to a name prefix there.
     resources = distinct(concat(
+      ["arn:${data.aws_partition.current.partition}:ecr:${var.region}:${data.aws_caller_identity.current.account_id}:repository/*"],
       [aws_ecr_repository.ddp_sample[0].arn],
       var.image_builder_additional_ecr_repository_arns,
     ))

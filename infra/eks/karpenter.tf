@@ -183,6 +183,15 @@ resource "null_resource" "wait_for_node_drain" {
     aws_placement_group.accelerator,
     aws_vpc_endpoint.interface,
     aws_vpc_endpoint.s3,
+    # S3 Files mount target (+ its SG): on destroy the drain-wait must finish BEFORE the NFS
+    # endpoint is removed. A pod hard-mounting S3 Files whose mount target vanishes mid-drain
+    # stalls kubelet's volume unmount, which stalls the drain, which times out and can leak the
+    # NodeClaim/EC2 instance. efs.tf already protects the CSI driver for this reason; the mount
+    # target (the other half — the NFS server) needs the same protection. No cycle: the mount
+    # target depends only on the VPC subnet + SG, not on the cluster.
+    aws_cloudcontrolapi_resource.s3files_mt,
+    aws_security_group.s3files_mt,
+    aws_vpc_security_group_ingress_rule.s3files_mt_from_nodes,
   ]
 
   provisioner "local-exec" {
