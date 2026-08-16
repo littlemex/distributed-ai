@@ -904,7 +904,12 @@ variable "openzfs_dynamic_provisioning_enabled" {
     DYNAMICALLY provision per-PVC child volumes (multi-tenant: each PVC gets its own isolated
     child volume with its own quota under an existing filesystem). Static mounting only needs
     describe, so this is OFF by default; when enabled it adds fsx:CreateVolume / DeleteVolume /
-    TagResource / UntagResource / CreateVolumeFromSnapshot to the openzfs-csi role.
+    TagResource / ListTagsForResource, scoped to child volumes of this filesystem, to the
+    openzfs-csi role. Requires openzfs_enabled = true.
+
+    Disable safely: with reclaimPolicy Delete, turning this OFF while dynamic PVs still exist makes
+    the CSI DeleteVolume fail (AccessDenied), leaving PVs Released and the child volumes billing as
+    orphans. Delete all dynamic PVCs/PVs first, then disable.
   EOT
   type    = bool
   default = false
