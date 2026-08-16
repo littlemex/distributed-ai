@@ -11,9 +11,20 @@
 #   accelprof-knowledge - the knowledge MCP image (Dockerfile.accelprof-knowledge).
 ################################################################################
 
+variable "mcp_ecr_name_prefix" {
+  description = <<-EOT
+    Optional prefix for the MCP ECR repository names. Empty (default) = the book's fixed names
+    "accelprof" / "accelprof-knowledge". Set a prefix (e.g. "wsverify-") to stand up a SECOND
+    profiling-MCP deployment in the same account+region without colliding on the account-global
+    ECR repository names.
+  EOT
+  type        = string
+  default     = ""
+}
+
 resource "aws_ecr_repository" "accelprof" {
   count                = var.analysis_mcp_enabled ? 1 : 0
-  name                 = "accelprof"
+  name                 = "${var.mcp_ecr_name_prefix}accelprof"
   image_tag_mutability = "MUTABLE"
   # force_delete: a workshop cluster's teardown (analysis_mcp_enabled=false apply, or destroy)
   # must not wedge on a repo that still holds pushed image tags.
@@ -28,7 +39,7 @@ resource "aws_ecr_repository" "accelprof" {
 
 resource "aws_ecr_repository" "accelprof_knowledge" {
   count                = var.analysis_mcp_enabled ? 1 : 0
-  name                 = "accelprof-knowledge"
+  name                 = "${var.mcp_ecr_name_prefix}accelprof-knowledge"
   image_tag_mutability = "MUTABLE"
   force_delete         = true
 
