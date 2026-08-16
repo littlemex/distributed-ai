@@ -5,7 +5,7 @@ mcps:
   # needs the mcp-reader Pod Identity. Image bundles mlflow[mcp] + sagemaker-mlflow + supergateway.
   - name: mlflow
     transport: stdio
-    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/remote-mcp-bridge", tag: latest }
+    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/remote-mcp-bridge", tag: v1 }
     stdioCommand: ["mlflow", "mcp", "run"]
     serviceAccountName: mcp-reader
     env:
@@ -17,7 +17,7 @@ mcps:
   # and analyzes them. Needs the mount and the mcp-reader Pod Identity.
   - name: analysis
     transport: http
-    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof", tag: latest }
+    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof", tag: v1 }
     command: ["accelprof-analysis-mcp"]
     serviceAccountName: mcp-reader
     env:
@@ -35,5 +35,5 @@ mcps:
   # no AWS credentials (curated content only).
   - name: knowledge
     transport: http
-    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof-knowledge", tag: latest }
+    image: { repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof-knowledge", tag: v1 }
     command: ["accelprof-knowledge-mcp"]
