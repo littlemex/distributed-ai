@@ -1,19 +1,21 @@
 # The accelprof analysis MCP deploy image WITH the NVIDIA Nsight Systems CLI layered in, so the
 # built-in `nsys-stats` analyzer can run against a captured .nsys-rep (nsys stats is CPU-runnable —
-# no GPU needed to analyze a report). Kept separate from the base so the base stays small and
-# tool-agnostic; use this image for an entry that analyzes GPU traces.
+# no GPU needed to analyze a report; it writes its scratch .sqlite to a writable {tmp}, so a
+# read-only trace mount + read-only rootfs is fine). Layers ON TOP of the base image (per the base
+# Dockerfile's guidance) so the accelprof version pin lives in exactly one place.
 #
-# Build (context = infra/eks/images):
-#   finch/BuildKit -f Dockerfile.accelprof-analysis-nsys -t $ECR/accelprof:v2-nsys .
-FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
+# BASE must point at the built base image (Dockerfile.accelprof-analysis); no default, so an unset
+# BASE fails the build loudly rather than silently layering on a stale local image. Pass a digest
+# so the single accelprof version pin (in the base) is not undermined by a floating tag:
+#   BuildKit --build-arg BASE=$ECR/accelprof@sha256:<base-digest> -f Dockerfile.accelprof-analysis-nsys -t $ECR/accelprof:<base-tag>-nsys .
+ARG BASE
+FROM ${BASE}
+# nsight-systems-cli ships a near-self-contained deb; the ubuntu2204 repo is used deliberately on
+# this Debian bookworm base (glibc is compatible). Pin/replace if a future package breaks resolution.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
     && wget -qO /usr/share/keyrings/nvidia-devtools.asc https://developer.download.nvidia.com/devtools/repos/ubuntu2204/amd64/nvidia.pub \
     && echo "deb [signed-by=/usr/share/keyrings/nvidia-devtools.asc] https://developer.download.nvidia.com/devtools/repos/ubuntu2204/amd64/ /" > /etc/apt/sources.list.d/nvidia-devtools.list \
     && apt-get update && apt-get install -y --no-install-recommends nsight-systems-cli \
-    && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir "accelprof[mcp,sagemaker]==0.1.0"
-RUN useradd -u 1000 -m mcp
-ENV HOME=/tmp MCP_PORT=8080
+    && apt-get purge -y wget && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 USER 1000
-EXPOSE 8080
-CMD ["accelprof-analysis-mcp"]

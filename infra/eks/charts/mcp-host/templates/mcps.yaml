@@ -5,6 +5,10 @@
 {{- if not $mcp.name }}{{ fail "each mcps[] entry needs a name (a DNS-1123 label)" }}{{- end }}
 {{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $mcp.name) }}{{ fail (printf "mcp name %q must be a DNS-1123 label" $mcp.name) }}{{- end }}
 {{- if not (and $mcp.image $mcp.image.repository) }}{{ fail (printf "mcp %q: image.repository is required" $mcp.name) }}{{- end }}
+{{- /* pin explicitly: digest (preferred) and/or a real tag; never a silent or explicit :latest */ -}}
+{{- if and (not $mcp.image.digest) (not $mcp.image.tag) }}{{ fail (printf "mcp %q: pin the image — set image.digest (preferred) and/or image.tag" $mcp.name) }}{{- end }}
+{{- if eq ($mcp.image.tag | default "") "latest" }}{{ fail (printf "mcp %q: image.tag \"latest\" is not a pin — use a real tag and/or image.digest" $mcp.name) }}{{- end }}
+{{- if and $mcp.image.digest (not (regexMatch "^sha256:[0-9a-f]{64}$" $mcp.image.digest)) }}{{ fail (printf "mcp %q: image.digest must be \"sha256:<64 hex>\"" $mcp.name) }}{{- end }}
 {{- $transport := $mcp.transport | default "http" }}
 {{- if not (or (eq $transport "http") (eq $transport "stdio")) }}{{ fail (printf "mcp %q: transport must be 'http' or 'stdio'" $mcp.name) }}{{- end }}
 {{- $port := $mcp.port | default 8080 }}
@@ -42,6 +46,10 @@ spec:
     metadata:
       labels: { app: {{ $mcp.name }}, role: mcp-host }
     spec:
+      # A hosted MCP runs untrusted analyzer subprocesses; it has no reason to reach the K8s API.
+      # Pod Identity injects its own projected token (audience pods.eks.amazonaws.com) regardless, so
+      # AWS auth for mcp-reader still works. Opt back in per-mcp only if an MCP truly needs kube API.
+      automountServiceAccountToken: {{ $mcp.automountServiceAccountToken | default false }}
       {{- if $mcp.serviceAccountName }}
       serviceAccountName: {{ $mcp.serviceAccountName | quote }}
       {{- end }}
@@ -52,7 +60,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: {{ $mcp.name }}
-          image: "{{ $mcp.image.repository }}{{ if $mcp.image.digest }}@{{ $mcp.image.digest }}{{ else }}:{{ $mcp.image.tag | default "latest" }}{{ end }}"
+          image: "{{ $mcp.image.repository }}{{ with $mcp.image.tag }}:{{ . }}{{ end }}{{ with $mcp.image.digest }}@{{ . }}{{ end }}"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -99,7 +107,10 @@ spec:
             - { name: traces, mountPath: {{ $s3.mountBase | default "/traces" | quote }}, readOnly: true }
             {{- end }}
       volumes:
-        - { name: tmp, emptyDir: {} }
+        # bound the scratch dir (nsys stats writes a .sqlite here for a large .nsys-rep) so an
+        # untrusted MCP cannot fill node ephemeral storage and get its neighbours evicted.
+        - name: tmp
+          emptyDir: { sizeLimit: {{ $mcp.tmpSizeLimit | default $defaults.tmpSizeLimit | default "4Gi" | quote }} }
         {{- if $s3.enabled }}
         - name: traces
           persistentVolumeClaim: { claimName: {{ printf "%s-traces" $mcp.name | quote }}, readOnly: true }

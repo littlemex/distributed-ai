@@ -12,6 +12,8 @@ mcps:
   - name: analysis
     transport: http
     image:
+      # the base image serves the builtin `inventory` analyzer; for a real `nsys-stats` run use the
+      # nsys-layered variant (Dockerfile.accelprof-analysis-nsys) and its digest here.
       repository: "<account>.dkr.ecr.<region>.amazonaws.com/accelprof"
       digest: "sha256:<analysis-digest>"
     command: ["accelprof-analysis-mcp"]
@@ -19,8 +21,12 @@ mcps:
     env:
       MCP_MLFLOW_TRACKING_URI: "<mlflow-app-arn>"   # data-layer: terraform output -raw mlflow_app_arn
       MCP_AWS_REGION: "<region>"
-      MCP_TRACE_BUCKET: "<trace-bucket>"            # data-layer: terraform output trace_buckets
+      MCP_TRACE_BUCKET: "<trace-bucket>"            # data-layer: pick your region's bucket from the trace_buckets map output
       MCP_MOUNT_BASE: "/traces"
+    resources:                                       # bound an untrusted analyzer's footprint
+      requests: { cpu: "250m", memory: "512Mi" }
+      limits: { memory: "2Gi" }
+    # tmpSizeLimit: "4Gi"                            # cap the scratch emptyDir (nsys .sqlite); default 4Gi
     s3files:
       enabled: true
       volumeHandle: "<s3files-volume-handle>"       # data-layer: terraform output -raw s3files_volume_handle
