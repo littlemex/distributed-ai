@@ -1,0 +1,38 @@
+# The accelprof analysis MCP deploy image WITH the AWS Neuron profile tooling (neuron-explorer, from
+# the aws-neuronx-tools package) layered in, so the built-in `neuron-summary` analyzer can run
+# against a captured .neff + .ntff pair. `neuron-explorer view --output-format summary-text` parses
+# an already-captured profile and does NOT open /dev/neuron (verified real-machine on trn2: strace
+# shows zero /dev/neuron opens), so a CPU Pod with a read-only trace mount is enough — no Trainium
+# device is required to ANALYZE. Capturing the .ntff is the device-bound step, done by the producer.
+#
+# Layers ON TOP of the base image (Dockerfile.accelprof-analysis) so the single accelprof version pin
+# lives in exactly one place. BASE must point at the built base image; pass a digest so a floating
+# tag never undermines the pin:
+#   BuildKit --build-arg BASE=$ECR/accelprof@sha256:<base-digest> -f Dockerfile.accelprof-analysis-neuron -t $ECR/accelprof:<base-tag>-neuron .
+ARG BASE
+FROM ${BASE}
+# aws-neuronx-tools ships in the Neuron apt repo, which publishes Ubuntu pools. The base is Debian
+# bookworm (python:3.12-slim); glibc is compatible, so the Ubuntu jammy pool is used deliberately
+# here (same cross-distro approach as Dockerfile.accelprof-analysis-nsys with the nsys repo). Pin or
+# switch the pool if a future package breaks resolution. Only the analyze path (neuron-explorer view)
+# is exercised in the CPU Pod; the device runtime libs are not needed to parse a captured profile.
+USER root
+# aws-neuronx-tools carries the neuron-explorer binary; aws-neuronx-runtime-lib carries the runtime
+# shared library it links against (libnrt.so.1). The binary needs libnrt.so.1 to LOAD even for the
+# device-free `view` path — WITHOUT the runtime-lib it fails at startup with
+#   error while loading shared libraries: libnrt.so.1: cannot open shared object file
+# (verified real-machine on a python:3.12-slim CPU pod). The kernel driver (aws-neuronx-dkms) is NOT
+# installed: it is only needed to talk to a real device, which `view` never does.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates gnupg wget \
+    && wget -qO- https://apt.repos.neuron.amazonaws.com/GPG-PUB-KEY-AMAZON-AWS-NEURON.PUB \
+       | gpg --dearmor -o /usr/share/keyrings/neuron.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/neuron.gpg] https://apt.repos.neuron.amazonaws.com jammy main" \
+       > /etc/apt/sources.list.d/neuron.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends aws-neuronx-tools aws-neuronx-runtime-lib \
+    && apt-get purge -y wget gnupg && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+# neuron-explorer lives in /opt/aws/neuron/bin (so the analyzer's argv "neuron-explorer" resolves) and
+# libnrt.so.1 in /opt/aws/neuron/lib (so the dynamic linker finds it).
+ENV PATH="/opt/aws/neuron/bin:${PATH}" \
+    LD_LIBRARY_PATH="/opt/aws/neuron/lib:${LD_LIBRARY_PATH}"
+USER 1000
