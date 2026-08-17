@@ -70,6 +70,22 @@ No GPU node exists yet — Karpenter creates one on demand (next section).
 > kubectl config current-context     # must be YOUR cluster
 > ```
 
+### Preflight before an accelerated test case
+
+Before deploying a test case that schedules on GPU/EFA/FSx (e.g. `3.test_cases/pytorch/miles`
+or `pytorch/slime`), run the readiness check so a missing cluster piece is a named error rather
+than a silent `Pending` / mount failure:
+
+```bash
+./scripts/preflight.sh          # from infra/eks, after apply (reads cluster id + EFA SG from tf outputs)
+```
+
+It confirms the `node-role` placement labels, `nvidia.com/gpu` and `vpc.amazonaws.com/efa`
+advertisement, the storage CSI drivers and static PVs, and the EFA security group's
+self-referencing egress rule (the one a CIDR-only egress does not cover; see `sg.tf`).
+`terraform output accelerator_pool_placement` prints the node-role/EFA values to paste into a
+test case's `env_vars`.
+
 ---
 
 ## 2. Run something on a GPU
