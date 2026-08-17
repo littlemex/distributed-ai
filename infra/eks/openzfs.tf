@@ -89,7 +89,7 @@ resource "aws_security_group" "openzfs" {
 # For static provisioning the controller only reads filesystem/volume metadata
 # (fsx:DescribeFileSystems / fsx:DescribeVolumes); the create/delete actions in the upstream
 # example policy are dynamic-provisioning-only and never exercised by a fixed-volumeHandle PV.
-# FSx does not support ARN-scoped resource permissions, so this is Resource "*".
+# Describe* are account/region-wide list/discovery operations, so this stays Resource "*".
 # ---------------------------------------------------------------------------
 data "aws_iam_policy_document" "openzfs_csi_assume" {
   statement {
@@ -121,6 +121,40 @@ resource "aws_iam_role_policy" "openzfs_csi_describe" {
   name   = "openzfs-describe"
   role   = aws_iam_role.openzfs_csi.id
   policy = data.aws_iam_policy_document.openzfs_csi_describe.json
+}
+
+# Optional DYNAMIC-provisioning permissions. Static (fixed-volumeHandle) PVs never need these;
+# dynamic per-PVC child-volume provisioning (multi-tenant) requires create/delete. Gated by
+# var.openzfs_dynamic_provisioning_enabled so the default footprint stays describe-only, and by
+# var.openzfs_enabled so the policy never references a filesystem that does not exist.
+#
+# Scoped to child volumes of THIS filesystem: FSx supports the volume ARN
+# (arn:...:volume/<fs-id>/<vol-id>), so DeleteVolume cannot reach volumes in any other filesystem.
+# aws-fsx-openzfs-csi-driver only calls CreateVolume / DeleteVolume / DescribeVolumes (granted in
+# the describe policy) / ListTagsForResource, and tags volumes on create; it never calls
+# UntagResource or UpdateVolume. "fsx:CreateVolumeFromSnapshot" is not a real FSx IAM action
+# (a snapshot-origin volume is created by CreateVolume with OriginSnapshot).
+data "aws_iam_policy_document" "openzfs_csi_dynamic" {
+  count = var.openzfs_enabled && var.openzfs_dynamic_provisioning_enabled ? 1 : 0
+  statement {
+    sid = "DynamicChildVolumes"
+    actions = [
+      "fsx:CreateVolume",
+      "fsx:DeleteVolume",
+      "fsx:TagResource",
+      "fsx:ListTagsForResource",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:fsx:${var.region}:${data.aws_caller_identity.current.account_id}:volume/${aws_fsx_openzfs_file_system.shared[0].id}/*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "openzfs_csi_dynamic" {
+  count  = var.openzfs_enabled && var.openzfs_dynamic_provisioning_enabled ? 1 : 0
+  name   = "openzfs-dynamic-provisioning"
+  role   = aws_iam_role.openzfs_csi.id
+  policy = data.aws_iam_policy_document.openzfs_csi_dynamic[0].json
 }
 
 # ---------------------------------------------------------------------------
