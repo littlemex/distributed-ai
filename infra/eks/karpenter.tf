@@ -273,6 +273,25 @@ resource "null_resource" "wait_for_node_drain" {
         return 1
       }
 
+      # Delete every NodePool BEFORE the NodeClaim gate below. This is the crux: the gate waits
+      # for NodeClaims to reach zero but does not itself stop Karpenter from provisioning, so any
+      # NodePool whose workload is still running keeps a replacement NodeClaim alive and the gate
+      # never empties. The cpu/accelerator NodePools already carry depends_on the drain-wait, so
+      # Terraform deletes them before this runs — but the `monitoring` NodePool (observability.tf)
+      # deliberately omits that edge to avoid a dependency cycle (drain-wait -> gpu_operator ->
+      # kube_prometheus_stack -> monitoring NodePool), and its pods are torn down AFTER this hook.
+      # So on a bare `terraform destroy` the monitoring pool + its pods are both still live here,
+      # Karpenter keeps re-creating the monitoring node, and the gate below hangs to its 30-minute
+      # timeout (observed live in ap-northeast-1). Deleting all NodePools now makes Karpenter stop
+      # provisioning and gracefully drain every remaining NodeClaim — it is still running (this
+      # resource is destroyed BEFORE the controller), so it terminates the backing EC2 and clears
+      # the NodeClaim finalizer itself, preserving the billing guarantee. --wait=false because the
+      # NodeClaim gate below is what actually confirms the drain finished. Best-effort: a missing
+      # CRD (prior partial destroy) errors harmlessly and we continue.
+      echo "wait_for_node_drain: deleting all NodePools so Karpenter stops provisioning (best-effort)..."
+      kubectl delete nodepools.karpenter.sh --all --ignore-not-found=true --wait=false 2>/dev/null \
+        || echo "wait_for_node_drain: NodePool delete errored (CRD absent?) — continuing."
+
       # ── HARD GATE: never touch any finalizer until this passes ──────────────────
       # Block until Karpenter has terminated every NodeClaim. A NodeClaim's
       # karpenter.sh/termination finalizer is the billing guarantee itself: Karpenter holds the

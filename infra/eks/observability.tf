@@ -416,6 +416,14 @@ resource "kubectl_manifest" "nodepool_monitoring" {
             },
           ]
           expireAfter = "Never"
+          # Cap how long a graceful drain may block on a pod that will not evict (e.g. a
+          # PodDisruptionBudget on the monitoring stack). Without this, deleting the NodePool on
+          # teardown would let Karpenter honour a blocking PDB indefinitely and the node would
+          # never drain — re-introducing the very destroy hang this pool is implicated in
+          # (null_resource.wait_for_node_drain then times out). After this window Karpenter
+          # force-terminates the node. It only ever fires when the node is actually being
+          # terminated (teardown, or a rare disruption), so it does not affect steady-state.
+          terminationGracePeriod = "5m"
         }
       }
       # WhenEmpty (not WhenEmptyOrUnderutilized): reclaim only a truly empty node,
