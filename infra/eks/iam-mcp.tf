@@ -79,51 +79,56 @@ output "mcp_namespace" {
 }
 
 ################################################################################
-# producer wiring: the fixed "mcp-producer" ServiceAccount + a Pod Identity association
-# to the write-side producer IAM role that profiling workloads authenticate as
+# producer wiring: a Pod Identity association mapping the write-side producer role to the
+# (namespace, "mcp-producer") ServiceAccount that profiling workloads authenticate as
 # (write traces to S3 + log MLflow runs). This is the write-side counterpart to the
-# mcp-reader association above; the data-layer contract is that infra/eks associates
-# its fixed ServiceAccounts to BOTH producer_role_arn and mcp_reader_role_arn.
+# mcp-reader association above; the data-layer contract is that infra/eks associates its
+# fixed ServiceAccounts to BOTH producer_role_arn and mcp_reader_role_arn.
 #
-# The IAM role itself is NOT created here — it lives in the separate infra/data-layer
-# state (aws_iam_role.producer). Feed `terraform output -raw producer_role_arn` from there.
+# The IAM role itself is NOT created here — it lives in the separate infra/data-layer state
+# (aws_iam_role.producer). Feed `terraform output -raw producer_role_arn` from there.
 #
-# Unlike mcp-reader (which gets its own dedicated "mcp" namespace), the producer runs in
-# the namespace where the profiling WORKLOAD runs, so that namespace is assumed to already
-# exist (e.g. the workshop's "distai") and is NOT created here — only the ServiceAccount and
-# the association are. Self-gating on a non-empty role ARN keeps it opt-in without a separate
-# toggle.
+# Only the association is created here — NOT the ServiceAccount and NOT the namespace.
+# aws_eks_pod_identity_association is a control-plane record keyed by (cluster, namespace, SA
+# name) strings; it neither requires the namespace/SA to exist nor is affected by their
+# lifecycle. This is deliberate: the producer runs in the profiling WORKLOAD's namespace
+# (var.mcp_producer_namespace), which is owned by whoever deploys the workload — not by this
+# module. Creating the SA here would fail if that namespace does not exist yet, and creating
+# the namespace here would let a cluster teardown delete a shared workload namespace. So the
+# workload deploys the "mcp-producer" ServiceAccount in that namespace; the association below
+# stays dormant until a Pod using it runs, then injects the producer role's credentials.
+# Self-gating on a non-empty role ARN keeps it opt-in without a separate toggle.
 ################################################################################
 
 variable "mcp_producer_role_arn" {
-  description = "ARN of the write-side producer IAM role from the SEPARATE infra/data-layer state (`terraform output -raw producer_role_arn` there). When non-empty, infra/eks creates the `mcp-producer` ServiceAccount in var.mcp_producer_namespace and associates it via Pod Identity so profiling workloads can write traces and log MLflow runs. Empty (default) skips producer wiring."
+  description = "ARN of the write-side producer IAM role from the SEPARATE infra/data-layer state (`terraform output -raw producer_role_arn` there). When non-empty, infra/eks creates a Pod Identity association mapping this role to the `mcp-producer` ServiceAccount in var.mcp_producer_namespace, so profiling workloads can write traces and log MLflow runs. The ServiceAccount itself is created by the workload, not here. Empty (default) skips producer wiring."
   type        = string
   default     = ""
 
   validation {
-    condition     = var.mcp_producer_role_arn == "" || can(regex("^arn:aws:iam::[0-9]{12}:role/", var.mcp_producer_role_arn))
-    error_message = "mcp_producer_role_arn must be empty or a valid IAM role ARN (arn:aws:iam::<account>:role/<name>) — a malformed value would be wired silently."
+    # Non-empty role name required (bare "role/" is rejected); partition left open so GovCloud
+    # (aws-us-gov) / China (aws-cn) ARNs pass. A malformed value would otherwise be wired silently.
+    condition     = var.mcp_producer_role_arn == "" || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+", var.mcp_producer_role_arn))
+    error_message = "mcp_producer_role_arn must be empty or a valid IAM role ARN (arn:<partition>:iam::<account>:role/<name> with a non-empty name)."
   }
 }
 
 variable "mcp_producer_namespace" {
-  description = "Existing namespace where the profiling `mcp-producer` ServiceAccount is created — the namespace your profiling workloads run in. Must already exist (not created here). Only used when mcp_producer_role_arn is set."
+  description = "Namespace the producer Pod Identity association targets — the namespace your profiling workloads run in and create the `mcp-producer` ServiceAccount in. Not created or validated here (the association is just a control-plane record). Only used when mcp_producer_role_arn is set."
   type        = string
   default     = "distai"
+
+  validation {
+    # EKS validates the namespace string as a DNS-1123 label; catch an invalid value at plan time
+    # instead of an InvalidParameterException at apply time.
+    condition     = can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", var.mcp_producer_namespace)) && length(var.mcp_producer_namespace) <= 63
+    error_message = "mcp_producer_namespace must be a valid DNS-1123 label (lowercase alphanumerics and '-', starting/ending alphanumeric, <=63 chars)."
+  }
 }
 
 locals {
   producer_enabled = var.mcp_producer_role_arn != ""
   producer_sa      = "mcp-producer"
-}
-
-resource "kubectl_manifest" "producer_sa" {
-  count = local.producer_enabled ? 1 : 0
-  yaml_body = yamlencode({
-    apiVersion = "v1"
-    kind       = "ServiceAccount"
-    metadata   = { name = local.producer_sa, namespace = var.mcp_producer_namespace }
-  })
 }
 
 resource "aws_eks_pod_identity_association" "producer" {
@@ -132,5 +137,25 @@ resource "aws_eks_pod_identity_association" "producer" {
   namespace       = var.mcp_producer_namespace
   service_account = local.producer_sa
   role_arn        = var.mcp_producer_role_arn
-  depends_on      = [kubectl_manifest.producer_sa]
+
+  lifecycle {
+    precondition {
+      # Pod Identity cannot assume a cross-account role directly; fail at plan time rather than at
+      # apply time if the role ARN is in a different account than this cluster.
+      condition     = !local.producer_enabled || can(regex("::${data.aws_caller_identity.current.account_id}:role/", var.mcp_producer_role_arn))
+      error_message = "mcp_producer_role_arn must be a role in this cluster's own account — EKS Pod Identity does not assume cross-account roles."
+    }
+  }
+}
+
+# Single source of truth for the infra/workload contract: the workload must create a ServiceAccount
+# with this name in this namespace for the association to take effect.
+output "mcp_producer_service_account" {
+  description = "ServiceAccount name the producer Pod Identity association targets (create this SA in mcp_producer_namespace from your profiling workload). Null when producer wiring is off."
+  value       = local.producer_enabled ? local.producer_sa : null
+}
+
+output "mcp_producer_namespace" {
+  description = "Namespace the producer Pod Identity association targets. Null when producer wiring is off."
+  value       = local.producer_enabled ? var.mcp_producer_namespace : null
 }
