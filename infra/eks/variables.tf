@@ -911,8 +911,8 @@ variable "openzfs_dynamic_provisioning_enabled" {
     the CSI DeleteVolume fail (AccessDenied), leaving PVs Released and the child volumes billing as
     orphans. Delete all dynamic PVCs/PVs first, then disable.
   EOT
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
 }
 
 variable "openzfs_csi_driver_chart_version" {
@@ -1201,4 +1201,41 @@ variable "tenant_node_label_key" {
   description = "Node label key stamped by karpenter-tenant-pools (Experiment01) on tenant nodes; observability relabels it to a `tenant` label on GPU metrics. Keep in sync with the operator's configuration."
   type        = string
   default     = "tenantpools.dev/tenant"
+}
+
+variable "enable_fsx_openzfs_s3_backup" {
+  description = <<-EOT
+    Deploy a CronJob that periodically syncs an FSx for OpenZFS-backed PVC to S3 (cold-data
+    offload), together with its dedicated backup bucket, ServiceAccount, and Pod Identity
+    association. OFF by default. Requires openzfs_enabled = true. Turning it OFF removes the CronJob, SA, and
+    association. The backup bucket is the source of truth: it is NOT force_destroy, so toggle-off
+    or destroy will fail if the bucket still holds objects — empty it deliberately first. Backup
+    data is never silently deleted.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "openzfs_s3_backup_schedule" {
+  description = "Cron schedule for the FSx OpenZFS -> S3 backup job (UTC)."
+  type        = string
+  default     = "0 * * * *"
+}
+
+variable "openzfs_s3_backup_namespace" {
+  description = "Namespace of the PVC to back up and where the CronJob runs."
+  type        = string
+  default     = "distai"
+}
+
+variable "openzfs_s3_backup_pvc" {
+  description = "Name of the FSx for OpenZFS-backed PVC to sync to S3."
+  type        = string
+  default     = "shared-claim"
+}
+
+variable "openzfs_s3_backup_prefix" {
+  description = "S3 key prefix under the backup bucket to sync into."
+  type        = string
+  default     = "openzfs-cold/"
 }

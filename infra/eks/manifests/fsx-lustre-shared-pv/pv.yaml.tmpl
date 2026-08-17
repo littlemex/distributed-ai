@@ -1,0 +1,26 @@
+# A second static PersistentVolume that points at an EXISTING FSx for Lustre filesystem, so an
+# additional namespace can mount the same filesystem (path-separation sharing). The FSx for Lustre
+# CSI driver mounts by dnsname/mountname, so volumeHandle only needs to be unique per PV; claimRef
+# pre-reserves this PV for a single PVC so no other namespace can bind it. Render with envsubst
+# after exporting the variables below (see README.md for how to obtain DNS/MOUNT/HANDLE/CAP).
+#   TENANT   namespace that will mount the shared filesystem
+#   PV_NAME  unique PersistentVolume name (cluster-scoped)
+#   CLAIM    PersistentVolumeClaim name in TENANT that binds this PV
+#   DNS MOUNT HANDLE CAP  copied from the existing FSx for Lustre PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${PV_NAME}
+spec:
+  capacity: { storage: "${CAP}" }
+  accessModes: ["ReadWriteMany"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: ["flock"]
+  claimRef: { namespace: "${TENANT}", name: "${CLAIM}" }
+  csi:
+    driver: fsx.csi.aws.com
+    volumeHandle: "${HANDLE}-${TENANT}"
+    volumeAttributes:
+      dnsname: "${DNS}"
+      mountname: "${MOUNT}"

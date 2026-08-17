@@ -1,0 +1,6 @@
+apiVersion: v2
+name: openzfs-multitenant
+description: Per-tenant isolated FSx for OpenZFS child volumes via dynamic provisioning (one child volume with its own quota per tenant namespace).
+type: application
+version: 0.1.0
+appVersion: "1.0"
