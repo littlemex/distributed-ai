@@ -1,0 +1,14 @@
+# Root volume of the existing FSx for OpenZFS filesystem to carve child volumes under.
+# Get it with: aws fsx describe-file-systems --file-system-ids <fs> \
+#   --query 'FileSystems[0].OpenZFSConfiguration.RootVolumeId' --output text
+parentVolumeId: ""
+# Per-PVC storage quota (GiB). Each tenant's child volume is capped at this.
+storageCapacityQuotaGiB: 10
+# Namespaces that each get an isolated child-volume PVC. Removing a namespace here and upgrading
+# deletes its PVC and, with reclaimPolicy Delete, its child volume and data.
+tenants: []
+# Name of the per-tenant PVC created in each namespace.
+pvcName: data
+# NFS export clients. "*" is convenient for a demo; in production restrict to the node subnet.
+nfsExportClients: "*"
+storageClassName: openzfs-sc

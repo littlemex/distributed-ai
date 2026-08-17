@@ -124,9 +124,12 @@ output "shared_storage" {
       persistent_volume = "fsx-training"
     }
     fsx_openzfs = {
-      enabled           = var.openzfs_enabled
-      id                = var.openzfs_enabled ? aws_fsx_openzfs_file_system.shared[0].id : ""
-      dns_name          = var.openzfs_enabled ? aws_fsx_openzfs_file_system.shared[0].dns_name : ""
+      enabled  = var.openzfs_enabled
+      id       = var.openzfs_enabled ? aws_fsx_openzfs_file_system.shared[0].id : ""
+      dns_name = var.openzfs_enabled ? aws_fsx_openzfs_file_system.shared[0].dns_name : ""
+      # Root volume id — the ParentVolumeId for dynamic per-tenant child-volume provisioning,
+      # exposed here so callers read it from terraform output instead of a separate aws-cli call.
+      root_volume_id    = var.openzfs_enabled ? aws_fsx_openzfs_file_system.shared[0].root_volume_id : ""
       mount_name        = ""
       storage_capacity  = var.openzfs_enabled ? tostring(aws_fsx_openzfs_file_system.shared[0].storage_capacity) : ""
       persistent_volume = "openzfs-shared"

@@ -1,0 +1,14 @@
+{{- range .Values.tenants }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $.Values.pvcName }}
+  namespace: {{ . }}
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: {{ $.Values.storageClassName }}
+  # For ResourceType=volume the FSx OpenZFS CSI driver (v1.2.0) requires the PVC request to be
+  # exactly 1Gi; the real per-tenant quota comes from StorageCapacityQuotaGiB on the StorageClass.
+  resources: { requests: { storage: 1Gi } }
+{{- end }}

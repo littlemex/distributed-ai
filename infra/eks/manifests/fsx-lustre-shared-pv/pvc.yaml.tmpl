@@ -1,0 +1,14 @@
+# PersistentVolumeClaim in TENANT that binds the shared PV by volumeName. Render with envsubst
+# using the same TENANT / CLAIM / PV_NAME / CAP variables as pv.yaml.tmpl.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "${CLAIM}"
+  namespace: "${TENANT}"
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: ""
+  volumeName: "${PV_NAME}"
+  resources:
+    requests:
+      storage: "${CAP}"
