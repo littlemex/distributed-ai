@@ -40,8 +40,12 @@ if ! kubectl version -o json >/dev/null 2>&1; then
 fi
 ctx="$(kubectl config current-context 2>/dev/null)"
 grn "kubectl reachable (context: ${ctx})"
-[ -n "$CLUSTER_NAME" ] && ! printf '%s' "$ctx" | grep -qF -- "$CLUSTER_NAME" && \
-  ylw "context '${ctx}' does not contain '${CLUSTER_NAME}' -- confirm you are on the right cluster"
+# Match against the context's cluster entry (the EKS ARN carries the cluster name), not the
+# context alias -- a user is free to name the context anything (e.g. a short alias), so the
+# alias need not contain the cluster name even when it is the right cluster.
+ctx_cluster="$(kubectl config view -o jsonpath="{.contexts[?(@.name=='${ctx}')].context.cluster}" 2>/dev/null)"
+[ -n "$CLUSTER_NAME" ] && ! printf '%s' "${ctx} ${ctx_cluster}" | grep -qF -- "$CLUSTER_NAME" && \
+  ylw "current context ('${ctx}', cluster '${ctx_cluster}') does not reference '${CLUSTER_NAME}' -- confirm you are on the right cluster"
 
 # 2. node-role labels (distinguish "no nodes returned" from "nodes lack the label")
 if ! nodes_json="$(kubectl get nodes -o json 2>/dev/null)"; then
