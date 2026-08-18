@@ -80,10 +80,15 @@ locals {
   # now derives protect (efa>0 → protect, ADR D6), moving its budget/consolidate 10%/5m → 0/Never —
   # correct for an EFA collective (any voluntary disruption kills every rank) and inert for the
   # current tfvars (gpu-dev has efa=0 → reclaim, unchanged).
-  # protect/reclaim gate the accelerator pools (see pool_disruption_preset). generic is the
-  # CPU NodePool's preset (ADR D6): reclaim an idle CPU node quickly since it holds no
-  # collective. Kept in this one table so "everything disruption lives here" holds — the CPU
-  # NodePool body references local.disruption_presets.generic instead of an inline literal.
+  # protect/reclaim gate the accelerator pools (see pool_disruption_preset). generic supplies the
+  # CPU NodePool's consolidateAfter (ADR D6): reclaim an EMPTY CPU node quickly since it holds no
+  # collective. NOTE (ADR D6 revised): the CPU pool's consolidationPolicy is now WhenEmpty, not
+  # WhenEmptyOrUnderutilized. The original "Underutilized" choice assumed the CPU pool was pure
+  # idle-reclaimable job capacity, but it also hosts long-lived control-plane singletons (a KubeRay
+  # head); Underutilized flagged a node running a single such pod and evicted it (Ray head churn).
+  # WhenEmpty only reclaims truly-empty nodes, so it keeps fast idle reclaim without disrupting a
+  # running singleton, and matches every accelerator pool. Kept in this one table so "everything
+  # disruption lives here" holds.
   disruption_presets = {
     protect = { consolidate_after = "Never", budget_nodes = "0" }
     reclaim = { consolidate_after = "5m", budget_nodes = "10%" }
@@ -680,10 +685,16 @@ resource "kubectl_manifest" "nodepool_cpu" {
         }
       }
       disruption = {
-        # CPU nodes can be reclaimed promptly when idle. consolidateAfter comes from the
-        # shared disruption_presets.generic entry (ADR D6) so no disruption value lives
-        # outside that one table.
-        consolidationPolicy = "WhenEmptyOrUnderutilized"
+        # WhenEmpty (not WhenEmptyOrUnderutilized): the CPU pool hosts a mix of short-lived jobs
+        # (image builds) AND long-lived control-plane singletons (e.g. a KubeRay head holding the
+        # Ray GCS). "Underutilized" flags a node running a single such singleton as a consolidation
+        # candidate and evicts it -- observed churning a Ray head that had just scheduled and was
+        # still pulling its image (ADR D6 revised: the earlier "generic reclaim" 30s/Underutilized
+        # assumed the pool was idle-reclaimable job capacity only). WhenEmpty never touches a
+        # non-empty node, so a node running any pod is safe, while a truly-empty node (a finished
+        # build job's node) is still reclaimed after consolidateAfter. This matches every other
+        # pool, which already use WhenEmpty. consolidateAfter still comes from the generic preset.
+        consolidationPolicy = "WhenEmpty"
         consolidateAfter    = local.disruption_presets.generic.consolidate_after
       }
       limits = {
