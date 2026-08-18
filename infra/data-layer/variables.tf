@@ -29,21 +29,41 @@ variable "trace_expire_after_days" {
 }
 
 variable "mlflow_enabled" {
-  description = "Create the managed SageMaker MLflow App. It is a paid resource, so default OFF — opt-in per campaign."
+  description = "Create the managed SageMaker MLflow tracking server. Paid and always-on while created, so default OFF. Setting this false and applying DESTROYS the server and its run metadata (only the S3 artifacts survive) — that is a teardown, not a pause. To pause cost while idle, use `aws sagemaker stop-mlflow-tracking-server` instead."
   type        = bool
   default     = false
 }
 
 variable "mlflow_app_name" {
-  description = "Name of the SageMaker MLflow App (when mlflow_enabled)."
+  description = "Name of the SageMaker MLflow tracking server (when mlflow_enabled)."
   type        = string
   default     = "mcp-profiling"
 }
 
+variable "mlflow_tracking_server_size" {
+  description = "SageMaker MLflow tracking server size: Small, Medium, or Large."
+  type        = string
+  default     = "Small"
+  validation {
+    condition     = contains(["Small", "Medium", "Large"], var.mlflow_tracking_server_size)
+    error_message = "mlflow_tracking_server_size must be one of Small, Medium, or Large."
+  }
+}
+
+variable "mlflow_version" {
+  description = "MLflow version for the tracking server. Pinned for reproducibility: changing it forces a replacement (which loses run metadata), so keep it stable across applies."
+  type        = string
+  default     = "3.0"
+}
+
 variable "mlflow_app_arn" {
-  description = "MLflow App ARN to scope producer/reader MLflow IAM to. Empty = wildcard (single-account dev). Set to aws_sagemaker_mlflow_app.this[0].arn once known to remove the wildcard."
+  description = "MLflow tracking server ARN to scope producer/reader MLflow IAM to. Empty = wildcard (single-account dev). Set to aws_sagemaker_mlflow_tracking_server.this[0].arn to remove the wildcard. Must be an mlflow-tracking-server ARN: the sagemaker-mlflow:* actions do not authorize an mlflow-app ARN."
   type        = string
   default     = ""
+  validation {
+    condition     = var.mlflow_app_arn == "" || !can(regex(":mlflow-app/", var.mlflow_app_arn))
+    error_message = "mlflow_app_arn must be an mlflow-tracking-server ARN, not a serverless mlflow-app ARN (the latter does not authorize sagemaker-mlflow:* actions)."
+  }
 }
 
 variable "tags" {

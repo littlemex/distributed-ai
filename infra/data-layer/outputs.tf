@@ -29,8 +29,8 @@ output "janitor_role_arn" {
 }
 
 output "mlflow_app_arn" {
-  description = "MLflow App ARN (MLFLOW_TRACKING_URI for clients). Empty when mlflow_enabled=false."
-  value       = try(aws_sagemaker_mlflow_app.this[0].arn, "")
+  description = "MLflow tracking server ARN (MLFLOW_TRACKING_URI for clients). Empty when mlflow_enabled=false."
+  value       = try(aws_sagemaker_mlflow_tracking_server.this[0].arn, "")
 }
 
 output "s3files_file_system_id" {
