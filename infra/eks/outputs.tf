@@ -91,6 +91,28 @@ output "accelerator_pool_efa_schedulable" {
   value       = local.pool_efa_schedulable
 }
 
+output "accelerator_pool_placement" {
+  description = <<-EOT
+    Per-pool placement metadata for templating an accelerated test case's env (e.g. the
+    pytorch/miles and pytorch/slime GRPO env_vars) instead of hand-guessing labels. The
+    node-role label KEY is always "node-role" (the stable placement API; ADR D11 /
+    docs/node-role-separation.md), the VALUE is the pool name, and efa_schedulable is the
+    per-Pod EFA request cap. Example for a GRPO env_vars:
+      GPU_NODE_LABEL_KEY=node-role  GPU_NODE_ROLE=<pool>  EFA_PER_NODE=<efa_schedulable>
+  EOT
+  value = {
+    node_role_label_key = "node-role"
+    pools = {
+      for k, p in var.accelerator_pools : k => {
+        node_role       = k
+        instance_types  = p.instance_types
+        device_plugin   = p.device_plugin
+        efa_schedulable = lookup(local.pool_efa_schedulable, k, 0)
+      }
+    }
+  }
+}
+
 output "region" {
   description = <<-EOT
     AWS region this cluster was created in. Surfaced so helper scripts (tests/run-tests.sh) can
