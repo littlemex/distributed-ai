@@ -45,6 +45,8 @@ spec:
               --gateway-bind lan --gateway-port 18789 --gateway-auth token
               --gateway-token "$OPENCLAW_GATEWAY_TOKEN" || true;
               openclaw config set agents.defaults.model.primary "qwen-eks/Qwen/Qwen3.8-27B" || true;
+              openclaw plugins install @openclaw/duckduckgo-plugin || true;
+              openclaw config set tools.web.search.provider duckduckgo || true;
               exec openclaw gateway run --bind lan
           ports: [{ name: http, containerPort: 18789 }]
           readinessProbe:
