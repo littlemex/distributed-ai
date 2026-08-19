@@ -1,0 +1,66 @@
+# Always-on OpenClaw agent, backed by the self-hosted Qwen3.8-27B vLLM Service.
+# CPU pod on the `cpu` Karpenter pool. The Gateway (Control UI + agent runtime + cron
+# scheduler) runs as the main process, so it stays up = "always-on autonomous agent".
+# Config is seeded non-interactively at start (onboard custom OpenAI-compatible provider
+# pointed at the in-cluster vLLM Service). Ephemeral state (emptyDir) is fine for a demo.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openclaw-gateway
+type: Opaque
+stringData:
+  token: "qwen-demo-token"        # demo only; rotate / move to a real secret store
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw
+  labels: { app: openclaw }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: openclaw } }
+  template:
+    metadata:
+      labels: { app: openclaw }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }   # cpu pool consolidates idle nodes
+    spec:
+      nodeSelector: { node-role: cpu }
+      containers:
+        - name: openclaw
+          image: ghcr.io/openclaw/openclaw:2026.3.1
+          env:
+            - name: VLLM_API_KEY
+              value: "vllm-local"
+            - name: OPENCLAW_GATEWAY_TOKEN
+              valueFrom: { secretKeyRef: { name: openclaw-gateway, key: token } }
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              openclaw onboard --non-interactive --accept-risk --flow quickstart
+              --auth-choice custom-api-key
+              --custom-base-url "http://vllm-qwen-qwen3-8-27b:8000/v1"
+              --custom-model-id "Qwen/Qwen3.8-27B" --custom-compatibility openai
+              --custom-api-key "vllm-local" --custom-provider-id "qwen-eks"
+              --gateway-bind lan --gateway-port 18789 --gateway-auth token
+              --gateway-token "$OPENCLAW_GATEWAY_TOKEN" || true;
+              openclaw config set agents.defaults.model.primary "qwen-eks/Qwen/Qwen3.8-27B" || true;
+              exec openclaw gateway run --bind lan
+          ports: [{ name: http, containerPort: 18789 }]
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits: { cpu: "2", memory: 4Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openclaw
+  labels: { app: openclaw }
+spec:
+  type: ClusterIP
+  selector: { app: openclaw }
+  ports: [{ name: http, port: 18789, targetPort: http }]
