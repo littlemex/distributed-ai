@@ -40,6 +40,12 @@ extraArgs: []               # escape hatch; keep empty and justified in the over
 enableAutoToolChoice: false
 toolCallParser: ""
 
+# --- chat template kwargs (server-side default; a per-request chat_template_kwargs overrides) ---
+# For thinking models, serve in non-thinking mode by default: '{"enable_thinking": false}'.
+# Qwen3-family thinking + greedy/low-temp decoding is a known endless-repetition trap, and a
+# coding-agent backend does not want a reasoning preamble on every turn, so we default it off.
+chatTemplateKwargs: ""
+
 # --- resources (host RAM + shared memory, NOT VRAM) ---
 cpu: "8"
 memory: 64Gi

@@ -27,3 +27,9 @@ enablePrefixCaching: false
 # so the matching vLLM parser is qwen3_coder (hermes expects JSON and would fail to parse).
 enableAutoToolChoice: true
 toolCallParser: qwen3_coder
+
+# serve in non-thinking mode by default (thinking + greedy decoding endlessly repeats, and an
+# agent backend does not want a reasoning preamble each turn). Per-request chat_template_kwargs
+# can re-enable it. Verified: enable_thinking=false returns a clean 2-token answer vs a verbose
+# thinking trace.
+chatTemplateKwargs: '{"enable_thinking": false}'
