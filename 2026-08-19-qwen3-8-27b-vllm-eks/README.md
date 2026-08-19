@@ -30,6 +30,7 @@ docs/SCHEMA-models.md         proposed facts-vs-tuning schema (extraction candid
 scripts/up.sh                 render + apply + wait for rollout
 scripts/port-forward.sh       forward the Service to localhost (demo only)
 scripts/run_smoke.py          /v1/models + chat + tool-call assertions
+opencode/                     opencode custom-provider config + how to drive the model
 ```
 
 ## Prerequisites
@@ -66,3 +67,9 @@ Karpenter once idle (`consolidationPolicy: WhenEmpty`). Delete the pool to be ce
   `qwen3_coder` parser handles (`hermes` expects JSON and would not parse it).
 - TP4 on g6e.12xlarge (`num_key_value_heads: 4` divides 4). `max_model_len` capped to 32768
   (native 262144).
+- Served in non-thinking mode by default (`--default-chat-template-kwargs '{"enable_thinking":
+  false}'`): the Qwen3-family thinking mode under greedy/low-temp decoding endlessly repeats and
+  never emits a stop token, which stalls an agent loop. `enable_thinking=false` returns a clean
+  2-token answer; a per-request `chat_template_kwargs` can re-enable it.
+- opencode connects to this endpoint as a custom provider and completes a full agent tool loop
+  (its `read` tool) against the self-hosted model — see [`opencode/`](opencode/).
