@@ -24,7 +24,8 @@ NODE_ROLE="$(helm template x "$CHART" -f "$OVERLAY" --show-only templates/deploy
   | awk '/node-role:/{print $2; exit}')"
 if ! "${KCTL[@]}" get nodepool "$NODE_ROLE" >/dev/null 2>&1 \
    && ! "${KCTL[@]}" get nodes -l "node-role=$NODE_ROLE" --no-headers 2>/dev/null | grep -q .; then
-  echo "[NG] no NodePool or node with node-role=$NODE_ROLE (add the pool in infra/eks first)"; exit 1
+  echo "[NG] no NodePool or node with node-role=$NODE_ROLE"
+  echo "     apply the pool first:  kubectl --context \$KCTX apply -f ../pool/nodepool-gpu-l40s.yaml"; exit 1
 fi
 
 if [ "${1:-}" = "--down" ]; then

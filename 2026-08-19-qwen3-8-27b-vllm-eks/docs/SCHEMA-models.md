@@ -3,7 +3,7 @@
 Two files describe how a model is served. Keeping them apart is what lets a second engine
 serve the same model without copying the model's facts.
 
-## `serving/models/<normalized-id>.yaml` — facts (engine-independent)
+## `models/<normalized-id>.yaml` — facts (engine-independent)
 
 Facts are only what is **mechanically verifiable** from the model's `config.json`, tokenizer
 config, and license. If a value is a choice rather than a property of the model, it is not a
@@ -23,10 +23,10 @@ fact — it belongs in the overlay.
 Two-faced fields go by their nature: `max_position_embeddings: 262144` is a fact; the
 `maxModelLen: 32768` you actually launch with is a **tuning choice** → overlay.
 
-## `serving/<stack>/overlays/<normalized-id>.yaml` — tuning (engine-specific)
+## `overlays/<normalized-id>.yaml` — tuning (engine-specific)
 
 Plain Helm values layered on the stack chart's `values.yaml` with `-f`. There is **no merge
-engine** — the overlay is just values, `serving/models/` is a referenced fact document.
+engine** — the overlay is just values, `models/` is a referenced fact document.
 
 Typical fields: `image` (SDK-pinned), `tensorParallelSize` / `pipelineParallelSize`,
 `maxModelLen`, `gpuMemoryUtilization`, `maxNumSeqs`, `enablePrefixCaching`, `extraArgs`.

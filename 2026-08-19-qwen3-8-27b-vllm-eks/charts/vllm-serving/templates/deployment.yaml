@@ -47,6 +47,10 @@ spec:
             {{- if .Values.enforceEager }}
             - --enforce-eager
             {{- end }}
+            {{- if .Values.enableAutoToolChoice }}
+            - --enable-auto-tool-choice
+            - --tool-call-parser={{ .Values.toolCallParser }}
+            {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . }}
             {{- end }}

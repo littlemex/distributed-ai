@@ -33,6 +33,13 @@ enablePrefixCaching: false  # hybrid (linear-attention) models: prefix caching i
 enforceEager: false         # set true if cudagraph capture fails on a new architecture
 extraArgs: []               # escape hatch; keep empty and justified in the overlay
 
+# --- tool calling (an agent backend needs structured tool calls, not just chat) ---
+# Pick the parser that matches the model's chat_template tool-call format:
+#   qwen3_coder -> <tool_call><function=..><parameter=..> XML (Qwen3.x)
+#   hermes      -> <tool_call>{json}</tool_call>
+enableAutoToolChoice: false
+toolCallParser: ""
+
 # --- resources (host RAM + shared memory, NOT VRAM) ---
 cpu: "8"
 memory: 64Gi

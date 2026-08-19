@@ -22,3 +22,8 @@ maxModelLen: 32768
 gpuMemoryUtilization: 0.85
 maxNumSeqs: 16
 enablePrefixCaching: false
+
+# tool calling: the chat_template emits Qwen3 XML (<tool_call><function=..><parameter=..>),
+# so the matching vLLM parser is qwen3_coder (hermes expects JSON and would fail to parse).
+enableAutoToolChoice: true
+toolCallParser: qwen3_coder
