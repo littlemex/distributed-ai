@@ -1,6 +1,10 @@
-# SGLang serving Qwen/Qwen3.8-27B with DFLASH speculative decoding (draft incoai/Qwen3.8-27B-DFlash2),
+# SGLang serving Qwen/Qwen3.8-27B with DFLASH2 speculative decoding (draft incoai/Qwen3.8-27B-DFlash2),
 # on a SPOT g6e.12xlarge (separate quota from the on-demand vLLM). OpenAI-compatible on :8000.
-# For benchmarking dflash2 vs the vLLM autoregressive baseline. Tear down after the experiment.
+#
+# DFlash2 landed in sglang main AFTER the latest published nightly, so DFlash2DraftModel is missing
+# from the image. We therefore install the sglang PYTHON package from main at start (on top of the
+# nightly image, which already ships the prebuilt sgl-kernel / CUDA / torch — so no heavy kernel
+# recompile). This is the article's `pip install "sglang @ git+...#subdirectory=python"` method.
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: sglang-dflash, labels: { app: sglang-dflash } }
@@ -17,17 +21,19 @@ spec:
       containers:
         - name: sglang
           image: lmsysorg/sglang:nightly-dev-cu12-20260818-c0b6474b
-          command: ["python3","-m","sglang.launch_server"]
+          command: ["/bin/sh","-lc"]
           args:
-            - --model-path=Qwen/Qwen3.8-27B
-            - --tp=4
-            - --host=0.0.0.0
-            - --port=8000
-            - --mem-fraction-static=0.90
-            - --context-length=32768
-            - --speculative-algorithm=DFLASH
-            - --speculative-draft-model-path=incoai/Qwen3.8-27B-DFlash2
-            - --speculative-num-draft-tokens=8
+            - >
+              set -e;
+              echo '[dflash] installing sglang python from main (keeps prebuilt sgl-kernel)...';
+              pip install -U --no-deps "sglang @ git+https://github.com/sgl-project/sglang.git#subdirectory=python" 2>&1 | tail -4;
+              python3 -c "from sglang.srt.models.dflash import DFlash2DraftModel; print('[dflash] DFlash2DraftModel import OK')";
+              exec python3 -m sglang.launch_server
+              --model-path Qwen/Qwen3.8-27B --tp 4 --host 0.0.0.0 --port 8000
+              --mem-fraction-static 0.75 --context-length 16384
+              --speculative-algorithm DFLASH
+              --speculative-draft-model-path incoai/Qwen3.8-27B-DFlash2
+              --speculative-num-draft-tokens 8
           env:
             - { name: HF_HOME, value: /hf-cache }
           ports: [{ name: http, containerPort: 8000 }]
@@ -37,7 +43,7 @@ spec:
           readinessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 15
-            failureThreshold: 120
+            failureThreshold: 160
           volumeMounts:
             - { name: dshm, mountPath: /dev/shm }
             - { name: hf-cache, mountPath: /hf-cache }

@@ -1,4 +1,4 @@
-# SGLang + DFLASH2 (dflash2) — status: blocked on a source build
+# SGLang + DFLASH2 (dflash2) — WORKING via pip-install-main-at-start (benched)
 
 Goal: serve Qwen/Qwen3.8-27B with DFlash2 speculative decoding (draft model
 `incoai/Qwen3.8-27B-DFlash2`) and benchmark throughput / TTFT / TPOT vs the vLLM
