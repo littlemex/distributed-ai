@@ -8,12 +8,20 @@
 # Self-contained: put this script + agents.env anywhere on your Mac. Prereqs: kubectl, aws CLI,
 # curl, python3, and active AWS credentials. No repo checkout needed.
 #
-#   ./agents.sh setup       one-time: create the kubeconfig context (idempotent)
-#   ./agents.sh opencode     exec into the opencode pod and launch the opencode TUI
-#   ./agents.sh hermes       exec into the hermes pod and launch the hermes TUI
-#   ./agents.sh shell <name> exec a bash shell in a pod (name: opencode | hermes)
-#   ./agents.sh openclaw     background port-forward + open the OpenClaw Control UI in the browser
-#   ./agents.sh down         stop background port-forwards started by this script
+#   ./agents.sh setup                   one-time: create the kubeconfig context (idempotent)
+#   ./agents.sh opencode  [args...]     exec into the opencode pod and launch opencode
+#   ./agents.sh hermes    [args...]     exec into the hermes pod and launch hermes
+#   ./agents.sh qwen-code [args...]     exec into the qwen-code pod and launch qwen (Qwen Code)
+#   ./agents.sh -t <agent>              log into the pod with a shell and STOP (no TUI launch)
+#   ./agents.sh openclaw                background port-forward + open the OpenClaw Control UI
+#   ./agents.sh down                    stop background port-forwards started by this script
+#
+# Arg passthrough: everything after the agent name is forwarded verbatim to the wrapped CLI, e.g.
+#   ./agents.sh qwen-code -r <session-id>          # resume a Qwen Code session
+#   ./agents.sh qwen-code -p "summarize this repo"  # non-interactive prompt
+#   ./agents.sh opencode  run "fix the failing test"
+# Shell-only (-t / --shell) drops you at a bash prompt in the pod for manual work:
+#   ./agents.sh -t qwen-code
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,19 +44,39 @@ cmd_setup() {
     awk '/# >>> eks-agents/{p=1} !p{print} /# <<< eks-agents/{p=0}' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
     echo "[..] removed obsolete ssh Host block from ~/.ssh/config (no longer needed)"
   fi
-  echo "[OK] setup done. Now:  ./agents.sh opencode   |   ./agents.sh hermes   |   ./agents.sh openclaw"
+  echo "[OK] setup done. Now:  ./agents.sh opencode | hermes | qwen-code | openclaw"
 }
 
-_deploy_for() { case "$1" in opencode) echo "${OPENCODE_DEPLOY:-opencode}";; hermes) echo "${HERMES_DEPLOY:-hermes}";; *) echo "" ;; esac; }
+_deploy_for() { case "$1" in
+  opencode)  echo "${OPENCODE_DEPLOY:-opencode}";;
+  hermes)    echo "${HERMES_DEPLOY:-hermes}";;
+  qwen-code) echo "${QWENCODE_DEPLOY:-qwen-code}";;
+  *) echo "";; esac; }
 
-_exec() {  # _exec <deploy> <command...>
+# per-agent: how to cd + the CLI binary to exec
+_cd_for()  { case "$1" in hermes) echo 'cd /opt/data/work 2>/dev/null || cd ~';; *) echo 'cd ~';; esac; }
+_bin_for() { case "$1" in opencode) echo opencode;; hermes) echo hermes;; qwen-code) echo qwen;; esac; }
+
+_exec() {  # _exec <deploy> <command-string>
   local dep="$1"; shift
   exec "${K[@]}" exec -it "deploy/$dep" -- bash -lc "$*"
 }
 
-cmd_opencode() { _exec "$(_deploy_for opencode)" 'cd ~ && exec opencode'; }
-cmd_hermes()   { _exec "$(_deploy_for hermes)"   'cd /opt/data/work 2>/dev/null || cd ~; exec hermes'; }
-cmd_shell()    { local d; d="$(_deploy_for "${1:?usage: shell <opencode|hermes>}")"; [ -n "$d" ] || { echo "unknown $1" >&2; exit 1; }; _exec "$d" 'exec bash'; }
+# _run_agent <agent> [passthrough args...]
+_run_agent() {
+  local agent="$1"; shift || true
+  local dep; dep="$(_deploy_for "$agent")"
+  [ -n "$dep" ] || { echo "[NG] unknown agent: $agent  (use opencode | hermes | qwen-code)" >&2; exit 1; }
+  local cd_cmd; cd_cmd="$(_cd_for "$agent")"
+  if [ "${SHELL_ONLY:-0}" = 1 ]; then
+    _exec "$dep" "$cd_cmd; exec bash"
+  fi
+  local bin; bin="$(_bin_for "$agent")"
+  # forward passthrough args verbatim, safely re-quoted for the remote shell
+  local extra="" a
+  for a in "$@"; do extra+=" $(printf '%q' "$a")"; done
+  _exec "$dep" "$cd_cmd; exec $bin$extra"
+}
 
 cmd_openclaw() {
   local pidf="$PFDIR/openclaw.pid"
@@ -68,12 +96,18 @@ cmd_down() {
   echo "[OK] background port-forwards stopped"
 }
 
+usage() { sed -n '2,25p' "$HERE/$(basename "${BASH_SOURCE[0]}")"; }
+
+# leading -t/--shell => log into the pod shell only, no TUI launch
+SHELL_ONLY=0
+if [ "${1:-}" = "-t" ] || [ "${1:-}" = "--shell" ]; then SHELL_ONLY=1; shift; fi
+
 case "${1:-}" in
   setup) cmd_setup ;;
-  opencode) cmd_opencode ;;
-  hermes) cmd_hermes ;;
-  shell) shift; cmd_shell "$@" ;;
+  opencode|hermes|qwen-code) agent="$1"; shift; _run_agent "$agent" "$@" ;;
+  # back-compat: `shell <agent>` == `-t <agent>`
+  shell) shift; SHELL_ONLY=1; _run_agent "${1:?usage: shell <opencode|hermes|qwen-code>}" ;;
   openclaw) cmd_openclaw ;;
   down) cmd_down ;;
-  *) sed -n '2,20p' "$HERE/$(basename "${BASH_SOURCE[0]}")"; exit 1 ;;
+  *) usage; exit 1 ;;
 esac

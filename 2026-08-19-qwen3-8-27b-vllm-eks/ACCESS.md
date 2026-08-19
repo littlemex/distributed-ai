@@ -30,6 +30,34 @@ sources.
 Model is `ollama/Qwen/Qwen3.8-27B` = the self-hosted Qwen via the OpenAI-compatible "ollama"
 provider override. Hermes requires >=64K context, so vLLM serves max_model_len 65536.
 
+## qwen-code (interactive TUI)
+
+```bash
+./agents.sh qwen-code                 # kubectl exec -it into the pod, launches `qwen`
+```
+Qwen Code is Qwen's gemini-cli fork. It reaches the self-hosted Qwen via the `openai` auth type
+(OpenAI-compatible), baseUrl set to the in-cluster vLLM Service in `~/.qwen/settings.json`;
+`security.auth.selectedType=openai` skips the interactive `/auth`. Web search via the same
+bedrock-websearch MCP (AWS creds via Pod Identity). Verified: `qwen -p "..."` reaches the backend,
+and `qwen --approval-mode yolo -p "use web_search ..."` invokes the tool and cites a source URL.
+
+## Passthrough and shell-only
+
+Everything after the agent name is forwarded verbatim to the wrapped CLI:
+
+```bash
+./agents.sh qwen-code -r <session-id>            # resume a Qwen Code session
+./agents.sh qwen-code -p "summarize this repo"    # non-interactive prompt
+./agents.sh opencode  run "fix the failing test"
+```
+
+`-t` / `--shell` logs into the pod at a bash prompt and stops (no TUI), for manual terminal work:
+
+```bash
+./agents.sh -t qwen-code
+./agents.sh -t opencode
+```
+
 ## OpenClaw (browser)
 
 ```bash
@@ -42,8 +70,9 @@ Bedrock web search.
 ## Raw kubectl (no script)
 
 ```bash
-kubectl --context distai-tokyo -n distai exec -it deploy/opencode -- bash -lc opencode
-kubectl --context distai-tokyo -n distai exec -it deploy/hermes   -- bash -lc hermes
+kubectl --context distai-tokyo -n distai exec -it deploy/opencode  -- bash -lc opencode
+kubectl --context distai-tokyo -n distai exec -it deploy/hermes    -- bash -lc hermes
+kubectl --context distai-tokyo -n distai exec -it deploy/qwen-code -- bash -lc qwen
 kubectl --context distai-tokyo -n distai port-forward svc/openclaw 18789:18789   # then open the URL
 ```
 

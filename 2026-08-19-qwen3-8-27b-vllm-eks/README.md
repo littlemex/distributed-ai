@@ -31,6 +31,14 @@ scripts/up.sh                 render + apply + wait for rollout
 scripts/port-forward.sh       forward the Service to localhost (demo only)
 scripts/run_smoke.py          /v1/models + chat + tool-call assertions
 opencode/                     opencode custom-provider config + how to drive the model
+hermes/                       Hermes Agent pod on the self-hosted Qwen backend
+qwen-code/                    Qwen Code (gemini-cli fork) pod on the self-hosted Qwen backend
+openclaw/                     OpenClaw (browser agent) on the self-hosted Qwen backend
+tools/bedrock-websearch/      stdlib-only Bedrock web_search tool (CLI + stdio MCP, Pod Identity)
+client/agents.sh              keyless one-shot launchers (kubectl exec) for all four agents
+sglang/                       SGLang + DFLASH2 speculative-decoding serving + bench
+bench/                        vllm bench serve driver + results (concurrency sweep, dflash2)
+ACCESS.md                     how to reach each agent (keyless)
 ```
 
 ## Prerequisites
