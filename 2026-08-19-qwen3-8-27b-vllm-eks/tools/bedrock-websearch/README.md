@@ -35,15 +35,22 @@ Verified end to end: the Qwen agent invoked `bedrock-websearch_web_search` and r
 grounded answer with a citation. The opencode process needs AWS credentials in its environment
 (the MCP subprocess inherits them).
 
-## openclaw
+## openclaw (verified, deployed)
 
-Two ways to give the deployed OpenClaw agent this tool:
-- MCP: add the same command under OpenClaw's MCP config.
-- CLI: put `bedrock_websearch.py` on PATH in the pod; the agent runs it via its exec tool.
+The pinned OpenClaw build (2026.3.1) has no `openclaw mcp` subcommand, so this tool is wired
+via the agent's shell tool plus an `AGENTS.md` that teaches the agent to use it:
 
-Either way the pod needs AWS credentials for Bedrock. On EKS use a **Pod Identity association**
-(the cluster's auth model) binding the OpenClaw ServiceAccount to an IAM role with Bedrock
-invoke + web-search permission — do NOT bake static keys into the image.
+- `bedrock_websearch.py` and `AGENTS.md` are mounted from a ConfigMap at `/opt/tools`
+  (see `../../openclaw/openclaw.yaml`); the start command copies `AGENTS.md` into the agent
+  workspace, so the agent auto-runs the tool for "latest / research" questions.
+- AWS credentials come from an **EKS Pod Identity association** binding the `openclaw`
+  ServiceAccount to an IAM role with Bedrock permissions (no static keys). The wrapper reads
+  those credentials from the Pod Identity container endpoint (stdlib, no botocore in the image).
+- On an OpenClaw build that has `openclaw mcp add`, register it as a stdio MCP instead
+  (`--command python3 --args /opt/tools/bedrock_websearch.py --args --mcp`).
+
+Verified: `openclaw agent -m "What is the newest stable Go version? Research and cite the source."`
+auto-searches via Bedrock and answers with sources — Qwen brain, Bedrock search, in-pod, keyless.
 
 ## Cost / caveats
 

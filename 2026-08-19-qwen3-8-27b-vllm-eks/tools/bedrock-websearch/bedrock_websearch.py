@@ -3,21 +3,22 @@
 tool as a plain search tool that any agent can call, so a self-hosted model
 (e.g. Qwen on vLLM) stays the "brain" while Bedrock does the web search.
 
-Two entrypoints:
-  - CLI  : `bedrock_websearch.py "<query>"`  -> prints text (answer + sources).
-           For openclaw (agent runs it via its exec/bash tool) or any shell caller.
-  - MCP  : `bedrock_websearch.py --mcp`      -> stdio MCP server, tool `web_search`.
-           For opencode (opencode.json `mcp`) or any MCP client.
+Standard-library only: SigV4 signing and credential resolution are hand-rolled so
+this runs on a bare python3 (no pip/botocore) — e.g. inside the OpenClaw container.
+Credentials, in order: explicit AWS_* env vars, then EKS Pod Identity / ECS container
+credentials endpoint (AWS_CONTAINER_CREDENTIALS_FULL_URI + token file), then botocore
+if it happens to be installed (local dev convenience).
 
-Auth uses the default AWS credential chain (env, profile, or EKS Pod Identity),
-signed with SigV4 for service `bedrock`. Requires only `botocore` (MCP mode also
-needs `mcp`). No API key.
+Entrypoints:
+  - CLI : `bedrock_websearch.py "<query>"`   -> prints answer + sources (for openclaw exec).
+  - MCP : `bedrock_websearch.py --mcp`        -> stdio JSON-RPC MCP server, tool `web_search`.
 
-Env:
-  BEDROCK_WS_REGION   default us-east-1  (must be us-east-1|us-east-2|us-west-2)
-  BEDROCK_WS_MODEL    default openai.gpt-5.6-sol  (bare id; also terra/luna)
-  BEDROCK_WS_EXTERNAL default "true"     (external_web_access)
+Env: BEDROCK_WS_REGION (us-east-1|us-east-2|us-west-2, default us-east-1),
+     BEDROCK_WS_MODEL (default openai.gpt-5.6-sol), BEDROCK_WS_EXTERNAL (default true).
 """
+import datetime
+import hashlib
+import hmac
 import json
 import os
 import sys
@@ -26,39 +27,97 @@ import urllib.request
 DEFAULT_REGION = os.environ.get("BEDROCK_WS_REGION", "us-east-1")
 DEFAULT_MODEL = os.environ.get("BEDROCK_WS_MODEL", "openai.gpt-5.6-sol")
 EXTERNAL = os.environ.get("BEDROCK_WS_EXTERNAL", "true").lower() in ("1", "true", "yes")
+SERVICE = "bedrock"
+
+
+def _get_credentials():
+    """Return (access_key, secret_key, session_token|None)."""
+    ak = os.environ.get("AWS_ACCESS_KEY_ID")
+    sk = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    if ak and sk:
+        return ak, sk, os.environ.get("AWS_SESSION_TOKEN")
+    # EKS Pod Identity / ECS container credentials endpoint
+    uri = os.environ.get("AWS_CONTAINER_CREDENTIALS_FULL_URI")
+    rel = os.environ.get("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+    if rel and not uri:
+        uri = "http://169.254.170.2" + rel
+    if uri:
+        headers = {}
+        tok_file = os.environ.get("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")
+        tok = os.environ.get("AWS_CONTAINER_AUTHORIZATION_TOKEN")
+        if tok_file and os.path.exists(tok_file):
+            tok = open(tok_file).read().strip()
+        if tok:
+            headers["Authorization"] = tok
+        req = urllib.request.Request(uri, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            d = json.load(r)
+        return d["AccessKeyId"], d["SecretAccessKey"], d.get("Token")
+    # last resort: botocore (local dev with profiles/SSO)
+    try:
+        import botocore.session
+        c = botocore.session.get_session().get_credentials()
+        if c:
+            c = c.get_frozen_credentials()
+            return c.access_key, c.secret_key, c.token
+    except Exception:
+        pass
+    raise RuntimeError("no AWS credentials (env / Pod Identity endpoint / botocore) found")
+
+
+def _sign(method, host, path, body, region, ak, sk, token):
+    """Return SigV4 headers for a POST to host+path."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    amzdate = now.strftime("%Y%m%dT%H%M%SZ")
+    datestamp = now.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(body.encode()).hexdigest()
+
+    headers = {"content-type": "application/json", "host": host,
+               "x-amz-date": amzdate, "x-amz-content-sha256": payload_hash}
+    if token:
+        headers["x-amz-security-token"] = token
+    signed_headers = ";".join(sorted(headers))
+    canonical_headers = "".join(f"{k}:{headers[k]}\n" for k in sorted(headers))
+    canonical_request = "\n".join([method, path, "", canonical_headers, signed_headers, payload_hash])
+
+    scope = f"{datestamp}/{region}/{SERVICE}/aws4_request"
+    string_to_sign = "\n".join([
+        "AWS4-HMAC-SHA256", amzdate, scope,
+        hashlib.sha256(canonical_request.encode()).hexdigest()])
+
+    def _hmac(key, msg):
+        return hmac.new(key, msg.encode(), hashlib.sha256).digest()
+
+    k = _hmac(("AWS4" + sk).encode(), datestamp)
+    k = _hmac(k, region)
+    k = _hmac(k, SERVICE)
+    k = _hmac(k, "aws4_request")
+    sig = hmac.new(k, string_to_sign.encode(), hashlib.sha256).hexdigest()
+    headers["Authorization"] = (
+        f"AWS4-HMAC-SHA256 Credential={ak}/{scope}, "
+        f"SignedHeaders={signed_headers}, Signature={sig}")
+    return headers
 
 
 def bedrock_web_search(query, region=None, model=None, external=None):
     """Run one web-search-grounded Responses call. Returns {answer, citations, queries}."""
-    import botocore.session
-    from botocore.auth import SigV4Auth
-    from botocore.awsrequest import AWSRequest
-
     region = region or DEFAULT_REGION
     model = model or DEFAULT_MODEL
     ext = EXTERNAL if external is None else external
 
-    creds = botocore.session.get_session().get_credentials()
-    if creds is None:
-        raise RuntimeError("no AWS credentials (env/profile/Pod Identity) found")
-    creds = creds.get_frozen_credentials()
-
+    ak, sk, token = _get_credentials()
     host = f"bedrock-mantle.{region}.api.aws"
-    url = f"https://{host}/openai/v1/responses"
+    path = "/openai/v1/responses"
     body = json.dumps({
         "model": model,
         "input": query,
         "tools": [{"type": "web_search", "external_web_access": ext}],
     })
-    aws_req = AWSRequest(method="POST", url=url, data=body,
-                         headers={"Content-Type": "application/json", "Host": host})
-    SigV4Auth(creds, "bedrock", region).add_auth(aws_req)
-
-    http_req = urllib.request.Request(url, data=body.encode(),
-                                      headers=dict(aws_req.headers.items()), method="POST")
-    with urllib.request.urlopen(http_req, timeout=120) as r:
+    headers = _sign("POST", host, path, body, region, ak, sk, token)
+    req = urllib.request.Request(f"https://{host}{path}", data=body.encode(),
+                                 headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=120) as r:
         data = json.load(r)
-
     if isinstance(data, dict) and data.get("error"):
         raise RuntimeError(f"bedrock error: {data['error']}")
 
@@ -82,7 +141,6 @@ def bedrock_web_search(query, region=None, model=None, external=None):
                 walk(v)
 
     walk(data)
-    # dedupe citations, keep order
     seen = set()
     citations = [c for c in citations if not (c in seen or seen.add(c))]
     return {"answer": "\n".join(a for a in answers if a).strip(),
@@ -109,7 +167,7 @@ TOOL_SCHEMA = {
 
 
 def run_mcp():
-    """Minimal MCP stdio server (newline-delimited JSON-RPC 2.0). No mcp/fastmcp dependency."""
+    """Minimal MCP stdio server (newline-delimited JSON-RPC 2.0). No dependencies."""
     out = sys.stdout
 
     def send(obj):
@@ -130,7 +188,7 @@ def run_mcp():
             send({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "bedrock-websearch", "version": "0.1.0"}}})
+                "serverInfo": {"name": "bedrock-websearch", "version": "0.2.0"}}})
         elif method == "notifications/initialized":
             continue
         elif method == "tools/list":
@@ -163,10 +221,7 @@ def main(argv):
         print('usage: bedrock_websearch.py "<query>"   |   --mcp', file=sys.stderr)
         sys.exit(2)
     result = bedrock_web_search(" ".join(args))
-    if "--json" in argv:
-        print(json.dumps(result, ensure_ascii=False))
-    else:
-        print(_format(result))
+    print(json.dumps(result, ensure_ascii=False) if "--json" in argv else _format(result))
 
 
 if __name__ == "__main__":

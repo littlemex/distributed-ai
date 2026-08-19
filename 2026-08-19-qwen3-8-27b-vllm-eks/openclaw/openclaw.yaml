@@ -1,8 +1,16 @@
-# Always-on OpenClaw agent, backed by the self-hosted Qwen3.8-27B vLLM Service.
-# CPU pod on the `cpu` Karpenter pool. The Gateway (Control UI + agent runtime + cron
-# scheduler) runs as the main process, so it stays up = "always-on autonomous agent".
-# Config is seeded non-interactively at start (onboard custom OpenAI-compatible provider
-# pointed at the in-cluster vLLM Service). Ephemeral state (emptyDir) is fine for a demo.
+# Always-on OpenClaw agent, backed by the self-hosted Qwen3.8-27B vLLM Service,
+# with web search via the bedrock-websearch MCP tool (Bedrock does the search; Qwen
+# stays the brain). CPU pod on the `cpu` Karpenter pool.
+#
+# The bedrock-websearch tool script + an AGENTS.md that teaches the agent to use it are
+# mounted from a ConfigMap; the agent runs the tool via its shell tool (this OpenClaw build
+# has no `openclaw mcp` subcommand — use the MCP path on builds that do). AWS credentials for
+# Bedrock come from an EKS Pod Identity association bound to the `openclaw` ServiceAccount
+# (no static keys in the image). Create the ConfigMap from the tool sources before applying:
+#   kubectl -n distai create configmap openclaw-tools \
+#     --from-file=bedrock_websearch.py=../tools/bedrock-websearch/bedrock_websearch.py \
+#     --from-file=AGENTS.md=../tools/bedrock-websearch/AGENTS.md \
+#     --dry-run=client -o yaml | kubectl apply -f -
 apiVersion: v1
 kind: Secret
 metadata:
@@ -23,8 +31,9 @@ spec:
   template:
     metadata:
       labels: { app: openclaw }
-      annotations: { karpenter.sh/do-not-disrupt: "true" }   # cpu pool consolidates idle nodes
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
     spec:
+      serviceAccountName: openclaw        # Pod Identity -> Bedrock (web_search)
       nodeSelector: { node-role: cpu }
       containers:
         - name: openclaw
@@ -34,6 +43,8 @@ spec:
               value: "vllm-local"
             - name: OPENCLAW_GATEWAY_TOKEN
               valueFrom: { secretKeyRef: { name: openclaw-gateway, key: token } }
+            - name: BEDROCK_WS_REGION
+              value: "us-east-1"          # Bedrock web_search regions: us-east-1|us-east-2|us-west-2
           command: ["/bin/sh","-lc"]
           args:
             - >
@@ -45,8 +56,7 @@ spec:
               --gateway-bind lan --gateway-port 18789 --gateway-auth token
               --gateway-token "$OPENCLAW_GATEWAY_TOKEN" || true;
               openclaw config set agents.defaults.model.primary "qwen-eks/Qwen/Qwen3.8-27B" || true;
-              openclaw plugins install @openclaw/duckduckgo-plugin || true;
-              openclaw config set tools.web.search.provider duckduckgo || true;
+              mkdir -p ~/.openclaw/workspace && cp /opt/tools/AGENTS.md ~/.openclaw/workspace/AGENTS.md || true;
               exec openclaw gateway run --bind lan
           ports: [{ name: http, containerPort: 18789 }]
           readinessProbe:
@@ -56,6 +66,11 @@ spec:
           resources:
             requests: { cpu: "500m", memory: 1Gi }
             limits: { cpu: "2", memory: 4Gi }
+          volumeMounts:
+            - { name: tools, mountPath: /opt/tools, readOnly: true }
+      volumes:
+        - name: tools
+          configMap: { name: openclaw-tools }
 ---
 apiVersion: v1
 kind: Service
