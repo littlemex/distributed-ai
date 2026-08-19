@@ -1,0 +1,49 @@
+# hermes pod (keyless): use it with `kubectl exec -it deploy/hermes -- bash -lc hermes`
+# (agents.sh hermes). No sshd/ssh key. Uses the self-hosted Qwen3.8-27B via the OpenAI-compatible
+# "ollama" provider override. Hermes requires >=64K context (vLLM serves max_model_len 65536).
+#
+# Prereqs (create once):
+#   kubectl -n distai create configmap hermes-files --from-file=config.yaml=config.yaml \
+#     --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: hermes, labels: { app: hermes } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: hermes } }
+  template:
+    metadata:
+      labels: { app: hermes }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
+    spec:
+      nodeSelector: { node-role: cpu }
+      containers:
+        - name: hermes
+          image: nousresearch/hermes-agent:v2026.8.18
+          env:
+            - { name: OLLAMA_API_KEY, value: "vllm-local" }
+            - { name: OLLAMA_BASE_URL, value: "http://vllm-qwen-qwen3-8-27b:8000/v1" }
+            - { name: HOME, value: "/root" }
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              set -e;
+              mkdir -p /root/.hermes;
+              cp /opt/hermes-config/config.yaml /root/.hermes/config.yaml;
+              ln -sf /opt/hermes/bin/hermes /usr/local/bin/hermes;
+              touch /tmp/ready;
+              echo '[ready] use: kubectl exec -it deploy/hermes -- bash -lc hermes';
+              exec sleep infinity
+          readinessProbe:
+            exec: { command: ["sh","-c","test -f /tmp/ready"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits: { cpu: "2", memory: 6Gi }
+          volumeMounts:
+            - { name: hermes-config, mountPath: /opt/hermes-config, readOnly: true }
+      volumes:
+        - name: hermes-config
+          configMap: { name: hermes-files }
