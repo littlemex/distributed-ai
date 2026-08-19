@@ -1,0 +1,24 @@
+# vLLM tuning overlay for Qwen/Qwen3.8-27B.
+# Layered on charts/vllm-serving/values.yaml with `helm template -f`.
+# The MODEL FACTS this tuning derives from live in serving/models/qwen3.8-27b.yaml.
+#
+# Why these values (all rooted in the hybrid linear-attention architecture):
+#  - architecture qwen3_5 needs vLLM >= 0.27.0 (Qwen3_5ForConditionalGeneration is registered
+#    there); v0.27.1 is pinned in the image.
+#  - 48 of 64 layers are linear_attention (Gated DeltaNet). Prefix caching is NOT supported
+#    for the recurrent-state layers -> enablePrefixCaching stays false. Do not advertise
+#    "cheap repeated system prompts" for this model.
+#  - The recurrent state, not the paged KV pool, caps concurrency -> maxNumSeqs kept low.
+#  - bf16 weights ~54 GiB do not fit one 48 GiB L40S -> tensorParallelSize 4 on g6e.12xlarge
+#    (num_kv_heads=4 divides TP4). TP2 also works on a 2-GPU slice if the pool changes.
+#  - native context is 262144; capped to 32768 for a first bring-up.
+
+image: vllm/vllm-openai:v0.27.1
+model: Qwen/Qwen3.8-27B
+nodeRole: gpu-l40s
+gpuCount: 4
+tensorParallelSize: 4
+maxModelLen: 32768
+gpuMemoryUtilization: 0.85
+maxNumSeqs: 16
+enablePrefixCaching: false

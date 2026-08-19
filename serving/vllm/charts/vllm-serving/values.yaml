@@ -1,0 +1,61 @@
+# Default values for vllm-serving.
+# One release serves exactly one model on one GPU node (single-node tensor parallel).
+# Per-model values live in serving/vllm/overlays/<normalized-model>.yaml and are layered
+# on top of these defaults with `-f`. Model facts (the source of these tuning choices)
+# live in serving/models/<normalized-model>.yaml.
+
+# --- container image (SDK-pinned; upstream unless a model needs a newer kernel) ---
+image: vllm/vllm-openai:v0.27.1
+imagePullPolicy: IfNotPresent
+
+# --- model ---
+# model is the Hugging Face repo id (model_id). servedModelName defaults to it.
+model: Qwen/Qwen3.8-27B
+servedModelName: ""
+
+# --- node selection (capability is encoded in the pool NAME, not the instance type) ---
+# The chart selects the pool by its node-role label. The infra module owns which
+# instance types back that pool (see infra/eks accelerator_pools). The chart never
+# hardcodes an instance type.
+nodeRole: gpu-l40s
+
+# --- accelerator + parallelism ---
+gpuCount: 4            # whole GPUs requested (== tensorParallelSize * pipelineParallelSize)
+tensorParallelSize: 4
+pipelineParallelSize: 1
+
+# --- serving tuning ---
+maxModelLen: 32768          # model native is 262144; capped for a first bring-up
+gpuMemoryUtilization: 0.85  # hybrid linear-attention state is accounted separately from KV
+maxNumSeqs: 16              # conservative: recurrent state caps concurrency, avoid preemption
+dtype: bfloat16
+enablePrefixCaching: false  # hybrid (linear-attention) models: prefix caching is unsupported
+enforceEager: false         # set true if cudagraph capture fails on a new architecture
+extraArgs: []               # escape hatch; keep empty and justified in the overlay
+
+# --- resources (host RAM + shared memory, NOT VRAM) ---
+cpu: "8"
+memory: 64Gi
+shmSize: 16Gi               # /dev/shm for NCCL / TP worker tensor exchange (emptyDir Memory)
+
+# --- weights / HF cache ---
+# emptyDir: weights re-download on every pod start (fine for a toy / single model).
+# existingClaim: bind a pre-created static RWX PVC to persist the cache across pods.
+storage:
+  hfCache:
+    type: emptyDir            # emptyDir | existingClaim
+    existingClaimName: ""
+    sizeLimit: 120Gi
+
+# --- optional Hugging Face token (gated models). Qwen3.8-27B is ungated. ---
+hfTokenSecret: ""            # name of a Secret with key `token`
+
+# --- service ---
+port: 8000
+replicas: 1
+
+# Cold start on a new architecture = node launch + image pull + 54GiB download + compile.
+# startupProbe budget = periodSeconds * failureThreshold.
+startupPeriodSeconds: 30
+startupFailureThreshold: 80  # ~40 min
+progressDeadlineSeconds: 3000

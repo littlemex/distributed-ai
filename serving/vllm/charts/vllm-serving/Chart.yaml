@@ -1,0 +1,12 @@
+apiVersion: v2
+name: vllm-serving
+description: >-
+  Single-node vLLM OpenAI-compatible serving for one model on a Neuron-free GPU
+  Karpenter pool. This chart lives in the workload project (serving/), NOT in the
+  reusable infra/eks module, so the base cluster module stays untouched. It consumes
+  the cluster contract (node-role pool label, nvidia.com/gpu device plugin, optional
+  shared PVC) and renders a Deployment + Service. Multi-node (LeaderWorkerSet) and
+  disaggregated topologies are out of scope for this chart.
+type: application
+version: 0.1.0
+appVersion: "0.27.1"
