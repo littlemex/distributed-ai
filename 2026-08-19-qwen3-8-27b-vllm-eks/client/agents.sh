@@ -47,7 +47,7 @@ _exec() {  # _exec <deploy> <command...>
 }
 
 cmd_opencode() { _exec "$(_deploy_for opencode)" 'cd ~ && exec opencode'; }
-cmd_hermes()   { _exec "$(_deploy_for hermes)"   'cd ~ && exec hermes'; }
+cmd_hermes()   { _exec "$(_deploy_for hermes)"   'cd /opt/data/work 2>/dev/null || cd ~; exec hermes'; }
 cmd_shell()    { local d; d="$(_deploy_for "${1:?usage: shell <opencode|hermes>}")"; [ -n "$d" ] || { echo "unknown $1" >&2; exit 1; }; _exec "$d" 'exec bash'; }
 
 cmd_openclaw() {

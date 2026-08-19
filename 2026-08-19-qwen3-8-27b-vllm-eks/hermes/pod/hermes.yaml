@@ -1,10 +1,13 @@
-# hermes pod (keyless): use it with `kubectl exec -it deploy/hermes -- bash -lc hermes`
-# (agents.sh hermes). No sshd/ssh key. Uses the self-hosted Qwen3.8-27B via the OpenAI-compatible
-# "ollama" provider override. Hermes requires >=64K context (vLLM serves max_model_len 65536).
+# hermes pod (keyless): `kubectl exec -it deploy/hermes -- bash -lc hermes` (agents.sh hermes).
+# Uses the self-hosted Qwen3.8-27B via the OpenAI-compatible "ollama" provider override.
+# Hermes requires >=64K context (vLLM serves max_model_len 65536).
 #
-# Prereqs (create once):
-#   kubectl -n distai create configmap hermes-files --from-file=config.yaml=config.yaml \
-#     --dry-run=client -o yaml | kubectl apply -f -
+# Config is applied at start with `hermes config set` (Hermes' real config lives in
+# /opt/data/config.yaml, not ~/.hermes):
+#  - model.default is the BARE model id (no provider prefix); the provider comes from the
+#    OLLAMA_* env. A "ollama/Qwen/Qwen3.8-27B" ref would be mangled by the slash in the model id.
+#  - terminal.cwd is a world-accessible git dir OUTSIDE /root (Hermes' agent/terminal runs
+#    sandboxed and cannot enter root's 0700 home).
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: hermes, labels: { app: hermes } }
@@ -24,14 +27,15 @@ spec:
           env:
             - { name: OLLAMA_API_KEY, value: "vllm-local" }
             - { name: OLLAMA_BASE_URL, value: "http://vllm-qwen-qwen3-8-27b:8000/v1" }
-            - { name: HOME, value: "/root" }
           command: ["/bin/sh","-lc"]
           args:
             - >
               set -e;
-              mkdir -p /root/.hermes;
-              cp /opt/hermes-config/config.yaml /root/.hermes/config.yaml;
               ln -sf /opt/hermes/bin/hermes /usr/local/bin/hermes;
+              mkdir -p /opt/data/work && chmod 777 /opt/data/work;
+              cd /opt/data/work; git rev-parse --git-dir >/dev/null 2>&1 || git init -q; git config user.email agent@local; git config user.name hermes;
+              hermes config set model.default "Qwen/Qwen3.8-27B" >/dev/null 2>&1 || true;
+              hermes config set terminal.cwd "/opt/data/work" >/dev/null 2>&1 || true;
               touch /tmp/ready;
               echo '[ready] use: kubectl exec -it deploy/hermes -- bash -lc hermes';
               exec sleep infinity
@@ -42,8 +46,3 @@ spec:
           resources:
             requests: { cpu: "500m", memory: 1Gi }
             limits: { cpu: "2", memory: 6Gi }
-          volumeMounts:
-            - { name: hermes-config, mountPath: /opt/hermes-config, readOnly: true }
-      volumes:
-        - name: hermes-config
-          configMap: { name: hermes-files }
