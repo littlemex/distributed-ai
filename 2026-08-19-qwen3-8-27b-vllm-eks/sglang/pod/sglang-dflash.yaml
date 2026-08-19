@@ -16,7 +16,7 @@ spec:
         - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
       containers:
         - name: sglang
-          image: lmsysorg/sglang:dev
+          image: lmsysorg/sglang:nightly-dev-cu12-20260818-c0b6474b
           command: ["python3","-m","sglang.launch_server"]
           args:
             - --model-path=Qwen/Qwen3.8-27B

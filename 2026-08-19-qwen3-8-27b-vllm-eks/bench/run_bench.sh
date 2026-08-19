@@ -13,7 +13,7 @@ K=(kubectl --context "$KCTX" -n "$NAMESPACE")
 POD="$("${K[@]}" get pods -l "$SEL" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
 echo "=== bench pod=$POD c=$CONC num=$NUM in=$IN out=$OUT ==="
 "${K[@]}" exec "$POD" -- vllm bench serve --backend openai-chat --model "$MODEL" \
-  --base-url http://localhost:8000 --endpoint /v1/chat/completions \
+  --base-url "${TARGET:-http://localhost:8000}" --endpoint /v1/chat/completions \
   --dataset-name random --num-prompts "$NUM" --max-concurrency "$CONC" \
   --random-input-len "$IN" --random-output-len "$OUT" \
   --percentile-metrics ttft,tpot,itl,e2el --ignore-eos 2>&1 \
