@@ -46,6 +46,15 @@ toolCallParser: ""
 # coding-agent backend does not want a reasoning preamble on every turn, so we default it off.
 chatTemplateKwargs: ""
 
+# --- HF config overrides (e.g. RoPE/YaRN scaling to extend context) ---
+# JSON string passed to vLLM --hf-overrides. For YaRN:
+#   '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":262144}}'
+# Set maxModelLen = original * factor. YaRN trades some accuracy for length.
+hfOverrides: ""
+
+# --- extra container env (e.g. VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 for YaRN-extended context) ---
+extraEnv: {}
+
 # --- resources (host RAM + shared memory, NOT VRAM) ---
 cpu: "8"
 memory: 64Gi

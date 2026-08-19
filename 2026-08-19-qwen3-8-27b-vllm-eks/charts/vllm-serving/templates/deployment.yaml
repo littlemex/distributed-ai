@@ -35,7 +35,7 @@ spec:
             - --served-model-name={{ include "vllm-serving.served" . }}
             - --tensor-parallel-size={{ .Values.tensorParallelSize }}
             - --pipeline-parallel-size={{ .Values.pipelineParallelSize }}
-            - --max-model-len={{ .Values.maxModelLen }}
+            - --max-model-len={{ int64 .Values.maxModelLen }}
             - --gpu-memory-utilization={{ .Values.gpuMemoryUtilization }}
             - --max-num-seqs={{ .Values.maxNumSeqs }}
             - --dtype={{ .Values.dtype }}
@@ -54,12 +54,19 @@ spec:
             {{- if .Values.chatTemplateKwargs }}
             - {{ printf "--default-chat-template-kwargs=%s" .Values.chatTemplateKwargs | quote }}
             {{- end }}
+            {{- if .Values.hfOverrides }}
+            - {{ printf "--hf-overrides=%s" .Values.hfOverrides | quote }}
+            {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . }}
             {{- end }}
           env:
             - name: HF_HOME
               value: /hf-cache
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
             {{- if .Values.hfTokenSecret }}
             - name: HF_TOKEN
               valueFrom:

@@ -18,9 +18,12 @@ model: Qwen/Qwen3.8-27B
 nodeRole: gpu-l40s
 gpuCount: 4
 tensorParallelSize: 4
-maxModelLen: 65536          # >=64K so agents like Hermes (which require >=64K) accept it; native is 262144
-gpuMemoryUtilization: 0.90
-maxNumSeqs: 16
+maxModelLen: 1048576        # 1M via YaRN (factor 4 x native 262144). See ropeScaling below.
+gpuMemoryUtilization: 0.92
+maxNumSeqs: 2               # 1M KV ~16GiB/rank per seq; keep concurrency low for the long-context test
+hfOverrides: '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":262144}}'
+extraEnv:
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"   # allow max_model_len > native; YaRN handles the extended range
 enablePrefixCaching: false
 
 # tool calling: the chat_template emits Qwen3 XML (<tool_call><function=..><parameter=..>),
