@@ -1,0 +1,67 @@
+# SSH-able opencode pod: ssh in and use opencode interactively against the self-hosted
+# Qwen3.8-27B, with web search via the bedrock-websearch MCP (Bedrock; Pod Identity, no keys).
+# CPU pod on the `cpu` pool. opencode + openssh installed at start on a node base image
+# (demo posture; for repeated use bake a custom image via in-cluster BuildKit).
+#
+# Prereqs (create once):
+#   kubectl -n distai create sa opencode
+#   aws eks create-pod-identity-association --cluster-name distai-eks --region ap-northeast-1 \
+#     --namespace distai --service-account opencode \
+#     --role-arn arn:aws:iam::776010787911:role/distai-openclaw-bedrock
+#   kubectl -n distai create configmap opencode-files \
+#     --from-file=opencode.json=opencode.json \
+#     --from-file=bedrock_websearch.py=../../tools/bedrock-websearch/bedrock_websearch.py \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n distai create secret generic opencode-ssh \
+#     --from-file=authorized_keys=/path/to/opencode_ed25519.pub --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencode-ssh
+  labels: { app: opencode-ssh }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: opencode-ssh } }
+  template:
+    metadata:
+      labels: { app: opencode-ssh }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
+    spec:
+      serviceAccountName: opencode        # Pod Identity -> Bedrock (web_search)
+      nodeSelector: { node-role: cpu }
+      containers:
+        - name: opencode
+          image: node:22-bookworm-slim
+          env:
+            - { name: AWS_REGION, value: "us-east-1" }
+            - { name: BEDROCK_WS_REGION, value: "us-east-1" }
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              set -e;
+              apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-server python3 ca-certificates >/dev/null;
+              mkdir -p /run/sshd /root/.ssh /root/.config/opencode;
+              cp /opt/oc-config/opencode.json /root/.config/opencode/opencode.json;
+              install -m 600 /opt/ssh/authorized_keys /root/.ssh/authorized_keys;
+              ssh-keygen -A;
+              printf 'PermitRootLogin prohibit-password\nPubkeyAuthentication yes\nPasswordAuthentication no\nX11Forwarding no\n' > /etc/ssh/sshd_config.d/opencode.conf;
+              npm install -g opencode-ai >/tmp/npm.log 2>&1 || cat /tmp/npm.log;
+              echo 'export PATH=$PATH:/usr/local/bin' >> /root/.bashrc;
+              echo '[ready] ssh in with: ssh -p <localport> root@localhost ; then run: opencode';
+              exec /usr/sbin/sshd -D -e
+          ports: [{ name: ssh, containerPort: 22 }]
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits: { cpu: "2", memory: 4Gi }
+          volumeMounts:
+            - { name: oc-config, mountPath: /opt/oc-config, readOnly: true }
+            - { name: tools, mountPath: /opt/tools, readOnly: true }
+            - { name: ssh-keys, mountPath: /opt/ssh, readOnly: true }
+      volumes:
+        - name: oc-config
+          configMap: { name: opencode-files, items: [{ key: opencode.json, path: opencode.json }] }
+        - name: tools
+          configMap: { name: opencode-files, items: [{ key: bedrock_websearch.py, path: bedrock_websearch.py }] }
+        - name: ssh-keys
+          secret: { secretName: opencode-ssh }
