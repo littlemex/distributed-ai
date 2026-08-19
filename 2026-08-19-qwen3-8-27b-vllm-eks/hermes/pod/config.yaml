@@ -1,0 +1,4 @@
+# Hermes default model = self-hosted Qwen3.8-27B, reached via the OpenAI-compatible
+# "ollama" provider override (OLLAMA_BASE_URL points at the in-cluster vLLM Service).
+model:
+  default: ollama/Qwen/Qwen3.8-27B

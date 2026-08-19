@@ -18,8 +18,8 @@ model: Qwen/Qwen3.8-27B
 nodeRole: gpu-l40s
 gpuCount: 4
 tensorParallelSize: 4
-maxModelLen: 32768
-gpuMemoryUtilization: 0.85
+maxModelLen: 65536          # >=64K so agents like Hermes (which require >=64K) accept it; native is 262144
+gpuMemoryUtilization: 0.90
 maxNumSeqs: 16
 enablePrefixCaching: false
 

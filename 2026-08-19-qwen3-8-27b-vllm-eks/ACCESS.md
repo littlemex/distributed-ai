@@ -34,11 +34,14 @@ MCP (AWS creds via Pod Identity). Verified: `opencode run --pure --auto "..."` u
 Opens `http://127.0.0.1:18789/#token=qwen-demo-token`. Ask it to "research X" — it auto-uses
 Bedrock web search. Stop background port-forwards with `./agents.sh down`.
 
-## hermes (if deployed)
+## ssh into hermes (Nous Research Hermes Agent)
 
 ```bash
-ssh hermes            # or ./agents.sh hermes   (same ssh setup; hermes-ssh pod)
+ssh hermes            # or ./agents.sh hermes
+# then:  hermes        (interactive TUI, model ollama/Qwen/Qwen3.8-27B = self-hosted Qwen)
 ```
+Hermes requires >=64K context, so vLLM serves the model at max_model_len 65536. Hermes reaches
+Qwen via its OpenAI-compatible "ollama" provider override (OLLAMA_BASE_URL -> in-cluster vLLM).
 
 ## Notes
 
