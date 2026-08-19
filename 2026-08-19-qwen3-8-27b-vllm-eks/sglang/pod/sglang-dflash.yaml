@@ -1,0 +1,54 @@
+# SGLang serving Qwen/Qwen3.8-27B with DFLASH speculative decoding (draft incoai/Qwen3.8-27B-DFlash2),
+# on a SPOT g6e.12xlarge (separate quota from the on-demand vLLM). OpenAI-compatible on :8000.
+# For benchmarking dflash2 vs the vLLM autoregressive baseline. Tear down after the experiment.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: sglang-dflash, labels: { app: sglang-dflash } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: sglang-dflash } }
+  template:
+    metadata: { labels: { app: sglang-dflash } }
+    spec:
+      nodeSelector: { node-role: gpu-l40s-spot }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: sglang
+          image: lmsysorg/sglang:dev
+          command: ["python3","-m","sglang.launch_server"]
+          args:
+            - --model-path=Qwen/Qwen3.8-27B
+            - --tp=4
+            - --host=0.0.0.0
+            - --port=8000
+            - --mem-fraction-static=0.90
+            - --context-length=32768
+            - --speculative-algorithm=DFLASH
+            - --speculative-draft-model-path=incoai/Qwen3.8-27B-DFlash2
+            - --speculative-num-draft-tokens=8
+          env:
+            - { name: HF_HOME, value: /hf-cache }
+          ports: [{ name: http, containerPort: 8000 }]
+          resources:
+            requests: { cpu: "8", memory: 64Gi, nvidia.com/gpu: 4 }
+            limits: { memory: 64Gi, nvidia.com/gpu: 4 }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+            failureThreshold: 120
+          volumeMounts:
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+        - { name: hf-cache, emptyDir: { sizeLimit: 120Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: sglang-dflash, labels: { app: sglang-dflash } }
+spec:
+  type: ClusterIP
+  selector: { app: sglang-dflash }
+  ports: [{ name: http, port: 8000, targetPort: http }]

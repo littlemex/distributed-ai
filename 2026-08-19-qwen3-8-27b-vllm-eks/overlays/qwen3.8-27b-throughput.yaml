@@ -1,0 +1,16 @@
+# Throughput / concurrency profile for Qwen/Qwen3.8-27B (short context, high max_num_seqs).
+# Use for vllm bench concurrency sweeps. NOT YaRN (no hfOverrides). Note: max_model_len 8192
+# means agents needing >=64K (Hermes) won't run under this profile — it is a temporary
+# benchmarking profile; restore overlays/qwen3.8-27b.yaml (YaRN 1M) afterwards.
+image: vllm/vllm-openai:v0.27.1
+model: Qwen/Qwen3.8-27B
+nodeRole: gpu-l40s
+gpuCount: 4
+tensorParallelSize: 4
+maxModelLen: 8192
+gpuMemoryUtilization: 0.92
+maxNumSeqs: 256
+enablePrefixCaching: false
+enableAutoToolChoice: true
+toolCallParser: qwen3_coder
+chatTemplateKwargs: '{"enable_thinking": false}'
