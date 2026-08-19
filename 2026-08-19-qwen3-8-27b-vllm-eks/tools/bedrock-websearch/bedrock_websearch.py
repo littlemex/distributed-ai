@@ -41,9 +41,15 @@ def _get_credentials():
     rel = os.environ.get("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
     if rel and not uri:
         uri = "http://169.254.170.2" + rel
+    tok_file = os.environ.get("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")
+    # Fallback to the fixed EKS Pod Identity endpoint + token file when the env vars are not
+    # propagated to us (e.g. a parent process that only forwards a subset of env to subprocesses).
+    _pi_token = "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"
+    if not uri and os.path.exists(_pi_token):
+        uri = "http://169.254.170.23/v1/credentials"
+        tok_file = tok_file or _pi_token
     if uri:
         headers = {}
-        tok_file = os.environ.get("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")
         tok = os.environ.get("AWS_CONTAINER_AUTHORIZATION_TOKEN")
         if tok_file and os.path.exists(tok_file):
             tok = open(tok_file).read().strip()

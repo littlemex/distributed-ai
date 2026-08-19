@@ -1,31 +1,47 @@
-# Access: browser -> OpenClaw, ssh -> opencode
+# Access the agents (self-hosted Qwen3.8-27B backend)
 
-Both agents run in the `distai` namespace on `distai-eks` (ap-northeast-1) and use the
-self-hosted Qwen3.8-27B (vLLM) as their model, with web search via Bedrock (Pod Identity).
-Use the `distai-tokyo` kube context (from `aws eks update-kubeconfig --name distai-eks --region ap-northeast-1`).
-
-## Browser -> OpenClaw (always-on agent, Control UI)
+One-shot launchers live in `client/`. Copy `client/agents.sh` + `client/agents.env.example`
+anywhere on your Mac (no repo checkout needed), then:
 
 ```bash
-kubectl --context distai-tokyo -n distai port-forward svc/openclaw 18789:18789
+cp agents.env.example agents.env      # edit if your cluster/profile differ
+./agents.sh setup                     # one-time: kubeconfig + ssh key (auto) + ~/.ssh/config
 ```
-Then open: http://127.0.0.1:18789/#token=qwen-demo-token
-(Chat, cron/autonomous jobs, memory. Ask it anything; "research X" auto-uses Bedrock web search.)
 
-## SSH -> opencode (interactive coding agent)
+Prereqs: `kubectl`, `aws` CLI, `ssh`, `nc`, `python3` (standard on macOS + your AWS setup). You
+need active AWS credentials (default profile or SSO) in your shell — the ssh ProxyCommand uses
+them to reach EKS.
+
+## ssh into opencode (one shot)
 
 ```bash
-kubectl --context distai-tokyo -n distai port-forward deploy/opencode-ssh 2222:22
-# in another terminal (private key from setup):
-ssh -p 2222 -i /Users/akazawt/tmp/qwen/ssh/opencode_ed25519 \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost
-# inside the pod:
-opencode                                   # interactive TUI, model vllm-local/Qwen/Qwen3.8-27B
-# or non-interactive:
-opencode run --pure --auto "Use web_search to find the latest Go version and cite the source."
+ssh opencode                          # port-forward is automatic (ProxyCommand); lands in the pod
+# then:  opencode
+```
+Or launch the TUI directly:
+```bash
+./agents.sh opencode
+```
+The pod reaches Qwen via the in-cluster Service and does web search via the bedrock-websearch
+MCP (AWS creds via Pod Identity). Verified: `opencode run --pure --auto "..."` uses the
+`web_search` tool and cites sources.
+
+## OpenClaw in the browser (one shot)
+
+```bash
+./agents.sh openclaw                  # background port-forward + opens the Control UI
+```
+Opens `http://127.0.0.1:18789/#token=qwen-demo-token`. Ask it to "research X" — it auto-uses
+Bedrock web search. Stop background port-forwards with `./agents.sh down`.
+
+## hermes (if deployed)
+
+```bash
+ssh hermes            # or ./agents.sh hermes   (same ssh setup; hermes-ssh pod)
 ```
 
-Notes:
-- The opencode pod reaches Qwen via the in-cluster Service (no port-forward needed for the model),
-  and web search via the bedrock-websearch MCP (AWS creds via Pod Identity).
-- Demo posture: single replica, ephemeral state, gateway token in a plain Secret, key-based ssh.
+## Notes
+
+- `agents.sh setup` creates the ssh key (`SSH_KEY` in agents.env) if missing and syncs the public
+  key into the pods for you; re-run it any time to re-sync or after redeploying.
+- Demo posture: single replicas, ephemeral state, gateway token in a plain Secret, key-based ssh.
