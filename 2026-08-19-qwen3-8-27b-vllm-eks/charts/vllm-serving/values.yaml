@@ -52,6 +52,14 @@ chatTemplateKwargs: ""
 # Set maxModelLen = original * factor. YaRN trades some accuracy for length.
 hfOverrides: ""
 
+# --- speculative decoding (JSON string for vLLM --speculative-config) ---
+# Qwen3.8-27B ships a 1-layer MTP head (config text_config.mtp_num_hidden_layers=1), so MTP
+# self-speculation needs NO separate draft model and is lossless (target-verified). Example:
+#   '{"method": "mtp", "num_speculative_tokens": 3}'
+# num_speculative_tokens > 1 reuses the single MTP layer autoregressively (measured 1.42x at 1,
+# 1.69x at 3 vs no-spec, FP8/random). Leave empty to disable speculative decoding.
+speculativeConfig: ""
+
 # --- extra container env (e.g. VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 for YaRN-extended context) ---
 extraEnv: {}
 

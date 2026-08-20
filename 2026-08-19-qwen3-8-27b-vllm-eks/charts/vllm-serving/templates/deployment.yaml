@@ -57,6 +57,9 @@ spec:
             {{- if .Values.hfOverrides }}
             - {{ printf "--hf-overrides=%s" .Values.hfOverrides | quote }}
             {{- end }}
+            {{- if .Values.speculativeConfig }}
+            - {{ printf "--speculative-config=%s" .Values.speculativeConfig | quote }}
+            {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . }}
             {{- end }}

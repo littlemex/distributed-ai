@@ -26,6 +26,11 @@ extraEnv:
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"   # allow max_model_len > native; YaRN handles the extended range
 enablePrefixCaching: false
 
+# MTP self-speculative decoding: Qwen3.8-27B ships a 1-layer MTP head, so this needs no separate
+# draft model and is lossless (target-verified). num_speculative_tokens 3 reuses the MTP layer
+# multi-step; measured ~1.69x TPOT at c=1 (FP8/random) vs no-spec, and composes with YaRN 1M.
+speculativeConfig: '{"method": "mtp", "num_speculative_tokens": 3}'
+
 # tool calling: the chat_template emits Qwen3 XML (<tool_call><function=..><parameter=..>),
 # so the matching vLLM parser is qwen3_coder (hermes expects JSON and would fail to parse).
 enableAutoToolChoice: true
