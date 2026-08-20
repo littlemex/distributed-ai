@@ -1,0 +1,65 @@
+# CANDIDATE PRODUCTION config: lowest TPOT that still meets the 1M-token hard requirement.
+# SGLang, TP4 on g6e.12xlarge, stacking every lever that survives on L40S (Ada):
+#   - W4A16 INT4 weights (compressed-tensors checkpoint) -> halve weight bytes again vs FP8
+#   - DFLASH2 speculative decoding (draft incoai/Qwen3.8-27B-DFlash2) -> multi-token / pass
+#   - fp8 KV cache -> halve the KV-read term that dominates TPOT at long context
+#   - YaRN factor 4 over native 262144 -> 1,048,576 context (the MUST requirement)
+# DFlash2 lives only in sglang main, so we pip-install sglang python from main at start (the
+# nightly image already ships the prebuilt sgl-kernel). Composition risk: DFLASH2 x YaRN-1M is
+# the unproven combination; watch startup. mem-fraction 0.85 leaves room for the 1M fp8 KV pool
+# (~4 KB/token/GPU at TP4 -> ~4 GiB/GPU for a single 1M sequence).
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: sglang-int4-1m, labels: { app: sglang-int4-1m } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: sglang-int4-1m } }
+  template:
+    metadata: { labels: { app: sglang-int4-1m } }
+    spec:
+      nodeSelector: { node-role: gpu-l40s-spot }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: sglang
+          image: lmsysorg/sglang:nightly-dev-cu12-20260818-c0b6474b
+          # Build sglang-main once, then sleep: the server is launched via `kubectl exec` so tuning
+          # knobs (mem-fraction, num-draft-tokens, context) can be iterated WITHOUT a 15-min Rust
+          # rebuild each time. The working launch command is recorded in sglang/README.md.
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              set -e;
+              echo '[int4-1m] installing sglang python from main...';
+              pip install -U --no-deps "sglang @ git+https://github.com/sgl-project/sglang.git#subdirectory=python" 2>&1 | tail -4;
+              python3 -c "from sglang.srt.models.dflash import DFlash2DraftModel; print('[int4-1m] DFlash2DraftModel import OK')";
+              touch /tmp/built;
+              echo '[int4-1m] build done; launch the server via kubectl exec (see README)';
+              exec sleep infinity
+          env:
+            - { name: HF_HOME, value: /hf-cache }
+            # allow context_length (1M) > model-derived (262144); YaRN handles the extended range
+            - { name: SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN, value: "1" }
+          ports: [{ name: http, containerPort: 8000 }]
+          resources:
+            requests: { cpu: "8", memory: 64Gi, nvidia.com/gpu: 4 }
+            limits: { memory: 64Gi, nvidia.com/gpu: 4 }
+          readinessProbe:
+            exec: { command: ["sh","-c","test -f /tmp/built"] }
+            periodSeconds: 15
+            failureThreshold: 240
+          volumeMounts:
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+        - { name: hf-cache, emptyDir: { sizeLimit: 120Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: sglang-int4-1m, labels: { app: sglang-int4-1m } }
+spec:
+  type: ClusterIP
+  selector: { app: sglang-int4-1m }
+  ports: [{ name: http, port: 8000, targetPort: http }]

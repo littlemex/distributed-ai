@@ -1,0 +1,61 @@
+# vLLM FP8 on G7e (RTX PRO 6000 Blackwell, sm_120), TP2 on g7e.12xlarge (2x 96 GB GDDR7).
+# Same latency profile as bench/fp8-latency/vllm-lat.yaml (ctx 8192, max-num-seqs 20, online FP8,
+# CUDA graphs on) so the g7e-vs-g6e TPOT comparison is apples-to-apples on FP8.
+# Watch startup for sm_120 kernel support in the pinned image (the one open risk).
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: vllm-g7e, labels: { app: vllm-g7e } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: vllm-g7e } }
+  template:
+    metadata:
+      labels: { app: vllm-g7e }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
+    spec:
+      nodeSelector: { node-role: gpu-g7e }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.27.1
+          command: ["python3","-m","vllm.entrypoints.openai.api_server"]
+          args:
+            - --model=Qwen/Qwen3.8-27B
+            - --served-model-name=Qwen/Qwen3.8-27B
+            - --tensor-parallel-size=2
+            - --max-model-len=8192
+            - --gpu-memory-utilization=0.90
+            - --max-num-seqs=20
+            - --no-enable-prefix-caching
+            - --quantization=fp8
+            - --host=0.0.0.0
+            - --port=8000
+          env:
+            - { name: HF_HOME, value: /hf-cache }
+          ports: [{ name: http, containerPort: 8000 }]
+          resources:
+            requests: { cpu: "8", memory: 64Gi, nvidia.com/gpu: 2 }
+            limits: { memory: 64Gi, nvidia.com/gpu: 2 }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+            failureThreshold: 160
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+          volumeMounts:
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+        - { name: hf-cache, emptyDir: { sizeLimit: 120Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: vllm-g7e, labels: { app: vllm-g7e } }
+spec:
+  type: ClusterIP
+  selector: { app: vllm-g7e }
+  ports: [{ name: http, port: 8000, targetPort: http }]
