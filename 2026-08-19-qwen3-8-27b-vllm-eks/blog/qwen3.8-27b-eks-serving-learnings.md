@@ -339,7 +339,9 @@ aws eks create-pod-identity-association --cluster-name distai-eks --region ap-no
 - 検索を伴う 1 回の Responses API 呼び出しで、入力トークンが大きくなる(実測で約 30k input tokens/回、web コンテキストが注入されるため)。課金は `billing.payer=developer` としてアカウントに乗る。
 - `chat/completions` では `web_search` を拒否するため、必ず Responses API 経由にする必要がある。
 
-## 3 エージェントの接続とハマりどころ
+## エージェントの接続とハマりどころ / 特徴比較
+
+opencode / qwen-code / OpenClaw / Hermes Agent の 4 つを自前 Qwen バックエンドで動かした。それぞれの素性とハマりどころ、そして使ってみて見えた特徴を記録する。
 
 ### opencode
 
@@ -349,6 +351,15 @@ aws eks create-pod-identity-association --cluster-name distai-eks --region ap-no
 - 同様に、opencode のローカル状態(`~/.local/share/opencode/project`, `~/.local/share/opencode/storage`)が古いまま残っていると `init` 直後でハングし、vLLM に一切リクエストが届かない現象があった。該当ディレクトリを削除して state をクリアすると解消した。
 - 非対話でツール(ファイル読み取り等)を使わせるには `--auto`(権限自動承認)が必要。無いと承認待ちでブロックする。
 - モデルの `limit.context` / `limit.output` を opencode.json 側で明示しないと、opencode が既定で大きな `max_tokens`(実測で約 32000)を要求し、vLLM 側の `max_model_len` を超えて `400` エラーになった。`{"limit": {"context": 32768, "output": ...}}` のように明示して解消した。
+
+### qwen-code
+
+Qwen 公式の gemini-cli フォーク(npm `@qwen-code/qwen-code`、バイナリ `qwen`、実測 0.21.14)。設定は単一の `~/.qwen/settings.json` で、`modelProviders.openai` の `baseUrl` を自前 vLLM に向け、`security.auth.selectedType: "openai"` を入れておくと起動時の対話 `/auth` をスキップできる。MCP は同じ settings.json の `mcpServers` で登録する。qwen-code 独自の落とし穴:
+
+- MCP の状態表示 `qwen mcp list` は stdio サーバを `Disconnected` と出すが、これは静的表示で、実セッションでは遅延接続される(実際に web_search ツールが呼べて URL 付きで返る)。表示に惑わされないこと。
+- 非対話は `-p "..."`、セッション再開は `-r <id>` / `-c`。ツールを自動実行させるには `--approval-mode yolo` が要る(承認プロンプトで止まる)。
+- **マルチモーダルのモダリティ判定がモデル名ベース**。qwen-code は `qwen*-vl-*` のような名前でだけ画像/動画対応と判定するため、自前の `Qwen/Qwen3.8-27B` という名前だと vision 非対応と見なされ、`@画像パス` を渡しても添付が `Operation cancelled` でキャンセルされる(`--approval-mode yolo` でも変わらない=承認ではなくモダリティ判定が原因)。**`modelProviders.openai[].generationConfig.modalities` に `{"image": true, "video": true}` を明示**すると解消し、画像を読めるようになった(E2E 実測: push した画像内テキストを正しく読解)。
+- `@path` はプロセスの cwd 基準で解決される。Pod 内で動くため参照できるのは Pod 上のパスだけ(Mac ローカルのファイルは直接読めない)。
 
 ### OpenClaw
 
@@ -395,6 +406,28 @@ hermes config set terminal.cwd "/opt/data/work"
 echo y | hermes mcp add bedrock-websearch --command python3 \
   --env BEDROCK_WS_REGION=us-east-1 --args /opt/tools/bedrock_websearch.py --mcp
 ```
+
+### 使ってみて見えた特徴の比較
+
+| 観点 | opencode | qwen-code | Hermes Agent |
+|---|---|---|---|
+| 位置づけ | コーディング特化 | コーディング特化(gemini-cli フォーク) | 汎用パーソナルアシスタント(コーディング専用ではない) |
+| バックエンド接続 | `@ai-sdk/openai-compatible` プロバイダ | `modelProviders.openai`(openai auth type) | `ollama` プロバイダの base URL 上書き |
+| 設定の置き場 | `opencode.json` | `~/.qwen/settings.json`(単一ファイル) | `/opt/data/config.yaml`(CLI `hermes config set` 経由) |
+| MCP 登録 | local stdio(コンテナ env が subprocess に渡らず、Pod Identity は固定エンドポイント fallback が必要) | settings.json `mcpServers`(遅延接続) | `hermes mcp add` |
+| 非対話実行 | `opencode run --pure --auto` | `qwen -p`(ツールは `--approval-mode yolo`) | ワンショット CLI あり |
+| 画像入力 | 可(base64 data URL、モデル名 gate なし) | 可(ただし `modalities` 明示が必要) | 可(`supports_vision: true` が必要) |
+| 動画入力 | 経路なし(openai/anthropic protocol が動画 MIME を拒否) | 条件付き(モデル名 gate + 明示設定) | 独自 `video_url` 拡張(vLLM との相互運用は未検証) |
+| ローカルファイル | 自プロセスの FS を読んで base64 | `@path`(cwd 基準) | 統一 resolver(data/http/file/local/container) |
+| 主なハマり | 古い state / 外部プラグインでハング、`max_tokens` 明示 | モデル名モダリティ gate、`mcp list` の Disconnected 表示 | slash 入りモデル名、`/root` 権限、config 置き場、64K 下限 |
+
+要約すると、コーディング用途では opencode と qwen-code が本命で、qwen-code は gemini-cli 譲りの `@path` とマルチモーダル、opencode は `run --pure` の非対話が使いやすい。Hermes はコーディング特化ではなく汎用アシスタント寄りという位置づけが実際に触ってみて分かった。OpenClaw はブラウザ Control UI と cron を持つ「常駐エージェント」型で毛色が違う。
+
+### マルチモーダル(画像/動画)の学び
+
+- **本番 vLLM(MTP + YaRN 1M 有効)がそのまま画像を理解**した。テキスト入り画像を送ると正しく OCR し(実測)、spec decode(MTP)や YaRN 1M と同居しても画像理解は壊れなかった。serving 側の設定変更なしで動く。
+- 3 エージェントに共通するのは「**Pod のファイルシステムからファイルを読んで base64 でリクエストに埋め込む**」方式で、アップロード API 経路は持たない。したがって Mac ローカルのファイルはまず Pod に入れる必要がある。`agents.sh push <file>`(内部は `kubectl cp`)で Pod の `/root/media/` に置き、TUI で `@/root/media/foo.png` のように参照する運用にした。動画は vLLM 側でどうせ数フレームに間引かれるため、push 内で ffmpeg で事前ダウンサンプル(fps 1 / 512px / 60s)している。
+- 動画対応は総じて弱い。opencode は動画経路そのものがなく、qwen-code / Hermes はコードはあるが送信形式(特に Hermes の独自 `video_url`)と vLLM の解釈が一致するかは未検証。画像が確実な道。
 
 ## アクセス方法: ssh は不要だった
 
