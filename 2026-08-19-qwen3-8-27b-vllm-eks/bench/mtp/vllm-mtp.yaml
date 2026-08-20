@@ -1,0 +1,63 @@
+# vLLM with MTP (Multi-Token Prediction) self-speculative decoding on a SPOT g6e.12xlarge.
+# Qwen3.8-27B ships a 1-layer MTP head (config text_config.mtp_num_hidden_layers=1, weights mtp.*),
+# so no separate draft model is needed and the speculation is lossless (target-verified).
+# Base model (has the MTP weights) + online FP8. Short context 8192 for a clean TPOT comparison
+# against the FP8-no-spec baseline (16.13 ms, vllm bench random in512/out256, same node class).
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: vllm-mtp, labels: { app: vllm-mtp } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: vllm-mtp } }
+  template:
+    metadata:
+      labels: { app: vllm-mtp }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
+    spec:
+      nodeSelector: { node-role: gpu-l40s-spot }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.27.1
+          command: ["python3","-m","vllm.entrypoints.openai.api_server"]
+          args:
+            - --model=Qwen/Qwen3.8-27B
+            - --served-model-name=Qwen/Qwen3.8-27B
+            - --tensor-parallel-size=4
+            - --max-model-len=8192
+            - --gpu-memory-utilization=0.90
+            - --max-num-seqs=20
+            - --no-enable-prefix-caching
+            - --quantization=fp8
+            - '--speculative-config={"method": "mtp", "num_speculative_tokens": 5}'
+            - --host=0.0.0.0
+            - --port=8000
+          env:
+            - { name: HF_HOME, value: /hf-cache }
+          ports: [{ name: http, containerPort: 8000 }]
+          resources:
+            requests: { cpu: "8", memory: 64Gi, nvidia.com/gpu: 4 }
+            limits: { memory: 64Gi, nvidia.com/gpu: 4 }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+            failureThreshold: 160
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+          volumeMounts:
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+        - { name: hf-cache, emptyDir: { sizeLimit: 120Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: vllm-mtp, labels: { app: vllm-mtp } }
+spec:
+  type: ClusterIP
+  selector: { app: vllm-mtp }
+  ports: [{ name: http, port: 8000, targetPort: http }]
