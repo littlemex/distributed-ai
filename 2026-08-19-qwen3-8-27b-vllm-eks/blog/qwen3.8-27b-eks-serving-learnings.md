@@ -6,7 +6,7 @@ topics: ["EKS", "vLLM", "Qwen", "Kubernetes", "LLM"]
 published: false
 ---
 
-自前 EKS クラスタ(`distai-eks`, ap-northeast-1)に `Qwen/Qwen3.8-27B` を vLLM で serving し、opencode / OpenClaw / Hermes Agent という 3 つの自律エージェントを自前 Qwen バックエンドで動かし、Amazon Bedrock の Web Search をツール化し、最後に YaRN で context を native の 4 倍(1M)まで拡張するところまでやった記録です。品質より網羅性を優先し、実装と実測に忠実に書きます。数値は本文中で明記した実測のみで、未計測のものは「未計測」と書きます。
+自前 EKS クラスタ(`distai-eks`, ap-northeast-1)に `Qwen/Qwen3.8-27B` を vLLM で serving し、opencode / qwen-code / OpenClaw / Hermes Agent という自律エージェントを自前 Qwen バックエンドで動かし、Amazon Bedrock の Web Search をツール化し、YaRN で context を native の 4 倍(1M)まで拡張し、画像/動画のマルチモーダル入力を通し、最後に投機的デコード(MTP)と FP8 量子化で推論速度を約 2.4 倍まで詰めるところまでやった記録です。品質より網羅性を優先し、実装と実測に忠実に書きます。数値は本文中で明記した実測のみで、未計測のものは「未計測」と書きます。
 
 ## リポジトリと作業場所
 
@@ -530,6 +530,97 @@ YaRN は一般に、長さを拡張する代わりに精度(特に中間~長距�
 
 これらは今後の検証課題として残っている。
 
+## 推論高速化: 投機的デコードと量子化
+
+ここまでの構成(bf16, spec decode なし)を起点に、単一ユーザーの decode レイテンシ(TPOT, inter-token latency)をどこまで詰められるかを実測した記録です。最終的に vLLM 本番構成へ投機的デコード(MTP)と FP8 量子化を組み込むところまで進んだので、その過程で得た知見と没案を含めて残します。
+
+### ルーフライン分析: そもそも何が TPOT を決めているか
+
+L40S(g6e.12xlarge)のメモリ帯域は GDDR6 で 864 GB/s です。bf16 の Qwen3.8-27B(重み約 54GB)を TP4 で分割すると 13.5GB/GPU になり、decode の 1 トークンごとに全パラメータを読む必要があるため、重み読み出しだけで理論下限 `13.5GB / 864GB/s ≈ 15.6ms/token` になります。実測の bf16 TPOT は 22.5ms で、これは下限の約 85% にあたります。つまり vLLM は既にメモリ帯域のほぼ限界で動いており、カーネルチューニングで詰められる余地はもともと薄い、というのが今回の起点でした。
+
+この帯域律速には 2 つの表れ方があります。短い context では毎トークンの重み読み出しが支配的(重み律速)、YaRN で拡張した長い context(1M)では full_attention 16 層分の KV 読み出しが支配的(KV 律速)になります。この 2 つは別の対策(量子化 vs KV dtype)で効くため、切り分けて考える必要があります。
+
+### FP8 量子化(vLLM online)
+
+同一ノード・同一プロファイルで `--quantization` の有無だけを切り替えた対照実験です(`vllm bench serve`, dataset=random, in512/out256)。
+
+| 同時実行数 | bf16 TPOT (ms) | FP8 TPOT (ms) | 速度比 |
+|---|---|---|---|
+| 1 | 22.51 | 16.13 | 1.40x |
+| 2 | 25.71 | 17.22 | 1.49x |
+| 4 | 27.06 | 18.57 | 1.46x |
+
+per-GPU の重みは FP8 化で bf16 13.21 GiB → FP8 8.77 GiB に減りました。ただし FP8 の理論下限(重みが半分なので約 7.8ms)に対して実測は 16ms で、約 8ms の差は量子化では縮まらない固定オーバーヘッドです。内訳は PCIe 経由の TP all-reduce(L40S は NVLink 非搭載)、カーネル起動、動的な活性量子化、サンプリングなどです。
+
+### DFLASH2(SGLang)による投機的デコード
+
+[inco.ai の DFlash2](https://inco.ai/blog/dflash2/) の draft モデル(`incoai/Qwen3.8-27B-DFlash2`)を SGLang(`main` ブランチ)で動かした結果です。
+
+| 構成 | TPOT c=1 (ms) | accept length |
+|---|---|---|
+| FP8 + DFLASH2 | 8.14 | 約 3(random トークン) |
+| INT4(W4A16) + DFLASH2 + fp8 KV | 7.78 | 同上 |
+
+bf16 の 22.5ms から見て約 2 倍の TPOT 短縮です。ただし random トークンの benchmark は draft の受理率(accept length)を過小評価するという注意が要ります(規則的な実テキスト/コードでは受理率が上がるはずです)。運用面の重さも記録しておきます。DFlash2 は SGLang の `main` ブランチにしかなく、公開されているどの image にも入っていないため、image 起動時に `pip install "sglang @ git+https://github.com/sgl-project/sglang.git#subdirectory=python"` で source からインストールする必要があり、Rust サーバのビルドを含めて cold start が約 15 分かかります。さらに 1M context では cuda graph capture が非常に遅く(1 バケットに数分かかり、全体で数時間規模になる)、`--cuda-graph-max-bs` でバケット数を絞る対策が必須でした。また計測ツールが SGLang 側は `sglang.bench_serving`、vLLM 側は `vllm bench serve` と異なり、`--ignore-eos` のような互換性のないフラグもあるため、数値の直接比較には注意が必要です。
+
+### INT4 と直交実験(DOE)による追加チューニング
+
+「コーディング/調査用途なので、スループットは多少犠牲にして良いから TPOT を最優先で下げたい」という方針のもと、Fable と相談して実験計画を立てました。全水準を総当たりすると組み合わせ数が爆発するため、直交計画で検証数を絞り込んでいます。固定条件は INT4(compressed-tensors 量子化)+ fp8 KV + YaRN 1M、ベンチはランダムトークンではなくコード生成プロンプト・greedy(temperature=0)・非ストリーミングの差分計測(`(t512-t16)/(tok512-tok16)`)で server 側の decode コストだけを抜き出しています。
+
+block_size(投機トークン数)と accept threshold(受理閾値)の 2×2:
+
+| block_size | accept threshold | TPOT (ms) | accept length |
+|---|---|---|---|
+| 8 | 1.0(lossless) | 6.96 | 3.33 |
+| 16 | 1.0 | 10.63 | 2.92(悪化) |
+| 8 | 0.5(lossy) | 6.58 | 3.73 |
+
+block_size を 8 から 16 に増やすと accept length は伸びず頭打ちのままで、verify にかかる計算量が増えるだけ悪化しました。DFlash2 の draft は block_size 8 を前提に学習されているためと考えられます。accept threshold を 0.5 まで緩める(厳密な一致でなく近い候補も受理する)と TPOT はわずかに改善しましたが、5% 台の改善幅に対して lossy になるトレードオフがあり、割に合いませんでした。
+
+compute 側のチューニングも試しましたが、いずれも今回のスタックでは使えませんでした。`torch.compile` は Triton の codegen バグ(`launcher() missing 1 required positional argument: '_grid_2'`)でクラッシュし、`linear_replayssm_spec` は KDA(kimi_linear)系モデル専用のオプションで Qwen3.8(Gated DeltaNet)には適用できませんでした。また 4 枚の L40S は PCIe 接続(NVLink 非搭載)のため、SGLang のログで `CustomAllreduce is disabled` と出て NCCL 経由の all-reduce にフォールバックしており、この通信コストが投機的デコード下での固定コストの一部になっています。
+
+ここから見えた本質は、投機的デコードを入れると律速がメモリ帯域から計算(compute)側に移る、という点です。INT4(W4A16)は matmul の前に bf16 へ dequant する計算コストが乗るため、compute 寄りの regime では帯域削減のメリットを相殺してしまい、同時実行数 2 では FP8 に負ける結果になりました。つまり投機的デコードと組み合わせるなら、量子化は INT4 より FP8 の方が有利という結論です。
+
+### 検討したが未計測の道: g7e(Blackwell)
+
+L40S より新しい世代の `g7e.12xlarge`(NVIDIA RTX PRO 6000 Blackwell, 96GB GDDR7 x2)は東京リージョンでも提供されており、価格は `g6e.12xlarge` より安価でした(実測 on-demand: g7e.12xlarge $12.02/hr, g6e.12xlarge $15.22/hr, ap-northeast-1)。ただし decode の TPOT はアグリゲートのメモリ帯域で決まるため、2 枚の RTX PRO 6000 と 4 枚の L40S を比べると帯域はほぼ同等になる計算で、GPU の枚数を減らしても飛躍的には速くならないと見積もりました。Blackwell 世代の本当の強みはハードウェア支援の FP4(L40S の Ada 世代は非対応)で、これなら重みバイト数をさらに半分にできるはずです。今回は capacity(空き枠)の制約で g7e ノードを安定して起動できず、TPOT の実測はできていません(未計測)。段違いの高速化を狙うなら、HBM を積んだ GPU(H100 は 3.35TB/s で L40S の約 4 倍)が本命の方向性だと考えています。
+
+### MTP(Multi-Token Prediction): 本番採用の決め手
+
+`Qwen/Qwen3.8-27B` の `config.json` を見ると `text_config.mtp_num_hidden_layers: 1` という設定があり、`model.safetensors.index.json` にも `mtp.fc.weight` や `mtp.layers.0.*` といった MTP 用の重みが含まれています。つまりこのモデルは 1 層の MTP ヘッドを内蔵しており、別の draft モデルを用意しなくても self-speculative decoding が使えます。target モデル自身が検証するため無損失(lossless)です。vLLM v0.27.1 はこれを検出して使えます(起動ログに `Detected MTP model. Sharing target model ...` と出ます)。
+
+```
+--speculative-config={"method": "mtp", "num_speculative_tokens": N}
+```
+
+| 構成(FP8, vLLM bench random in512/out256) | TPOT c=1 (ms) | 速度比 |
+|---|---|---|
+| FP8(spec decode なし) | 16.13 | 1.00x |
+| FP8 + MTP(num_speculative_tokens=1) | 11.39 | 1.42x |
+| FP8 + MTP(num_speculative_tokens=3) | 9.52 | 1.69x |
+
+`num_speculative_tokens` を 1 より大きくすると、1 層しかない MTP ヘッドを多段(multi-step)で再利用でき、これも速度に効きました。DFlash2(約 8ms)にわずかに劣るものの、MTP は既存の vLLM Helm chart にフラグ 1 つを足すだけで組み込めて、無損失で、YaRN 1M とも両立します。SGLang の source ビルドや cuda graph capture の遅さといった運用の重さを抱えずにこの速度が手に入るため、本番構成には DFlash2 ではなく MTP を採用しました。
+
+なお、公式の量子化済みチェックポイント `Qwen/Qwen3.8-27B-FP8` も MTP の重み(fp8 量子化済み、22 テンソル)を含んでいることを確認しています。校正済みで起動も速くなるはずですが、Helm chart はモデル名から Deployment/Service 名を導出する作りのため、このチェックポイントに切り替えると名前が変わってしまい既存のエージェント側の設定を全て変更する必要が出てきます。そのため今回は base モデルのまま `--quantization=fp8` で動的に量子化する方式(online FP8)を選び、Deployment/Service 名を変えずに済ませました。この判断により、静的 FP8 チェックポイントとの品質差については検証していません(未計測)。
+
+### 本番構成への組み込みと最終実測
+
+Helm chart(`charts/vllm-serving`)に `speculativeConfig` と `quantization` の value を追加し、`overlays/qwen3.8-27b.yaml` に反映して本番の vLLM に適用しました。まず MTP だけを組み込んで実測し、次に FP8 量子化を重ねて実測しています。
+
+| 段階 | 構成 | TPOT c=1 (ms) | 起点からの速度比 |
+|---|---|---|---|
+| 起点 | bf16, spec decode なし | 22.5 | 1.00x |
+| 中間 | bf16 + MTP(3) + YaRN 1M | 13.26 | 1.70x |
+| 最終 | FP8 + MTP(3) + YaRN 1M | 9.36 | 2.41x |
+
+各段階で以下を実機確認し、機能を落とさずに速度だけが上がっていることを確かめています。
+
+- tool calling: `get_weather` のような関数呼び出しが正しく発行される。
+- 画像入力: テキストを焼き込んだテスト画像を正しく読み取れる。
+- 1M context: 408032 トークンの context に埋めた needle(位置は約 375426 トークン、native の 262144 を明確に超える)を正しく取り出せる。
+
+マルチモーダル入力についてはメモリ使用量の暴発を防ぐため、`--limit-mm-per-prompt` を Helm chart の value(`limitMmPerPrompt`)として追加し、`'{"image": 2, "video": 1}'` を本番 overlay に設定しました。
+
 ## まとめ
 
 - `Qwen/Qwen3.8-27B`(ハイブリッド注意の VLM)は upstream の `vllm/vllm-openai:v0.27.1` でカスタムビルド無しに serving できた。
@@ -538,3 +629,4 @@ YaRN は一般に、長さを拡張する代わりに精度(特に中間~長距�
 - Bedrock の Web Search は Qwen の tool-calling に直結できないため、SigV4 の薄いラッパーツール(`bedrock_websearch.py`)を自作し、opencode(MCP)/OpenClaw(shell + AGENTS.md)/Hermes(MCP)の 3 パターンで組み込んだ。EKS Pod Identity でキーレス認証。
 - ssh は結局不要で、`kubectl exec` に一本化した。
 - YaRN で native の 4 倍(1048576)まで context を拡張し、324049 トークンでの needle-in-haystack を実証したが、精度の系統的な評価は未計測のまま残っている。
+- 推論速度は、L40S のメモリ帯域(864GB/s)によるルーフライン分析を起点に、FP8 量子化(1.4〜1.5x)、DFlash2 による投機的デコード(SGLang, 約 2x だが運用が重い)、Fable との直交実験による block_size/accept threshold チューニングを経て、最終的に Qwen3.8-27B 内蔵の MTP ヘッド(無損失)と FP8 量子化を本番の vLLM 構成に組み込んだ。起点の bf16 22.5ms から最終的に FP8+MTP(3) 9.36ms(約 2.4 倍)まで短縮し、tool calling・画像入力・1M context のいずれも機能を落とさずに実測で確認している。
