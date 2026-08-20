@@ -58,6 +58,27 @@ Everything after the agent name is forwarded verbatim to the wrapped CLI:
 ./agents.sh -t opencode
 ```
 
+## Multimodal (images / video)
+
+Qwen3.8-27B is a VLM; the production vLLM serves images out of the box (verified: it OCR'd a test
+image while MTP + YaRN 1M were active — no serving change needed). The agents read files from the
+POD filesystem and base64-embed them, so a local file must first be copied into the pod:
+
+```bash
+./agents.sh push ./diagram.png qwen-code     # kubectl-cp into the pod's /root/media/
+# -> prints: @/root/media/diagram.png
+./agents.sh qwen-code                          # then in the TUI:  @/root/media/diagram.png explain this
+```
+
+- qwen-code needs image/video modality declared for a self-hosted model whose name isn't `qwen*-vl-*`
+  (its modality gate is name-based). This repo's `qwen-code/pod/settings.json` sets
+  `generationConfig.modalities: {image:true, video:true}`, so images work (verified E2E).
+- Video: `push` ffmpeg-downsamples it first (vLLM only samples a few frames). Video support across
+  the CLIs is uneven — opencode has no video path; qwen-code/hermes can emit it but interop with
+  vLLM's `video_url` extension is unverified. Images are the reliable path today.
+- opencode/hermes can also take images (base64 from a pod path) but each needs its own config
+  (opencode: attach the pod path; hermes: `supports_vision: true`); only qwen-code is verified here.
+
 ## OpenClaw (browser)
 
 ```bash

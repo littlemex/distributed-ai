@@ -14,7 +14,14 @@
 #   ./agents.sh qwen-code [args...]     exec into the qwen-code pod and launch qwen (Qwen Code)
 #   ./agents.sh -t <agent>              log into the pod with a shell and STOP (no TUI launch)
 #   ./agents.sh openclaw                background port-forward + open the OpenClaw Control UI
+#   ./agents.sh push <file> [agent]     copy a local image/video into the agent pod (for multimodal)
 #   ./agents.sh down                    stop background port-forwards started by this script
+#
+# Multimodal: the agents read files from the POD filesystem and base64-embed them into the request
+# (no upload API). `push` kubectl-cp's a local file into the pod (default agent: qwen-code) and, for
+# video, ffmpeg-downsamples it first (vLLM samples only a few frames, so shrinking client-side is
+# faster). It prints the pod path; reference it in the TUI, e.g. qwen-code: `@/root/media/foo.png`.
+# Images work today (verified); video support is weak/uneven across the CLIs (see docs).
 #
 # Arg passthrough: everything after the agent name is forwarded verbatim to the wrapped CLI, e.g.
 #   ./agents.sh qwen-code -r <session-id>          # resume a Qwen Code session
@@ -96,7 +103,35 @@ cmd_down() {
   echo "[OK] background port-forwards stopped"
 }
 
-usage() { sed -n '2,25p' "$HERE/$(basename "${BASH_SOURCE[0]}")"; }
+# push a local image/video into the agent pod for multimodal use
+cmd_push() {
+  local src="${1:?usage: push <local-file> [opencode|qwen-code|hermes]}"; local agent="${2:-qwen-code}"
+  [ -f "$src" ] || { echo "[NG] not a file: $src" >&2; exit 1; }
+  local dep; dep="$(_deploy_for "$agent")"; [ -n "$dep" ] || { echo "[NG] unknown agent: $agent" >&2; exit 1; }
+  local pod; pod="$("${K[@]}" get pod -l "app=$dep" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
+  [ -n "$pod" ] || { echo "[NG] no running pod for $agent" >&2; exit 1; }
+  local base; base="$(basename "$src")"; local send="$src"
+  case "$(printf '%s' "$base" | tr 'A-Z' 'a-z')" in
+    *.mp4|*.mov|*.mkv|*.webm|*.avi)
+      if command -v ffmpeg >/dev/null 2>&1; then
+        local tmp="${TMPDIR:-/tmp}/agents-media"; mkdir -p "$tmp"; local out="$tmp/${base%.*}_ds.mp4"
+        echo "[..] ffmpeg downsample (fps 1, <=512px, first 60s, no audio)..."
+        if ffmpeg -y -i "$src" -vf "fps=1,scale='min(512,iw)':-2" -t 60 -an "$out" >/dev/null 2>&1; then
+          send="$out"; base="$(basename "$out")"
+        else echo "[warn] ffmpeg failed; sending the raw video"; fi
+      else echo "[warn] ffmpeg not found locally; sending raw video (large; most frames dropped by the server)"; fi ;;
+  esac
+  local dest="${MEDIA_DIR:-/root/media}"
+  "${K[@]}" exec "deploy/$dep" -- mkdir -p "$dest" >/dev/null 2>&1 || true
+  echo "[..] copying $send -> $agent pod ($pod):$dest/$base"
+  "${K[@]}" cp "$send" "$pod:$dest/$base"
+  echo "[OK] pod path: $dest/$base"
+  echo "     reference it in the TUI:"
+  echo "       qwen-code:  @$dest/$base"
+  echo "       opencode :  paste the path $dest/$base (or drag the local file if running opencode locally)"
+}
+
+usage() { sed -n '2,31p' "$HERE/$(basename "${BASH_SOURCE[0]}")"; }
 
 # leading -t/--shell => log into the pod shell only, no TUI launch
 SHELL_ONLY=0
@@ -108,6 +143,7 @@ case "${1:-}" in
   # back-compat: `shell <agent>` == `-t <agent>`
   shell) shift; SHELL_ONLY=1; _run_agent "${1:?usage: shell <opencode|hermes|qwen-code>}" ;;
   openclaw) cmd_openclaw ;;
+  push) shift; cmd_push "$@" ;;
   down) cmd_down ;;
   *) usage; exit 1 ;;
 esac
