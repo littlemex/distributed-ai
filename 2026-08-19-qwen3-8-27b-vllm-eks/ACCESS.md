@@ -73,9 +73,10 @@ POD filesystem and base64-embed them, so a local file must first be copied into 
 - qwen-code needs image/video modality declared for a self-hosted model whose name isn't `qwen*-vl-*`
   (its modality gate is name-based). This repo's `qwen-code/pod/settings.json` sets
   `generationConfig.modalities: {image:true, video:true}`, so images work (verified E2E).
-- Video: `push` ffmpeg-downsamples it first (vLLM only samples a few frames). Video support across
-  the CLIs is uneven — opencode has no video path; qwen-code/hermes can emit it but interop with
-  vLLM's `video_url` extension is unverified. Images are the reliable path today.
+- Video: works with qwen-code (verified E2E — a 4-word clip was read back in order as
+  CAT/DOG/SUN/CAR). `push` ffmpeg-downsamples video first (vLLM only samples a few frames). opencode
+  has no video path; hermes' `video_url` interop is unverified. qwen-code is the reliable path for
+  both images and video.
 - opencode/hermes can also take images (base64 from a pod path) but each needs its own config
   (opencode: attach the pod path; hermes: `supports_vision: true`); only qwen-code is verified here.
 

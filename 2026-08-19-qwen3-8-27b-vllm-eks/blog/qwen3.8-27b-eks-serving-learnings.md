@@ -417,7 +417,7 @@ echo y | hermes mcp add bedrock-websearch --command python3 \
 | MCP 登録 | local stdio(コンテナ env が subprocess に渡らず、Pod Identity は固定エンドポイント fallback が必要) | settings.json `mcpServers`(遅延接続) | `hermes mcp add` |
 | 非対話実行 | `opencode run --pure --auto` | `qwen -p`(ツールは `--approval-mode yolo`) | ワンショット CLI あり |
 | 画像入力 | 可(base64 data URL、モデル名 gate なし) | 可(ただし `modalities` 明示が必要) | 可(`supports_vision: true` が必要) |
-| 動画入力 | 経路なし(openai/anthropic protocol が動画 MIME を拒否) | 条件付き(モデル名 gate + 明示設定) | 独自 `video_url` 拡張(vLLM との相互運用は未検証) |
+| 動画入力 | 経路なし(openai/anthropic protocol が動画 MIME を拒否) | 可(`modalities` 明示すれば動く、E2E 実測済み) | 独自 `video_url` 拡張(vLLM との相互運用は未検証) |
 | ローカルファイル | 自プロセスの FS を読んで base64 | `@path`(cwd 基準) | 統一 resolver(data/http/file/local/container) |
 | 主なハマり | 古い state / 外部プラグインでハング、`max_tokens` 明示 | モデル名モダリティ gate、`mcp list` の Disconnected 表示 | slash 入りモデル名、`/root` 権限、config 置き場、64K 下限 |
 
@@ -427,7 +427,7 @@ echo y | hermes mcp add bedrock-websearch --command python3 \
 
 - **本番 vLLM(MTP + YaRN 1M 有効)がそのまま画像を理解**した。テキスト入り画像を送ると正しく OCR し(実測)、spec decode(MTP)や YaRN 1M と同居しても画像理解は壊れなかった。serving 側の設定変更なしで動く。
 - 3 エージェントに共通するのは「**Pod のファイルシステムからファイルを読んで base64 でリクエストに埋め込む**」方式で、アップロード API 経路は持たない。したがって Mac ローカルのファイルはまず Pod に入れる必要がある。`agents.sh push <file>`(内部は `kubectl cp`)で Pod の `/root/media/` に置き、TUI で `@/root/media/foo.png` のように参照する運用にした。動画は vLLM 側でどうせ数フレームに間引かれるため、push 内で ffmpeg で事前ダウンサンプル(fps 1 / 512px / 60s)している。
-- 動画対応は総じて弱い。opencode は動画経路そのものがなく、qwen-code / Hermes はコードはあるが送信形式(特に Hermes の独自 `video_url`)と vLLM の解釈が一致するかは未検証。画像が確実な道。
+- 動画は **qwen-code で E2E 実測できた**。4 フレームに別々の単語(CAT / DOG / SUN / CAR)を焼いた 8 秒のクリップを push(ffmpeg で fps 1 にダウンサンプル)し、`@/root/media/clip_ds.mp4` で「フレームに現れる単語を順に挙げて」と聞くと、`CAT / DOG / SUN / CAR` と順序通りに正答した。事前の調査では「送信形式と vLLM の解釈が一致するか未検証」と保守的に見ていたが、`generationConfig.modalities.video: true` を入れれば実際に通る。一方 opencode は動画経路そのものがなく、Hermes は独自 `video_url` 拡張のため未検証のまま。**動画も含めて qwen-code が最も素直に動く**。
 
 ## アクセス方法: ssh は不要だった
 
