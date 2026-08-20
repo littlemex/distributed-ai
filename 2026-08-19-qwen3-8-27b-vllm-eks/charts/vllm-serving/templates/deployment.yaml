@@ -39,6 +39,12 @@ spec:
             - --gpu-memory-utilization={{ .Values.gpuMemoryUtilization }}
             - --max-num-seqs={{ .Values.maxNumSeqs }}
             - --dtype={{ .Values.dtype }}
+            {{- if .Values.quantization }}
+            - --quantization={{ .Values.quantization }}
+            {{- end }}
+            {{- if .Values.limitMmPerPrompt }}
+            - {{ printf "--limit-mm-per-prompt=%s" .Values.limitMmPerPrompt | quote }}
+            {{- end }}
             - --host=0.0.0.0
             - --port={{ .Values.port }}
             {{- if not .Values.enablePrefixCaching }}

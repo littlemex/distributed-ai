@@ -14,13 +14,20 @@
 #  - native context is 262144; capped to 32768 for a first bring-up.
 
 image: vllm/vllm-openai:v0.27.1
-model: Qwen/Qwen3.8-27B
+model: Qwen/Qwen3.8-27B     # base repo (carries the MTP head); FP8 is applied online (quantization below)
 nodeRole: gpu-l40s
 gpuCount: 4
 tensorParallelSize: 4
 maxModelLen: 1048576        # 1M via YaRN (factor 4 x native 262144). See ropeScaling below.
 gpuMemoryUtilization: 0.92
 maxNumSeqs: 2               # 1M KV ~16GiB/rank per seq; keep concurrency low for the long-context test
+
+# Online FP8: halves the weight bytes read per decode token (measured FP8+MTP c=1 ~1.7x faster than
+# bf16 no-spec; FP8 is near-lossless and MTP is lossless). served-model-name stays Qwen/Qwen3.8-27B
+# so the agents need no change.
+quantization: fp8
+# Multimodal memory guard: this is a VLM (verified it reads images/video); cap items per request.
+limitMmPerPrompt: '{"image": 2, "video": 1}'
 hfOverrides: '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":262144}}'
 extraEnv:
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"   # allow max_model_len > native; YaRN handles the extended range

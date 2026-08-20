@@ -29,6 +29,14 @@ maxModelLen: 32768          # model native is 262144; capped for a first bring-u
 gpuMemoryUtilization: 0.85  # hybrid linear-attention state is accounted separately from KV
 maxNumSeqs: 16              # conservative: recurrent state caps concurrency, avoid preemption
 dtype: bfloat16
+# Online quantization (vLLM --quantization). "fp8" halves weight bytes read per decode token on
+# Ada/L40S (near-lossless, no checkpoint needed); leave empty to serve the checkpoint's native dtype.
+# Note: keep `model` as the base repo (it carries the MTP head); the official FP8 checkpoint would
+# change the derived deploy/service name and break the agents, so we quantize online instead.
+quantization: ""
+# Cap multimodal items per request (vLLM --limit-mm-per-prompt, JSON). Guards GPU memory against a
+# runaway number of images/video frames. Example: '{"image": 2, "video": 1}'. Empty = vLLM default.
+limitMmPerPrompt: ""
 enablePrefixCaching: false  # hybrid (linear-attention) models: prefix caching is unsupported
 enforceEager: false         # set true if cudagraph capture fails on a new architecture
 extraArgs: []               # escape hatch; keep empty and justified in the overlay
