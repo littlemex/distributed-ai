@@ -1,0 +1,58 @@
+# SGLang DFLASH2 speculative decoding + online FP8 (stacked) — the lowest-TPOT config on this
+# hardware. Same recipe as sglang/pod/sglang-dflash.yaml (pip-install sglang main at start so
+# DFlash2DraftModel is present) plus `--quantization fp8` on the target (draft stays as shipped).
+# Spot g6e.12xlarge, separate from production. OpenAI-compatible on :8000.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: sglang-dflash-fp8, labels: { app: sglang-dflash-fp8 } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: sglang-dflash-fp8 } }
+  template:
+    metadata: { labels: { app: sglang-dflash-fp8 } }
+    spec:
+      nodeSelector: { node-role: gpu-l40s-spot }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: sglang
+          image: lmsysorg/sglang:nightly-dev-cu12-20260818-c0b6474b
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              set -e;
+              echo '[dflash-fp8] installing sglang python from main...';
+              pip install -U --no-deps "sglang @ git+https://github.com/sgl-project/sglang.git#subdirectory=python" 2>&1 | tail -4;
+              python3 -c "from sglang.srt.models.dflash import DFlash2DraftModel; print('[dflash-fp8] DFlash2DraftModel import OK')";
+              exec python3 -m sglang.launch_server
+              --model-path Qwen/Qwen3.8-27B --tp 4 --host 0.0.0.0 --port 8000
+              --quantization fp8
+              --mem-fraction-static 0.80 --context-length 16384
+              --speculative-algorithm DFLASH
+              --speculative-draft-model-path incoai/Qwen3.8-27B-DFlash2
+              --speculative-num-draft-tokens 8
+          env:
+            - { name: HF_HOME, value: /hf-cache }
+          ports: [{ name: http, containerPort: 8000 }]
+          resources:
+            requests: { cpu: "8", memory: 64Gi, nvidia.com/gpu: 4 }
+            limits: { memory: 64Gi, nvidia.com/gpu: 4 }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+            failureThreshold: 200
+          volumeMounts:
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+        - { name: hf-cache, emptyDir: { sizeLimit: 120Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: sglang-dflash-fp8, labels: { app: sglang-dflash-fp8 } }
+spec:
+  type: ClusterIP
+  selector: { app: sglang-dflash-fp8 }
+  ports: [{ name: http, port: 8000, targetPort: http }]
