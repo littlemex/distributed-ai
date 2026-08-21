@@ -32,9 +32,16 @@ Bring these yourself:
 | Requirement | Detail |
 |---|---|
 | EKS cluster + Karpenter | reachable via a kubeconfig context; Karpenter provisions the GPU node |
+| GPU EC2NodeClass | the pool references a Karpenter EC2NodeClass named `gpu-ddp` (subnet/SG/AMI discovery); edit `serving/pool/nodepool-gpu-l40s.yaml` if yours differs |
+| Bedrock role | an IAM role the agents assume for `web_search`, passed as `QWEN_BEDROCK_ROLE_ARN`; grant it Bedrock access and enable model access in `QWEN_BEDROCK_REGION` |
 | GPU quota | `Running On-Demand G and VT instances` ≥ 48 vCPU (g6e.12xlarge) |
 | CLI tools | `kubectl`, `aws` CLI v2, `helm` 3.x, `python3` |
 | Caller IAM | `eks:*PodIdentityAssociation*`, `iam:PassRole`, `sts:GetCallerIdentity` |
+
+This reference assumes a **dedicated cluster**: the GPU pool is part of the workload, and `deploy.sh
+--down` removes that cluster-scoped Karpenter NodePool. On a shared cluster, delete only the
+namespaced resources (`kubectl delete namespace $QWEN_NAMESPACE` plus the Pod Identity associations)
+so you do not remove a pool other workloads rely on.
 
 `deploy.sh` preflight checks and reports on these: the EKS Pod Identity agent add-on, the Bedrock
 role and its model access, the availability zone offering g6e, and the target namespace.
