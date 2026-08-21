@@ -1,0 +1,5 @@
+# local / env-specific (never commit real values)
+client/qwen-agents.env
+client/agents.env
+**/*.local.json
+!**/*.local.json.example

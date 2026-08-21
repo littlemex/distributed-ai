@@ -1,0 +1,65 @@
+# qwen-code pod (keyless): use it with `kubectl exec -it deploy/qwen-code -- bash -lc qwen`
+# (agents.sh qwen-code). No sshd/ssh key — kubectl exec authenticates via your kubeconfig.
+# qwen-code is Qwen's gemini-cli fork (npm @qwen-code/qwen-code, binary `qwen`). It reaches the
+# self-hosted Qwen via the in-cluster Service using the `openai` auth type (OpenAI-compatible),
+# and web search via the bedrock-websearch MCP (AWS creds via Pod Identity).
+#
+# Config is a single ~/.qwen/settings.json (see qwen-code/pod/settings.json): modelProviders.openai
+# points baseUrl at the vLLM Service, security.auth.selectedType=openai avoids the interactive
+# /auth prompt, and mcpServers wires bedrock-websearch over stdio.
+#
+# Prereqs (create once):
+#   kubectl -n "$QWEN_NAMESPACE" create sa qwen-code
+#   aws eks create-pod-identity-association --cluster-name <your-eks-cluster> --namespace <your-namespace> \
+#     --service-account qwen-code --role-arn arn:aws:iam::<acct>:role/<bedrock-role-name>
+#   kubectl -n "$QWEN_NAMESPACE" create configmap qwen-code-files \
+#     --from-file=settings.json=settings.json \
+#     --from-file=bedrock_websearch.py=../../tools/bedrock-websearch/bedrock_websearch.py \
+#     --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: qwen-code, labels: { app: qwen-code } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: qwen-code } }
+  template:
+    metadata:
+      labels: { app: qwen-code }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
+    spec:
+      serviceAccountName: qwen-code        # Pod Identity -> Bedrock (web_search)
+      nodeSelector: { node-role: cpu }
+      containers:
+        - name: qwen-code
+          image: node:22-bookworm-slim
+          env:
+            - { name: AWS_REGION, value: "us-east-1" }
+            - { name: BEDROCK_WS_REGION, value: "us-east-1" }
+            - { name: HOME, value: "/root" }
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              set -e;
+              apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 ca-certificates git >/dev/null;
+              npm install -g @qwen-code/qwen-code >/tmp/npm.log 2>&1 || cat /tmp/npm.log;
+              mkdir -p /root/.qwen;
+              cp /opt/qc-config/settings.json /root/.qwen/settings.json;
+              touch /tmp/ready;
+              echo '[ready] use: kubectl exec -it deploy/qwen-code -- bash -lc qwen';
+              exec sleep infinity
+          readinessProbe:
+            exec: { command: ["sh","-c","test -f /tmp/ready"] }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits: { cpu: "2", memory: 4Gi }
+          volumeMounts:
+            - { name: qc-config, mountPath: /opt/qc-config, readOnly: true }
+            - { name: tools, mountPath: /opt/tools, readOnly: true }
+      volumes:
+        - name: qc-config
+          configMap: { name: qwen-code-files, items: [{ key: settings.json, path: settings.json }] }
+        - name: tools
+          configMap: { name: qwen-code-files, items: [{ key: bedrock_websearch.py, path: bedrock_websearch.py }] }

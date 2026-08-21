@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vllm-serving.name" . }}
+  labels:
+    {{- include "vllm-serving.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  # Recreate: a GPU node holds a fixed number of devices; RollingUpdate would need a
+  # second node's worth of GPUs to stand up the new pod before the old one frees them.
+  strategy:
+    type: Recreate
+  progressDeadlineSeconds: {{ .Values.progressDeadlineSeconds }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ include "vllm-serving.name" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "vllm-serving.labels" . | nindent 8 }}
+    spec:
+      nodeSelector:
+        node-role: {{ .Values.nodeRole }}
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --model={{ .Values.model }}
+            - --served-model-name={{ include "vllm-serving.served" . }}
+            - --tensor-parallel-size={{ .Values.tensorParallelSize }}
+            - --pipeline-parallel-size={{ .Values.pipelineParallelSize }}
+            - --max-model-len={{ int64 .Values.maxModelLen }}
+            - --gpu-memory-utilization={{ .Values.gpuMemoryUtilization }}
+            - --max-num-seqs={{ .Values.maxNumSeqs }}
+            - --dtype={{ .Values.dtype }}
+            {{- if .Values.quantization }}
+            - --quantization={{ .Values.quantization }}
+            {{- end }}
+            {{- if .Values.limitMmPerPrompt }}
+            - {{ printf "--limit-mm-per-prompt=%s" .Values.limitMmPerPrompt | quote }}
+            {{- end }}
+            - --host=0.0.0.0
+            - --port={{ .Values.port }}
+            {{- if not .Values.enablePrefixCaching }}
+            - --no-enable-prefix-caching
+            {{- end }}
+            {{- if .Values.enforceEager }}
+            - --enforce-eager
+            {{- end }}
+            {{- if .Values.enableAutoToolChoice }}
+            - --enable-auto-tool-choice
+            - --tool-call-parser={{ .Values.toolCallParser }}
+            {{- end }}
+            {{- if .Values.chatTemplateKwargs }}
+            - {{ printf "--default-chat-template-kwargs=%s" .Values.chatTemplateKwargs | quote }}
+            {{- end }}
+            {{- if .Values.hfOverrides }}
+            - {{ printf "--hf-overrides=%s" .Values.hfOverrides | quote }}
+            {{- end }}
+            {{- if .Values.speculativeConfig }}
+            - {{ printf "--speculative-config=%s" .Values.speculativeConfig | quote }}
+            {{- end }}
+            {{- range .Values.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          env:
+            - name: HF_HOME
+              value: /hf-cache
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if .Values.hfTokenSecret }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.hfTokenSecret }}
+                  key: token
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          resources:
+            requests:
+              cpu: {{ .Values.cpu | quote }}
+              memory: {{ .Values.memory }}
+              nvidia.com/gpu: {{ .Values.gpuCount }}
+            limits:
+              memory: {{ .Values.memory }}
+              nvidia.com/gpu: {{ .Values.gpuCount }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.startupPeriodSeconds }}
+            failureThreshold: {{ .Values.startupFailureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+            - name: hf-cache
+              mountPath: /hf-cache
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.shmSize }}
+        - name: hf-cache
+          {{- if eq .Values.storage.hfCache.type "existingClaim" }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.storage.hfCache.existingClaimName }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.storage.hfCache.sizeLimit }}
+          {{- end }}

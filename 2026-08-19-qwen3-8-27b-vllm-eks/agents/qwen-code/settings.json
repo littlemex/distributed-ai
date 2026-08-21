@@ -1,0 +1,24 @@
+{
+  "modelProviders": {
+    "openai": [
+      {
+        "id": "Qwen/Qwen3.8-27B",
+        "name": "Qwen3.8-27B (vLLM on EKS)",
+        "baseUrl": "http://vllm-qwen-qwen3-8-27b:8000/v1",
+        "envKey": "VLLM_API_KEY",
+        "generationConfig": { "contextWindowSize": 32768, "maxRetries": 2, "timeout": 300000, "modalities": { "image": true, "video": true } }
+      }
+    ]
+  },
+  "env": { "VLLM_API_KEY": "not-needed" },
+  "security": { "auth": { "selectedType": "openai" } },
+  "model": { "name": "Qwen/Qwen3.8-27B" },
+  "mcpServers": {
+    "bedrock-websearch": {
+      "command": "python3",
+      "args": ["/opt/tools/bedrock_websearch.py", "--mcp"],
+      "env": { "AWS_REGION": "us-east-1", "BEDROCK_WS_REGION": "us-east-1" },
+      "trust": true
+    }
+  }
+}

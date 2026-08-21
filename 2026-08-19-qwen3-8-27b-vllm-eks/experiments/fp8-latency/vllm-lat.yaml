@@ -1,0 +1,64 @@
+# Standalone latency-profile vLLM for the FP8-vs-bf16 TPOT experiment, on a SPOT g6e.12xlarge
+# (separate from the on-demand 1M-context production serving, which stays up untouched).
+# Distinct name/Service (vllm-lat) so it never collides with vllm-qwen-qwen3-8-27b.
+#
+# Toggle the experiment by editing args: add/remove `--quantization=fp8` (online dynamic FP8;
+# quantizes nn.Linear weights to E4M3, activations dynamic per-token). Short context 8192 and
+# max-num-seqs 20 (single-user latency target). CUDA graphs ON (no --enforce-eager).
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: vllm-lat, labels: { app: vllm-lat } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: vllm-lat } }
+  template:
+    metadata:
+      labels: { app: vllm-lat }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
+    spec:
+      nodeSelector: { node-role: gpu-l40s-spot }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.27.1
+          command: ["python3","-m","vllm.entrypoints.openai.api_server"]
+          args:
+            - --model=Qwen/Qwen3.8-27B
+            - --served-model-name=Qwen/Qwen3.8-27B
+            - --tensor-parallel-size=4
+            - --max-model-len=8192
+            - --gpu-memory-utilization=0.92
+            - --max-num-seqs=20
+            - --no-enable-prefix-caching
+            - --quantization=fp8
+            - --host=0.0.0.0
+            - --port=8000
+          env:
+            - { name: HF_HOME, value: /hf-cache }
+          ports: [{ name: http, containerPort: 8000 }]
+          resources:
+            requests: { cpu: "8", memory: 64Gi, nvidia.com/gpu: 4 }
+            limits: { memory: 64Gi, nvidia.com/gpu: 4 }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+            failureThreshold: 160
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+          volumeMounts:
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+        - { name: hf-cache, emptyDir: { sizeLimit: 120Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: vllm-lat, labels: { app: vllm-lat } }
+spec:
+  type: ClusterIP
+  selector: { app: vllm-lat }
+  ports: [{ name: http, port: 8000, targetPort: http }]

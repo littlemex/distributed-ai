@@ -1,0 +1,49 @@
+# Karpenter NodePool for G7e (NVIDIA RTX PRO 6000 Blackwell, 96 GB GDDR7 per GPU).
+# Reuses the gpu-ddp EC2NodeClass (al2023@latest accelerated AMI; the current node driver is
+# 580.x which supports Blackwell / sm_120). Lets Karpenter pick the size from the pod's GPU
+# request: 2-GPU pod -> g7e.12xlarge (TP2); 1-GPU pod -> g7e.2xlarge (TP1). kubectl-applied;
+# not a terraform change. Zones 1a and 1c (g7e.12xlarge is offered in both).
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: gpu-g7e
+spec:
+  disruption:
+    budgets:
+    - nodes: 10%
+    consolidateAfter: 5m
+    consolidationPolicy: WhenEmpty
+  limits:
+    cpu: "200"
+    memory: 2000Gi
+  template:
+    metadata:
+      labels:
+        distributed-ai/device: nvidia
+        node-role: gpu-g7e
+    spec:
+      expireAfter: Never
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu-ddp
+      requirements:
+      - key: karpenter.sh/capacity-type
+        operator: In
+        values: ["on-demand"]
+      - key: node.kubernetes.io/instance-type
+        operator: In
+        values: ["g7e.12xlarge", "g7e.4xlarge", "g7e.2xlarge"]
+      - key: topology.kubernetes.io/zone
+        operator: In
+        values: ["ap-northeast-1a", "ap-northeast-1c"]
+      - key: kubernetes.io/arch
+        operator: In
+        values: ["amd64"]
+      - key: kubernetes.io/os
+        operator: In
+        values: ["linux"]
+      taints:
+      - effect: NoSchedule
+        key: nvidia.com/gpu
+      terminationGracePeriod: 1h
