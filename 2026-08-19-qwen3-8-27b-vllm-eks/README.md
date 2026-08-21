@@ -70,6 +70,7 @@ Deploy flags after `-- ` are forwarded to `deploy.sh`, so the whole run is one s
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --websearch
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --skip-gpu --websearch
 curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --engine sglang
 curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
 ```
@@ -83,7 +84,10 @@ repo the initial `curl` needs a `GITHUB_TOKEN`, and `QWEN_REPO` / `QWEN_REF` ove
 First run takes roughly 10-15 minutes for node provisioning, image pull, weight download, and warmup,
 and ends with a smoke check. The Bedrock `web_search` tool is off unless you pass `--websearch`; with
 it and no `QWEN_BEDROCK_ROLE_ARN`, a least-privilege Bedrock role is created for you. `--engine
-sglang` needs a prebuilt image, described in [`serving/README.md`](serving/README.md).
+sglang` needs a prebuilt image, described in [`serving/README.md`](serving/README.md). If your cluster
+already has a compatible GPU NodePool and you do not want this reference to apply its own, add
+`--skip-gpu` (alias of `--skip-pool`); it composes with `--websearch`, so `--skip-gpu --websearch`
+deploys serving and the agents with web search in one shot without touching the pool.
 
 ## Cost and cleanup
 

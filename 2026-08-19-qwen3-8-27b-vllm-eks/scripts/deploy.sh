@@ -4,8 +4,11 @@
 # EXISTING cluster (cluster creation is out of scope). Default engine is vLLM (verified); SGLang is
 # an opt-in faster engine that needs a prebuilt image (see serving/sglang/README.md).
 #
-#   ./scripts/deploy.sh [--engine vllm|sglang] [--only pool|serving|agents] [--websearch] [--yes] [--skip-smoke]
+#   ./scripts/deploy.sh [--engine vllm|sglang] [--only pool|serving|agents] [--skip-pool] [--websearch] [--yes] [--skip-smoke]
 #   ./scripts/deploy.sh --down [--purge-pool] [--yes]
+#
+# --skip-pool (alias --skip-gpu): run the full flow WITHOUT the GPU NodePool phase, for a cluster that
+# already has a compatible pool. Combine with --websearch for a single serving+agents+web_search shot.
 #
 # The Bedrock web_search tool is OPT-IN and off by default: without --websearch the agents deploy
 # with no MCP/web_search wiring, no Bedrock role, and no Pod Identity association, and still do chat
@@ -22,12 +25,13 @@ set -euo pipefail
 export AWS_PAGER=""   # keep aws CLI from paginating / injecting output that would pollute captures
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
-ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; PURGE_POOL=0; WEBSEARCH="${QWEN_WEBSEARCH:-0}"
+ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; PURGE_POOL=0; SKIP_POOL=0; WEBSEARCH="${QWEN_WEBSEARCH:-0}"
 while [ $# -gt 0 ]; do case "$1" in
   --engine) ENGINE="${2:?}"; shift 2;;
   --only) ONLY="${2:?}"; shift 2;;
   --yes) ASSUME_YES=1; shift;;
   --skip-smoke) SKIP_SMOKE=1; shift;;
+  --skip-pool|--skip-gpu) SKIP_POOL=1; shift;;
   --websearch) WEBSEARCH=1; shift;;
   --purge-pool) PURGE_POOL=1; shift;;
   --down) DOWN=1; shift;;
@@ -35,6 +39,7 @@ while [ $# -gt 0 ]; do case "$1" in
 esac; done
 case "$ENGINE" in vllm|sglang) :;; *) echo "--engine must be vllm|sglang" >&2; exit 2;; esac
 case "$ONLY" in ""|pool|serving|agents) :;; *) echo "--only must be pool|serving|agents" >&2; exit 2;; esac
+[ "$SKIP_POOL" = 1 ] && [ "$ONLY" = pool ] && { echo "--skip-pool and --only pool are contradictory" >&2; exit 2; }
 # web_search wiring lives in the agents phase; a --only pool|serving run would silently drop it.
 if [ "$WEBSEARCH" = 1 ] && [ -n "$ONLY" ] && [ "$ONLY" != agents ]; then
   echo "--websearch needs the agents phase: use --websearch with no --only, or --websearch --only agents" >&2; exit 2
@@ -266,6 +271,7 @@ case "$ONLY" in
   pool)    phase_pool;      log "smoke: not applicable with --only pool";;
   serving) phase_serving;   do_smoke;;
   agents)  phase_agents;    log "smoke: not run with --only agents (it does not (re)deploy serving)";;
-  "")      phase_pool; phase_serving; phase_agents; do_smoke;;
+  "")      if [ "$SKIP_POOL" = 1 ]; then log "pool: skipped (--skip-pool)"; else phase_pool; fi
+           phase_serving; phase_agents; do_smoke;;
 esac
 log "done (ns=$NS). Launch agents with:  qa opencode"
