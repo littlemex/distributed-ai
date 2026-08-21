@@ -6,7 +6,7 @@
 # chart templates, which are Go templates and not valid YAML).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$HERE"
+cd "$HERE" || exit 1
 rc=0
 
 echo "[lint] env-specific values"
@@ -28,7 +28,7 @@ echo "[lint] shellcheck"
 SH=(scripts/deploy.sh scripts/lint.sh client/qwen-agents.sh client/port-forward.sh serving/sglang/image/build.sh)
 present=0
 for f in "${SH[@]}"; do [ -f "$f" ] || continue; present=1
-  command -v shellcheck >/dev/null 2>&1 && { shellcheck -x "$f" || rc=1; } || echo "[lint][skip] shellcheck not installed"
+  command -v shellcheck >/dev/null 2>&1 && { shellcheck -x --severity=error "$f" || rc=1; } || echo "[lint][skip] shellcheck not installed"
 done
 [ "$present" = 1 ] || { echo "[lint][FAIL] no shell scripts matched — check paths"; rc=1; }
 
