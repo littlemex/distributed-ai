@@ -4,22 +4,28 @@
 # EXISTING cluster (cluster creation is out of scope). Default engine is vLLM (verified); SGLang is
 # an opt-in faster engine that needs a prebuilt image (see serving/sglang/README.md).
 #
-#   ./scripts/deploy.sh [--engine vllm|sglang] [--only pool|serving|agents] [--yes] [--skip-smoke]
+#   ./scripts/deploy.sh [--engine vllm|sglang] [--only pool|serving|agents] [--websearch] [--yes] [--skip-smoke]
 #   ./scripts/deploy.sh --down [--yes]
+#
+# The Bedrock web_search tool is OPT-IN and off by default: without --websearch the agents deploy
+# with no MCP/web_search wiring, no Bedrock role, and no Pod Identity association, and still do chat
+# and tool-calling. With --websearch the tool is wired in; if QWEN_BEDROCK_ROLE_ARN is unset the
+# script creates a least-privilege Bedrock role via scripts/setup-websearch-role.sh and uses it.
 #
 # Config (env): QWEN_KUBE_CONTEXT (default: current context), QWEN_NAMESPACE (default: qwen),
 # QWEN_REGION (default: from context), QWEN_BEDROCK_REGION (default: QWEN_REGION),
-# QWEN_BEDROCK_ROLE_ARN (required for the agents phase). The account is derived from the caller and
-# is not overridable.
+# QWEN_WEBSEARCH (1 to enable, same as --websearch), QWEN_BEDROCK_ROLE_ARN (optional; only used with
+# --websearch, auto-created when unset). The account is derived from the caller and is not overridable.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
-ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0
+ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; WEBSEARCH="${QWEN_WEBSEARCH:-0}"
 while [ $# -gt 0 ]; do case "$1" in
   --engine) ENGINE="${2:?}"; shift 2;;
   --only) ONLY="${2:?}"; shift 2;;
   --yes) ASSUME_YES=1; shift;;
   --skip-smoke) SKIP_SMOKE=1; shift;;
+  --websearch) WEBSEARCH=1; shift;;
   --down) DOWN=1; shift;;
   *) echo "unknown arg: $1" >&2; exit 2;;
 esac; done
@@ -106,21 +112,44 @@ phase_serving(){
   "${K[@]}" apply -f "serving/alias-$ENGINE.yaml"
 }
 
+ensure_websearch_role(){
+  # web_search is opt-in. When enabled without a caller-supplied role, create a least-privilege one.
+  [ "$WEBSEARCH" = 1 ] || return 0
+  [ -n "${QWEN_BEDROCK_ROLE_ARN:-}" ] && return 0
+  log "web_search: QWEN_BEDROCK_ROLE_ARN unset — creating a least-privilege Bedrock role"
+  QWEN_BEDROCK_ROLE_ARN="$(QWEN_REGION="$QWEN_REGION" scripts/setup-websearch-role.sh)" || die "Bedrock role creation failed"
+  echo "  role: $QWEN_BEDROCK_ROLE_ARN"
+}
+
+# When web_search is off, strip the MCP block from an agent's JSON config so the tool is not wired.
+# Echoes the path of the config to load (the original when on, a stripped temp file when off).
+agent_config(){  # <src-json> <mcp-key>
+  if [ "$WEBSEARCH" = 1 ]; then echo "$1"; return; fi
+  local out; out="$(mktemp)"
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d.pop(sys.argv[2],None); json.dump(d,open(sys.argv[3],"w"),indent=2)' "$1" "$2" "$out"
+  echo "$out"
+}
+
 phase_agents(){
-  log "agents"
-  local AGENTS=(opencode qwen-code hermes openclaw)
+  log "agents (web_search: $([ "$WEBSEARCH" = 1 ] && echo on || echo off))"
+  ensure_websearch_role
+  local AGENTS=(opencode qwen-code hermes openclaw) cfg
   for a in "${AGENTS[@]}"; do
     "${K[@]}" apply -f "agents/$a/sa.yaml" >/dev/null
-    # config maps (config + shared tool) — recreate idempotently
+    # config maps (config + the shared web_search tool script) — recreate idempotently
     case "$a" in
-      opencode)  "${K[@]}" create configmap opencode-files --from-file=opencode.json=agents/opencode/opencode.pod.json --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
-      qwen-code) "${K[@]}" create configmap qwen-code-files --from-file=settings.json=agents/qwen-code/settings.json --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
+      opencode)  cfg="$(agent_config agents/opencode/opencode.pod.json mcp)"
+                 "${K[@]}" create configmap opencode-files --from-file=opencode.json="$cfg" --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
+      qwen-code) cfg="$(agent_config agents/qwen-code/settings.json mcpServers)"
+                 "${K[@]}" create configmap qwen-code-files --from-file=settings.json="$cfg" --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
       hermes)    "${K[@]}" create configmap hermes-tools --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
       openclaw)  "${K[@]}" create configmap openclaw-tools --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --from-file=AGENTS.md=agents/tools/bedrock-websearch/AGENTS.md --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
     esac
-    # EKS Pod Identity association: create if absent, fail on role mismatch (no silent update)
-    if [ -n "${QWEN_BEDROCK_ROLE_ARN:-}" ]; then associate_pod_identity "$a"; fi
+    # Pod Identity association only when web_search is on and a role is available.
+    if [ "$WEBSEARCH" = 1 ] && [ -n "${QWEN_BEDROCK_ROLE_ARN:-}" ]; then associate_pod_identity "$a"; fi
     "${K[@]}" apply -f "agents/$a/deployment.yaml" >/dev/null
+    # hermes/openclaw read WEBSEARCH at startup to decide whether to wire the tool.
+    "${K[@]}" set env deploy/"$a" WEBSEARCH="$WEBSEARCH" >/dev/null 2>&1 || true
     "${K[@]}" rollout restart deploy/"$a" >/dev/null 2>&1 || true   # pick up configmap changes
   done
 }

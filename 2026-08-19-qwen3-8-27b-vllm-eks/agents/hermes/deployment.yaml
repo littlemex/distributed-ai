@@ -30,6 +30,7 @@ spec:
             - { name: OLLAMA_BASE_URL, value: "http://qwen-serving:8000/v1" }
             - { name: AWS_REGION, value: "us-east-1" }
             - { name: BEDROCK_WS_REGION, value: "us-east-1" }
+            - { name: WEBSEARCH, value: "0" }   # deploy.sh sets this to 1 with --websearch
           command: ["/bin/sh","-lc"]
           args:
             - >
@@ -39,7 +40,7 @@ spec:
               cd /opt/data/work; git rev-parse --git-dir >/dev/null 2>&1 || git init -q; git config user.email agent@local; git config user.name hermes;
               hermes config set model.default "Qwen/Qwen3.8-27B" >/dev/null 2>&1 || true;
               hermes config set terminal.cwd "/opt/data/work" >/dev/null 2>&1 || true;
-              echo y | hermes mcp add bedrock-websearch --command python3 --env BEDROCK_WS_REGION=us-east-1 --args /opt/tools/bedrock_websearch.py --mcp >/dev/null 2>&1 || true;
+              [ "${WEBSEARCH:-0}" = 1 ] && (echo y | hermes mcp add bedrock-websearch --command python3 --env BEDROCK_WS_REGION="$BEDROCK_WS_REGION" --args /opt/tools/bedrock_websearch.py --mcp >/dev/null 2>&1) || true;
               touch /tmp/ready;
               echo '[ready] use: kubectl exec -it deploy/hermes -- bash -lc hermes';
               exec sleep infinity

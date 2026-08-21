@@ -38,7 +38,7 @@ Bring these yourself:
 |---|---|
 | EKS cluster + Karpenter | reachable via a kubeconfig context; Karpenter provisions the GPU node |
 | GPU EC2NodeClass | the pool references a Karpenter EC2NodeClass named `gpu-ddp` (subnet/SG/AMI discovery); edit `serving/pool/nodepool-gpu-l40s.yaml` if yours differs |
-| Bedrock role | an IAM role the agents assume for `web_search`, passed as `QWEN_BEDROCK_ROLE_ARN`; grant it Bedrock access and enable model access in `QWEN_BEDROCK_REGION` |
+| Bedrock role (web_search only) | needed only if you enable the opt-in `web_search` tool with `--websearch`. Supply an existing role via `QWEN_BEDROCK_ROLE_ARN`, or let `deploy.sh` create a least-privilege one for you. Enable Bedrock model access in `QWEN_BEDROCK_REGION` either way |
 | GPU quota | `Running On-Demand G and VT instances` ≥ 48 vCPU (g6e.12xlarge) |
 | CLI tools | `kubectl`, `aws` CLI v2, `helm` 3.x, `python3` |
 | Caller IAM | `eks:*PodIdentityAssociation*`, `iam:PassRole`, `sts:GetCallerIdentity` |
@@ -75,6 +75,12 @@ commit and including this dated subdirectory, for example
 anywhere. Run `./scripts/deploy.sh --engine sglang` for the opt-in engine after building its image,
 described in [`serving/README.md`](serving/README.md).
 
+The Bedrock `web_search` tool is off by default; add `--websearch` to wire it into the agents. With
+`--websearch` and no `QWEN_BEDROCK_ROLE_ARN`, `deploy.sh` creates a least-privilege Bedrock role
+through `scripts/setup-websearch-role.sh` and uses it. Without `--websearch` the agents still do
+chat and tool-calling; they just have no web search, and no Bedrock role or Pod Identity association
+is created.
+
 ## Cost and cleanup
 
 The GPU node is billed per hour while running (g6e.12xlarge, on-demand). Tear everything down when
@@ -86,7 +92,9 @@ finished:
 
 This removes the Deployments for both engines and all four agents, the `qwen-serving` alias, and the
 cluster-scoped GPU NodePool. ServiceAccounts, ConfigMaps, and the namespace remain until you delete
-the namespace, and Pod Identity associations are removed only when `QWEN_BEDROCK_ROLE_ARN` is set.
+the namespace, and Pod Identity associations are removed only when `QWEN_BEDROCK_ROLE_ARN` is set. A
+Bedrock role that `--websearch` auto-created is not deleted by teardown; remove it with `aws iam
+delete-role-policy` and `aws iam delete-role` when you no longer need it.
 
 ## Layout
 
@@ -108,8 +116,9 @@ experiments/ measurements behind the production settings (FP8, MTP) and the opt-
 | `QWEN_NAMESPACE` | `qwen` | yes |
 | `QWEN_REGION` | derived from the context | yes |
 | `QWEN_BEDROCK_REGION` | `$QWEN_REGION` | yes |
+| `QWEN_WEBSEARCH` | `0` (off) | yes, or pass `--websearch` |
 | account id | `aws sts get-caller-identity` | no (derived from the caller) |
-| `QWEN_BEDROCK_ROLE_ARN` | — | yes; required for the agents phase |
+| `QWEN_BEDROCK_ROLE_ARN` | — | optional; only with `--websearch`, auto-created when unset |
 
 ## Software versions
 

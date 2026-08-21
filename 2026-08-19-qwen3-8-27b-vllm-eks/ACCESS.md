@@ -25,8 +25,9 @@ qa hermes
 `opencode` is the opencode coding CLI, `qwen-code` is Qwen Code, a gemini-cli fork whose binary is
 `qwen`, and `hermes` is the Hermes assistant CLI.
 
-Each reaches Qwen through the in-cluster `qwen-serving` Service and web search through the
-bedrock-websearch MCP tool, which authenticates to Bedrock via EKS Pod Identity.
+Each reaches Qwen through the in-cluster `qwen-serving` Service. Web search is opt-in: when the stack
+is deployed with `--websearch`, the agents also get the bedrock-websearch tool, which authenticates
+to Bedrock via EKS Pod Identity. Without it, the agents run without web search.
 
 ## Passthrough and shell-only
 
