@@ -38,7 +38,7 @@ Bring these yourself:
 |---|---|
 | EKS cluster + Karpenter | reachable via a kubeconfig context; Karpenter provisions the GPU node |
 | GPU EC2NodeClass | the pool references a Karpenter EC2NodeClass named `gpu-ddp` (subnet/SG/AMI discovery); edit `serving/pool/nodepool-gpu-l40s.yaml` if yours differs |
-| Bedrock role (web_search only) | needed only if you enable the opt-in `web_search` tool with `--websearch`. Supply an existing role via `QWEN_BEDROCK_ROLE_ARN`, or let `deploy.sh` create a least-privilege one for you. Enable Bedrock model access in `QWEN_BEDROCK_REGION` either way |
+| Bedrock role (web_search only) | needed only if you enable the opt-in `web_search` tool with `--websearch`. Supply an existing role via `QWEN_BEDROCK_ROLE_ARN`, or let `deploy.sh` create one for you with `AmazonBedrockFullAccess`. Enable Bedrock model access in `QWEN_BEDROCK_REGION` either way |
 | GPU quota | `Running On-Demand G and VT instances` ≥ 48 vCPU (g6e.12xlarge) |
 | CLI tools | `kubectl`, `aws` CLI v2, `helm` 3.x, `python3` |
 | Caller IAM | `eks:*PodIdentityAssociation*`, `iam:PassRole`, `sts:GetCallerIdentity` |
@@ -83,7 +83,7 @@ records the resolved context and namespace so `qa` targets the same place afterw
 repo the initial `curl` needs a `GITHUB_TOKEN`, and `QWEN_REPO` / `QWEN_REF` override the source.
 First run takes roughly 10-15 minutes for node provisioning, image pull, weight download, and warmup,
 and ends with a smoke check. The Bedrock `web_search` tool is off unless you pass `--websearch`; with
-it and no `QWEN_BEDROCK_ROLE_ARN`, a least-privilege Bedrock role is created for you. `--engine
+it and no `QWEN_BEDROCK_ROLE_ARN`, a Bedrock role with `AmazonBedrockFullAccess` is created for you. `--engine
 sglang` needs a prebuilt image, described in [`serving/README.md`](serving/README.md). If your cluster
 already has a compatible GPU NodePool and you do not want this reference to apply its own, add
 `--skip-gpu` (alias of `--skip-pool`); it composes with `--websearch`, so `--skip-gpu --websearch`
@@ -102,8 +102,10 @@ This removes the Deployments for both engines and all four agents, the `qwen-ser
 Pod Identity associations. It **keeps** the cluster-scoped GPU NodePool by default, since it is
 shared; add `--purge-pool` to remove it too (only on a dedicated cluster). ServiceAccounts,
 ConfigMaps, and the namespace remain until you delete the namespace. A Bedrock role that
-`--websearch` auto-created is not deleted by teardown; remove it with `aws iam delete-role-policy`
-and `aws iam delete-role` when you no longer need it.
+`--websearch` auto-created is not deleted by teardown; when you no longer need it, detach the managed
+policy and delete the role: `aws iam detach-role-policy --role-name qwen-agents-websearch
+--policy-arn arn:aws:iam::aws:policy/AmazonBedrockFullAccess` then `aws iam delete-role --role-name
+qwen-agents-websearch`.
 
 ## Layout
 

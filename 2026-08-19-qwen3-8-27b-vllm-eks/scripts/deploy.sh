@@ -13,7 +13,7 @@
 # The Bedrock web_search tool is OPT-IN and off by default: without --websearch the agents deploy
 # with no MCP/web_search wiring, no Bedrock role, and no Pod Identity association, and still do chat
 # and tool-calling. With --websearch the tool is wired in; if QWEN_BEDROCK_ROLE_ARN is unset the
-# script creates a least-privilege Bedrock role via scripts/setup-websearch-role.sh and uses it.
+# script creates a Bedrock role (AmazonBedrockFullAccess) via scripts/setup-websearch-role.sh.
 # web_search lives in the agents phase, so it is rejected with --only pool|serving.
 #
 # Config (env): QWEN_KUBE_CONTEXT (default: current context), QWEN_NAMESPACE (default: qwen),
@@ -162,7 +162,7 @@ ensure_websearch_role(){
   # web_search is opt-in. When enabled without a caller-supplied role, create a least-privilege one.
   [ "$WEBSEARCH" = 1 ] || return 0
   [ -n "${QWEN_BEDROCK_ROLE_ARN:-}" ] && return 0
-  log "web_search: QWEN_BEDROCK_ROLE_ARN unset — creating a least-privilege Bedrock role"
+  log "web_search: QWEN_BEDROCK_ROLE_ARN unset — creating a Bedrock role (AmazonBedrockFullAccess)"
   QWEN_BEDROCK_ROLE_ARN="$(QWEN_REGION="$QWEN_REGION" scripts/setup-websearch-role.sh)" || die "Bedrock role creation failed"
   case "$QWEN_BEDROCK_ROLE_ARN" in
     arn:aws:iam::*) echo "  role: $QWEN_BEDROCK_ROLE_ARN";;
