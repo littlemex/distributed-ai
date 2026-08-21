@@ -64,6 +64,18 @@ log(){ printf '\n\033[1;32m[deploy]\033[0m %s\n' "$*"; }
 die(){ printf '\033[1;31m[deploy][FAIL]\033[0m %s\n' "$*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"; }
 
+# retry a command on failure with linear backoff, to ride out transient EKS API / network timeouts.
+retry(){
+  local max=5 n=1
+  until "$@"; do
+    n=$((n+1)); [ "$n" -gt "$max" ] && { printf '\033[1;31m[deploy][retry]\033[0m gave up after %d attempts: %s\n' "$max" "$*" >&2; return 1; }
+    printf '\033[1;33m[deploy][retry]\033[0m attempt %d/%d in %ds: %s\n' "$n" "$max" $((n*3)) "$*" >&2
+    sleep $((n*3))
+  done
+}
+# apply YAML from stdin with retry (buffer to a temp file so each attempt re-reads the same input).
+kapply_stdin(){ local t r; t="$(mktemp)"; cat > "$t"; retry "${K[@]}" apply -f "$t"; r=$?; rm -f "$t"; return $r; }
+
 # preflight: fail early on a missing tool rather than mid-deploy. helm renders an engine (not needed
 # for --only agents); envsubst renders the SGLang manifest; teardown renders both to delete them.
 need kubectl; need aws; need python3
@@ -122,7 +134,7 @@ other_engine(){ [ "$ENGINE" = vllm ] && echo sglang || echo vllm; }
 engine_deploy(){ [ "$1" = vllm ] && echo vllm-qwen-qwen3-8-27b || echo sglang-qwen; }
 
 # NodePool is cluster-scoped; -n is irrelevant, so apply with the plain context.
-phase_pool(){ log "pool"; kubectl --context "$CTX" apply -f serving/pool/nodepool-gpu-l40s.yaml; }
+phase_pool(){ log "pool"; retry kubectl --context "$CTX" apply -f serving/pool/nodepool-gpu-l40s.yaml; }
 
 phase_serving(){
   log "serving ($ENGINE)"
@@ -136,14 +148,14 @@ phase_serving(){
   fi
   local dname other; dname="$(engine_deploy "$ENGINE")"; other="$(engine_deploy "$(other_engine)")"
   # bring the new engine up, then free the GPU by removing the other engine (one engine per node).
-  render_engine | "${K[@]}" apply -f -
+  render_engine | kapply_stdin
   "${K[@]}" delete "deploy/$other" --ignore-not-found >/dev/null 2>&1 || true
   log "waiting for $ENGINE Ready (first run 10-15 min: node + image + weights + warmup)"
   "${K[@]}" rollout status "deploy/$dname" --timeout=45m || {
     "${K[@]}" get pods 2>/dev/null; kubectl --context "$CTX" get nodeclaims 2>/dev/null | tail -5
     die "serving not Ready — check GPU quota and Karpenter NodeClaims"; }
   log "alias qwen-serving -> $ENGINE"
-  "${K[@]}" apply -f "serving/alias-$ENGINE.yaml"
+  retry "${K[@]}" apply -f "serving/alias-$ENGINE.yaml"
 }
 
 ensure_websearch_role(){
@@ -188,30 +200,30 @@ phase_agents(){
   ensure_websearch_role
   local AGENTS=(opencode qwen-code hermes openclaw) cfg
   for a in "${AGENTS[@]}"; do
-    "${K[@]}" apply -f "agents/$a/sa.yaml" >/dev/null
+    retry "${K[@]}" apply -f "agents/$a/sa.yaml" >/dev/null
     # config maps (config + the shared web_search tool script) — recreate idempotently
     case "$a" in
       opencode)  cfg="$(agent_config agents/opencode/opencode.pod.json mcp)" || die "opencode config render failed"
-                 "${K[@]}" create configmap opencode-files --from-file=opencode.json="$cfg" --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
+                 "${K[@]}" create configmap opencode-files --from-file=opencode.json="$cfg" --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | kapply_stdin >/dev/null;;
       qwen-code) cfg="$(agent_config agents/qwen-code/settings.json mcpServers)" || die "qwen-code config render failed"
-                 "${K[@]}" create configmap qwen-code-files --from-file=settings.json="$cfg" --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
-      hermes)    "${K[@]}" create configmap hermes-tools --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
-      openclaw)  "${K[@]}" create configmap openclaw-tools --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --from-file=AGENTS.md=agents/tools/bedrock-websearch/AGENTS.md --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
+                 "${K[@]}" create configmap qwen-code-files --from-file=settings.json="$cfg" --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | kapply_stdin >/dev/null;;
+      hermes)    "${K[@]}" create configmap hermes-tools --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | kapply_stdin >/dev/null;;
+      openclaw)  "${K[@]}" create configmap openclaw-tools --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --from-file=AGENTS.md=agents/tools/bedrock-websearch/AGENTS.md --dry-run=client -o yaml | kapply_stdin >/dev/null;;
     esac
     # Pod Identity association is declarative: on => ensure it, off => remove any leftover so "off"
     # really means no Bedrock credentials on the ServiceAccount.
     if [ "$WEBSEARCH" = 1 ] && [ -n "${QWEN_BEDROCK_ROLE_ARN:-}" ]; then associate_pod_identity "$a"; else disassociate_pod_identity "$a"; fi
-    "${K[@]}" apply -f "agents/$a/deployment.yaml" >/dev/null
+    retry "${K[@]}" apply -f "agents/$a/deployment.yaml" >/dev/null
     # hermes/openclaw read WEBSEARCH + BEDROCK_WS_REGION from container env at startup (opencode and
     # qwen-code are controlled by their config instead, so setting it on them would be a no-op).
     case "$a" in hermes|openclaw)
       if [ "$WEBSEARCH" = 1 ]; then
-        "${K[@]}" set env deploy/"$a" WEBSEARCH=1 BEDROCK_WS_REGION="$QWEN_BEDROCK_REGION" AWS_REGION="$QWEN_BEDROCK_REGION" >/dev/null 2>&1 || true
+        retry "${K[@]}" set env deploy/"$a" WEBSEARCH=1 BEDROCK_WS_REGION="$QWEN_BEDROCK_REGION" AWS_REGION="$QWEN_BEDROCK_REGION" >/dev/null 2>&1 || true
       else
-        "${K[@]}" set env deploy/"$a" WEBSEARCH=0 >/dev/null 2>&1 || true
+        retry "${K[@]}" set env deploy/"$a" WEBSEARCH=0 >/dev/null 2>&1 || true
       fi;;
     esac
-    "${K[@]}" rollout restart deploy/"$a" >/dev/null 2>&1 || true   # pick up configmap changes
+    retry "${K[@]}" rollout restart deploy/"$a" >/dev/null 2>&1 || true   # pick up configmap changes
   done
 }
 
@@ -220,7 +232,7 @@ associate_pod_identity(){
   existing="$(aws eks list-pod-identity-associations --region "$QWEN_REGION" --cluster-name "$CLUSTER_NAME" \
     --query "associations[?serviceAccount=='$sa' && namespace=='$NS'].associationId" --output text 2>/dev/null || true)"
   if [ -z "$existing" ] || [ "$existing" = None ]; then
-    aws eks create-pod-identity-association --region "$QWEN_REGION" --cluster-name "$CLUSTER_NAME" \
+    retry aws eks create-pod-identity-association --region "$QWEN_REGION" --cluster-name "$CLUSTER_NAME" \
       --namespace "$NS" --service-account "$sa" --role-arn "$QWEN_BEDROCK_ROLE_ARN" >/dev/null \
       || die "failed to create Pod Identity association for $sa (region=$QWEN_REGION cluster=$CLUSTER_NAME)"
   else
@@ -266,7 +278,7 @@ down(){
 # --- main ---------------------------------------------------------------------------------------
 [ "$DOWN" = 1 ] && { down; exit 0; }
 confirm_target
-kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml | kubectl --context "$CTX" apply -f - >/dev/null
+kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml | kapply_stdin >/dev/null
 case "$ONLY" in
   pool)    phase_pool;      log "smoke: not applicable with --only pool";;
   serving) phase_serving;   do_smoke;;
