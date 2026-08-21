@@ -1,7 +1,7 @@
 # Model facts for Qwen/Qwen3.8-27B.
 # FACTS ONLY: everything here is mechanically verifiable from the model's config.json,
 # tokenizer, and license. Engine-specific tuning (tp, max_model_len, image tag, flags)
-# does NOT belong here -- it lives in serving/<engine>/overlays/qwen3.8-27b.yaml.
+# does NOT belong here -- it lives in serving/values/qwen3.8-27b.values.yaml.
 # The normalized filename derives from model_id; the transformers architecture id
 # (qwen3_5) is a fact field, never the name.
 

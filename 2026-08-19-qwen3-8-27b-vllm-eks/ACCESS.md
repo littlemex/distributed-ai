@@ -5,25 +5,31 @@ credentials. No ssh key or sshd. Only OpenClaw's browser UI uses a background po
 
 ## Install the launcher
 
+The one-shot installer deploys the stack and puts `qa` on your PATH in a single command; see the
+README Quickstart. To install only the launcher without deploying:
+
 ```bash
-install -m 755 <(curl -fsSL <commit-pinned-raw-url>/client/qwen-agents.sh) ~/.local/bin/qwen-agents
-ln -sf ~/.local/bin/qwen-agents ~/.local/bin/qa
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/f3e58acb86080428b1cfe9e943e2d4566c733082/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
 ```
 
-`qa` resolves the target cluster from `$QWEN_KUBE_CONTEXT`, defaulting to the current kubeconfig
-context, and the namespace from `$QWEN_NAMESPACE` (default `qwen`). No env file is required. Prereqs:
-`kubectl`, `aws` CLI, `curl`, `python3`, and active AWS credentials.
+`qa` resolves the context from `$QWEN_KUBE_CONTEXT`, defaulting to the current kubeconfig context,
+the namespace from `$QWEN_NAMESPACE` (default `qwen`), and the region from the context's EKS ARN. No
+env file is required. Prereqs: `kubectl`, `aws` CLI, `curl`, `python3`, and active AWS credentials.
 
 ## Interactive TUIs
 
 ```bash
-qa opencode      # opencode coding CLI
-qa qwen-code     # Qwen Code (gemini-cli fork; binary `qwen`)
-qa hermes        # Hermes assistant CLI
+qa opencode
+qa qwen-code
+qa hermes
 ```
 
-Each reaches Qwen through the in-cluster `qwen-serving` Service and web search through the
-bedrock-websearch MCP tool, which authenticates to Bedrock via EKS Pod Identity.
+`opencode` is the opencode coding CLI, `qwen-code` is Qwen Code, a gemini-cli fork whose binary is
+`qwen`, and `hermes` is the Hermes assistant CLI.
+
+Each reaches Qwen through the in-cluster `qwen-serving` Service. Web search is opt-in: when the stack
+is deployed with `--websearch`, the agents also get the bedrock-websearch tool, which authenticates
+to Bedrock via EKS Pod Identity. Without it, the agents run without web search.
 
 ## Passthrough and shell-only
 
@@ -31,10 +37,13 @@ Arguments after the agent name are forwarded to the wrapped CLI. `-t` / `--shell
 pod shell instead of launching the TUI.
 
 ```bash
-qa qwen-code -r <session-id>          # resume a Qwen Code session
-qa qwen-code -p "summarize this repo" # non-interactive prompt
-qa -t opencode                        # shell into the pod
+qa qwen-code -r <session-id>
+qa qwen-code -p "summarize this repo"
+qa -t opencode
 ```
+
+The first resumes a Qwen Code session, the second runs a non-interactive prompt, and `-t` shells
+into the pod instead of launching the TUI.
 
 ## Multimodal (images / video)
 
@@ -42,9 +51,12 @@ Agents read files from the pod filesystem and base64-embed them, so a local file
 pod first:
 
 ```bash
-qa push ./diagram.png qwen-code       # kubectl-cp into the pod's media dir; prints the pod path
-qa qwen-code                          # then in the TUI:  @<pod-path> explain this
+qa push ./diagram.png qwen-code
+qa qwen-code
 ```
+
+`push` kubectl-cp's the file into the pod's media directory and prints the pod path; reference that
+path in the TUI, for example `@<pod-path> explain this`.
 
 qwen-code handles both image and video (video is ffmpeg-downsampled by `push`, since the server
 samples only a few frames). Its modality gate is model-name based, so `agents/qwen-code/settings.json`

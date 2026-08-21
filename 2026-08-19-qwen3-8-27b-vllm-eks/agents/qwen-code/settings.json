@@ -4,9 +4,9 @@
       {
         "id": "Qwen/Qwen3.8-27B",
         "name": "Qwen3.8-27B (vLLM on EKS)",
-        "baseUrl": "http://vllm-qwen-qwen3-8-27b:8000/v1",
+        "baseUrl": "http://qwen-serving:8000/v1",
         "envKey": "VLLM_API_KEY",
-        "generationConfig": { "contextWindowSize": 32768, "maxRetries": 2, "timeout": 300000, "modalities": { "image": true, "video": true } }
+        "generationConfig": { "contextWindowSize": 1048576, "maxRetries": 2, "timeout": 300000, "modalities": { "image": true, "video": true } }
       }
     ]
   },

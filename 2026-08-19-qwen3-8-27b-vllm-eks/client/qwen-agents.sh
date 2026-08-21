@@ -32,17 +32,29 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# An env file next to the launcher is OPTIONAL. If present it is sourced first; otherwise every
+# value comes from QWEN_* environment variables, and the context defaults to the current kubeconfig
+# context. Only `setup` needs CLUSTER_NAME/REGION; the exec/push/openclaw paths need just a context.
 ENV_FILE="${AGENTS_ENV:-$HERE/agents.env}"
-[ -f "$ENV_FILE" ] || { echo "[NG] $ENV_FILE not found. Copy agents.env.example -> agents.env and edit it." >&2; exit 1; }
-# shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$ENV_FILE"; set +a
+fi
 [ -z "${AWS_PROFILE:-}" ] && unset AWS_PROFILE || true
-: "${CLUSTER_NAME:?}"; : "${REGION:?}"; : "${KUBE_CONTEXT:?}"; : "${NAMESPACE:?}"
+KUBE_CONTEXT="${KUBE_CONTEXT:-${QWEN_KUBE_CONTEXT:-$(kubectl config current-context 2>/dev/null || true)}}"
+NAMESPACE="${NAMESPACE:-${QWEN_NAMESPACE:-qwen}}"
+# derive region from the context's EKS cluster ARN (arn:aws:eks:<region>:...) so no env is needed
+_CTX_CLUSTER="$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$KUBE_CONTEXT')].context.cluster}" 2>/dev/null || true)"
+REGION="${REGION:-${QWEN_REGION:-$(printf '%s' "$_CTX_CLUSTER" | sed -n 's#^arn:aws:eks:\([^:]*\):.*#\1#p')}}"
+REGION="${REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || echo ap-northeast-1)}}}"
+: "${KUBE_CONTEXT:?no kube context available — set QWEN_KUBE_CONTEXT or select one with kubectl}"
 PROFILE_ARGS=(); [ -n "${AWS_PROFILE:-}" ] && PROFILE_ARGS=(--profile "$AWS_PROFILE")
 K=(kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE")
 PFDIR="${TMPDIR:-/tmp}/agents-pf"; mkdir -p "$PFDIR"
 
 cmd_setup() {
+  CLUSTER_NAME="${CLUSTER_NAME:-${QWEN_CLUSTER_NAME:-}}"
+  : "${CLUSTER_NAME:?setup needs a cluster name — set CLUSTER_NAME or QWEN_CLUSTER_NAME}"
   echo "[..] kubeconfig context $KUBE_CONTEXT"
   aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION" "${PROFILE_ARGS[@]}" --alias "$KUBE_CONTEXT" >/dev/null
   # remove the old ssh-based block if a previous version of this script installed one
@@ -96,7 +108,8 @@ cmd_openclaw() {
   for _ in $(seq 1 30); do curl -sf -o /dev/null "http://127.0.0.1:${port}/" 2>/dev/null && break; sleep 0.4; done
   local url="http://127.0.0.1:${port}/#token=${OPENCLAW_TOKEN:-qwen-demo-token}"
   echo "[OK] OpenClaw Control UI: $url  (port-forward in background; ./agents.sh down to stop)"
-  open "$url" 2>/dev/null || true
+  { command -v open >/dev/null 2>&1 && open "$url"; } 2>/dev/null \
+    || { command -v xdg-open >/dev/null 2>&1 && xdg-open "$url"; } 2>/dev/null || true
 }
 
 cmd_down() {
@@ -132,7 +145,19 @@ cmd_push() {
   echo "       opencode :  paste the path $dest/$base (or drag the local file if running opencode locally)"
 }
 
-usage() { sed -n '2,31p' "$HERE/$(basename "${BASH_SOURCE[0]}")"; }
+usage() {
+  local me; me="$(basename "$0")"
+  cat >&2 <<USAGE
+$me — launchers for the EKS-hosted Qwen3.8-27B agents (keyless kubectl exec)
+  $me setup                      create the kubeconfig context (idempotent)
+  $me opencode|hermes|qwen-code  exec into the pod and launch the CLI (extra args are forwarded)
+  $me -t <agent>                 open a pod shell instead of the TUI
+  $me openclaw                   background port-forward + open the OpenClaw Control UI
+  $me push <file> [agent]        copy a local image/video into the agent pod (default: qwen-code)
+  $me down                       stop background port-forwards
+Env: QWEN_KUBE_CONTEXT (default current), QWEN_NAMESPACE (default qwen); region from the EKS ARN.
+USAGE
+}
 
 # leading -t/--shell => log into the pod shell only, no TUI launch
 SHELL_ONLY=0

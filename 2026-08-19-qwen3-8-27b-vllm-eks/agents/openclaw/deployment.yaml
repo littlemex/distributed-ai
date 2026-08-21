@@ -45,18 +45,20 @@ spec:
               valueFrom: { secretKeyRef: { name: openclaw-gateway, key: token } }
             - name: BEDROCK_WS_REGION
               value: "us-east-1"          # Bedrock web_search regions: us-east-1|us-east-2|us-west-2
+            - name: WEBSEARCH
+              value: "0"                  # deploy.sh sets this to 1 with --websearch
           command: ["/bin/sh","-lc"]
           args:
             - >
               openclaw onboard --non-interactive --accept-risk --flow quickstart
               --auth-choice custom-api-key
-              --custom-base-url "http://vllm-qwen-qwen3-8-27b:8000/v1"
+              --custom-base-url "http://qwen-serving:8000/v1"
               --custom-model-id "Qwen/Qwen3.8-27B" --custom-compatibility openai
               --custom-api-key "vllm-local" --custom-provider-id "qwen-eks"
               --gateway-bind lan --gateway-port 18789 --gateway-auth token
               --gateway-token "$OPENCLAW_GATEWAY_TOKEN" || true;
               openclaw config set agents.defaults.model.primary "qwen-eks/Qwen/Qwen3.8-27B" || true;
-              mkdir -p ~/.openclaw/workspace && cp /opt/tools/AGENTS.md ~/.openclaw/workspace/AGENTS.md || true;
+              mkdir -p ~/.openclaw/workspace; [ "${WEBSEARCH:-0}" = 1 ] && cp /opt/tools/AGENTS.md ~/.openclaw/workspace/AGENTS.md || true;
               exec openclaw gateway run --bind lan
           ports: [{ name: http, containerPort: 18789 }]
           readinessProbe:

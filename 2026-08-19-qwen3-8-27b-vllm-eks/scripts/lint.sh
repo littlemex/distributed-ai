@@ -12,7 +12,10 @@ rc=0
 echo "[lint] env-specific values"
 # 12-digit AWS account ids, and any cluster/context names that must not ship in a public reference.
 # Extend CLUSTER_PAT with the names this deployment happens to use before publishing.
-ACCOUNT_PAT='[0-9]{12}'
+# A 12-digit AWS account id, but only when it is a standalone token — not a 12-digit run that happens
+# to sit inside a longer alphanumeric string such as a commit SHA. Real account ids appear delimited
+# by :/./quote/space (ARNs, ECR hosts), which this still catches.
+ACCOUNT_PAT='(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)'
 # Set LINT_FORBID to a regex of this deployment's cluster/context names before publishing.
 CLUSTER_PAT="${LINT_FORBID:-}"
 PAT="$ACCOUNT_PAT"; [ -n "$CLUSTER_PAT" ] && PAT="$ACCOUNT_PAT|$CLUSTER_PAT"
@@ -33,7 +36,9 @@ done
 [ "$present" = 1 ] || { echo "[lint][FAIL] no shell scripts matched — check paths"; rc=1; }
 
 echo "[lint] yamllint (manifests only, not Helm templates)"
-mapfile -t YAMLS < <(find serving/sglang/manifests serving/pool serving/values serving/alias-*.yaml agents experiments \
+# read into an array without mapfile (mapfile is bash 4+, absent on macOS's bash 3.2)
+YAMLS=()
+while IFS= read -r y; do YAMLS+=("$y"); done < <(find serving/sglang/manifests serving/pool serving/values serving/alias-*.yaml agents experiments \
      -name '*.yaml' -not -path '*/charts/*/templates/*' 2>/dev/null)
 if [ "${#YAMLS[@]}" -eq 0 ]; then echo "[lint][FAIL] no manifests matched — check paths"; rc=1
 elif command -v yamllint >/dev/null 2>&1; then yamllint "${YAMLS[@]}" || rc=1
