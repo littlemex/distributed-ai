@@ -5,14 +5,16 @@ credentials. No ssh key or sshd. Only OpenClaw's browser UI uses a background po
 
 ## Install the launcher
 
+The one-shot installer deploys the stack and puts `qa` on your PATH in a single command; see the
+README Quickstart. To install only the launcher without deploying:
+
 ```bash
-install -m 755 <(curl -fsSL <commit-pinned-raw-url>/client/qwen-agents.sh) ~/.local/bin/qwen-agents
-ln -sf ~/.local/bin/qwen-agents ~/.local/bin/qa
+curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --no-deploy
 ```
 
-`qa` resolves the target cluster from `$QWEN_KUBE_CONTEXT`, defaulting to the current kubeconfig
-context, and the namespace from `$QWEN_NAMESPACE` (default `qwen`). No env file is required. Prereqs:
-`kubectl`, `aws` CLI, `curl`, `python3`, and active AWS credentials.
+`qa` resolves the context from `$QWEN_KUBE_CONTEXT`, defaulting to the current kubeconfig context,
+the namespace from `$QWEN_NAMESPACE` (default `qwen`), and the region from the context's EKS ARN. No
+env file is required. Prereqs: `kubectl`, `aws` CLI, `curl`, `python3`, and active AWS credentials.
 
 ## Interactive TUIs
 

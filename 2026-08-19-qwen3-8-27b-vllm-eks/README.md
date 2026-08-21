@@ -56,30 +56,31 @@ bring those per the table above.
 ## Quickstart
 
 ```bash
-git clone <this repo>
-cd <repo>/2026-08-19-qwen3-8-27b-vllm-eks
-./scripts/deploy.sh
-install -m 755 <(curl -fsSL <commit-pinned-raw-url>/client/qwen-agents.sh) ~/.local/bin/qwen-agents
-ln -sf ~/.local/bin/qwen-agents ~/.local/bin/qa
+curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash
 qa opencode
 ```
 
-`deploy.sh` runs the default vLLM engine, reads the target context from `$QWEN_KUBE_CONTEXT`
-defaulting to the current kubeconfig context, and shows the context, cluster ARN, and account for
-confirmation before it changes anything. First run takes roughly 10-15 minutes for node
-provisioning, image pull, weight download, and warmup, and ends with a smoke check that gates
-success. In the launcher install line, `<commit-pinned-raw-url>` is the raw GitHub URL pinned to a
-commit and including this dated subdirectory, for example
-`https://raw.githubusercontent.com/<owner>/<repo>/<full-sha>/2026-08-19-qwen3-8-27b-vllm-eks`. The
-`ln -sf` line adds the short alias `qa`, after which `qa opencode` drops into the opencode TUI from
-anywhere. Run `./scripts/deploy.sh --engine sglang` for the opt-in engine after building its image,
-described in [`serving/README.md`](serving/README.md).
+One command deploys the whole stack and installs the `qa` launcher on your PATH — no git clone and
+no manual setup. `install.sh` fetches this reference at a pinned ref, runs `deploy.sh`, installs
+`qa`, and adds `~/.local/bin` to your PATH if it is missing. `<commit-pinned-raw-url>` is the raw
+GitHub URL pinned to a commit, for example
+`https://raw.githubusercontent.com/<owner>/<repo>/<full-sha>/2026-08-19-qwen3-8-27b-vllm-eks`.
 
-The Bedrock `web_search` tool is off by default; add `--websearch` to wire it into the agents. With
-`--websearch` and no `QWEN_BEDROCK_ROLE_ARN`, `deploy.sh` creates a least-privilege Bedrock role
-through `scripts/setup-websearch-role.sh` and uses it. Without `--websearch` the agents still do
-chat and tool-calling; they just have no web search, and no Bedrock role or Pod Identity association
-is created.
+Deploy flags after `-- ` are forwarded to `deploy.sh`, so the whole run is one shot:
+
+```bash
+curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --websearch --only serving
+curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --engine sglang
+curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --no-deploy
+```
+
+The only env you may set is `QWEN_NAMESPACE`, which defaults to `qwen`, and `QWEN_KUBE_CONTEXT`,
+which defaults to the current context; the region and cluster are auto-derived from the context's
+EKS ARN. For a private repo the initial `curl` needs a `GITHUB_TOKEN`, and `QWEN_REPO` / `QWEN_REF`
+override the source. First run takes roughly 10-15 minutes for node provisioning, image pull, weight
+download, and warmup, and ends with a smoke check. The Bedrock `web_search` tool is off unless you
+pass `--websearch`; with it and no `QWEN_BEDROCK_ROLE_ARN`, a least-privilege Bedrock role is created
+for you. `--engine sglang` needs a prebuilt image, described in [`serving/README.md`](serving/README.md).
 
 ## Cost and cleanup
 

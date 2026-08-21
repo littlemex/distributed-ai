@@ -43,7 +43,10 @@ fi
 [ -z "${AWS_PROFILE:-}" ] && unset AWS_PROFILE || true
 KUBE_CONTEXT="${KUBE_CONTEXT:-${QWEN_KUBE_CONTEXT:-$(kubectl config current-context 2>/dev/null || true)}}"
 NAMESPACE="${NAMESPACE:-${QWEN_NAMESPACE:-qwen}}"
-REGION="${REGION:-${QWEN_REGION:-ap-northeast-1}}"
+# derive region from the context's EKS cluster ARN (arn:aws:eks:<region>:...) so no env is needed
+_CTX_CLUSTER="$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$KUBE_CONTEXT')].context.cluster}" 2>/dev/null || true)"
+REGION="${REGION:-${QWEN_REGION:-$(printf '%s' "$_CTX_CLUSTER" | sed -n 's#^arn:aws:eks:\([^:]*\):.*#\1#p')}}"
+REGION="${REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-northeast-1}}}"
 : "${KUBE_CONTEXT:?no kube context available — set QWEN_KUBE_CONTEXT or select one with kubectl}"
 PROFILE_ARGS=(); [ -n "${AWS_PROFILE:-}" ] && PROFILE_ARGS=(--profile "$AWS_PROFILE")
 K=(kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE")

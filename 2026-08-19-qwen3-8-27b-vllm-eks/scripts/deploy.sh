@@ -34,10 +34,13 @@ case "$ENGINE" in vllm|sglang) :;; *) echo "--engine must be vllm|sglang" >&2; e
 NS="${QWEN_NAMESPACE:-qwen}"
 CTX="${QWEN_KUBE_CONTEXT:-$(kubectl config current-context)}"
 K=(kubectl --context "$CTX" -n "$NS")
-QWEN_REGION="${QWEN_REGION:-$(aws configure get region 2>/dev/null || true)}"
+# The context's cluster entry is an EKS ARN (arn:aws:eks:<region>:<acct>:cluster/<name>); derive both
+# region and cluster name from it so neither needs an env var. AWS_REGION / aws config are fallbacks.
+CTX_CLUSTER="$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$CTX')].context.cluster}" 2>/dev/null || true)"
+QWEN_REGION="${QWEN_REGION:-$(printf '%s' "$CTX_CLUSTER" | sed -n 's#^arn:aws:eks:\([^:]*\):.*#\1#p')}"
+QWEN_REGION="${QWEN_REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || true)}}}"
 QWEN_BEDROCK_REGION="${QWEN_BEDROCK_REGION:-$QWEN_REGION}"
-# cluster name from the context's cluster entry (EKS kubeconfig cluster is an ARN -> take the tail)
-CLUSTER_NAME="${CLUSTER_NAME:-$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$CTX')].context.cluster}" 2>/dev/null | sed 's#.*/##')}"
+CLUSTER_NAME="${CLUSTER_NAME:-$(printf '%s' "$CTX_CLUSTER" | sed 's#.*/##')}"
 # shellcheck source=/dev/null
 . serving/common/model.env
 
