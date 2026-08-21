@@ -56,22 +56,22 @@ bring those per the table above.
 ## Quickstart
 
 ```bash
-curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash
 qa opencode
 ```
 
 One command deploys the whole stack and installs the `qa` launcher on your PATH — no git clone and
 no manual setup. `install.sh` fetches this reference at a pinned ref, runs `deploy.sh`, installs
-`qa`, and adds `~/.local/bin` to your PATH if it is missing. `<commit-pinned-raw-url>` is the raw
+`qa`, and adds `~/.local/bin` to your PATH if it is missing. `https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks` is the raw
 GitHub URL pinned to a commit, for example
 `https://raw.githubusercontent.com/<owner>/<repo>/<full-sha>/2026-08-19-qwen3-8-27b-vllm-eks`.
 
 Deploy flags after `-- ` are forwarded to `deploy.sh`, so the whole run is one shot:
 
 ```bash
-curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --websearch --only serving
-curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --engine sglang
-curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --no-deploy
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --websearch --only serving
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --engine sglang
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
 ```
 
 The only env you may set is `QWEN_NAMESPACE`, which defaults to `qwen`, and `QWEN_KUBE_CONTEXT`,

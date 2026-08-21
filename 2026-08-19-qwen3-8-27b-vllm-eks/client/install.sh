@@ -2,9 +2,9 @@
 # One-shot installer. Fetches this reference at a pinned ref, deploys the stack, installs the `qa`
 # launcher onto PATH, and adds ~/.local/bin to PATH if missing. No git clone, no manual steps.
 #
-#   curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- [deploy flags...]
-#   curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --websearch --only serving
-#   curl -fsSL <commit-pinned-raw-url>/client/install.sh | bash -s -- --no-deploy   # launcher only
+#   curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- [deploy flags...]
+#   curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --websearch --only serving
+#   curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy   # launcher only
 #
 # All deploy flags (--engine, --only, --websearch, --yes, --skip-smoke) are forwarded to deploy.sh.
 # Installer flags: --ref <sha|branch> (default: pin at release), --no-deploy (install the launcher
