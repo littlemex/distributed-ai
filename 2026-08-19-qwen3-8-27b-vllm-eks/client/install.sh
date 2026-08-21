@@ -6,7 +6,7 @@
 #   curl -fsSL <raw>/client/install.sh | QWEN_NAMESPACE=trial bash -s -- --websearch
 #   curl -fsSL <raw>/client/install.sh | bash -s -- --engine sglang
 #   curl -fsSL <raw>/client/install.sh | bash -s -- --no-deploy            # install the launcher only
-# where <raw> is https://raw.githubusercontent.com/littlemex/distributed-ai/abc1afaabf43b71c21e2b73acf333dc5d12a4ab5/2026-08-19-qwen3-8-27b-vllm-eks
+# where <raw> is https://raw.githubusercontent.com/littlemex/distributed-ai/f3e58acb86080428b1cfe9e943e2d4566c733082/2026-08-19-qwen3-8-27b-vllm-eks
 #
 # Env goes on `bash`, not `curl` (a var before `curl` is lost). All deploy flags (--engine, --only,
 # --websearch, --yes, --skip-smoke, --purge-pool) are forwarded to deploy.sh. Installer flags:
