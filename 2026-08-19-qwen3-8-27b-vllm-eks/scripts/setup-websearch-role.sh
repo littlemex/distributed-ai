@@ -8,6 +8,7 @@
 # deliberately narrower than AmazonBedrockFullAccess. Override the name with QWEN_WEBSEARCH_ROLE_NAME.
 # Needs iam:GetRole / iam:CreateRole / iam:PutRolePolicy on the caller.
 set -euo pipefail
+export AWS_PAGER=""   # stdout must be exactly the role ARN; keep the CLI from paginating into it
 
 ROLE_NAME="${QWEN_WEBSEARCH_ROLE_NAME:-qwen-agents-websearch}"
 say(){ printf '[websearch-role] %s\n' "$*" >&2; }

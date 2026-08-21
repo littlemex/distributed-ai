@@ -43,10 +43,10 @@ Bring these yourself:
 | CLI tools | `kubectl`, `aws` CLI v2, `helm` 3.x, `python3` |
 | Caller IAM | `eks:*PodIdentityAssociation*`, `iam:PassRole`, `sts:GetCallerIdentity` |
 
-This reference assumes a **dedicated cluster**: the GPU pool is part of the workload, and `deploy.sh
---down` removes that cluster-scoped Karpenter NodePool. On a shared cluster, delete only the
-namespaced resources (`kubectl delete namespace $QWEN_NAMESPACE` plus the Pod Identity associations)
-so you do not remove a pool other workloads rely on.
+The GPU pool is a cluster-scoped Karpenter NodePool. `deploy.sh --down` keeps it by default and only
+removes it with `--purge-pool`, so teardown does not disrupt a pool other workloads share. On a
+shared cluster, prefer deleting just the namespaced resources: `kubectl delete namespace
+$QWEN_NAMESPACE` plus the Pod Identity associations.
 
 `deploy.sh` shows the target context, cluster, and account for confirmation before it changes
 anything, creates the namespace if it is absent, and for the SGLang engine checks that its image
@@ -56,31 +56,34 @@ bring those per the table above.
 ## Quickstart
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash
 qa opencode
 ```
 
 One command deploys the whole stack and installs the `qa` launcher on your PATH — no git clone and
 no manual setup. `install.sh` fetches this reference at a pinned ref, runs `deploy.sh`, installs
-`qa`, and adds `~/.local/bin` to your PATH if it is missing. `https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks` is the raw
+`qa`, and adds `~/.local/bin` to your PATH if it is missing. `https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks` is the raw
 GitHub URL pinned to a commit, for example
 `https://raw.githubusercontent.com/<owner>/<repo>/<full-sha>/2026-08-19-qwen3-8-27b-vllm-eks`.
 
 Deploy flags after `-- ` are forwarded to `deploy.sh`, so the whole run is one shot:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --websearch --only serving
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --engine sglang
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/7dfe62a8d9dc745aed834885416278ba1db4eb6c/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --websearch
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --engine sglang
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
 ```
 
 The only env you may set is `QWEN_NAMESPACE`, which defaults to `qwen`, and `QWEN_KUBE_CONTEXT`,
 which defaults to the current context; the region and cluster are auto-derived from the context's
-EKS ARN. For a private repo the initial `curl` needs a `GITHUB_TOKEN`, and `QWEN_REPO` / `QWEN_REF`
-override the source. First run takes roughly 10-15 minutes for node provisioning, image pull, weight
-download, and warmup, and ends with a smoke check. The Bedrock `web_search` tool is off unless you
-pass `--websearch`; with it and no `QWEN_BEDROCK_ROLE_ARN`, a least-privilege Bedrock role is created
-for you. `--engine sglang` needs a prebuilt image, described in [`serving/README.md`](serving/README.md).
+EKS ARN. Put any env on `bash`, not `curl`, since a variable before `curl` is lost:
+`curl -fsSL <raw>/client/install.sh | QWEN_NAMESPACE=trial bash -s -- --websearch`. The installer
+records the resolved context and namespace so `qa` targets the same place afterwards. For a private
+repo the initial `curl` needs a `GITHUB_TOKEN`, and `QWEN_REPO` / `QWEN_REF` override the source.
+First run takes roughly 10-15 minutes for node provisioning, image pull, weight download, and warmup,
+and ends with a smoke check. The Bedrock `web_search` tool is off unless you pass `--websearch`; with
+it and no `QWEN_BEDROCK_ROLE_ARN`, a least-privilege Bedrock role is created for you. `--engine
+sglang` needs a prebuilt image, described in [`serving/README.md`](serving/README.md).
 
 ## Cost and cleanup
 
@@ -92,10 +95,11 @@ finished:
 ```
 
 This removes the Deployments for both engines and all four agents, the `qwen-serving` alias, and the
-cluster-scoped GPU NodePool. ServiceAccounts, ConfigMaps, and the namespace remain until you delete
-the namespace, and Pod Identity associations are removed only when `QWEN_BEDROCK_ROLE_ARN` is set. A
-Bedrock role that `--websearch` auto-created is not deleted by teardown; remove it with `aws iam
-delete-role-policy` and `aws iam delete-role` when you no longer need it.
+Pod Identity associations. It **keeps** the cluster-scoped GPU NodePool by default, since it is
+shared; add `--purge-pool` to remove it too (only on a dedicated cluster). ServiceAccounts,
+ConfigMaps, and the namespace remain until you delete the namespace. A Bedrock role that
+`--websearch` auto-created is not deleted by teardown; remove it with `aws iam delete-role-policy`
+and `aws iam delete-role` when you no longer need it.
 
 ## Layout
 
@@ -116,7 +120,7 @@ experiments/ measurements behind the production settings (FP8, MTP) and the opt-
 | `QWEN_KUBE_CONTEXT` | current kubeconfig context | yes (deploy confirms) |
 | `QWEN_NAMESPACE` | `qwen` | yes |
 | `QWEN_REGION` | derived from the context | yes |
-| `QWEN_BEDROCK_REGION` | `$QWEN_REGION` | yes |
+| `QWEN_BEDROCK_REGION` | `us-east-1` (a web_search region) | yes |
 | `QWEN_WEBSEARCH` | `0` (off) | yes, or pass `--websearch` |
 | account id | `aws sts get-caller-identity` | no (derived from the caller) |
 | `QWEN_BEDROCK_ROLE_ARN` | — | optional; only with `--websearch`, auto-created when unset |

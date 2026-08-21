@@ -36,7 +36,9 @@ done
 [ "$present" = 1 ] || { echo "[lint][FAIL] no shell scripts matched — check paths"; rc=1; }
 
 echo "[lint] yamllint (manifests only, not Helm templates)"
-mapfile -t YAMLS < <(find serving/sglang/manifests serving/pool serving/values serving/alias-*.yaml agents experiments \
+# read into an array without mapfile (mapfile is bash 4+, absent on macOS's bash 3.2)
+YAMLS=()
+while IFS= read -r y; do YAMLS+=("$y"); done < <(find serving/sglang/manifests serving/pool serving/values serving/alias-*.yaml agents experiments \
      -name '*.yaml' -not -path '*/charts/*/templates/*' 2>/dev/null)
 if [ "${#YAMLS[@]}" -eq 0 ]; then echo "[lint][FAIL] no manifests matched — check paths"; rc=1
 elif command -v yamllint >/dev/null 2>&1; then yamllint "${YAMLS[@]}" || rc=1
