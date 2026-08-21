@@ -7,7 +7,7 @@
 # has no `openclaw mcp` subcommand — use the MCP path on builds that do). AWS credentials for
 # Bedrock come from an EKS Pod Identity association bound to the `openclaw` ServiceAccount
 # (no static keys in the image). Create the ConfigMap from the tool sources before applying:
-#   kubectl -n distai create configmap openclaw-tools \
+#   kubectl -n "$QWEN_NAMESPACE" create configmap openclaw-tools \
 #     --from-file=bedrock_websearch.py=../tools/bedrock-websearch/bedrock_websearch.py \
 #     --from-file=AGENTS.md=../tools/bedrock-websearch/AGENTS.md \
 #     --dry-run=client -o yaml | kubectl apply -f -

@@ -3,8 +3,8 @@
 # Reaches Qwen via the in-cluster Service; web search via the bedrock-websearch MCP (Pod Identity).
 #
 # Prereqs (create once):
-#   kubectl -n distai create sa opencode   # + Pod Identity association to the Bedrock role
-#   kubectl -n distai create configmap opencode-files \
+#   kubectl -n "$QWEN_NAMESPACE" create sa opencode   # + Pod Identity association to the Bedrock role
+#   kubectl -n "$QWEN_NAMESPACE" create configmap opencode-files \
 #     --from-file=opencode.json=opencode.json \
 #     --from-file=bedrock_websearch.py=../../tools/bedrock-websearch/bedrock_websearch.py \
 #     --dry-run=client -o yaml | kubectl apply -f -

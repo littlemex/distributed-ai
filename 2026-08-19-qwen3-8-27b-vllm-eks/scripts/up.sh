@@ -4,13 +4,13 @@
 # to match the infra/eks workflow (no CD controller in the base cluster).
 #
 # Usage:
-#   NAMESPACE=distai KCTX=distai-tokyo ./up.sh qwen3.8-27b
-#   NAMESPACE=distai KCTX=distai-tokyo ./up.sh qwen3.8-27b --down   # remove
+#   NAMESPACE=qwen KCTX=<your-kube-context> ./up.sh qwen3.8-27b
+#   NAMESPACE=qwen KCTX=<your-kube-context> ./up.sh qwen3.8-27b --down   # remove
 set -euo pipefail
 
 MODEL_KEY="${1:?usage: up.sh <model-key> (matches overlays/<model-key>.yaml)}"
 shift || true
-NAMESPACE="${NAMESPACE:-distai}"
+NAMESPACE="${NAMESPACE:-qwen}"
 KCTX="${KCTX:-}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHART="${HERE}/../charts/vllm-serving"

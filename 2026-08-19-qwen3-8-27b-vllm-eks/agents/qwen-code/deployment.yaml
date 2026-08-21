@@ -9,10 +9,10 @@
 # /auth prompt, and mcpServers wires bedrock-websearch over stdio.
 #
 # Prereqs (create once):
-#   kubectl -n distai create sa qwen-code
-#   aws eks create-pod-identity-association --cluster-name distai-eks --namespace distai \
-#     --service-account qwen-code --role-arn arn:aws:iam::<acct>:role/distai-openclaw-bedrock
-#   kubectl -n distai create configmap qwen-code-files \
+#   kubectl -n "$QWEN_NAMESPACE" create sa qwen-code
+#   aws eks create-pod-identity-association --cluster-name <your-eks-cluster> --namespace <your-namespace> \
+#     --service-account qwen-code --role-arn arn:aws:iam::<acct>:role/<bedrock-role-name>
+#   kubectl -n "$QWEN_NAMESPACE" create configmap qwen-code-files \
 #     --from-file=settings.json=settings.json \
 #     --from-file=bedrock_websearch.py=../../tools/bedrock-websearch/bedrock_websearch.py \
 #     --dry-run=client -o yaml | kubectl apply -f -

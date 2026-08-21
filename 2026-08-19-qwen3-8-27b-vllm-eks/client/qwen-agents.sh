@@ -34,6 +34,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${AGENTS_ENV:-$HERE/agents.env}"
 [ -f "$ENV_FILE" ] || { echo "[NG] $ENV_FILE not found. Copy agents.env.example -> agents.env and edit it." >&2; exit 1; }
+# shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
 [ -z "${AWS_PROFILE:-}" ] && unset AWS_PROFILE || true
 : "${CLUSTER_NAME:?}"; : "${REGION:?}"; : "${KUBE_CONTEXT:?}"; : "${NAMESPACE:?}"
@@ -111,7 +112,7 @@ cmd_push() {
   local pod; pod="$("${K[@]}" get pod -l "app=$dep" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
   [ -n "$pod" ] || { echo "[NG] no running pod for $agent" >&2; exit 1; }
   local base; base="$(basename "$src")"; local send="$src"
-  case "$(printf '%s' "$base" | tr 'A-Z' 'a-z')" in
+  case "$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')" in
     *.mp4|*.mov|*.mkv|*.webm|*.avi)
       if command -v ffmpeg >/dev/null 2>&1; then
         local tmp="${TMPDIR:-/tmp}/agents-media"; mkdir -p "$tmp"; local out="$tmp/${base%.*}_ds.mp4"

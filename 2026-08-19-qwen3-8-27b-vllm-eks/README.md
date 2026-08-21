@@ -1,83 +1,92 @@
-# Serving Qwen3.8-27B with vLLM on EKS (GPU, single node)
+# Qwen3.8-27B on EKS — vLLM serving + self-hosted agents
 
-A dated experiment: stand up a single-node vLLM OpenAI-compatible server for
-`Qwen/Qwen3.8-27B` on a Neuron-free GPU Karpenter pool, and verify it works end to end
-(model list, chat, and structured tool calls for an agent backend). The base cluster
-(`infra/eks`) is **not modified**; this directory carries everything that `kubectl delete`
-can remove — the GPU pool manifest, the serving chart, per-model tuning, and scripts.
+Reference deployment of `Qwen/Qwen3.8-27B` on EKS with vLLM (FP8 + MTP speculative decoding +
+YaRN 1M context), plus four agents — opencode, qwen-code, Hermes, OpenClaw — running against the
+self-hosted backend, and a Bedrock `web_search` tool wired in over EKS Pod Identity. SGLang with
+DFLASH2 speculative decoding is available as an opt-in faster engine.
 
-If a second serving experiment reuses this skeleton, the reusable parts (chart, scripts,
-model-facts/overlay split) are candidates for extraction into a permanent `serving/vllm/`
-top-level directory — but not before then.
+**Status**
 
-## Model
+| Path | State | Notes |
+|---|---|---|
+| vLLM (default) | verified | FP8 + MTP(3) + YaRN 1M; tool-calling, image, video, 1M retrieval checked. Single-user TPOT ≈ 9.4 ms (c=1, in512/out256, `--ignore-eos`). |
+| SGLang (opt-in) | experimental | DFLASH2 + FP8 + fp8 KV + YaRN 1M. Promotion criteria not yet met (0/4) — see [`serving/README.md`](serving/README.md). |
 
-`Qwen/Qwen3.8-27B` (`architecture: Qwen3_5ForConditionalGeneration`, `model_type: qwen3_5`).
-A VLM (image-text-to-text) with a hybrid attention stack: 48 of 64 layers are
-linear-attention (Gated DeltaNet), 16 are full attention. bf16 weights ≈ 54 GiB.
-Facts live in [`models/qwen3.8-27b.yaml`](models/qwen3.8-27b.yaml); the tuning derived from
-them is in [`overlays/qwen3.8-27b.yaml`](overlays/qwen3.8-27b.yaml).
+The base cluster is not modified. Everything here is removable with the teardown command; nothing
+is added to the Terraform-managed `infra/` layer.
 
-## Layout
+## Architecture
 
 ```
-pool/nodepool-gpu-l40s.yaml   Karpenter NodePool: g6e.12xlarge (4x L40S), reuses the
-                              gpu-ddp EC2NodeClass. kubectl-applied; not a terraform change.
-charts/vllm-serving/          Helm chart (Deployment + Service). helm template | kubectl apply.
-overlays/qwen3.8-27b.yaml     per-model tuning layered on the chart values
-models/qwen3.8-27b.yaml       model facts (config.json-derived), separate from tuning
-docs/SCHEMA-models.md         proposed facts-vs-tuning schema (extraction candidate)
-scripts/up.sh                 render + apply + wait for rollout
-scripts/port-forward.sh       forward the Service to localhost (demo only)
-scripts/run_smoke.py          /v1/models + chat + tool-call assertions
-opencode/                     opencode custom-provider config + how to drive the model
-hermes/                       Hermes Agent pod on the self-hosted Qwen backend
-qwen-code/                    Qwen Code (gemini-cli fork) pod on the self-hosted Qwen backend
-openclaw/                     OpenClaw (browser agent) on the self-hosted Qwen backend
-tools/bedrock-websearch/      stdlib-only Bedrock web_search tool (CLI + stdio MCP, Pod Identity)
-client/agents.sh              keyless one-shot launchers (kubectl exec) for all four agents
-sglang/                       SGLang + DFLASH2 speculative-decoding serving + bench
-bench/                        vllm bench serve driver + results (concurrency sweep, dflash2)
-ACCESS.md                     how to reach each agent (keyless)
+Karpenter NodePool (g6e.12xlarge, L40S x4)
+  └─ vLLM (FP8 + MTP + YaRN 1M)   ── OpenAI-compatible :8000 ──┐
+                                                              │  Service alias: qwen-serving
+CPU pods: opencode / qwen-code / Hermes / OpenClaw ───────────┘  (agents always target the alias)
+  └─ bedrock-websearch tool  ── EKS Pod Identity ─▶ Amazon Bedrock web_search
 ```
 
 ## Prerequisites
 
-- `distai-eks` (ap-northeast-1) reachable; kubeconfig context (e.g. `distai-tokyo`).
-- NVIDIA device plugin present (installed by infra when a GPU pool exists).
-- GPU quota: g6e.12xlarge is 48 vCPU; "Running On-Demand G and VT instances" must cover it.
+Bring these yourself:
 
-## Run
+| Requirement | Detail |
+|---|---|
+| EKS cluster + Karpenter | reachable via a kubeconfig context; Karpenter provisions the GPU node |
+| GPU quota | `Running On-Demand G and VT instances` ≥ 48 vCPU (g6e.12xlarge) |
+| CLI tools | `kubectl`, `aws` CLI v2, `helm` 3.x, `python3` |
+| Caller IAM | `eks:*PodIdentityAssociation*`, `iam:PassRole`, `sts:GetCallerIdentity` |
+
+`deploy.sh` preflight checks and reports on these: the EKS Pod Identity agent add-on, the Bedrock
+role and its model access, the availability zone offering g6e, and the target namespace.
+
+## Quickstart
 
 ```bash
-export KCTX=distai-tokyo NAMESPACE=distai
-kubectl --context "$KCTX" apply -f pool/nodepool-gpu-l40s.yaml     # one g6e.12xlarge pool
-cd scripts
-./up.sh qwen3.8-27b                                                # deploy + wait for rollout
-./port-forward.sh qwen3.8-27b 8000 &
-python3 run_smoke.py --base-url http://localhost:8000 --model Qwen/Qwen3.8-27B
-./up.sh qwen3.8-27b --down                                         # remove workload
+git clone <this repo> && cd <repo>/2026-08-19-qwen3-8-27b-vllm-eks
+./scripts/deploy.sh                 # default engine vLLM; prompts to confirm the target cluster
+install -m 755 <(curl -fsSL <commit-pinned-raw-url>/client/qwen-agents.sh) ~/.local/bin/qwen-agents
+qa opencode                         # qa = qwen-agents; drops into the opencode TUI
 ```
 
-Cold start on a fresh node: node launch (2-4 min) + image pull + weight download (~54 GiB)
-+ compile/warmup. Observed ≈ 9.5 min to Ready on this cluster. The GPU node is reclaimed by
-Karpenter once idle (`consolidationPolicy: WhenEmpty`). Delete the pool to be certain:
-`kubectl --context $KCTX delete -f pool/nodepool-gpu-l40s.yaml`.
+`deploy.sh` reads the target context from `$QWEN_KUBE_CONTEXT`, defaulting to the current kubeconfig
+context, and shows the context, cluster ARN, and account for confirmation before it changes anything.
+First run takes roughly 10-15 minutes: node provisioning, image pull, weight download, and warmup. It
+ends with a smoke check that gates success. Run `./scripts/deploy.sh --engine sglang` for the opt-in
+engine after building its image — see [`serving/README.md`](serving/README.md).
 
-## Findings
+## Cost and cleanup
 
-- vLLM `v0.27.1` (upstream `vllm/vllm-openai:v0.27.1`) registers
-  `Qwen3_5ForConditionalGeneration` and initializes the hybrid engine (mamba / GDN
-  splitting ops present) — no custom image needed.
-- Hybrid linear-attention: prefix caching is disabled (`--no-enable-prefix-caching`).
-- Tool calling needs `--enable-auto-tool-choice --tool-call-parser qwen3_coder`: the
-  chat_template emits Qwen3 XML (`<tool_call><function=..><parameter=..>`), which the
-  `qwen3_coder` parser handles (`hermes` expects JSON and would not parse it).
-- TP4 on g6e.12xlarge (`num_key_value_heads: 4` divides 4). `max_model_len` capped to 32768
-  (native 262144).
-- Served in non-thinking mode by default (`--default-chat-template-kwargs '{"enable_thinking":
-  false}'`): the Qwen3-family thinking mode under greedy/low-temp decoding endlessly repeats and
-  never emits a stop token, which stalls an agent loop. `enable_thinking=false` returns a clean
-  2-token answer; a per-request `chat_template_kwargs` can re-enable it.
-- opencode connects to this endpoint as a custom provider and completes a full agent tool loop
-  (its `read` tool) against the self-hosted model — see [`opencode/`](opencode/).
+The GPU node is billed per hour while running (g6e.12xlarge, on-demand). Tear everything down when
+finished:
+
+```bash
+./scripts/deploy.sh --down          # removes agents, serving, the GPU pool, and the alias
+```
+
+## Layout
+
+```
+serving/     model-serving reference: vllm/ (default) and sglang/ (opt-in) engines, shared pool,
+             model facts, and the qwen-serving Service alias
+agents/      opencode / qwen-code / hermes / openclaw (each self-contained) + shared tools/
+client/      qwen-agents.sh launcher (keyless kubectl exec), port-forward.sh
+scripts/     deploy.sh (one-shot bring-up and teardown), smoke.py, lint.sh
+experiments/ benchmarks and rejected explorations (concurrency sweep, FP8 latency, SGLang/DFLASH, MTP)
+```
+
+## Configuration (environment)
+
+| Variable | Source / default | Overridable |
+|---|---|---|
+| `QWEN_KUBE_CONTEXT` | current kubeconfig context | yes (deploy confirms) |
+| `QWEN_NAMESPACE` | `qwen` | yes |
+| `QWEN_REGION` | derived from the context | yes |
+| `QWEN_BEDROCK_REGION` | `$QWEN_REGION` | yes |
+| account id | `aws sts get-caller-identity` | no (derived, verified) |
+| `QWEN_BEDROCK_ROLE_ARN` | — | yes (account is verified against the caller) |
+
+## Access
+
+Agents run in CPU pods and are entered with `kubectl exec` (keyless, no ssh). See
+[`ACCESS.md`](ACCESS.md) for per-agent usage and [`agents/README.md`](agents/README.md) for what
+each agent is. Licensed under the repository `LICENSE`.

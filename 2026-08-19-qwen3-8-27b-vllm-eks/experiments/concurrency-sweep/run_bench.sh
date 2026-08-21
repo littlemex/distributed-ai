@@ -3,10 +3,10 @@
 # INSIDE the serving pod against localhost:8000 (the vLLM image + weights are already there,
 # so no extra image pull / port-forward). Slight CPU contention with the server is acceptable.
 #
-#   KCTX=distai-tokyo NAMESPACE=distai ./run_bench.sh [CONCURRENCY] [NUM_PROMPTS] [IN_LEN] [OUT_LEN]
+#   KCTX=<your-kube-context> NAMESPACE=qwen ./run_bench.sh [CONCURRENCY] [NUM_PROMPTS] [IN_LEN] [OUT_LEN]
 #   sweep:  for c in 1 2 4 8 16 32 64; do ./run_bench.sh $c $((c*8)) 1024 256; done
 set -euo pipefail
-KCTX="${KCTX:-distai-tokyo}"; NAMESPACE="${NAMESPACE:-distai}"; MODEL="${MODEL:-Qwen/Qwen3.8-27B}"
+KCTX="${KCTX:-}"; NAMESPACE="${NAMESPACE:-qwen}"; MODEL="${MODEL:-Qwen/Qwen3.8-27B}"
 SEL="${SEL:-app.kubernetes.io/instance=vllm-qwen-qwen3-8-27b}"
 CONC="${1:-32}"; NUM="${2:-$((CONC*8))}"; IN="${3:-1024}"; OUT="${4:-256}"
 K=(kubectl --context "$KCTX" -n "$NAMESPACE")
