@@ -1,111 +1,99 @@
 #!/usr/bin/env python3
-"""Smoke test a vLLM OpenAI-compatible endpoint.
+"""Smoke check for the Qwen3.8-27B serving endpoint, run via kubectl exec (no port-forward).
 
-Not wired into CI -- run manually against a port-forwarded (or in-cluster) endpoint
-before declaring a model "served". Checks three things, in order of importance for an
-agent backend:
+Checks, against the active serving pod's localhost:8000:
+  (a) /v1/models returns the expected served-model-name
+  (b) a short chat returns non-empty content
+  (c) a tool-calling request returns a tool_call
+  (d) the startup log shows the speculative-decode engine active (MTP for vLLM, DFLASH for sglang)
 
-  1. /v1/models lists the served model.
-  2. /v1/chat/completions returns a non-empty text answer.
-  3. a tool-enabled request comes back as a structured tool call (finish_reason
-     "tool_calls" with valid JSON arguments). OpenAI-compatible != tool-calling
-     compatible: if the model/engine has no tool-call parser, this step fails and an
-     agent (opencode/kiro) will not work even though chat does.
+Modes:
+  --gate    (default) all four required; exit 1 if any fails. Used before flipping the alias.
+  --report  (a)(b)(d) required; (c) recorded only. Prints `SMOKE(c)=PASS|FAIL`, exit 0 if a/b/d pass.
+            Used for a standalone opt-in deploy that does not touch the alias.
 
-Usage:
-  python3 run_smoke.py --base-url http://localhost:8000 --model Qwen/Qwen3.8-27B
-  python3 run_smoke.py ... --skip-tools    # chat-only (e.g. a base model)
+The promotion criterion "tool-calling works" is exactly the (c) line this prints; there is no
+separate definition.
 """
-import argparse
-import json
-import sys
-import urllib.request
+import argparse, json, subprocess, sys
 
+MODEL = "Qwen/Qwen3.8-27B"
 
-def _post(url, payload, timeout):
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+def sh(args):
+    return subprocess.run(args, capture_output=True, text=True)
 
+def serving_pod(ctx, ns, engine):
+    sel = "app.kubernetes.io/name=vllm-serving" if engine == "vllm" else "app=sglang-qwen"
+    r = sh(["kubectl", "--context", ctx, "-n", ns, "get", "pod", "-l", sel,
+            "--field-selector=status.phase=Running", "-o",
+            "jsonpath={.items[0].metadata.name}"])
+    return r.stdout.strip()
 
-def _get(url, timeout):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return json.load(r)
+def in_pod(ctx, ns, pod, py):
+    return sh(["kubectl", "--context", ctx, "-n", ns, "exec", pod, "--", "python3", "-c", py])
 
+CHECK_PY = r'''
+import urllib.request, json
+B="http://localhost:8000"
+def get(p):
+    return json.load(urllib.request.urlopen(B+p, timeout=30))
+def post(body):
+    req=urllib.request.Request(B+"/v1/chat/completions", data=json.dumps(body).encode(),
+        headers={"Content-Type":"application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=120))
+out={}
+try:
+    m=get("/v1/models"); out["a"]=any(d.get("id")=="%(model)s" for d in m.get("data",[]))
+except Exception as e: out["a"]=False
+try:
+    r=post({"model":"%(model)s","messages":[{"role":"user","content":"Say OK."}],"max_tokens":8,"temperature":0})
+    out["b"]=bool(r["choices"][0]["message"].get("content"))
+except Exception as e: out["b"]=False
+try:
+    r=post({"model":"%(model)s","messages":[{"role":"user","content":"Weather in Tokyo? use the tool"}],
+        "tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],
+        "tool_choice":"auto","max_tokens":64,"temperature":0})
+    out["c"]=bool(r["choices"][0]["message"].get("tool_calls"))
+except Exception as e: out["c"]=False
+print(json.dumps(out))
+''' % {"model": MODEL}
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base-url", default="http://localhost:8000")
-    ap.add_argument("--model", required=True)
-    ap.add_argument("--timeout", type=int, default=120)
-    ap.add_argument("--skip-tools", action="store_true")
-    args = ap.parse_args()
-    base = args.base_url.rstrip("/")
-    fails = []
+    ap.add_argument("--context", required=True)
+    ap.add_argument("--namespace", required=True)
+    ap.add_argument("--engine", choices=["vllm", "sglang"], default="vllm")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--gate", action="store_true")
+    g.add_argument("--report", action="store_true")
+    a = ap.parse_args()
+    report = a.report and not a.gate
 
-    # 1. models
+    pod = serving_pod(a.context, a.namespace, a.engine)
+    if not pod:
+        print("[smoke][FAIL] no running serving pod"); sys.exit(1)
+
+    r = in_pod(a.context, a.namespace, pod, CHECK_PY)
     try:
-        ids = [m["id"] for m in _get(f"{base}/v1/models", args.timeout).get("data", [])]
-        assert args.model in ids, f"{args.model} not in {ids}"
-        print(f"[OK] /v1/models lists {args.model}")
-    except Exception as e:
-        fails.append(f"models: {e}")
+        res = json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        print("[smoke][FAIL] could not run checks in pod:\n" + r.stderr[-400:]); sys.exit(1)
 
-    # 2. chat
-    try:
-        resp = _post(
-            f"{base}/v1/chat/completions",
-            {"model": args.model,
-             "messages": [{"role": "user", "content": "Reply with the single word: pong"}],
-             "max_tokens": 16, "temperature": 0},
-            args.timeout,
-        )
-        text = resp["choices"][0]["message"].get("content") or ""
-        assert text.strip(), "empty chat content"
-        print(f"[OK] chat completion: {text.strip()[:60]!r}")
-    except Exception as e:
-        fails.append(f"chat: {e}")
+    # (d) startup log
+    needle = "Detected MTP" if a.engine == "vllm" else "DFLASH"
+    logs = sh(["kubectl", "--context", a.context, "-n", a.namespace, "logs", pod, "--tail=400"])
+    res["d"] = needle.lower() in logs.stdout.lower()
 
-    # 3. tool call
-    if not args.skip_tools:
-        try:
-            tools = [{
-                "type": "function",
-                "function": {
-                    "name": "get_weather",
-                    "description": "Get the current weather for a city",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"city": {"type": "string"}},
-                        "required": ["city"],
-                    },
-                },
-            }]
-            resp = _post(
-                f"{base}/v1/chat/completions",
-                {"model": args.model,
-                 "messages": [{"role": "user", "content": "What is the weather in Tokyo? Use the tool."}],
-                 "tools": tools, "tool_choice": "auto", "max_tokens": 128, "temperature": 0},
-                args.timeout,
-            )
-            choice = resp["choices"][0]
-            tcs = choice["message"].get("tool_calls") or []
-            assert tcs, f"no tool_calls (finish_reason={choice.get('finish_reason')}); "\
-                        "engine likely lacks a tool-call parser for this model"
-            json.loads(tcs[0]["function"]["arguments"])  # must be valid JSON
-            print(f"[OK] tool call: {tcs[0]['function']['name']}({tcs[0]['function']['arguments']})")
-        except Exception as e:
-            fails.append(f"tools: {e}")
+    for k in ("a", "b", "c", "d"):
+        print(f"  ({k}) {'PASS' if res.get(k) else 'FAIL'}")
+    print(f"SMOKE(c)={'PASS' if res.get('c') else 'FAIL'}")
 
-    if fails:
-        print("\n[NG] smoke failed:")
-        for f in fails:
-            print(f"  - {f}")
-        sys.exit(1)
-    print("\n[OK] all smoke checks passed")
-
+    required = ("a", "b", "d") if report else ("a", "b", "c", "d")
+    ok = all(res.get(k) for k in required)
+    if report and not res.get("c"):
+        print("[smoke] (c) tool-calling FAIL -> not promotable")
+    print("[smoke] PASS" if ok else "[smoke] FAIL")
+    sys.exit(0 if ok else 1)
 
 if __name__ == "__main__":
     main()

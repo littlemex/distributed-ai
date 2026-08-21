@@ -1,0 +1,16 @@
+# qwen-serving: stable Service the agents target, pointed at the vLLM engine.
+# deploy.sh applies exactly one of alias-vllm.yaml / alias-sglang.yaml (no runtime patch), so the
+# repo is the source of truth for which engine is active.
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen-serving
+  labels: { app.kubernetes.io/part-of: qwen-serving }
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: vllm-qwen-qwen3-8-27b
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

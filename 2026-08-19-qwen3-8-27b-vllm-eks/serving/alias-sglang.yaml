@@ -1,0 +1,14 @@
+# qwen-serving pointed at the SGLang engine (opt-in). See alias-vllm.yaml for the contract.
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen-serving
+  labels: { app.kubernetes.io/part-of: qwen-serving }
+spec:
+  type: ClusterIP
+  selector:
+    app: sglang-qwen
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
