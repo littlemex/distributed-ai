@@ -111,6 +111,8 @@ phase_agents(){
     case "$a" in
       opencode)  "${K[@]}" create configmap opencode-files --from-file=opencode.json=agents/opencode/opencode.pod.json --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
       qwen-code) "${K[@]}" create configmap qwen-code-files --from-file=settings.json=agents/qwen-code/settings.json --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
+      hermes)    "${K[@]}" create configmap hermes-tools --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
+      openclaw)  "${K[@]}" create configmap openclaw-tools --from-file=bedrock_websearch.py=agents/tools/bedrock-websearch/bedrock_websearch.py --from-file=AGENTS.md=agents/tools/bedrock-websearch/AGENTS.md --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null;;
     esac
     # EKS Pod Identity association: create if absent, fail on role mismatch (no silent update)
     if [ -n "${QWEN_BEDROCK_ROLE_ARN:-}" ]; then associate_pod_identity "$a"; fi

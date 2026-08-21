@@ -54,4 +54,4 @@ spec:
             - { name: tools, mountPath: /opt/tools, readOnly: true }
       volumes:
         - name: tools
-          configMap: { name: opencode-files, items: [{ key: bedrock_websearch.py, path: bedrock_websearch.py }] }
+          configMap: { name: hermes-tools, items: [{ key: bedrock_websearch.py, path: bedrock_websearch.py }] }
