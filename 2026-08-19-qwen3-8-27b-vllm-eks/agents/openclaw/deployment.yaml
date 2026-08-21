@@ -50,7 +50,7 @@ spec:
             - >
               openclaw onboard --non-interactive --accept-risk --flow quickstart
               --auth-choice custom-api-key
-              --custom-base-url "http://vllm-qwen-qwen3-8-27b:8000/v1"
+              --custom-base-url "http://qwen-serving:8000/v1"
               --custom-model-id "Qwen/Qwen3.8-27B" --custom-compatibility openai
               --custom-api-key "vllm-local" --custom-provider-id "qwen-eks"
               --gateway-bind lan --gateway-port 18789 --gateway-auth token

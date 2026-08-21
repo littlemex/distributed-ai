@@ -5,7 +5,7 @@ is **not the default** and is **not yet promoted**: its agent-facing features ar
 needs a prebuilt custom image. Use it only if you accept those caveats.
 
 Why vLLM is the default: every client here is a tool-calling agent, and the vLLM path (FP8 + MTP)
-is verified end to end at ≈9.4 ms TPOT (c=1). SGLang benches faster (≈8.1 ms raw), but that number
+is verified end to end at ≈9.5 ms TPOT (c=1). SGLang benches faster (≈8.1 ms raw), but that number
 is without the tool-calling path, and the composition below is unverified.
 
 ## Promotion criteria (0/4 — must all pass before SGLang can become the default)

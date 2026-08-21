@@ -17,10 +17,13 @@ context, and the namespace from `$QWEN_NAMESPACE` (default `qwen`). No env file 
 ## Interactive TUIs
 
 ```bash
-qa opencode      # opencode coding CLI
-qa qwen-code     # Qwen Code (gemini-cli fork; binary `qwen`)
-qa hermes        # Hermes assistant CLI
+qa opencode
+qa qwen-code
+qa hermes
 ```
+
+`opencode` is the opencode coding CLI, `qwen-code` is Qwen Code, a gemini-cli fork whose binary is
+`qwen`, and `hermes` is the Hermes assistant CLI.
 
 Each reaches Qwen through the in-cluster `qwen-serving` Service and web search through the
 bedrock-websearch MCP tool, which authenticates to Bedrock via EKS Pod Identity.
@@ -31,10 +34,13 @@ Arguments after the agent name are forwarded to the wrapped CLI. `-t` / `--shell
 pod shell instead of launching the TUI.
 
 ```bash
-qa qwen-code -r <session-id>          # resume a Qwen Code session
-qa qwen-code -p "summarize this repo" # non-interactive prompt
-qa -t opencode                        # shell into the pod
+qa qwen-code -r <session-id>
+qa qwen-code -p "summarize this repo"
+qa -t opencode
 ```
+
+The first resumes a Qwen Code session, the second runs a non-interactive prompt, and `-t` shells
+into the pod instead of launching the TUI.
 
 ## Multimodal (images / video)
 
@@ -42,9 +48,12 @@ Agents read files from the pod filesystem and base64-embed them, so a local file
 pod first:
 
 ```bash
-qa push ./diagram.png qwen-code       # kubectl-cp into the pod's media dir; prints the pod path
-qa qwen-code                          # then in the TUI:  @<pod-path> explain this
+qa push ./diagram.png qwen-code
+qa qwen-code
 ```
+
+`push` kubectl-cp's the file into the pod's media directory and prints the pod path; reference that
+path in the TUI, for example `@<pod-path> explain this`.
 
 qwen-code handles both image and video (video is ffmpeg-downsampled by `push`, since the server
 samples only a few frames). Its modality gate is model-name based, so `agents/qwen-code/settings.json`

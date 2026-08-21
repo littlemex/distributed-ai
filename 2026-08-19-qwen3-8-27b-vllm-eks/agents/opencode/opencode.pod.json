@@ -4,7 +4,7 @@
     "vllm-local": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "vLLM (Qwen3.8-27B on EKS)",
-      "options": { "baseURL": "http://vllm-qwen-qwen3-8-27b:8000/v1", "apiKey": "sk-noop" },
+      "options": { "baseURL": "http://qwen-serving:8000/v1", "apiKey": "sk-noop" },
       "models": { "Qwen/Qwen3.8-27B": { "name": "Qwen3.8-27B", "limit": { "context": 32768, "output": 2048 } } }
     }
   },

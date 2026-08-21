@@ -1,7 +1,7 @@
 # hermes pod (keyless): `kubectl exec -it deploy/hermes -- bash -lc hermes` (agents.sh hermes).
 # Uses the self-hosted Qwen3.8-27B via the OpenAI-compatible "ollama" provider override, and
 # web search via the bedrock-websearch MCP (so it does not fall back to a headless browser /
-# curl). Hermes requires >=64K context (vLLM serves max_model_len 65536).
+# curl). Hermes needs a long context; the vLLM backend serves the full YaRN 1M context.
 #
 # Config applied at start with `hermes config set` / `hermes mcp add` (Hermes' real config is
 # /opt/data/config.yaml, not ~/.hermes):
@@ -27,7 +27,7 @@ spec:
           image: nousresearch/hermes-agent:v2026.8.18
           env:
             - { name: OLLAMA_API_KEY, value: "vllm-local" }
-            - { name: OLLAMA_BASE_URL, value: "http://vllm-qwen-qwen3-8-27b:8000/v1" }
+            - { name: OLLAMA_BASE_URL, value: "http://qwen-serving:8000/v1" }
             - { name: AWS_REGION, value: "us-east-1" }
             - { name: BEDROCK_WS_REGION, value: "us-east-1" }
           command: ["/bin/sh","-lc"]

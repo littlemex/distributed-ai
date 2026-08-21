@@ -32,17 +32,26 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# An env file next to the launcher is OPTIONAL. If present it is sourced first; otherwise every
+# value comes from QWEN_* environment variables, and the context defaults to the current kubeconfig
+# context. Only `setup` needs CLUSTER_NAME/REGION; the exec/push/openclaw paths need just a context.
 ENV_FILE="${AGENTS_ENV:-$HERE/agents.env}"
-[ -f "$ENV_FILE" ] || { echo "[NG] $ENV_FILE not found. Copy agents.env.example -> agents.env and edit it." >&2; exit 1; }
-# shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$ENV_FILE"; set +a
+fi
 [ -z "${AWS_PROFILE:-}" ] && unset AWS_PROFILE || true
-: "${CLUSTER_NAME:?}"; : "${REGION:?}"; : "${KUBE_CONTEXT:?}"; : "${NAMESPACE:?}"
+KUBE_CONTEXT="${KUBE_CONTEXT:-${QWEN_KUBE_CONTEXT:-$(kubectl config current-context 2>/dev/null || true)}}"
+NAMESPACE="${NAMESPACE:-${QWEN_NAMESPACE:-qwen}}"
+REGION="${REGION:-${QWEN_REGION:-ap-northeast-1}}"
+: "${KUBE_CONTEXT:?no kube context available — set QWEN_KUBE_CONTEXT or select one with kubectl}"
 PROFILE_ARGS=(); [ -n "${AWS_PROFILE:-}" ] && PROFILE_ARGS=(--profile "$AWS_PROFILE")
 K=(kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE")
 PFDIR="${TMPDIR:-/tmp}/agents-pf"; mkdir -p "$PFDIR"
 
 cmd_setup() {
+  CLUSTER_NAME="${CLUSTER_NAME:-${QWEN_CLUSTER_NAME:-}}"
+  : "${CLUSTER_NAME:?setup needs a cluster name — set CLUSTER_NAME or QWEN_CLUSTER_NAME}"
   echo "[..] kubeconfig context $KUBE_CONTEXT"
   aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION" "${PROFILE_ARGS[@]}" --alias "$KUBE_CONTEXT" >/dev/null
   # remove the old ssh-based block if a previous version of this script installed one

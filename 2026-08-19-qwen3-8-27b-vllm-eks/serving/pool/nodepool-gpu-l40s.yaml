@@ -29,9 +29,8 @@ spec:
       - key: node.kubernetes.io/instance-type
         operator: In
         values: ["g6e.12xlarge"]
-      - key: topology.kubernetes.io/zone
-        operator: In
-        values: ["ap-northeast-1a"]
+      # No zone pin: Karpenter picks any AZ in the cluster's subnets that offers g6e. Pin a zone
+      # here only if your capacity or data-locality requires it.
       - key: kubernetes.io/arch
         operator: In
         values: ["amd64"]
