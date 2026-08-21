@@ -56,23 +56,23 @@ bring those per the table above.
 ## Quickstart
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/abc1afaabf43b71c21e2b73acf333dc5d12a4ab5/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash
 qa opencode
 ```
 
 One command deploys the whole stack and installs the `qa` launcher on your PATH — no git clone and
 no manual setup. `install.sh` fetches this reference at a pinned ref, runs `deploy.sh`, installs
-`qa`, and adds `~/.local/bin` to your PATH if it is missing. `https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks` is the raw
+`qa`, and adds `~/.local/bin` to your PATH if it is missing. `https://raw.githubusercontent.com/littlemex/distributed-ai/abc1afaabf43b71c21e2b73acf333dc5d12a4ab5/2026-08-19-qwen3-8-27b-vllm-eks` is the raw
 GitHub URL pinned to a commit, for example
 `https://raw.githubusercontent.com/<owner>/<repo>/<full-sha>/2026-08-19-qwen3-8-27b-vllm-eks`.
 
 Deploy flags after `-- ` are forwarded to `deploy.sh`, so the whole run is one shot:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --websearch
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --skip-gpu --websearch
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --engine sglang
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/abc1afaabf43b71c21e2b73acf333dc5d12a4ab5/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --websearch
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/abc1afaabf43b71c21e2b73acf333dc5d12a4ab5/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --skip-gpu --websearch
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/abc1afaabf43b71c21e2b73acf333dc5d12a4ab5/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --engine sglang
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/abc1afaabf43b71c21e2b73acf333dc5d12a4ab5/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
 ```
 
 The only env you may set is `QWEN_NAMESPACE`, which defaults to `qwen`, and `QWEN_KUBE_CONTEXT`,

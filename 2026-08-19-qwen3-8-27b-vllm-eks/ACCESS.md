@@ -9,7 +9,7 @@ The one-shot installer deploys the stack and puts `qa` on your PATH in a single 
 README Quickstart. To install only the launcher without deploying:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/feat/serving-vllm-qwen/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/abc1afaabf43b71c21e2b73acf333dc5d12a4ab5/2026-08-19-qwen3-8-27b-vllm-eks/client/install.sh | bash -s -- --no-deploy
 ```
 
 `qa` resolves the context from `$QWEN_KUBE_CONTEXT`, defaulting to the current kubeconfig context,
