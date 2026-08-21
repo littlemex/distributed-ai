@@ -1,0 +1,54 @@
+# SGLang serving of Qwen3.8-27B with DFLASH2 speculative decoding + FP8 + fp8 KV + YaRN 1M.
+# OPT-IN engine (see ../README.md; promotion criteria not yet met). deploy.sh injects the shared
+# values (${...}) from serving/common/model.env and ${SGLANG_IMAGE} from image/image.env, then
+# applies this. Uses a PREBUILT custom image (DFlash2 baked in) so there is no in-cluster build.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: sglang-qwen, labels: { app: sglang-qwen } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: sglang-qwen } }
+  template:
+    metadata: { labels: { app: sglang-qwen } }
+    spec:
+      nodeSelector: { node-role: gpu-l40s }
+      tolerations: [{ key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }]
+      containers:
+        - name: sglang
+          image: ${SGLANG_IMAGE}
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              exec python3 -m sglang.launch_server
+              --model-path ${MODEL_ID} --served-model-name ${SERVED_MODEL_NAME}
+              --tp 4 --host 0.0.0.0 --port 8000
+              --context-length ${MAX_CONTEXT}
+              --json-model-override-args '{"rope_scaling":{"rope_type":"yarn","factor":${YARN_FACTOR}.0,"original_max_position_embeddings":${NATIVE_CONTEXT}}}'
+              --quantization fp8 --kv-cache-dtype fp8_e4m3 --mem-fraction-static 0.80 --cuda-graph-max-bs 4
+              --speculative-algorithm DFLASH
+              --speculative-draft-model-path incoai/Qwen3.8-27B-DFlash2
+              --speculative-num-draft-tokens 8
+          env:
+            - { name: HF_HOME, value: /hf-cache }
+            - { name: SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN, value: "1" }
+            - { name: PYTORCH_CUDA_ALLOC_CONF, value: expandable_segments:True }
+          ports: [{ name: http, containerPort: 8000 }]
+          resources:
+            requests: { cpu: "8", memory: 64Gi, nvidia.com/gpu: 4 }
+            limits: { memory: 64Gi, nvidia.com/gpu: 4 }
+          readinessProbe: { httpGet: { path: /health, port: http }, periodSeconds: 15, failureThreshold: 240 }
+          volumeMounts:
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - { name: dshm, emptyDir: { medium: Memory, sizeLimit: 16Gi } }
+        - { name: hf-cache, emptyDir: { sizeLimit: 120Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: sglang-qwen, labels: { app: sglang-qwen } }
+spec:
+  type: ClusterIP
+  selector: { app: sglang-qwen }
+  ports: [{ name: http, port: 8000, targetPort: http }]

@@ -65,11 +65,15 @@ MV
   rm -f "$mv"
 }
 render_sglang(){
-  [ -f serving/sglang/manifests/qwen3.8-27b.sglang.yaml ] || die "sglang manifest missing (chunk D)"
+  [ -f serving/sglang/manifests/qwen3.8-27b.sglang.yaml ] || die "sglang manifest missing"
+  # shellcheck source=/dev/null
+  . serving/sglang/image/image.env
+  local acct sgimg; acct="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)"
+  sgimg="${acct}.dkr.ecr.${QWEN_REGION}.amazonaws.com/${ECR_REPO}:${TAG}"
   # shellcheck disable=SC2016
   MODEL_ID="$MODEL_ID" SERVED_MODEL_NAME="$SERVED_MODEL_NAME" MAX_CONTEXT="$MAX_CONTEXT" \
-  YARN_FACTOR="$YARN_FACTOR" NATIVE_CONTEXT="$NATIVE_CONTEXT" \
-    envsubst '${MODEL_ID} ${SERVED_MODEL_NAME} ${MAX_CONTEXT} ${YARN_FACTOR} ${NATIVE_CONTEXT}' \
+  YARN_FACTOR="$YARN_FACTOR" NATIVE_CONTEXT="$NATIVE_CONTEXT" SGLANG_IMAGE="$sgimg" \
+    envsubst '${MODEL_ID} ${SERVED_MODEL_NAME} ${MAX_CONTEXT} ${YARN_FACTOR} ${NATIVE_CONTEXT} ${SGLANG_IMAGE}' \
     < serving/sglang/manifests/qwen3.8-27b.sglang.yaml
 }
 render_engine(){ if [ "$ENGINE" = vllm ]; then render_vllm; else render_sglang; fi; }
