@@ -28,6 +28,11 @@ case "$ENGINE" in vllm|sglang) :;; *) echo "--engine must be vllm|sglang" >&2; e
 NS="${QWEN_NAMESPACE:-qwen}"
 CTX="${QWEN_KUBE_CONTEXT:-$(kubectl config current-context)}"
 K=(kubectl --context "$CTX" -n "$NS")
+QWEN_REGION="${QWEN_REGION:-$(aws configure get region 2>/dev/null || true)}"
+QWEN_BEDROCK_REGION="${QWEN_BEDROCK_REGION:-$QWEN_REGION}"
+# cluster name from the context's cluster entry (EKS kubeconfig cluster is an ARN -> take the tail)
+CLUSTER_NAME="${CLUSTER_NAME:-$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$CTX')].context.cluster}" 2>/dev/null | sed 's#.*/##')}"
+# shellcheck source=/dev/null
 . serving/common/model.env
 
 log(){ printf '\n\033[1;32m[deploy]\033[0m %s\n' "$*"; }
@@ -70,25 +75,29 @@ render_sglang(){
 render_engine(){ if [ "$ENGINE" = vllm ]; then render_vllm; else render_sglang; fi; }
 other_engine(){ [ "$ENGINE" = vllm ] && echo sglang || echo vllm; }
 
-phase_pool(){ log "pool"; "${K[@]}" apply -f serving/pool/nodepool-gpu-l40s.yaml >/dev/null || \
-  kubectl --context "$CTX" apply -f serving/pool/nodepool-gpu-l40s.yaml; }
+# NodePool is cluster-scoped; -n is irrelevant, so apply with the plain context.
+phase_pool(){ log "pool"; kubectl --context "$CTX" apply -f serving/pool/nodepool-gpu-l40s.yaml; }
+
+engine_deploy(){ [ "$1" = vllm ] && echo vllm-qwen-qwen3-8-27b || echo sglang-qwen; }
 
 phase_serving(){
   log "serving ($ENGINE)"
   if [ "$ENGINE" = sglang ]; then
-    command -v aws >/dev/null && { . serving/sglang/image/image.env 2>/dev/null || true; }
-    if [ -n "${ECR_REPO:-}" ] && ! aws ecr describe-images --region "${QWEN_REGION:-}" \
+    # shellcheck source=/dev/null
+    [ -f serving/sglang/image/image.env ] && . serving/sglang/image/image.env
+    if [ -n "${ECR_REPO:-}" ] && ! aws ecr describe-images --region "$QWEN_REGION" \
          --repository-name "$ECR_REPO" --image-ids imageTag="${TAG:-}" >/dev/null 2>&1; then
-      die "SGLang image ${ECR_REPO}:${TAG} not found. Run serving/sglang/image/build.sh first (see serving/sglang/README.md)."
+      die "SGLang image ${ECR_REPO}:${TAG:-} not found. Run serving/sglang/image/build.sh first (see serving/sglang/README.md)."
     fi
   fi
-  # switch: bring the new engine up, then remove the other so it releases the GPU (planned downtime).
+  local dname other; dname="$(engine_deploy "$ENGINE")"; other="$(engine_deploy "$(other_engine)")"
+  # bring the new engine up, then free the GPU by removing the other engine (one engine per node).
   render_engine | "${K[@]}" apply -f -
-  "${K[@]}" delete -f <(if [ "$(other_engine)" = vllm ]; then render_vllm; else render_sglang 2>/dev/null || true; fi) --ignore-not-found >/dev/null 2>&1 || true
-  log "waiting for $ENGINE to become Ready (first run can take 10-15 min: node + image + weights + warmup)"
-  "${K[@]}" rollout status deploy -l app.kubernetes.io/managed-by --timeout=45m 2>/dev/null || \
-  "${K[@]}" wait --for=condition=ready pod -l "serving-engine=$ENGINE" --timeout=45m || \
-    { "${K[@]}" get pods; die "serving pod not Ready — check quota / Karpenter NodeClaims (kubectl get nodeclaims)"; }
+  "${K[@]}" delete "deploy/$other" --ignore-not-found >/dev/null 2>&1 || true
+  log "waiting for $ENGINE Ready (first run 10-15 min: node + image + weights + warmup)"
+  "${K[@]}" rollout status "deploy/$dname" --timeout=45m || {
+    "${K[@]}" get pods 2>/dev/null; kubectl --context "$CTX" get nodeclaims 2>/dev/null | tail -5
+    die "serving not Ready — check GPU quota and Karpenter NodeClaims"; }
   log "alias qwen-serving -> $ENGINE"
   "${K[@]}" apply -f "serving/alias-$ENGINE.yaml"
 }
@@ -141,7 +150,7 @@ down(){
 # --- main ---------------------------------------------------------------------------------------
 [ "$DOWN" = 1 ] && { down; exit 0; }
 confirm_target
-CLUSTER_NAME="${CLUSTER_NAME:-$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$CTX')].context.cluster}" 2>/dev/null | sed 's#.*/##')}"
+kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml | kubectl --context "$CTX" apply -f - >/dev/null
 case "$ONLY" in
   pool)    phase_pool;;
   serving) phase_serving;;
