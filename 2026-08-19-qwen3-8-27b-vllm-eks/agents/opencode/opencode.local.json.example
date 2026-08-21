@@ -11,7 +11,7 @@
       "models": {
         "Qwen/Qwen3.8-27B": {
           "name": "Qwen3.8-27B (vLLM/EKS)",
-          "limit": { "context": 32768, "output": 4096 }
+          "limit": { "context": 1048576, "output": 4096 }
         }
       }
     }
