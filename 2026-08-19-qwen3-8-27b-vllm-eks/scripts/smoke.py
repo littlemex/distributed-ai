@@ -79,10 +79,13 @@ def main():
     except Exception:
         print("[smoke][FAIL] could not run checks in pod:\n" + r.stderr[-400:]); sys.exit(1)
 
-    # (d) startup log
+    # (d) speculative decoding active. "Detected MTP"/"DFLASH" only appear once at startup and can
+    # scroll out of a bounded tail on a long-running pod, so check the recurring per-step metrics
+    # line instead ("SpecDecoding metrics: ..."), falling back to the one-time startup message for
+    # a pod that has not served a request yet.
+    logs = sh(["kubectl", "--context", a.context, "-n", a.namespace, "logs", pod, "--tail=2000"])
     needle = "Detected MTP" if a.engine == "vllm" else "DFLASH"
-    logs = sh(["kubectl", "--context", a.context, "-n", a.namespace, "logs", pod, "--tail=400"])
-    res["d"] = needle.lower() in logs.stdout.lower()
+    res["d"] = "specdecoding metrics" in logs.stdout.lower() or needle.lower() in logs.stdout.lower()
 
     for k in ("a", "b", "c", "d"):
         print(f"  ({k}) {'PASS' if res.get(k) else 'FAIL'}")
