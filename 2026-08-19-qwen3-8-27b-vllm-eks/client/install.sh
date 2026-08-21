@@ -12,12 +12,12 @@
 # --websearch, --yes, --skip-smoke, --purge-pool) are forwarded to deploy.sh. Installer flags:
 # --ref <sha|branch>, --no-deploy. Env: QWEN_NAMESPACE (default qwen), QWEN_KUBE_CONTEXT (default
 # current context); region and cluster are auto-derived from the context's EKS ARN. Repo coordinates:
-# QWEN_REPO / QWEN_REF; a private repo needs GITHUB_TOKEN. REF default is the feature branch tip
-# (NOT pinned) during development; pin it to a tag or SHA once merged.
+# QWEN_REPO / QWEN_REF; a private repo needs GITHUB_TOKEN. REF default is pinned to a commit SHA so a
+# given install.sh URL always deploys the same code; override with QWEN_REF / --ref for a branch.
 set -euo pipefail
 
 REPO="${QWEN_REPO:-littlemex/distributed-ai}"
-REF="${QWEN_REF:-feat/serving-vllm-qwen}"
+REF="${QWEN_REF:-11f1830ad6e9f6f737ddc77dd6cc8bc8bfc09a79}"
 SUBDIR="${QWEN_DIR:-2026-08-19-qwen3-8-27b-vllm-eks}"
 DO_DEPLOY=1
 PASS=()
