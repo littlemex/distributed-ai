@@ -27,7 +27,11 @@
 set -euo pipefail
 
 REPO="${FT_REPO:-littlemex/distributed-ai}"
-REF="${FT_REF:-main}"
+# Pre-merge this defaults to the FEATURE BRANCH, so fixes land without re-pinning the raw URL in
+# every set of instructions. Once merged this becomes a release tag or the merge SHA. Note the raw
+# URL above and this REF are independent: the URL only decides which install.sh you run, while REF
+# decides which tree it fetches -- so pass --ref / FT_REF to pin the code exactly.
+REF="${FT_REF:-feat/deepseek-v4-flash-freetoken-eks}"
 SUBDIR="${FT_DIR:-2026-08-23-deepseek-v4-flash-freetoken-eks}"
 DO_DEPLOY=1
 PASS=()
