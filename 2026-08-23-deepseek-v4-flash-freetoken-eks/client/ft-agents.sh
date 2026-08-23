@@ -84,7 +84,7 @@ _exec() {  # _exec <deploy> <command-string>
 _run_agent() {
   local agent="$1"; shift || true
   local dep; dep="$(_deploy_for "$agent")"
-  [ -n "$dep" ] || { echo "[NG] unknown agent: $agent  (use opencode | hermes | opencode)" >&2; exit 1; }
+  [ -n "$dep" ] || { echo "[NG] unknown agent: $agent  (use opencode | hermes)" >&2; exit 1; }
   local cd_cmd; cd_cmd="$(_cd_for "$agent")"
   if [ "${SHELL_ONLY:-0}" = 1 ]; then
     _exec "$dep" "$cd_cmd; exec bash"
@@ -148,7 +148,7 @@ usage() {
   cat >&2 <<USAGE
 $me — launchers for the EKS-hosted DeepSeek-V4-Flash agents (keyless kubectl exec)
   $me setup                      create the kubeconfig context (idempotent)
-  $me opencode|hermes|opencode  exec into the pod and launch the CLI (extra args are forwarded)
+  $me opencode|hermes            exec into the pod and launch the CLI (extra args are forwarded)
   $me -t <agent>                 open a pod shell instead of the TUI
   $me openclaw                   background port-forward + open the OpenClaw Control UI
   $me push <file> [agent]        copy a local image/video into the agent pod (default: opencode)
@@ -163,9 +163,9 @@ if [ "${1:-}" = "-t" ] || [ "${1:-}" = "--shell" ]; then SHELL_ONLY=1; shift; fi
 
 case "${1:-}" in
   setup) cmd_setup ;;
-  opencode|hermes|opencode) agent="$1"; shift; _run_agent "$agent" "$@" ;;
+  opencode|hermes) agent="$1"; shift; _run_agent "$agent" "$@" ;;
   # back-compat: `shell <agent>` == `-t <agent>`
-  shell) shift; SHELL_ONLY=1; _run_agent "${1:?usage: shell <opencode|hermes|opencode>}" ;;
+  shell) shift; SHELL_ONLY=1; _run_agent "${1:?usage: shell <opencode|hermes>}" ;;
   openclaw) cmd_openclaw ;;
   push) shift; cmd_push "$@" ;;
   down) cmd_down ;;
