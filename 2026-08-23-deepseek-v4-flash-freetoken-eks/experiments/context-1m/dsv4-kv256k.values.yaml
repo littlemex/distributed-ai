@@ -1,0 +1,24 @@
+# Experiment overlay: buy context by spending expert residency.
+# Layered after serving/values/deepseek-v4-flash.values.yaml + the hybrid overlay.
+#
+# The finding this quantifies. Raising maxSeqLenOverride to 1048576 changes what the server
+# ADVERTISES (`/v1/models` reports ctx 1048576) but not what it can do: the KV pool is sized by
+# dividing the VRAM budget, not by the declared ceiling, so it stayed at exactly the 32 768-cap
+# allocation -- 501 pages, 64 128 tokens, 2.09 GiB -- and a long prompt is refused by the engine
+# itself:
+#   prompt is too long: 152010 tokens > 64128 maximum (prompt + generation);
+#   shorten the prompt or increase the KV cache budget
+#
+# `--kv-reserve-tokens` is that budget knob: it is the KV floor --moe-cache-auto satisfies BEFORE
+# it spends whatever remains on expert slots. Raising it therefore converts VRAM from expert cache
+# into context, one for one. At the baseline the split is 2.09 GiB KV against 27.3 GiB of experts
+# (2 193 slots, 19.9% residency), so this is not a free knob -- residency is exactly what sets
+# decode speed on an offload engine.
+#
+# 262 144 is chosen as 4x the current usable ceiling: large enough that the trade is unmistakable
+# in both directions (context gained, moe_cache_size lost), small enough to still leave an expert
+# cache worth measuring. Read the outcome from:
+#   --moe-cache-auto resolved moe_cache_size=<N> num_pages=<P>
+# then benchmark to price the residency loss in tok/s.
+kvReserveTokens: 262144
+maxSeqLenOverride: 262144

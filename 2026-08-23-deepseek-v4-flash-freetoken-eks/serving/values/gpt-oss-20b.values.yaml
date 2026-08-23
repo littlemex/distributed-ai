@@ -1,0 +1,40 @@
+# FreeToken tuning overlay for openai/gpt-oss-20b -- the SMOKE profile.
+# Layered on charts/freetoken-serving/values.yaml with `helm template -f`.
+# The MODEL FACTS this derives from live in serving/models/gpt-oss-20b.yaml.
+#
+# Purpose: prove the image, chart, Karpenter pool, and S3 Files mount on the CHEAPEST node that
+# can run FreeToken's offload path, so that a DeepSeek-V4-Flash failure on g6e.8xlarge can only be
+# about capacity -- never about plumbing. It runs the same `--moe-backend offload` code path, and
+# it reads its checkpoint over the SAME S3 Files mount, so the expensive run inherits nothing
+# unverified.
+
+model: openai/gpt-oss-20b
+
+expertBankGib: 10            # MODEL FACT (derived in serving/models/gpt-oss-20b.yaml)
+memory: 24Gi                 # -> Karpenter picks g6e.xlarge (32 GiB, the smallest 1x L40S)
+cpu: "3"                     # of g6e.xlarge's 4 vCPU
+shmSize: 1Gi
+
+preflight:
+  enabled: true
+  # 8, not the chart default of 24. A g6e.xlarge has 32 GiB total and ~29 GiB allocatable, so
+  # demanding banks+24 = 34 GiB would refuse to start on the very node this profile targets. The
+  # headroom only has to cover this model's dense weights, KV, and load transients, all of which
+  # are small at 21B; DeepSeek-V4-Flash keeps the larger default.
+  requiredHeadroomGib: 8
+
+# Same shared mount the DSV4 profile uses, so the smoke exercises the real storage path (single-AZ
+# nodeAffinity, read-only NFS mount, EFS CSI S3 Files volumeHandle) and not just a local download.
+checkpoint:
+  source: s3files
+  s3files:
+    claimName: freetoken-model-cache
+    subPath: openai/gpt-oss-20b
+
+moeBackend: offload          # explicit, matching the DSV4 profile: `auto` would resolve here too,
+                             # but pinning it keeps the two profiles comparable
+moeCacheAuto: true
+
+# Native is 131072. Capped for the smoke so KV never becomes the variable under study.
+maxSeqLenOverride: 8192
+maxRunningRequests: 4

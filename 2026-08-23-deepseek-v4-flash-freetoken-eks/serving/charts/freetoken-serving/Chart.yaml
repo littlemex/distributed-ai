@@ -1,0 +1,13 @@
+apiVersion: v2
+name: freetoken-serving
+description: >-
+  Single-node FreeToken serving for one MoE model on one L40S, with the expert set held in
+  pinned host RAM and an LRU cache of expert slots in VRAM. Because the experts are
+  page-locked (non-swappable, no disk-resident path), HOST RAM is the model-size gate --
+  which is why this chart derives its node size from a memory request rather than naming an
+  instance type. Lives in the workload project, so the reusable infra/eks module stays
+  untouched; it consumes the cluster contract (node-role pool label, nvidia.com/gpu device
+  plugin, optional S3 Files RWX PVC) and renders a Deployment + Service.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

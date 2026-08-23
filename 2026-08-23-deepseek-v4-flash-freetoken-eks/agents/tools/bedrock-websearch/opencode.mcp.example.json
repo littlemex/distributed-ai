@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "bedrock-websearch": {
+      "type": "local",
+      "command": ["python3", "/abs/path/to/bedrock_websearch.py", "--mcp"],
+      "environment": { "AWS_REGION": "us-east-1", "BEDROCK_WS_REGION": "us-east-1" }
+    }
+  }
+}

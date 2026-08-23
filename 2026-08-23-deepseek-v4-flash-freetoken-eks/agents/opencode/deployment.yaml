@@ -1,0 +1,65 @@
+# opencode pod (keyless): use it with `kubectl exec -it deploy/opencode -- bash -lc opencode`
+# (agents.sh opencode). No sshd/ssh key — kubectl exec authenticates via your kubeconfig.
+# Reaches Qwen via the in-cluster Service; web search via the bedrock-websearch MCP (Pod Identity).
+#
+# Prereqs (create once):
+#   kubectl -n "$QWEN_NAMESPACE" create sa opencode   # + Pod Identity association to the Bedrock role
+#   kubectl -n "$QWEN_NAMESPACE" create configmap opencode-files \
+#     --from-file=opencode.json=opencode.json \
+#     --from-file=bedrock_websearch.py=../../tools/bedrock-websearch/bedrock_websearch.py \
+#     --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opencode, labels: { app: opencode } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: opencode } }
+  template:
+    metadata:
+      labels: { app: opencode }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
+    spec:
+      serviceAccountName: opencode        # Pod Identity -> Bedrock (web_search)
+      nodeSelector: { node-role: cpu }
+      containers:
+        - name: opencode
+          image: node:22-bookworm-slim
+          env:
+            - { name: AWS_REGION, value: "us-east-1" }
+            - { name: BEDROCK_WS_REGION, value: "us-east-1" }
+            - { name: HOME, value: "/root" }
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              set -e;
+              apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 ca-certificates >/dev/null;
+              npm install -g opencode-ai >/tmp/npm.log 2>&1 || cat /tmp/npm.log;
+              mkdir -p /root/.config/opencode;
+              cp /opt/oc-config/opencode.json /root/.config/opencode/opencode.json;
+              touch /tmp/ready;
+              echo '[ready] use: kubectl exec -it deploy/opencode -- bash -lc opencode';
+              exec sleep infinity
+          readinessProbe:
+            exec: { command: ["sh","-c","test -f /tmp/ready"] }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits: { cpu: "2", memory: 4Gi }
+          volumeMounts:
+            - { name: oc-config, mountPath: /opt/oc-config, readOnly: true }
+            - { name: tools, mountPath: /opt/tools, readOnly: true }
+            # The same S3 Files file system the serving pods read their checkpoint from, shared
+            # across every agent pod. See agents/README.md for what it is and is not good for.
+            - { name: shared, mountPath: /shared, readOnly: true }
+      volumes:
+        - name: oc-config
+          configMap: { name: opencode-files, items: [{ key: opencode.json, path: opencode.json }] }
+        - name: tools
+          configMap: { name: opencode-files, items: [{ key: bedrock_websearch.py, path: bedrock_websearch.py }] }
+        # ReadWriteMany, so all agents plus the serving pod mount it simultaneously. Read-only here
+        # AND at the node (the PV pins `-o ro`), so an agent cannot corrupt a 160 GB checkpoint that
+        # a serving pod is mid-read on.
+        - name: shared
+          persistentVolumeClaim: { claimName: freetoken-model-cache, readOnly: true }

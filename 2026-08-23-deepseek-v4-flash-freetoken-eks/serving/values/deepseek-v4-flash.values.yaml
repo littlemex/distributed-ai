@@ -1,0 +1,65 @@
+# FreeToken tuning overlay for deepseek-ai/DeepSeek-V4-Flash-0731.
+# Layered on charts/freetoken-serving/values.yaml with `helm template -f`.
+# The MODEL FACTS this derives from live in serving/models/deepseek-v4-flash.yaml.
+#
+# Why these values:
+#  - 137 GiB of experts must be page-locked in host RAM. That single fact chooses the instance:
+#    memory 200Gi makes Karpenter skip g6e.xlarge/2xlarge/4xlarge (32/64/128 GiB, all too small)
+#    and land on g6e.8xlarge -- one L40S with 256 GiB RAM. This is the model's real requirement,
+#    not a preference: pinned pages are non-swappable and FreeToken has no disk-resident expert
+#    path, so no amount of swap, NVMe, or extra VRAM substitutes for host RAM.
+#  - the checkpoint is ~160 GB, so it is read IN PLACE from the shared S3 Files mount. With the
+#    default per-pod emptyDir every restart would re-download 160 GB.
+
+model: deepseek-ai/DeepSeek-V4-Flash-0731
+servedModelName: deepseek-ai/DeepSeek-V4-Flash
+
+expertBankGib: 137           # MODEL FACT, from FreeToken's own host_banks.py note for DSV4
+memory: 200Gi                # 137 banks + dense weights + KV + load transients -> g6e.8xlarge
+cpu: "28"                    # of g6e.8xlarge's 32 vCPU; the rest for kubelet/CSI/device plugin
+shmSize: 2Gi
+
+# Read the 160 GB checkpoint in place. The producer writes it to the bucket through the S3 API
+# (storage/sync-checkpoint.sh); this mount is read-only, at the node, by design.
+checkpoint:
+  source: s3files
+  s3files:
+    claimName: freetoken-model-cache
+    # MUST point at a directory that still contains the inference/config.json subdir -- FreeToken
+    # reads the authoritative DeepSeek-V4 model args from there, so a flattened sync fails to load
+    # even with all 46 safetensors shards present.
+    subPath: deepseek-ai/DeepSeek-V4-Flash-0731
+
+# hybrid, promoted from experiment to default because it won on every measured point with
+# non-overlapping sample ranges: +20-34% aggregate throughput at concurrency 1 and a 25-37% lower
+# TPOT (offload 90.5 ms, hybrid 56.6-68.1 ms). `ft bench bw` explains why -- on an L40S the CPU
+# retires a ds_fp4 expert at 61.9 GB/s against PCIe's 13.5 GB/s, a 4.59x ratio -- so hybrid computes
+# most decode-time expert misses on the CPU and fetches only a fraction over PCIe.
+# See experiments/README.md; experiments/moe-backend/ keeps the offload baseline reproducible.
+moeBackend: hybrid
+# Of g6e.8xlarge's 32 vCPU, leaving 8 for kubelet, the CSI node plugin, the device plugin, and the
+# NFS client still serving checkpoint reads. Oversubscribing here would slow the very PCIe fetches
+# hybrid overlaps its CPU work against.
+moeCpuThreads: "24"
+moeCacheAuto: true           # size the GPU expert cache from whatever VRAM the KV floor leaves
+
+# Native context is 1M (YaRN factor 16). Capped hard for bring-up: on a single 44.7 GiB L40S the KV
+# cache and the expert-slot cache compete for the SAME VRAM, so a 1M window would starve the expert
+# cache and turn every token into a PCIe fetch. Raise this only while watching /v1/cache/status.
+maxSeqLenOverride: 32768
+kvReserveTokens: 8192        # FreeToken's default, stated explicitly: it is the floor that
+                             # --moe-cache-auto respects before it spends the rest on experts
+maxRunningRequests: 4        # concurrency multiplies expert-cache pressure, not just KV.
+                             # This is a CAP, not a batch size: a single interactive user still gets
+                             # concurrency-1 behaviour (decode 14.7-17.7 tok/s). Raise it to 16 for
+                             # batch throughput (41.83 tok/s aggregate) at the cost of per-stream
+                             # latency -- see experiments/concurrency/.
+
+# Measure the CPU-vs-PCIe bandwidth ratio on whichever node this pod lands on, because hybrid's
+# fetch/compute split is derived from it and FreeToken discards a profile recorded on another GPU.
+# Without it the engine warns and falls back to one fetch per layer per step. Measured note: that
+# fallback performed indistinguishably from the derived 18.5% split, so this is here for the
+# explanation and for `--moe-backend auto`, not as a throughput knob.
+benchBw:
+  enabled: true
+  dtype: ds_fp4

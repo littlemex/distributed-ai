@@ -1,0 +1,61 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  # Single-L40S pool. The NAME encodes the capability (one L40S, variable host RAM), not a
+  # size -- which host-RAM size a pod lands on is DERIVED from that pod's memory request.
+  name: gpu-l40s-1x
+spec:
+  disruption:
+    budgets:
+    # "1", not "10%": a percentage floors to ZERO on a pool with fewer than 10 nodes, which
+    # permanently blocks consolidation -- an idle g6e.8xlarge would keep billing forever. This pool
+    # is expected to hold one or two nodes, so an absolute budget is the only correct choice.
+    - nodes: "1"
+    consolidateAfter: 5m
+    consolidationPolicy: WhenEmpty
+  limits:
+    cpu: "200"
+    memory: 2000Gi
+  template:
+    metadata:
+      labels:
+        distributed-ai/device: nvidia
+        node-role: gpu-l40s-1x
+    spec:
+      expireAfter: Never
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        # Reuses the cluster's existing GPU EC2NodeClass (subnet/SG/AMI discovery, AL2023
+        # nvidia variant, localStorage Raid0 for the instance-store NVMe). Referenced only --
+        # this reference never edits it.
+        name: gpu-ddp
+      requirements:
+      - key: karpenter.sh/capacity-type
+        operator: In
+        values: ["on-demand"]
+      # Every type below is exactly ONE L40S (45776 MiB VRAM) and differs only in host RAM
+      # and NVMe: xlarge 32Gi / 2xlarge 64Gi / 4xlarge 128Gi / 8xlarge 256Gi. FreeToken's
+      # expert banks are PINNED HOST RAM, so host RAM -- not VRAM -- is the model-size gate.
+      # Karpenter picks the cheapest type that satisfies the pod's memory request, so the
+      # workload steers its own node size and this pool is never edited between profiles:
+      #   gpt-oss-20b   (~12 GiB banks)  -> requests 24Gi  -> g6e.xlarge
+      #   DeepSeek-V4-Flash (137 GiB)    -> requests 200Gi -> g6e.8xlarge
+      # Because gpuCount is always 1 here, the pool and the chart can never disagree about
+      # how many GPUs a node has (a class of drift possible when a pool mixes GPU counts).
+      - key: node.kubernetes.io/instance-type
+        operator: In
+        values: ["g6e.xlarge", "g6e.2xlarge", "g6e.4xlarge", "g6e.8xlarge"]
+      # No zone pin: all four types are offered in us-east-2a/b/c. A zone pin is REQUIRED
+      # only when a pod also mounts the single-AZ S3 Files volume -- that constraint travels
+      # with the PV's nodeAffinity, not with this pool, so an unpinned pool stays reusable.
+      - key: kubernetes.io/arch
+        operator: In
+        values: ["amd64"]
+      - key: kubernetes.io/os
+        operator: In
+        values: ["linux"]
+      taints:
+      - effect: NoSchedule
+        key: nvidia.com/gpu
+      terminationGracePeriod: 1h
