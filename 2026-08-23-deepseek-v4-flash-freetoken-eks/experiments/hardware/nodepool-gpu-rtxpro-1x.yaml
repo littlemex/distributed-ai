@@ -1,0 +1,58 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  # Deliberately a SEPARATE pool from gpu-l40s-1x rather than another instance type inside it. That
+  # pool's whole premise is "every member is one L40S, differing only in host RAM, so the pod's
+  # memory request picks a size" -- adding a different GPU with different VRAM would break the
+  # invariant that makes memory-request-steering safe there.
+  name: gpu-rtxpro-1x
+spec:
+  disruption:
+    budgets:
+    # Absolute, not a percentage: a percentage floors to zero below ten nodes and would leave an
+    # idle GPU node billing forever.
+    - nodes: "1"
+    consolidateAfter: 5m
+    consolidationPolicy: WhenEmpty
+  limits:
+    cpu: "200"
+    memory: 2000Gi
+  template:
+    metadata:
+      labels:
+        distributed-ai/device: nvidia
+        node-role: gpu-rtxpro-1x
+    spec:
+      expireAfter: Never
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu-ddp
+      requirements:
+      - key: karpenter.sh/capacity-type
+        operator: In
+        values: ["on-demand"]
+      # g7e.8xlarge: 1x RTX PRO Server 6000 (96 GiB VRAM), 256 GiB host RAM, 32 vCPU, INTEL.
+      # Chosen to move two variables that the L40S measurements identified as the binding ones:
+      #   VRAM 45 -> 96 GiB, which is what sets expert residency (19.9% on the L40S)
+      #   AMD Milan -> Intel, which is what gates the CPU MoE vector tier (measured isa=avx2;
+      #   FreeToken ships dot_dsfp4_avx512 and dispatches to it only when the hardware has AVX-512)
+      - key: node.kubernetes.io/instance-type
+        operator: In
+        values: ["g7e.8xlarge"]
+      # PINNED, unlike gpu-l40s-1x. g7e is offered in us-east-2a/2b, but 2a had NO capacity (InsufficientInstanceCapacity), so this is pinned to 2b, and the S3 Files mount
+      # target this workload reads through must be in the SAME AZ as the pod. Without the pin
+      # Karpenter could pick 2b while the PV pins the pod to 2a, leaving it unschedulable.
+      - key: topology.kubernetes.io/zone
+        operator: In
+        values: ["us-east-2b"]
+      - key: kubernetes.io/arch
+        operator: In
+        values: ["amd64"]
+      - key: kubernetes.io/os
+        operator: In
+        values: ["linux"]
+      taints:
+      - effect: NoSchedule
+        key: nvidia.com/gpu
+      terminationGracePeriod: 1h

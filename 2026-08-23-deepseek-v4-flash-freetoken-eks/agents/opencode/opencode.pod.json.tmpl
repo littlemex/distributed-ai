@@ -1,0 +1,24 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "freetoken-local/${SERVED_MODEL_NAME}",
+  "provider": {
+    "freetoken-local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "FreeToken (${SERVED_MODEL_NAME} on EKS)",
+      "options": { "baseURL": "http://freetoken-serving:1919/v1", "apiKey": "sk-noop" },
+      "models": {
+        "${SERVED_MODEL_NAME}": {
+          "name": "${SERVED_MODEL_NAME}",
+          "limit": { "context": ${MAX_CONTEXT}, "output": 2048 }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "bedrock-websearch": {
+      "type": "local",
+      "command": ["python3", "/opt/tools/bedrock_websearch.py", "--mcp"],
+      "environment": { "AWS_REGION": "us-east-1", "BEDROCK_WS_REGION": "us-east-1" }
+    }
+  }
+}

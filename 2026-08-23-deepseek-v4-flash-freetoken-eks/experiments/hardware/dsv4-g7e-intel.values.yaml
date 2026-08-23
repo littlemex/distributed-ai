@@ -1,0 +1,38 @@
+# Experiment overlay: the same DeepSeek-V4-Flash on g7e.8xlarge instead of g6e.8xlarge.
+# Layered after serving/values/deepseek-v4-flash.values.yaml (hybrid is now its default).
+# Requires experiments/hardware/nodepool-gpu-rtxpro-1x.yaml.
+#
+# The L40S measurements pointed at exactly two binding constraints, and g7e moves both:
+#
+#   VRAM 45 -> 96 GiB. Expert residency was 19.9% (2 193 of 11 008 slots), so ~80% of expert
+#   accesses missed. Residency is the first-order term in decode speed, and it is set by VRAM.
+#   Naively, ~86 GiB left after dense weights could hold ~6 700 slots -> ~61% residency, which
+#   would cut the miss rate from 80% to ~39%.
+#
+#   AMD Milan -> Intel. `ft bench bw` reported `isa=avx2`, because g6e's EPYC Milan has no
+#   AVX-512. FreeToken ships a dedicated `dot_dsfp4_avx512` and its dispatcher selects it only on
+#   AVX-512 hardware (`if (t >= ISA_AVX512) return dot_dsfp4_avx512;`), processing 16 weights per
+#   block against AVX2's 8. Since hybrid's whole advantage is CPU-side expert compute measured at
+#   61.9 GB/s, this should raise precisely the term that matters.
+#
+# NOTE that this moves TWO variables at once, so a raw tok/s delta cannot be attributed to either
+# on its own. Two log lines separate them: the bench's `isa=` line attributes the CPU half, and
+# `--moe-cache-auto resolved moe_cache_size=` attributes the residency half. Read both.
+#
+# host RAM is unchanged at 256 GiB, so the 143 GiB of pinned banks and the preflight floor are
+# identical -- this is not a memory-capacity experiment.
+
+nodeRole: gpu-rtxpro-1x
+
+# us-east-2b: g7e is absent from us-east-2c and had no capacity in us-east-2a where the original mount target lives.
+# Created by `setup-s3files.sh --add-zone us-east-2b`; the file system and its data are shared and
+# only the network path differs.
+checkpoint:
+  source: s3files
+  s3files:
+    claimName: freetoken-model-cache-us-east-2b
+    subPath: deepseek-ai/DeepSeek-V4-Flash-0731
+
+# Held at the g6e baseline's value so the hardware is the only thing that changed. Raising it is a
+# separate experiment, run afterwards on this same node.
+maxRunningRequests: 4

@@ -1,0 +1,25 @@
+# Stable Service name for whichever model is currently served.
+#
+# The engine Deployment/Service names are derived from the model id (ft-openai-gpt-oss-20b,
+# ft-deepseek-ai-deepseek-v4-flash-0731), so agents that targeted them directly would need
+# reconfiguring every time the served model changes. They target this alias instead.
+#
+# The selector deliberately matches the CHART, not a model: exactly one freetoken-serving release
+# runs at a time (one L40S per node, and the expert banks of a second model would not fit beside
+# the first), and scripts/deploy.sh enforces that by removing the previous model's Deployment. So
+# "whichever freetoken-serving pod is Ready" is unambiguous.
+apiVersion: v1
+kind: Service
+metadata:
+  name: freetoken-serving
+  labels:
+    app.kubernetes.io/name: freetoken-serving
+    app.kubernetes.io/component: alias
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: freetoken-serving
+  ports:
+    - name: http
+      port: 1919
+      targetPort: http

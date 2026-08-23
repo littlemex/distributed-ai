@@ -1,0 +1,287 @@
+{{- if not .Values.image }}{{ fail "image is required: build it with serving/image/build.sh and pass the ECR tag" }}{{- end }}
+{{- if not .Values.model }}{{ fail "model is required" }}{{- end }}
+{{- if not .Values.cpu }}{{ fail "cpu is required: an empty value renders an invalid resource quantity and is rejected at apply time" }}{{- end }}
+{{- if not .Values.memory }}{{ fail "memory is required: it both bounds the pinned expert banks and steers Karpenter to an instance size" }}{{- end }}
+{{- if not (has .Values.checkpoint.source (list "s3files" "hf")) }}{{ fail (printf "checkpoint.source must be \"s3files\" or \"hf\" (got %q); an unknown value would silently fall through to the per-pod download path" .Values.checkpoint.source) }}{{- end }}
+{{- $bank := int .Values.expertBankGib -}}
+{{- if lt $bank 1 }}{{ fail "expertBankGib is required (a MODEL FACT from serving/models/<model>.yaml): FreeToken pins the whole expert set in host RAM, so this is what decides whether the model can run at all" }}{{- end }}
+{{- $needGib := add $bank (int .Values.preflight.requiredHeadroomGib) -}}
+{{- /* "the pod's own limit is too small" is knowable HERE, from values, so assert it at render time
+     rather than at runtime. A container cannot usefully inspect this: an initContainer sees its OWN
+     cgroup limit, not the serving container's, so a runtime check would compare the model's
+     requirement against the probe's 128Mi and fail every time. */ -}}
+{{- $memGi := regexFind "^[0-9]+" (.Values.memory | toString) | int -}}
+{{- if not (hasSuffix "Gi" (.Values.memory | toString)) }}{{ fail (printf "memory must be expressed in Gi so it can be checked against expertBankGib (got %q)" .Values.memory) }}{{- end }}
+{{- if lt $memGi $needGib }}{{ fail (printf "memory=%s is below this model's requirement: %d GiB of pinned expert banks + %d GiB headroom = %d GiB. Pinned pages are unreclaimable, so the pod would die on `cudaHostRegister failed` after reading the whole checkpoint. Raise memory (which also steers Karpenter to a larger g6e size) or lower preflight.requiredHeadroomGib if the headroom is genuinely too conservative." .Values.memory $bank (int .Values.preflight.requiredHeadroomGib) $needGib) }}{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "freetoken-serving.name" . }}
+  labels:
+    {{- include "freetoken-serving.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  # Recreate: one L40S per node, and the new pod cannot pin its expert banks until the old pod has
+  # released both the GPU and its (unreclaimable) host pages.
+  strategy:
+    type: Recreate
+  progressDeadlineSeconds: {{ .Values.progressDeadlineSeconds }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ include "freetoken-serving.name" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "freetoken-serving.labels" . | nindent 8 }}
+    spec:
+      nodeSelector:
+        node-role: {{ .Values.nodeRole }}
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      {{- $wantsWarm := eq .Values.checkpoint.source "s3files" -}}
+      {{- $wantsBench := .Values.benchBw.enabled -}}
+      {{- if or .Values.preflight.enabled $wantsWarm $wantsBench }}
+      initContainers:
+      {{- end }}
+      {{- if .Values.preflight.enabled }}
+        # Refuse to start unless the NODE can cover the pinned expert banks. Page-locked memory
+        # cannot be swapped or reclaimed, so an under-provisioned pod is not "slow" -- it is
+        # doomed, and without this check it fails only after reading the entire checkpoint (tens of
+        # minutes for a 160 GB model) with an opaque `cudaHostRegister failed`.
+        #
+        # Scope: this checks the NODE only (MemTotal), i.e. "Karpenter gave us a smaller instance
+        # type than this model needs". The complementary question -- "is the pod's own limit big
+        # enough" -- is asserted at TEMPLATE time above, because an initContainer can only see its
+        # own cgroup limit (128Mi here), never the serving container's.
+        - name: preflight-host-ram
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              need_gib={{ $needGib }}
+              need_kib=$((need_gib * 1024 * 1024))
+              total_kib=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+              printf '[preflight] expert banks need %s GiB pinned; +%s GiB headroom => require %s GiB\n' \
+                '{{ $bank }}' '{{ .Values.preflight.requiredHeadroomGib }}' "$need_gib"
+              printf '[preflight] node MemTotal: %s GiB\n' "$((total_kib / 1024 / 1024))"
+              if [ "$total_kib" -lt "$need_kib" ]; then
+                printf '[preflight][FAIL] node has %s GiB but this model needs %s GiB of host RAM.\n' \
+                  "$((total_kib / 1024 / 1024))" "$need_gib" >&2
+                printf '[preflight][FAIL] FreeToken pins the expert set in host RAM (non-swappable);\n' >&2
+                printf '[preflight][FAIL] swap and extra VRAM cannot substitute. Raise .Values.memory so\n' >&2
+                printf '[preflight][FAIL] Karpenter selects a larger g6e size, or serve a smaller model.\n' >&2
+                exit 1
+              fi
+              printf '[preflight] OK\n'
+          resources:
+            requests: { cpu: "100m", memory: 128Mi }
+            limits: { memory: 128Mi }
+      {{- end }}
+      {{- if $wantsWarm }}
+        # S3 Files imports object metadata LAZILY, on access. Opening a deep path before its
+        # parents have been walked can therefore hit a negative cache and report ENOENT for a file
+        # that exists in the bucket. FreeToken opens config.json, inference/config.json, and 46
+        # safetensors shards by exact path, so it is squarely exposed to this. Walking the tree
+        # first forces the import, and checking the two config files here converts a confusing
+        # mid-load parse error into an explicit, early failure.
+        - name: warm-checkpoint-metadata
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              dir='{{ include "freetoken-serving.modelPath" . }}'
+              printf '[warm] walking %s to force S3 Files metadata import\n' "$dir"
+              find "$dir" -maxdepth 3 >/dev/null 2>&1 || true
+              n=$(find "$dir" -name '*.safetensors' 2>/dev/null | wc -l)
+              printf '[warm] visible safetensors shards: %s\n' "$n"
+              if [ ! -f "$dir/config.json" ]; then
+                printf '[warm][FAIL] %s/config.json not visible after the metadata walk.\n' "$dir" >&2
+                printf '[warm][FAIL] Check the subPath and that sync-checkpoint.sh completed.\n' >&2
+                exit 1
+              fi
+              if [ -d "$dir/inference" ] && [ ! -f "$dir/inference/config.json" ]; then
+                printf '[warm][FAIL] inference/ exists but inference/config.json is missing.\n' >&2
+                exit 1
+              fi
+              if [ "$n" -eq 0 ]; then
+                printf '[warm][FAIL] no safetensors shards visible under %s.\n' "$dir" >&2
+                exit 1
+              fi
+              printf '[warm] OK\n'
+          volumeMounts:
+            - name: checkpoint
+              mountPath: /models
+              readOnly: true
+          resources:
+            requests: { cpu: "200m", memory: 256Mi }
+            limits: { memory: 256Mi }
+      {{- end }}
+      {{- if $wantsBench }}
+        # Measured HERE, on this node, because the profile is keyed on hardware: FreeToken ignores a
+        # benchbw.json whose recorded GPU name does not match the running GPU. Runs last of the
+        # initContainers because it is the slow one -- the instant RAM preflight and the metadata
+        # walk should fail first, before spending minutes on a bench.
+        - name: bench-bw
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args:
+            - bench
+            - bw
+            - --out=/bench/benchbw.json
+            {{- with .Values.benchBw.dtype }}
+            - --dtype={{ . }}
+            {{- end }}
+            {{- range .Values.benchBw.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          env:
+            - name: CUDA_HOME
+              value: /usr/local/cuda
+          volumeMounts:
+            - name: benchbw
+              mountPath: /bench
+          resources:
+            requests:
+              # The same single GPU the serving container will use. An initContainer's request is
+              # not additive with the app container's, so the pod still holds exactly one GPU.
+              nvidia.com/gpu: {{ .Values.gpuCount }}
+              cpu: {{ .Values.cpu | quote }}
+              memory: 8Gi
+            limits:
+              nvidia.com/gpu: {{ .Values.gpuCount }}
+              memory: 8Gi
+      {{- end }}
+      containers:
+        - name: freetoken
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args:
+            - serve
+            - --model={{ include "freetoken-serving.modelPath" . }}
+            - --served-model-name={{ include "freetoken-serving.served" . }}
+            - --host=0.0.0.0
+            - --port={{ .Values.port }}
+            - --max-running-requests={{ .Values.maxRunningRequests }}
+            - --moe-backend={{ .Values.moeBackend }}
+            {{- if .Values.moeCacheSize }}
+            - --moe-cache-size={{ int64 .Values.moeCacheSize }}
+            {{- else if .Values.moeCacheRate }}
+            - --moe-cache-rate={{ .Values.moeCacheRate }}
+            {{- else if .Values.moeCacheAuto }}
+            - --moe-cache-auto
+            {{- end }}
+            {{- with .Values.kvReserveTokens }}
+            - --kv-reserve-tokens={{ int64 . }}
+            {{- end }}
+            {{- with .Values.memoryRatio }}
+            - --memory-ratio={{ . }}
+            {{- end }}
+            {{- with .Values.moeCpuThreads }}
+            - --moe-cpu-threads={{ . }}
+            {{- end }}
+            {{- with .Values.moeCpuLayers }}
+            - --moe-cpu-layers={{ . }}
+            {{- end }}
+            {{- with .Values.moeHybridMaxFetch }}
+            - --moe-hybrid-max-fetch={{ int64 . }}
+            {{- end }}
+            {{- with .Values.maxOutputTokens }}
+            - --max-output-tokens={{ int64 . }}
+            {{- end }}
+            {{- with .Values.maxSeqLenOverride }}
+            - --max-seq-len-override={{ int64 . }}
+            {{- end }}
+            {{- range .Values.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          env:
+            - name: HF_HOME
+              value: /hf-cache
+            - name: CUDA_HOME
+              value: /usr/local/cuda
+            {{- if .Values.benchBw.enabled }}
+            # Overrides the default ~/.cache/freetoken/benchbw.json, which would be empty here --
+            # the profile lives in the emptyDir the bench-bw initContainer just wrote to.
+            - name: FREETOKEN_BENCHBW_PATH
+              value: /bench/benchbw.json
+            {{- end }}
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          resources:
+            requests:
+              cpu: {{ .Values.cpu | quote }}
+              memory: {{ .Values.memory }}
+              nvidia.com/gpu: {{ .Values.gpuCount }}
+            limits:
+              # memory limit == request: pinned pages are unreclaimable, so a Burstable pod would
+              # only discover under pressure that there is nothing to reclaim.
+              memory: {{ .Values.memory }}
+              nvidia.com/gpu: {{ .Values.gpuCount }}
+          # NOT an httpGet on /health. FreeToken starts uvicorn BEFORE it loads the model and
+          # /health returns HTTP 200 the whole time, reporting its state in the BODY:
+          #   {"status":"loading","phase":"expert_banks","progress":{"done_bytes":..,"total_bytes":..}}
+          #   {"status":"ok",...}
+          # An httpGet probe only sees the status code, so it would mark the pod Ready minutes
+          # before it can serve -- and because the freetoken-serving alias selects on a label, the
+          # alias would immediately route real traffic to a pod still reading 143 GiB of experts.
+          # Only an exec probe can read the body, so require status "ok" explicitly.
+          startupProbe:
+            exec:
+              command: ["/bin/sh", "-c",
+                        "curl -sf --max-time 5 http://127.0.0.1:{{ .Values.port }}/health | grep -q '\"status\":\"ok\"'"]
+            periodSeconds: {{ .Values.startupPeriodSeconds }}
+            failureThreshold: {{ .Values.startupFailureThreshold }}
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c",
+                        "curl -sf --max-time 5 http://127.0.0.1:{{ .Values.port }}/health | grep -q '\"status\":\"ok\"'"]
+            periodSeconds: 15
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+            {{- if eq .Values.checkpoint.source "s3files" }}
+            - name: checkpoint
+              mountPath: /models
+              readOnly: true
+            {{- else }}
+            - name: hf-cache
+              mountPath: /hf-cache
+            {{- end }}
+            {{- if .Values.benchBw.enabled }}
+            - name: benchbw
+              mountPath: /bench
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.shmSize }}
+        {{- if .Values.benchBw.enabled }}
+        # Tiny JSON, and deliberately pod-scoped rather than persisted: a profile is only valid for
+        # the GPU it was measured on, and Karpenter may place the next pod on a different size.
+        - name: benchbw
+          emptyDir:
+            sizeLimit: 16Mi
+        {{- end }}
+        {{- if eq .Values.checkpoint.source "s3files" }}
+        - name: checkpoint
+          persistentVolumeClaim:
+            claimName: {{ required "checkpoint.s3files.claimName is required when source=s3files" .Values.checkpoint.s3files.claimName }}
+            readOnly: true
+        {{- else }}
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: {{ .Values.checkpoint.hf.sizeLimit }}
+        {{- end }}

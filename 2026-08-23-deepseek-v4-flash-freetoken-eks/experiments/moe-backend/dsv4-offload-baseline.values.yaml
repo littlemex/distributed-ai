@@ -1,0 +1,20 @@
+# Experiment overlay: revert to --moe-backend offload, the BASELINE hybrid is measured against.
+# Layered after serving/values/deepseek-v4-flash.values.yaml.
+#
+# hybrid is the shipped default (see that file), so this overlay exists to reproduce the comparison
+# rather than to recommend anything. offload keeps every expert miss on the PCIe path instead of
+# computing most of them on the CPU, and measured 7.51-7.52 tok/s at concurrency 1 against hybrid's
+# 9.03-10.07, with TPOT 90.5 ms against 56.6-68.1 ms.
+#
+# It is also the more reproducible of the two -- bandwidth-bound on a fixed path, it repeats to
+# within 0.1% at c=1, whereas hybrid spreads about +/-10% across 24 CPU threads. That makes offload
+# the better control when measuring anything else.
+moeBackend: offload
+
+# Not needed without the CPU executor, and left unset so nothing implies the CPU pool is in play.
+moeCpuThreads: ""
+
+# The bandwidth profile only informs hybrid's fetch/compute split and `auto`'s backend choice, so
+# skip the bench and save several minutes of startup on a pure offload run.
+benchBw:
+  enabled: false

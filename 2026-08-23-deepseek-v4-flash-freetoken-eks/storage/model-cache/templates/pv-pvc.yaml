@@ -1,0 +1,12 @@
+{{- if not .Values.volumeHandle }}
+{{- fail "volumeHandle is required: run storage/setup-s3files.sh and pass its s3files:<fs>::<ap> output" }}
+{{- end }}
+{{- if not .Values.zone }}
+{{- fail "zone is required: the S3 Files mount target is single-AZ and its NFS endpoint resolves only from that AZ, so an unpinned PV lets the scheduler place a pod where the mount hangs forever in ContainerCreating. Pass the mount target's AZ (setup-s3files.sh prints it)." }}
+{{- end }}
+{{- include "s3files.pv-pvc" (dict
+      "name" .Values.name
+      "namespace" .Values.namespace
+      "volumeHandle" .Values.volumeHandle
+      "zone" .Values.zone
+      "capacity" .Values.capacity) }}

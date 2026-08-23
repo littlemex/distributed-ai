@@ -1,0 +1,24 @@
+# Experiment overlay: raise maxRunningRequests from 4 to 16.
+# Layered after serving/values/deepseek-v4-flash.values.yaml (hybrid is now its default).
+#
+# Why this is the cheapest remaining lever. Aggregate throughput already scaled 2.2-2.3x from
+# concurrency 1 to 4 (offload 7.5 -> 16.6, hybrid 9.0 -> 20.7 tok/s) while per-stream decode fell
+# only from 11.1 to 7.1 tok/s. That shape is expert-fetch amortization: concurrent requests in the
+# same decode step share whatever experts that step pulls, so the ~2.6 GB of expert traffic a token
+# implies is paid once for the batch rather than once per request. Nothing in the c=1..4 data
+# suggests 4 is the knee, and `maxRunningRequests` is the only thing capping it.
+#
+# What would show a limit. Two mechanisms bound this, and they are distinguishable:
+#   KV      -- 64 128 tokens total across all running requests at the baseline budget. At 16
+#              concurrent requests that is ~4 000 tokens each before the pool is the constraint.
+#   thrash  -- more concurrent requests route to more DISTINCT experts per step, so the union grows
+#              and the 19.9%-resident cache is asked to serve a wider working set. Beyond some
+#              point the per-step union stops overlapping and amortization stops paying.
+# Watch per-stream decode tok/s: graceful amortization keeps aggregate rising while per-stream
+# decays slowly; thrash makes per-stream collapse faster than aggregate gains.
+#
+# CUDA graphs are captured for batch sizes [1, 2, 4] at the baseline; raising the cap changes which
+# batch sizes are captured, so a step beyond the captured set falls back to eager execution. Worth
+# noting when reading the result -- a regression at high concurrency may be graph coverage rather
+# than expert thrash.
+maxRunningRequests: 16

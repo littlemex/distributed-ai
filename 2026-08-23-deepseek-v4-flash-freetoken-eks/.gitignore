@@ -1,0 +1,9 @@
+# local / env-specific (never commit real values)
+client/ft-agents.env
+client/agents.env
+**/*.local.json
+!**/*.local.json.example
+
+# helm dependency build artifacts (the s3files-lib dep is resolved from infra/ by path)
+storage/model-cache/charts/
+storage/model-cache/Chart.lock

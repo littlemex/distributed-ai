@@ -1,0 +1,64 @@
+# hermes pod (keyless): `kubectl exec -it deploy/hermes -- bash -lc hermes` (agents.sh hermes).
+# Uses the self-hosted Qwen3.8-27B via the OpenAI-compatible "ollama" provider override, and
+# web search via the bedrock-websearch MCP (so it does not fall back to a headless browser /
+# curl). Hermes needs a long context; the vLLM backend serves the full YaRN 1M context.
+#
+# Config applied at start with `hermes config set` / `hermes mcp add` (Hermes' real config is
+# /opt/data/config.yaml, not ~/.hermes):
+#  - model.default is the BARE model id; the provider comes from OLLAMA_* env.
+#  - terminal.cwd is a world-accessible git dir OUTSIDE /root (agent runs sandboxed, non-root).
+#  - bedrock-websearch registered as a stdio MCP; AWS creds via Pod Identity (SA hermes).
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: hermes, labels: { app: hermes } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: hermes } }
+  template:
+    metadata:
+      labels: { app: hermes }
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
+    spec:
+      serviceAccountName: hermes          # Pod Identity -> Bedrock (web_search)
+      nodeSelector: { node-role: cpu }
+      containers:
+        - name: hermes
+          image: nousresearch/hermes-agent:v2026.8.18
+          env:
+            - { name: OLLAMA_API_KEY, value: "vllm-local" }
+            - { name: OLLAMA_BASE_URL, value: "http://freetoken-serving:1919/v1" }
+            - { name: AWS_REGION, value: "us-east-1" }
+            - { name: BEDROCK_WS_REGION, value: "us-east-1" }
+            - { name: WEBSEARCH, value: "0" }   # deploy.sh sets this to 1 with --websearch
+          command: ["/bin/sh","-lc"]
+          args:
+            - >
+              set -e;
+              ln -sf /opt/hermes/bin/hermes /usr/local/bin/hermes;
+              mkdir -p /opt/data/work && chmod 777 /opt/data/work;
+              cd /opt/data/work; git rev-parse --git-dir >/dev/null 2>&1 || git init -q; git config user.email agent@local; git config user.name hermes;
+              hermes config set model.default "Qwen/Qwen3.8-27B" >/dev/null 2>&1 || true;
+              hermes config set terminal.cwd "/opt/data/work" >/dev/null 2>&1 || true;
+              [ "${WEBSEARCH:-0}" = 1 ] && (echo y | hermes mcp add bedrock-websearch --command python3 --env BEDROCK_WS_REGION="$BEDROCK_WS_REGION" --args /opt/tools/bedrock_websearch.py --mcp >/dev/null 2>&1) || true;
+              touch /tmp/ready;
+              echo '[ready] use: kubectl exec -it deploy/hermes -- bash -lc hermes';
+              exec sleep infinity
+          readinessProbe:
+            exec: { command: ["sh","-c","test -f /tmp/ready"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits: { cpu: "2", memory: 6Gi }
+          volumeMounts:
+            - { name: tools, mountPath: /opt/tools, readOnly: true }
+            # Shared S3 Files volume: the same checkpoint/artifact store the serving pod
+            # reads, mounted RWX across every agent pod. Read-only here and at the node.
+            - { name: shared, mountPath: /shared, readOnly: true }
+      volumes:
+        - name: tools
+          configMap: { name: hermes-tools, items: [{ key: bedrock_websearch.py, path: bedrock_websearch.py }] }
+        - name: shared
+          persistentVolumeClaim: { claimName: freetoken-model-cache, readOnly: true }
+

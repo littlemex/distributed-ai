@@ -1,0 +1,16 @@
+apiVersion: v2
+name: freetoken-model-cache
+description: >-
+  Binds the shared S3 Files model-cache file system into the serving namespace as a static
+  CSI PV + PVC, so every FreeToken pod reads one copy of a multi-hundred-GB checkpoint in
+  place instead of downloading its own. Deliberately a thin wrapper: the PV/PVC itself is
+  rendered by infra/eks/charts/s3files-lib, which already encodes the volumeHandle format,
+  the mandatory access point, the ReadWriteMany-not-ReadOnlyMany driver quirk, and the
+  single-AZ nodeAffinity pin. Re-implementing those here would create the third divergent
+  copy that library was factored out to prevent.
+type: application
+version: 0.1.0
+dependencies:
+  - name: s3files-lib
+    version: 0.1.0
+    repository: "file://../../../infra/eks/charts/s3files-lib"

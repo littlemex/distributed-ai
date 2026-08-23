@@ -1,0 +1,135 @@
+# Default values for freetoken-serving.
+# One release serves one model on ONE L40S, with the MoE experts held in pinned host RAM.
+# Per-model overlays live in serving/values/<model>.values.yaml; the model FACTS those overlays
+# derive from live in serving/models/<model>.yaml.
+#
+# The mental model that governs every knob below: in FreeToken, VRAM holds the dense weights, the
+# KV cache, and an LRU cache of expert SLOTS, while the full expert set lives in PINNED HOST RAM.
+# So host RAM -- not VRAM -- is what decides whether a model can run at all, and PCIe is what
+# decides how fast it runs. Sizing therefore starts from hostRam, not from the GPU.
+
+image: ""                    # required: the ECR image built by serving/image/build.sh
+imagePullPolicy: IfNotPresent
+
+# --- model -----------------------------------------------------------------------------------
+model: ""                    # HF repo id, or a path under the mounted checkpoint volume
+servedModelName: ""          # defaults to the basename of `model`
+
+# --- node selection --------------------------------------------------------------------------
+# Capability is encoded in the pool NAME. This pool is every 1x-L40S g6e size; which SIZE the pod
+# lands on is derived from resources.memory below, so the chart never names an instance type.
+nodeRole: gpu-l40s-1x
+
+# --- host memory: THE binding constraint -----------------------------------------------------
+# expertBankGib is a MODEL FACT (from serving/models/<model>.yaml): the pinned host bytes
+# FreeToken must cudaHostRegister for this checkpoint's experts. It is not a tuning dial.
+#
+# Page-locked memory is by definition non-swappable, so this is a hard floor: adding swap to the
+# node cannot substitute for it, and FreeToken has no disk-resident expert path (the non-pinned
+# residency classes LOCKED and PAGEABLE both raise NotImplementedError). Under-provision and the
+# pod dies on `cudaHostRegister failed for N GiB` -- which, without the preflight below, happens
+# only AFTER the whole checkpoint has been read.
+expertBankGib: 0
+# memory request == limit: pinned pages are unreclaimable, so a pod whose memory limit exceeded its
+# request would only discover under pressure that there is nothing to reclaim. Note this yields
+# Burstable, NOT Guaranteed, QoS -- Guaranteed would additionally require a CPU limit, and a CPU
+# limit is deliberately omitted because CFS throttling would stall FreeToken's CPU MoE executor
+# mid-decode. Memory is the resource that must be exact here; CPU is not. This value is
+# also what steers Karpenter to a node size, so it must exceed expertBankGib by the dense
+# weights + KV + load-time transients.
+memory: ""                   # e.g. "200Gi" for DeepSeek-V4-Flash, "24Gi" for gpt-oss-20b
+cpu: ""                      # FreeToken's CPU MoE executor scales with cores; see moeCpuThreads
+# /dev/shm is an emptyDir with medium:Memory, so it counts AGAINST the memory limit above. This
+# chart is single-GPU (gpuCount is always 1), so there is no tensor-parallel worker exchange to
+# size it for -- keep it small so the budget goes to expert banks instead.
+shmSize: 1Gi
+
+# Fail fast if the NODE cannot cover expertBankGib. Without this the failure surfaces as an opaque
+# CUDA error tens of minutes into the checkpoint read. (Whether the POD's own limit is sufficient is
+# checked at Helm render time instead -- a container can only see its own cgroup, not the serving
+# container's.)
+preflight:
+  enabled: true
+  # Headroom over expertBankGib the preflight demands, to cover dense weights + KV + transients.
+  # Purely a guard: it never grants memory, it only refuses to start without it.
+  requiredHeadroomGib: 24
+
+# --- hardware bandwidth profile (`ft bench bw`) -----------------------------------------------
+# hybrid has to decide, per layer per step, how many of its expert misses to FETCH over PCIe versus
+# COMPUTE on the CPU. With --moe-hybrid-max-fetch left at auto it derives that split from a measured
+# CPU-MoE-vs-PCIe bandwidth ratio, and WITHOUT a profile it falls back to the most conservative
+# possible cap of one fetch per layer per step:
+#   --moe-hybrid-max-fetch auto: no usable `ft bench bw` profile for 'ds_fp4' experts;
+#   using a fixed fetch cap of 1
+# Enabling this runs `ft bench bw` as an initContainer so the profile is measured on the ACTUAL node
+# the pod landed on. That matters twice: the ratio is hardware-specific, and FreeToken discards a
+# profile whose recorded GPU name differs from the running one. The bench builds synthetic banks
+# capped at 2 GiB, so it does NOT read the checkpoint and its cost is independent of model size.
+# Only meaningful with moeBackend hybrid (or auto, which consults the same profile to choose).
+benchBw:
+  enabled: false
+  # Expert format(s) to bench. Restricting it to the format this model actually uses avoids paying
+  # for entries nothing will read. DeepSeek-V4 experts are ds_fp4; gpt-oss is mxfp4.
+  dtype: ""                  # e.g. "ds_fp4"; empty = every dtype the bench knows
+  extraArgs: []              # e.g. ["--threshold=2.5", "--pcie-iters=60"]
+
+# --- accelerator ------------------------------------------------------------------------------
+# Always 1: every instance type in the gpu-l40s-1x pool has exactly one L40S, so the chart and the
+# pool cannot drift on GPU count.
+gpuCount: 1
+
+# --- checkpoint source ------------------------------------------------------------------------
+# s3files: read the checkpoint IN PLACE from a shared S3 Files (NFS) mount. One download serves
+#          every pod and survives pod/node replacement -- for a 160 GB checkpoint that is the
+#          difference between a one-time cost and a per-restart cost.
+# hf:      each pod downloads from Hugging Face into its own emptyDir. Simple, but re-downloads on
+#          every pod start; only sane for small checkpoints.
+checkpoint:
+  source: hf                 # s3files | hf
+  s3files:
+    claimName: ""            # PVC created from infra/eks/charts/s3files-lib
+    subPath: ""              # checkpoint dir within the file system
+    # DeepSeek-V4 checkpoints MUST retain their inference/config.json subdir -- FreeToken reads
+    # the authoritative model args from there, so a sync that flattens subdirs yields a
+    # checkpoint it cannot load even with every safetensors shard present.
+  hf:
+    sizeLimit: 200Gi
+  # FreeToken reads checkpoints with chunked multi-threaded O_DIRECT and falls back to mmap when
+  # O_DIRECT is unavailable. NFS does not support O_DIRECT, so an s3files checkpoint takes the
+  # mmap path: correct, but load throughput is the mount's, not the NVMe's.
+
+# --- MoE backend ------------------------------------------------------------------------------
+# auto   -> dense resolves to fused; MoE resolves to offload, upgraded to hybrid when a cached
+#           `ft bench bw` profile recommends it
+# offload-> experts in host RAM, LRU of expert slots on GPU, misses stream over PCIe
+# hybrid -> per step, fetch some misses over PCIe and compute the rest on CPU, overlapped
+# cpu    -> compute misses on the CPU instead of fetching them
+# fused  -> all experts resident in VRAM (never auto-selected; needs the VRAM)
+moeBackend: auto
+moeCacheAuto: true           # size the GPU expert cache from free VRAM (default for offload)
+moeCacheSize: ""             # GPU expert-cache size in SLOTS (overrides cache-auto)
+moeCacheRate: ""             # ...or as a fraction of all experts
+kvReserveTokens: ""          # KV token floor reserved BEFORE cache-auto fills experts (dflt 8192)
+memoryRatio: ""              # fraction of free VRAM the engine may use (dflt 0.9)
+moeCpuThreads: ""            # CPU MoE worker threads (dflt physical cores)
+moeCpuLayers: ""             # which MoE layers decode on CPU (dflt all on GPU)
+moeHybridMaxFetch: ""        # max experts fetched over PCIe per layer per step
+
+# --- serving tuning ---------------------------------------------------------------------------
+maxRunningRequests: 4        # FreeToken default; expert-cache thrash grows with concurrency
+maxOutputTokens: ""          # default output budget for requests that omit one (dflt 32768)
+maxSeqLenOverride: ""        # cap context below the checkpoint's native length
+extraArgs: []                # escape hatch; keep empty and justify in the overlay
+
+extraEnv: {}
+
+# --- service ----------------------------------------------------------------------------------
+port: 1919                   # FreeToken's default bind port
+replicas: 1
+
+# Cold start = node launch + image pull (CUDA devel base is multi-GB) + checkpoint read +
+# pin-after-fill + kernel warmup. FreeToken's own note: pinning ~137 GiB alone costs ~47 s once
+# the pages are resident, and the read that fills them dominates.
+startupPeriodSeconds: 30
+startupFailureThreshold: 120   # ~60 min
+progressDeadlineSeconds: 4200

@@ -257,14 +257,19 @@ spec:
           resources:
             requests:
               cpu: {{ $ib.cpu | default "2" | quote }}
-              memory: 8Gi
+              # Overridable, like cpu and ephemeralStorage. It was previously hardcoded at 8Gi,
+              # which silently capped what this builder could build: an image whose Dockerfile
+              # compiles anything substantial (e.g. a CUDA extension against torch) is OOMKilled
+              # with exit 137 and NO buildkit log, because the container is SIGKILLed rather than
+              # failing a build step. Raise imageBuild.memory for such images. Default unchanged.
+              memory: {{ $ib.memory | default "8Gi" }}
               # Peak build disk ~= pushed image size x4-5 (base unpacked + snapshot, uncompressed);
               # the buildkit state emptyDir counts against this too. 30Gi fits ddp-sample on the
               # shared CPU pool's 150Gi root. For a large image raise imageBuild.ephemeralStorage AND
               # set dedicatedPool.enabled=true, else the Job stays Pending or is Evicted mid-build.
               ephemeral-storage: {{ $ib.ephemeralStorage | default "30Gi" }}
             limits:
-              memory: 8Gi
+              memory: {{ $ib.memory | default "8Gi" }}
               ephemeral-storage: {{ $ib.ephemeralStorage | default "30Gi" }}
           volumeMounts:
             - { name: dockercfg, mountPath: /dockercfg }

@@ -1,0 +1,25 @@
+# Experiment overlay: DeepSeek-V4-Flash at its FULL native 1M context.
+# Layered after serving/values/deepseek-v4-flash.values.yaml (and optionally the hybrid overlay).
+#
+# What this tests. The YaRN extension to 1M is not something to configure -- it is already baked
+# into the checkpoint and FreeToken's DSV4 args implement it:
+#   original_seq_len 65536 x rope_factor 16 = 1 048 576
+# So the open question is not "can we reach 1M" but "does the KV for 1M leave enough VRAM for an
+# expert cache worth having". Those two consumers share one 45 GiB L40S, and the measured baseline
+# spends 27.3 GiB of it on 2 193 expert slots (19.9% residency) against just 2.09 GiB of KV at a
+# 32 768 cap.
+#
+# DSV4's KV is not flat per token: dsv4_cost_model splits it into window / compressed / indexer /
+# state-ring tiers, with the window tier scaled by swa_full_tokens_ratio (0.2) and the compressed
+# tier at 1/ratio. That is why the question is worth measuring rather than extrapolating -- a naive
+# linear scaling from the 32 768 point would be wrong in an unknown direction.
+#
+# Read the outcome from the startup log, not from a benchmark:
+#   --moe-cache-auto resolved moe_cache_size=<N> num_pages=<P>
+# and compare N against the baseline's 2 193. A large drop means 1M is technically reachable but
+# pays for itself in expert residency, i.e. in decode speed.
+maxSeqLenOverride: 1048576
+
+# The KV floor --moe-cache-auto honours BEFORE it spends the remainder on expert slots. Left at the
+# engine default so the split is the engine's own decision rather than something forced here.
+kvReserveTokens: 8192

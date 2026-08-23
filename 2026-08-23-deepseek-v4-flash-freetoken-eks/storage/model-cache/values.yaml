@@ -1,0 +1,24 @@
+# Values for freetoken-model-cache.
+# Populate these from storage/setup-s3files.sh's output (it prints all three).
+
+# PV + PVC name. The serving chart's checkpoint.s3files.claimName must match this.
+name: freetoken-model-cache
+
+# Namespace of the PVC (the PV is cluster-scoped).
+namespace: freetoken
+
+# "s3files:<FileSystemId>::<AccessPointId>". A bare fs-id makes the EFS CSI driver take the EFS
+# code path: it resolves <fs>.efs.<region>.amazonaws.com, calls elasticfilesystem
+# DescribeMountTargets, gets "file system not found", and the mount ends in
+# `mount.nfs4: mount system call failed` after a connection timeout. The access point is
+# mandatory -- an fs id alone will not mount even with the s3files: prefix.
+volumeHandle: ""
+
+# AZ of the single mount target. STRONGLY recommended: the NFS endpoint resolves per-AZ, so a pod
+# scheduled in another AZ hangs in ContainerCreating forever rather than failing. This is the
+# constraint that has to travel with the VOLUME rather than with the Karpenter pool, which is why
+# the gpu-l40s-1x pool stays AZ-agnostic.
+zone: ""
+
+# Nominal only; S3 Files is not capacity-bound.
+capacity: 5Gi

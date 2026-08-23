@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "freetoken-serving.name" . }}
+  labels:
+    {{- include "freetoken-serving.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ include "freetoken-serving.name" . }}
+  ports:
+    - name: http
+      port: {{ .Values.port }}
+      targetPort: http
