@@ -388,3 +388,83 @@ class TestAgentTestCommand:
     def test_a_label_the_model_already_got_right_is_untouched(self, monkeypatch):
         monkeypatch.setattr(tools, "uses_django_runner", lambda: True)
         assert tools.test_command("queries.tests").endswith("queries.tests")
+
+
+class TestRepairingTheDatasetsOwnIds:
+    """`PASS_TO_PASS` is stored whitespace-separated, so a parametrised case with a space in it
+    arrives as fragments. Eleven of the twenty-four instances in the pilot subset have some, and
+    every fragment is a test pytest cannot find — which took the run to exit 4 and the instance
+    out of the comparison entirely.
+    """
+
+    def test_fragments_are_rejoined_on_bracket_balance(self):
+        assert score.repair_ids(
+            ("a.py::test_powers[-10-1", "/", "10]", "a.py::test_x[1.0-m]")
+        ) == ("a.py::test_powers[-10-1 / 10]", "a.py::test_x[1.0-m]")
+
+    def test_a_balanced_list_is_untouched(self):
+        ids = ("a.py::test_x", "a.py::test_y[1-2]")
+        assert score.repair_ids(ids) == ids
+
+    def test_a_fragment_that_never_closes_is_left_for_the_runner_to_reject(self):
+        assert score.repair_ids(("a.py::test_x[oops",)) == ("a.py::test_x[oops",)
+
+    def test_ids_pytest_reports_missing_are_read_back(self):
+        text = (
+            "ERROR: not found: /testbed/a.py::test_z[q\n"
+            "(no name '/testbed/a.py::test_z[q' in any of [<Module a.py>])\n"
+        )
+        assert score._not_found(text) == {"a.py::test_z[q"}
+
+    def outcome(self, monkeypatch, *, decisive, missing_first_run):
+        """Two runs: the first reports the missing ids, the second is clean."""
+        state = {"n": 0, "commands": []}
+
+        def fake_run(command, timeout=None):
+            state["n"] += 1
+            state["commands"].append(command)
+            named = [w for w in shlex.split(command)[3:] if not w.startswith("-")]
+            first = state["n"] == 1
+
+            class Result:
+                stdout = (
+                    "".join(f"ERROR: not found: /testbed/{m}\n" for m in missing_first_run)
+                    if first
+                    else "".join(f"PASSED {n}\n" for n in named)
+                )
+                stderr = ""
+                returncode = 4 if first else 0
+
+            return Result()
+
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: False)
+        monkeypatch.setattr(score, "run", fake_run)
+        ids = tuple(f"a/b.py::test_{i}" for i in range(20))
+        return score.pytest_outcome(ids, timeout=1, decisive=decisive), state
+
+    def test_a_regression_list_drops_the_missing_ids_and_says_which(self, monkeypatch):
+        result, state = self.outcome(
+            monkeypatch, decisive=False, missing_first_run=["a/b.py::test_3"]
+        )
+        assert result["scoreable"] and result["ok"]
+        assert result["not_in_checkout"] == ["a/b.py::test_3"]
+        assert state["n"] == 2
+        assert "test_3 " not in state["commands"][1] + " "
+
+    def test_the_decisive_list_is_not_scored_on_a_subset(self, monkeypatch):
+        """Scoring "did you fix it" on some of the tests that define the fix is a different
+        question wearing the same name."""
+        result, state = self.outcome(
+            monkeypatch, decisive=True, missing_first_run=["a/b.py::test_3"]
+        )
+        assert result["scoreable"] is False
+        assert result["basis"] == "ids this checkout does not contain"
+        assert state["n"] == 1
+
+    def test_losing_most_of_the_regression_list_is_not_a_score_either(self, monkeypatch):
+        result, _ = self.outcome(
+            monkeypatch,
+            decisive=False,
+            missing_first_run=[f"a/b.py::test_{i}" for i in range(15)],
+        )
+        assert result["scoreable"] is False

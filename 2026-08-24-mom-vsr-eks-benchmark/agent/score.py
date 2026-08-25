@@ -88,7 +88,7 @@ def reset_checkout() -> None:
     run("git checkout -- .")
 
 
-def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
+def pytest_outcome(tests: tuple[str, ...], *, timeout: int, decisive: bool = False) -> dict:
     """Run named tests and report what happened, without reading silence as success.
 
     A zero exit status is not enough on its own. pytest exits zero when every test was
@@ -107,6 +107,7 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
         return {"ran": 0, "passed": 0, "failed": 0, "ok": False, "scoreable": False,
                 "detail": "no tests named: this instance cannot be scored"}
     django = tools.uses_django_runner()
+    tests = tests if django else repair_ids(tests)
     batches = _batched(tests)
     results = []
     for batch in batches:
@@ -119,6 +120,24 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
             return {"ran": len(tests), "passed": 0, "failed": 0, "skipped": 0, "ok": False,
                     "scoreable": False, "returncode": None, "basis": "timeout",
                     "detail": f"a batch did not finish within {timeout}s"}
+
+    missing = set().union(*(_not_found(r["text"]) for r in results)) if results else set()
+    dropped: tuple[str, ...] = ()
+    if missing and not django:
+        remaining = tuple(test for test in tests if test not in missing)
+        # The decisive list has to be complete: scoring "did you fix it" on a subset of the
+        # tests that define the fix is a different question with the same name. A regression
+        # list may lose a few and say so — but not most of itself.
+        if not decisive and remaining and len(remaining) >= 0.9 * len(tests):
+            dropped = tuple(sorted(missing))
+            results = [_run_batch(b, django=django, timeout=timeout) for b in _batched(remaining)]
+            tests = remaining
+        else:
+            return {"ran": len(tests), "passed": 0, "failed": 0, "skipped": 0, "ok": False,
+                    "scoreable": False, "returncode": 4,
+                    "basis": "ids this checkout does not contain",
+                    "not_in_checkout": sorted(missing)[:20],
+                    "detail": "\n".join(r["text"][-600:] for r in results)[-1600:]}
 
     passed = sum(r["passed"] for r in results)
     failed = sum(r["failed"] for r in results)
@@ -149,12 +168,53 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
         "failed": failed,
         "skipped": skipped,
         "batches": len(results),
+        # Named, not just counted: a reader has to be able to check that what was dropped was
+        # a fragment of the dataset's own list and not a test the episode broke.
+        "not_in_checkout": list(dropped),
         "ok": returncode == 0 and passed >= len(tests),
         "scoreable": scoreable,
         "returncode": returncode,
         "basis": basis,
         "detail": detail[-1600:],
     }
+
+
+def repair_ids(tests: tuple[str, ...]) -> tuple[str, ...]:
+    """Re-join ids that the dataset split on whitespace.
+
+    `PASS_TO_PASS` is stored whitespace-separated, so a parametrised id whose case contains a
+    space arrives as fragments: `test_powers[-10-1`, `/`, `10]`. Eleven of the twenty-four
+    instances in the pilot subset have some — up to 36 of matplotlib's 813 — and every fragment
+    is a test pytest cannot find, which took the whole run to exit 4 and the whole instance out
+    of the comparison.
+
+    Bracket balance is the join rule: a fragment is an id with an unmatched `[`, and the
+    following entries belong to it until the brackets close. Single spaces, because that is
+    what splitting on whitespace leaves. An id this cannot repair is reported by pytest as not
+    found, and handled there rather than guessed at here.
+    """
+    out: list[str] = []
+    pending: list[str] = []
+    for test in tests:
+        pending.append(test)
+        joined = " ".join(pending)
+        if joined.count("[") <= joined.count("]"):
+            out.append(joined)
+            pending = []
+    if pending:
+        # Never balanced. Kept as it stands so the runner is the one to say it does not exist.
+        out.extend(pending)
+    return tuple(out)
+
+
+def _not_found(text: str) -> set[str]:
+    """The ids pytest says this checkout does not contain, as we asked for them."""
+    found = set()
+    for line in re.findall(r"^ERROR: not found: (.+)$", text, flags=re.MULTILINE):
+        name = line.strip()
+        prefix = f"{str(TESTBED).rstrip('/')}/"
+        found.add(name[len(prefix):] if name.startswith(prefix) else name)
+    return found
 
 
 def _batched(tests: tuple[str, ...], *, budget: int | None = None) -> list[tuple[str, ...]]:
@@ -302,7 +362,9 @@ def main(argv: list[str] | None = None) -> int:
         print("[FAIL] test patch did not apply — the episode cannot be scored")
         return 1
 
-    fail_to_pass = pytest_outcome(tuple(instance["fail_to_pass"]), timeout=args.timeout)
+    fail_to_pass = pytest_outcome(
+        tuple(instance["fail_to_pass"]), timeout=args.timeout, decisive=True
+    )
     pass_to_pass = pytest_outcome(tuple(instance["pass_to_pass"]), timeout=args.timeout)
     scoreable = fail_to_pass.get("scoreable", True) and pass_to_pass.get("scoreable", True)
     verdict.update(
