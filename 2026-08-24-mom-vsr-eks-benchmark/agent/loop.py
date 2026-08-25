@@ -736,14 +736,29 @@ def _comparability(
             "failed or was cut off, which is not the model failing to follow the format"
         )
     ceiling_bound = state.spend_usd >= budget.max_usd
+    # The provider, not the policy, decided how this episode went. Three shapes of it, each
+    # of which would otherwise be read as a model that could not fix the bug:
+    unreachable = "could not be reached" in stopped
+    mostly_failed_calls = state.transport_failures * 3 > max(len(steps), 1)
+    approximated = sum(step.usd for step in steps if step.usd_estimated)
+    mostly_guessed = approximated > 0.25 * max(state.spend_usd, 1e-9)
+    excluded_because = (
+        f"the ${budget.max_usd:.2f} runaway ceiling bound this episode, which binds the "
+        "premium baseline first and so cannot be read as a quality result"
+        if ceiling_bound
+        else f"the episode ended on the transport rather than on the policy: {stopped}"
+        if unreachable
+        else f"{state.transport_failures} of {len(steps)} turns produced no action because "
+        "the call failed, so what this arm would have done is not observed"
+        if mostly_failed_calls
+        else f"${approximated:.3f} of ${state.spend_usd:.3f} was priced by approximation "
+        "rather than reported, which is too much of the bill to compare"
+        if mostly_guessed
+        else None
+    )
     return {
-        "comparable": not ceiling_bound,
-        "not_comparable_because": (
-            f"the ${budget.max_usd:.2f} runaway ceiling bound this episode, which binds the "
-            "premium baseline first and so cannot be read as a quality result"
-            if ceiling_bound
-            else None
-        ),
+        "comparable": excluded_because is None,
+        "not_comparable_because": excluded_because,
         "binding_constraint": (
             "spend" if ceiling_bound
             else "steps" if state.steps >= budget.max_steps

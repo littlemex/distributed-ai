@@ -234,11 +234,23 @@ def complete(
                     continue
                 raise Unreachable(reply.error, billed)
             _consume(reply, connection, response, started, endpoint)
-            if reply.error and reply.text == "" and attempt < endpoint.max_attempts:
+            if not reply.text and not reply.error and not reply.priced:
+                # A 200 that carried no content, no finish reason and no usage block. Whatever
+                # went wrong is on the far side, and treating it as the model's turn is worse
+                # than useless: the loop reads an empty reply as a malformed answer, charges an
+                # approximation for it, and asks again, which is how one episode spent
+                # thirty turns and most of its budget on nothing.
+                reply.error = "the provider answered 200 with an empty stream"
+            if reply.error and reply.text == "":
                 # No visible content, so nothing was sampled and a retry is not a second
                 # attempt at the step. But the prompt was read and any thinking was done,
                 # so the usage is carried into the next attempt rather than dropped.
                 billed.append(_billed(reply, len(body)))
+                if attempt >= endpoint.max_attempts:
+                    # Every attempt came back empty. Ending the episode says so; returning the
+                    # last empty reply would file a provider failure as a model that could not
+                    # follow the format.
+                    raise Unreachable(reply.error, billed)
                 time.sleep(backoff)
                 backoff *= 2
                 continue
@@ -320,6 +332,14 @@ def _consume(
                 event = json.loads(data)
             except json.JSONDecodeError:
                 continue
+            if event.get("error"):
+                # A gateway that fails after the headers are out cannot use a status code, so
+                # it streams the failure as an event instead. Ignoring that field is how a
+                # provider-side refusal arrives as a 200 with nothing in it, and how the first
+                # astropy episode charged thirty premium turns for empty replies.
+                detail = event["error"]
+                message = detail.get("message") if isinstance(detail, dict) else detail
+                reply.error = f"error event: {str(message)[:300]}"
             if event.get("model"):
                 reply.served_model = event["model"]
             if event.get("usage"):

@@ -47,10 +47,28 @@ job_name() {
   echo "${name:0:57}${PASS:+-p${PASS}}"
 }
 
+# An episode that ended on the transport rather than on the policy is worth one more try:
+# nothing about the arm was observed, and leaving it there costs the paired comparison a whole
+# row. An episode excluded for any other pre-registered reason stands as it is.
+already_done() {
+  local directory="${RESULTS}/${PASS_DIR}$1/$2"
+  [[ -f "${directory}/score.json" ]] || return 1
+  python3 - "${directory}/episode.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(1)
+episode = json.loads(path.read_text())
+why = episode.get("not_comparable_because") or ""
+raise SystemExit(1 if "transport" in why else 0)
+PY
+}
+
 launch_instance() {
   local instance="$1" launched=0
   for policy in ${POLICIES}; do
-    if [[ -f "${RESULTS}/${PASS_DIR}${instance}/${policy}/score.json" ]]; then
+    if already_done "${instance}" "${policy}"; then
       continue
     fi
     "${HERE}/run.sh" "${instance}" "${policy}" >/dev/null 2>&1 || {

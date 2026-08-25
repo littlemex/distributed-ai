@@ -137,6 +137,13 @@ spec:
   # it. Well above the longest episode measured, so it is not a condition of the experiment.
   activeDeadlineSeconds: ${EPISODE_DEADLINE:-3600}
   template:
+    metadata:
+      annotations:
+        # An episode cannot be interrupted and resumed: it is a conversation with a model, and
+        # a pod that dies at step 22 has spent the money and has nothing to show. Karpenter
+        # consolidated a node under four running episodes and the taint manager evicted them
+        # all, so a running episode now holds its node until it is finished.
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       restartPolicy: Never
       containers:

@@ -19,9 +19,21 @@ AGENT = Path(__file__).resolve().parents[1]
 if str(AGENT) not in sys.path:
     sys.path.insert(0, str(AGENT))
 
+import loop  # noqa: E402
 import policy as pol  # noqa: E402
 import tools  # noqa: E402
 import transport  # noqa: E402
+
+
+def _bare_step(index: int, *, usd: float = 0.1, estimated: bool = False) -> loop.Step:
+    """The fields a diagnosis reads, and defaults for the rest."""
+    return loop.Step(
+        index=index, tier=pol.CHEAP, route_reason="", model="m", step_type="read",
+        tool="read_file", signature="read_file:a", ok=True, tests_passed=None,
+        finish_reason="stop", latency_ms=1.0, ttft_ms=1.0, prompt_tokens=10,
+        fresh_prompt_tokens=10, cached_prompt_tokens=0, cache_write_tokens=0,
+        completion_tokens=5, reasoning_tokens=0, usd=usd, usd_estimated=estimated,
+    )
 
 
 def budget(**kwargs) -> pol.Budget:
@@ -585,3 +597,133 @@ class TestUsageReading:
         reply = transport.Reply(model="x")
         transport._usage(reply, {"prompt_tokens": 500, "cacheReadInputTokens": 480})
         assert reply.cached_prompt_tokens == 480
+
+class TestStreamsThatSayNothing:
+    """A 200 that delivers no answer is the provider's failure, not the model's.
+
+    Both shapes were seen on the first real sweep: a gateway that streams its failure as an
+    SSE event, and one that closes the stream with nothing in it at all. Read as steps, they
+    cost an episode thirty premium turns, most of its budget, and produced an empty diff that
+    would have been filed as a premium model unable to fix an astropy bug.
+    """
+
+    def stream(self, *lines) -> tuple:
+        class Response:
+            def __init__(self, payload):
+                self.payload = list(payload)
+
+            def readline(self):
+                return self.payload.pop(0) if self.payload else b""
+
+        class Connection:
+            sock = None
+
+        return Connection(), Response([line.encode() + b"\n" for line in lines])
+
+    def consume(self, *lines) -> transport.Reply:
+        reply = transport.Reply(model="x")
+        connection, response = self.stream(*lines)
+        transport._consume(reply, connection, response, 0.0, transport.Endpoint(url="http://x"))
+        return reply
+
+    def test_an_error_event_is_an_error(self):
+        reply = self.consume('data: {"error": {"message": "input too long"}}')
+        assert reply.error and "input too long" in reply.error
+
+    def test_a_bare_error_string_is_read_too(self):
+        reply = self.consume('data: {"error": "refused"}')
+        assert reply.error and "refused" in reply.error
+
+    def test_an_ordinary_stream_is_still_ordinary(self):
+        reply = self.consume(
+            'data: {"choices": [{"delta": {"content": "hi"}}]}',
+            'data: {"choices": [{"finish_reason": "stop"}], '
+            '"usage": {"prompt_tokens": 10, "completion_tokens": 2}}',
+            "data: [DONE]",
+        )
+        assert (reply.text, reply.error, reply.finish_reason) == ("hi", None, "stop")
+
+    def test_an_empty_stream_ends_the_episode_rather_than_the_turn(self, monkeypatch):
+        """Five empty attempts and then Unreachable: the loop records a transport failure and
+        stops, instead of asking again until the token budget is gone."""
+        calls = []
+
+        class Connection:
+            sock = None
+
+            def request(self, *args, **kwargs):
+                calls.append(1)
+
+            def getresponse(self):
+                class Response:
+                    status = 200
+
+                    def readline(self):
+                        return b""
+
+                    def getheader(self, _name):
+                        return None
+
+                return Response()
+
+            def close(self):
+                pass
+
+        endpoint = transport.Endpoint(url="http://x", max_attempts=3, backoff_s=0.0)
+        monkeypatch.setattr(type(endpoint), "connect", lambda self: Connection())
+        with pytest.raises(transport.Unreachable) as raised:
+            transport.complete(endpoint, model="m", messages=[{"role": "user", "content": "hi"}],
+                               max_tokens=10)
+        assert len(calls) == 3
+        assert "empty stream" in str(raised.value)
+        # Every attempt was billed, because every attempt read the prompt.
+        assert len(raised.value.billed) == 3
+
+    def test_a_reply_with_usage_but_no_text_is_the_model_saying_nothing(self, monkeypatch):
+        """Distinct from the case above: the provider reported what the call cost, so the call
+        happened and the empty answer is the model's own."""
+        reply = self.consume(
+            'data: {"choices": [{"finish_reason": "stop"}], '
+            '"usage": {"prompt_tokens": 10, "completion_tokens": 0}}'
+        )
+        assert reply.error is None and reply.priced
+
+
+class TestComparability:
+    def test_the_transport_deciding_the_outcome_excludes_the_episode(self):
+        state = pol.EpisodeState(spend_usd=0.5, transport_failures=9)
+        diagnosis = loop._comparability(
+            pol.POLICIES["cheap-always"](), budget(max_usd=20.0), state,
+            [], "the premium tier could not be reached: empty stream",
+        )
+        assert diagnosis["comparable"] is False
+        assert "transport" in diagnosis["not_comparable_because"]
+
+    def test_a_third_of_turns_failing_excludes_it_too(self):
+        state = pol.EpisodeState(spend_usd=0.5, transport_failures=4)
+        steps = [_bare_step(i) for i in range(1, 10)]
+        diagnosis = loop._comparability(
+            pol.POLICIES["cheap-always"](), budget(max_usd=20.0), state, steps,
+            "the agent said it was finished",
+        )
+        assert diagnosis["comparable"] is False
+
+    def test_a_bill_that_is_mostly_guessed_excludes_it(self):
+        state = pol.EpisodeState(spend_usd=1.0)
+        steps = [_bare_step(1, usd=0.6, estimated=True), _bare_step(2, usd=0.4)]
+        diagnosis = loop._comparability(
+            pol.POLICIES["cheap-always"](), budget(max_usd=20.0), state, steps,
+            "the agent said it was finished",
+        )
+        assert diagnosis["comparable"] is False
+        assert "approximation" in diagnosis["not_comparable_because"]
+
+    def test_an_ordinary_episode_is_comparable(self):
+        state = pol.EpisodeState(spend_usd=1.0)
+        steps = [_bare_step(1, usd=0.6), _bare_step(2, usd=0.4)]
+        diagnosis = loop._comparability(
+            pol.POLICIES["cheap-always"](), budget(max_usd=20.0), state, steps,
+            "the agent said it was finished",
+        )
+        assert diagnosis["comparable"] is True
+        assert diagnosis["not_comparable_because"] is None
