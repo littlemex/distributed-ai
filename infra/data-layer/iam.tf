@@ -89,6 +89,7 @@ resource "aws_iam_role_policy" "producer" {
           "sagemaker-mlflow:GetExperimentByName",
           "sagemaker-mlflow:GetExperiment",
           "sagemaker-mlflow:CreateRun",
+          "sagemaker-mlflow:GetRun",
           "sagemaker-mlflow:UpdateRun",
           "sagemaker-mlflow:LogMetric",
           "sagemaker-mlflow:LogParam",
