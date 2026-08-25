@@ -82,11 +82,21 @@ class RunConfig:
     # only the streaming path can carry a slow arm past the gateway's
     # non-streaming read window.
     stream: bool = True
+    # How long a stream may go silent before it is treated as dead. On the streaming
+    # path this replaces the total deadline, because total duration is what the
+    # high-effort arms are being measured on.
+    stream_idle_s: float = 90.0
 
 
 @dataclass
 class RunStats:
-    """What a run produced, including the arms that stopped existing during it."""
+    """What a run produced, including the arms that stopped existing during it.
+
+    The counters are mutated from inside the run's tasks without a lock, which is
+    safe because those tasks are coroutines on one event loop and none of them
+    yields between reading and writing. Moving the runner onto threads would make
+    every one of these a race.
+    """
 
     ok: int = 0
     failed: int = 0
@@ -94,6 +104,35 @@ class RunStats:
     # Cells not attempted because their arm had already been rejected.
     skipped: int = 0
     retired_arms: dict[str, str] = field(default_factory=dict)
+    # Per arm, this run's scored calls and how many of them the completion budget
+    # stopped. Counted as the calls come back rather than read from the file
+    # afterwards: the file may hold earlier runs measured at a different budget,
+    # and mixing those into the rate would hide exactly what the rate is for.
+    scored_by_arm: dict[str, int] = field(default_factory=dict)
+    truncated_by_arm: dict[str, int] = field(default_factory=dict)
+
+    def truncation_rates(self) -> dict[str, dict[str, float]]:
+        """Per arm, how often the completion budget was the thing that stopped it.
+
+        The budget is a cap and not a charge: raising it costs nothing for an arm
+        that stops at two hundred tokens, and only the arms that use it pay. What it
+        does change is scoring, because an arm cut off mid-sentence is graded as
+        wrong for running out of room rather than for being wrong. So the budget is
+        chosen by this number — raised until truncation is rare for every arm.
+        """
+        return {
+            arm: {
+                "scored": scored,
+                "truncated": self.truncated_by_arm.get(arm, 0),
+                "rate": self.truncated_by_arm.get(arm, 0) / scored if scored else 0.0,
+            }
+            for arm, scored in self.scored_by_arm.items()
+        }
+
+
+# A truncation rate above this on any arm means the budget, and not the model,
+# decided part of that arm's score.
+TRUNCATION_RATE_THRESHOLD = 0.02
 
 
 class _Unbounded:
@@ -136,19 +175,26 @@ def completed_cells(path: Path) -> set[str]:
     return done
 
 
-def truncation_rates(path: Path) -> dict[str, dict[str, float]]:
-    """Per arm, how often the completion budget was the thing that stopped it.
+def settings_conflict(path: Path, config: RunConfig) -> str | None:
+    """Why appending this run to an existing file would corrupt the comparison.
 
-    The budget is a cap and not a charge: raising it costs nothing for an arm that
-    stops at two hundred tokens, and only the arms that use it pay. What it does
-    change is scoring, because an arm cut off mid-sentence is graded as wrong for
-    running out of room rather than for being wrong. So the budget is chosen by
-    this number — raised until `length` is rare for every arm — and a run whose
-    high-effort arms truncate has measured verbosity, not knowledge.
+    A run always appends, and a resumed one skips the cells already there, so the
+    file can end up holding cells measured under two different settings. The arm
+    name does not protect against it: a default-effort arm in v2 is spelled exactly
+    as the same member was in v1, while having been measured on the non-streaming
+    path at an eighth of the completion budget. Mixing those makes the arm's
+    latency, its truncation rate and part of its accuracy artefacts of when it was
+    collected — and the effort axis is precisely a comparison between a member's
+    default arm and its own higher levels.
+
+    Rows written before these fields existed have no settings to check, and are
+    reported as the unknown they are rather than assumed to match.
     """
-    tally: dict[str, dict[str, float]] = {}
     if not path.exists():
-        return tally
+        return None
+    streams: set[bool | None] = set()
+    budgets: set[int | None] = set()
+    unlabelled = 0
     with path.open() as handle:
         for line in handle:
             line = line.strip()
@@ -158,15 +204,35 @@ def truncation_rates(path: Path) -> dict[str, dict[str, float]]:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if row.get("error"):
+            if "stream" not in row and "max_tokens" not in row:
+                unlabelled += 1
                 continue
-            bucket = tally.setdefault(row["arm"], {"scored": 0, "truncated": 0})
-            bucket["scored"] += 1
-            if row.get("finish_reason") == "length":
-                bucket["truncated"] += 1
-    for bucket in tally.values():
-        bucket["rate"] = bucket["truncated"] / bucket["scored"] if bucket["scored"] else 0.0
-    return tally
+            streams.add(row.get("stream"))
+            budgets.add(row.get("max_tokens"))
+    if unlabelled:
+        return (
+            f"{path} holds {unlabelled} rows from before the request settings were "
+            "recorded, so whether they were measured the same way cannot be checked. "
+            "Write this run to a new file."
+        )
+    mismatched = []
+    if streams - {config.stream}:
+        mismatched.append(
+            f"stream={sorted(streams, key=str)} (this run: {config.stream})"
+        )
+    if budgets - {config.max_tokens}:
+        mismatched.append(
+            f"max_tokens={sorted(budgets, key=str)} (this run: {config.max_tokens})"
+        )
+    if mismatched:
+        return (
+            f"{path} was collected with different request settings: "
+            + "; ".join(mismatched)
+            + ". Appending would put the difference between two settings inside the "
+            "comparison between two arms. Write this run to a new file, or match the "
+            "recorded settings."
+        )
+    return None
 
 
 def plan(
@@ -277,6 +343,7 @@ async def run(
                     reasoning_effort=task.effort,
                     max_attempts=config.max_attempts,
                     timeout_s=config.timeout_s,
+                    stream_idle_s=config.stream_idle_s,
                     extra_headers=extra_headers,
                 )
             if record.arm_unsupported:
@@ -288,6 +355,11 @@ async def run(
                 if not graded.parsed:
                     stats.unparsed += 1
                 stats.ok += 1
+                stats.scored_by_arm[task.arm] = stats.scored_by_arm.get(task.arm, 0) + 1
+                if record.finish_reason == "length":
+                    stats.truncated_by_arm[task.arm] = (
+                        stats.truncated_by_arm.get(task.arm, 0) + 1
+                    )
             else:
                 stats.failed += 1
 

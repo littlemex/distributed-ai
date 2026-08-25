@@ -1,9 +1,19 @@
 """Tests for the parts of the harness that decide what gets paid for.
 
 The expensive parts of this benchmark are network calls, and they are not tested
-here. What is tested is everything that decides *which* calls happen and how a
-finished call is counted, because a mistake there is not a crash — it is a
-plausible-looking number that cost money to produce and cannot be recomputed.
+here. What is tested is everything that decides *which* calls happen, what each one
+asks for, and how a finished call is counted — because a mistake there is not a
+crash. It is a plausible-looking number that cost money to produce and cannot be
+recomputed without spending again.
+
+Two properties are worth stating as the things these cases exist to protect:
+
+* **Comparability.** Every arm must be asked the same question the same way, with
+  only its own configuration differing. A regression that quietly sends every arm at
+  the default effort, or mixes two completion budgets into one file, produces a
+  matrix that looks fine and answers a different question than the one asked.
+* **Money.** A call that cannot produce a usable answer must not be made, and one
+  that has already been billed must not be paid for twice.
 """
 
 from __future__ import annotations
@@ -19,7 +29,8 @@ BENCH = Path(__file__).resolve().parents[1]
 if str(BENCH) not in sys.path:
     sys.path.insert(0, str(BENCH))
 
-from harness import catalog, dataset, runner  # noqa: E402
+import collect  # noqa: E402
+from harness import catalog, client, dataset, runner  # noqa: E402
 
 POOL = BENCH.parent / "vsr" / "pool.yaml"
 
@@ -50,6 +61,20 @@ def item(question_id: str) -> dataset.Item:
     )
 
 
+def config(**overrides) -> runner.RunConfig:
+    base = dict(
+        url="http://router",
+        max_tokens=16,
+        temperature=None,
+        concurrency=1,
+        max_attempts=1,
+        timeout_s=1.0,
+        shuffle_seed=1,
+    )
+    base.update(overrides)
+    return runner.RunConfig(**base)
+
+
 class TestArmExpansion:
     def test_pool_declarations_are_used(self):
         arms = catalog.arms(POOL, [member("sclv/gpt-5.6-sol", "gpt-5.6-sol")])
@@ -76,9 +101,30 @@ class TestArmExpansion:
 
     def test_duplicate_levels_are_collapsed(self, tmp_path):
         pool = tmp_path / "pool.yaml"
-        pool.write_text("effort_levels:\n  m: [default, low, low, default]\n")
+        pool.write_text(
+            "members:\n  - alias: m\neffort_levels:\n  m: [default, low, low, default]\n"
+        )
         arms = catalog.arms(pool, [member("sclv/m", "m")])
         assert [a.effort for a in arms] == ["default", "low"]
+
+    def test_a_declaration_for_a_member_that_is_gone_is_refused(self, tmp_path):
+        """Silently shrinking a run wastes the whole run, so it is an error."""
+        pool = tmp_path / "pool.yaml"
+        pool.write_text(
+            "members:\n  - alias: kept\neffort_levels:\n"
+            "  kept: [default, high]\n  renamed-away: [default, high]\n"
+        )
+        with pytest.raises(catalog.ConfigError, match="renamed-away"):
+            catalog.arms(pool, [member("sclv/kept", "kept")])
+
+    def test_analysing_a_subset_of_the_pool_is_not_an_error(self, tmp_path):
+        """The roster in the file is the reference, not the members passed in."""
+        pool = tmp_path / "pool.yaml"
+        pool.write_text(
+            "members:\n  - alias: a\n  - alias: b\neffort_levels:\n  b: [default, high]\n"
+        )
+        arms = catalog.arms(pool, [member("sclv/a", "a")])
+        assert [a.name for a in arms] == ["sclv/a"]
 
 
 class TestTasks:
@@ -92,8 +138,7 @@ class TestTasks:
         default = next(t for t in tasks if t.arm == "pinned:sclv/gpt-5.6-sol")
         assert default.effort is None
 
-    def test_arms_of_one_member_share_that_member_s_gate(self):
-        """The in-flight limit belongs to the serving member, not to the arm."""
+    def test_arms_of_one_member_are_addressed_to_that_member(self):
         arms = catalog.arms(POOL, [member("sclv/gpt-5.6-sol", "gpt-5.6-sol")])
         models = {t.model for t in runner.pinned_tasks([item("1")], arms)}
         assert models == {"sclv/gpt-5.6-sol"}
@@ -111,118 +156,320 @@ class TestTasks:
         remaining = runner.plan(tasks, seed=1, skip=done)
         assert [t.arm for t in remaining] == ["pinned:m@high"]
 
-
-class TestTruncationRates:
-    def test_only_scored_rows_count_and_length_is_the_numerator(self, tmp_path):
+    def test_a_failed_cell_counts_as_collected(self, tmp_path):
+        """Retrying it on resume would give one arm more attempts than the others."""
         out = tmp_path / "matrix.jsonl"
-        rows = [
-            {"arm": "a", "finish_reason": "stop", "error": None},
-            {"arm": "a", "finish_reason": "length", "error": None},
-            {"arm": "a", "finish_reason": "length", "error": None},
-            {"arm": "a", "finish_reason": None, "error": "http 502"},
-            {"arm": "b", "finish_reason": "stop", "error": None},
+        out.write_text(
+            json.dumps(
+                {"arm": "pinned:m", "question_id": "1", "error": "http 502"}
+            )
+            + "\n"
+        )
+        assert runner.completed_cells(out) == {"pinned:m\t1"}
+
+
+class _Recorder:
+    """A stand-in for the network that records what each call was asked to do."""
+
+    def __init__(self, reject: set[str] | None = None, finish_reason: str = "stop"):
+        self.reject = reject or set()
+        self.finish_reason = finish_reason
+        self.calls: list[dict] = []
+        self.in_flight = 0
+        self.peak_in_flight = 0
+
+    async def call_once(self, session, url, **kwargs):
+        self.calls.append(kwargs)
+        self.in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        # Suspends, so the other tasks reach the queue while this one is in flight.
+        # Without it every fake call would complete before the next task started and
+        # the concurrency assertions would pass on a scheduling accident.
+        await asyncio.sleep(0)
+        self.in_flight -= 1
+        return self._response(kwargs["arm"])
+
+    def _response(self, arm: str) -> client.Call:
+        record = client.Call(
+            arm=arm,
+            requested_model="m",
+            question_id="1",
+            dataset="MMLU-Pro",
+            category="math",
+            fold="test",
+        )
+        if arm in self.reject:
+            record.error = "http 400: unsupported value for reasoning_effort"
+            record.arm_unsupported = True
+        else:
+            record.text = "Answer: A"
+            record.finish_reason = self.finish_reason
+        return record
+
+    def arms_called(self, arm: str) -> int:
+        return sum(1 for kwargs in self.calls if kwargs["arm"] == arm)
+
+
+class _Graded:
+    extracted, correct, parsed = "A", True, True
+
+
+def drive(tmp_path, monkeypatch, tasks, recorder, **config_overrides):
+    monkeypatch.setattr(runner.client, "call_once", recorder.call_once)
+    monkeypatch.setattr(runner.score, "grade", lambda *a, **k: _Graded())
+    stats = asyncio.run(
+        runner.run(tasks, config(**config_overrides), tmp_path / "out.jsonl")
+    )
+    return stats
+
+
+class TestWhatIsAskedFor:
+    """The regression that would be invisible: every arm measured at one setting."""
+
+    def test_each_arm_s_effort_reaches_the_request(self, tmp_path, monkeypatch):
+        arms = catalog.arms(POOL, [member("sclv/gpt-5.6-sol", "gpt-5.6-sol")])
+        recorder = _Recorder()
+        drive(tmp_path, monkeypatch, runner.pinned_tasks([item("1")], arms), recorder)
+        sent = {kwargs["arm"]: kwargs["reasoning_effort"] for kwargs in recorder.calls}
+        assert sent == {
+            "pinned:sclv/gpt-5.6-sol": None,
+            "pinned:sclv/gpt-5.6-sol@none": "none",
+            "pinned:sclv/gpt-5.6-sol@low": "low",
+            "pinned:sclv/gpt-5.6-sol@high": "high",
+        }
+
+    def test_the_streaming_path_and_the_budget_reach_the_request(
+        self, tmp_path, monkeypatch
+    ):
+        recorder = _Recorder()
+        tasks = [runner.Task(arm="pinned:m", model="m", item=item("1"))]
+        drive(
+            tmp_path, monkeypatch, tasks, recorder, stream=True, max_tokens=4096,
+            stream_idle_s=30.0,
+        )
+        assert recorder.calls[0]["stream"] is True
+        assert recorder.calls[0]["max_tokens"] == 4096
+        assert recorder.calls[0]["stream_idle_s"] == 30.0
+
+    def test_no_stream_is_carried_through_rather_than_ignored(
+        self, tmp_path, monkeypatch
+    ):
+        recorder = _Recorder()
+        tasks = [runner.Task(arm="pinned:m", model="m", item=item("1"))]
+        drive(tmp_path, monkeypatch, tasks, recorder, stream=False)
+        assert recorder.calls[0]["stream"] is False
+
+    def test_the_cli_streams_by_default_and_can_be_told_not_to(self):
+        parser = collect.build_parser()
+        assert parser.parse_args(["matrix"]).stream is True
+        assert parser.parse_args(["matrix", "--no-stream"]).stream is False
+
+
+class TestMemberGate:
+    def test_arms_of_one_member_share_that_member_s_in_flight_limit(
+        self, tmp_path, monkeypatch
+    ):
+        """The limit belongs to the serving member; four arms are still one server."""
+        arms = catalog.arms(POOL, [member("sclv/gpt-5.6-sol", "gpt-5.6-sol", limit=1)])
+        recorder = _Recorder()
+        tasks = runner.pinned_tasks([item("1"), item("2")], arms)
+        drive(
+            tmp_path,
+            monkeypatch,
+            tasks,
+            recorder,
+            concurrency=8,
+            per_model_concurrency=(("sclv/gpt-5.6-sol", 1),),
+        )
+        assert len(recorder.calls) == 8
+        assert recorder.peak_in_flight == 1
+
+    def test_without_a_declared_limit_the_run_wide_bound_applies(
+        self, tmp_path, monkeypatch
+    ):
+        recorder = _Recorder()
+        tasks = [
+            runner.Task(arm="pinned:m", model="m", item=item(str(i))) for i in range(9)
         ]
-        out.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
-        rates = runner.truncation_rates(out)
-        assert rates["a"]["scored"] == 3
-        assert rates["a"]["rate"] == pytest.approx(2 / 3)
-        assert rates["b"]["rate"] == 0.0
-
-    def test_a_missing_file_is_not_an_error(self, tmp_path):
-        assert runner.truncation_rates(tmp_path / "nope.jsonl") == {}
+        drive(tmp_path, monkeypatch, tasks, recorder, concurrency=3)
+        assert recorder.peak_in_flight <= 3
 
 
-class _Response:
-    """Enough of a Call for the runner to route it, from a scripted outcome."""
+class TestTruncationCounting:
+    def test_the_rate_is_this_run_s_scored_calls(self, tmp_path, monkeypatch):
+        recorder = _Recorder(finish_reason="length")
+        tasks = [
+            runner.Task(arm="pinned:m@high", model="m", item=item(str(i)))
+            for i in range(4)
+        ]
+        stats = drive(tmp_path, monkeypatch, tasks, recorder)
+        rates = stats.truncation_rates()
+        assert rates["pinned:m@high"] == {"scored": 4, "truncated": 4, "rate": 1.0}
 
-    def __init__(self, arm: str, *, unsupported: bool = False):
-        self.arm = arm
-        self.arm_unsupported = unsupported
-        self.error = "http 400: reasoning_effort" if unsupported else None
-        self.text = "Answer: A"
-        self.correct = None
-        self.extracted = None
+    def test_an_unfinished_arm_is_not_counted_as_truncated(self, tmp_path, monkeypatch):
+        recorder = _Recorder(finish_reason="stop")
+        tasks = [runner.Task(arm="pinned:m", model="m", item=item("1"))]
+        stats = drive(tmp_path, monkeypatch, tasks, recorder)
+        assert stats.truncation_rates()["pinned:m"]["rate"] == 0.0
 
-    def to_json(self):
-        return {"arm": self.arm, "arm_unsupported": self.arm_unsupported}
+    def test_the_threshold_is_a_rate_and_lives_with_the_counter(self):
+        assert 0 < runner.TRUNCATION_RATE_THRESHOLD < 1
 
 
 class TestArmRetirement:
     """A rejected effort level means the arm is gone, not that a question failed."""
 
-    def run_with(self, tmp_path, monkeypatch, reject: set[str], tasks, concurrency=1):
-        calls: list[str] = []
-
-        async def fake_call_once(session, url, **kwargs):
-            arm = kwargs["arm"]
-            calls.append(arm)
-            # Suspends, so the other tasks reach the queue while this one is in
-            # flight. Without it every fake call would complete before the next
-            # task started and the test would pass on a scheduling accident.
-            await asyncio.sleep(0)
-            return _Response(arm, unsupported=arm in reject)
-
-        class _Graded:
-            extracted, correct, parsed = "A", True, True
-
-        monkeypatch.setattr(runner.client, "call_once", fake_call_once)
-        monkeypatch.setattr(runner.score, "grade", lambda *a, **k: _Graded())
-        config = runner.RunConfig(
-            url="http://router",
-            max_tokens=16,
-            temperature=None,
-            concurrency=concurrency,
-            max_attempts=1,
-            timeout_s=1.0,
-            shuffle_seed=1,
-        )
-        stats = asyncio.run(runner.run(tasks, config, tmp_path / "out.jsonl"))
-        return stats, calls
-
     def test_the_rest_of_a_rejected_arm_is_not_paid_for(self, tmp_path, monkeypatch):
+        recorder = _Recorder(reject={"pinned:m@high"})
         tasks = [
             runner.Task(arm="pinned:m@high", model="m", item=item(str(i)), effort="high")
             for i in range(5)
         ]
-        stats, calls = self.run_with(tmp_path, monkeypatch, {"pinned:m@high"}, tasks)
-        assert len(calls) == 1
+        stats = drive(tmp_path, monkeypatch, tasks, recorder)
+        assert len(recorder.calls) == 1
         assert stats.skipped == 4
         assert "pinned:m@high" in stats.retired_arms
 
     def test_only_the_calls_in_flight_are_wasted(self, tmp_path, monkeypatch):
         """The bound on waste is the concurrency, and it is not zero."""
+        recorder = _Recorder(reject={"pinned:m@high"})
         tasks = [
             runner.Task(arm="pinned:m@high", model="m", item=item(str(i)), effort="high")
             for i in range(12)
         ]
-        stats, calls = self.run_with(
-            tmp_path, monkeypatch, {"pinned:m@high"}, tasks, concurrency=4
-        )
-        assert 1 <= len(calls) <= 4
-        assert stats.skipped == 12 - len(calls)
+        stats = drive(tmp_path, monkeypatch, tasks, recorder, concurrency=4)
+        assert 1 <= len(recorder.calls) <= 4
+        assert stats.skipped == 12 - len(recorder.calls)
 
     def test_retiring_one_arm_leaves_the_others_running(self, tmp_path, monkeypatch):
+        recorder = _Recorder(reject={"pinned:m@high"})
         tasks = [
-            runner.Task(arm=arm, model="m", item=item(str(i)), effort=None)
+            runner.Task(arm=arm, model="m", item=item(str(i)))
             for i in range(3)
             for arm in ("pinned:m@high", "pinned:m")
         ]
-        stats, calls = self.run_with(tmp_path, monkeypatch, {"pinned:m@high"}, tasks)
-        assert calls.count("pinned:m") == 3
-        assert calls.count("pinned:m@high") == 1
+        stats = drive(tmp_path, monkeypatch, tasks, recorder)
+        assert recorder.arms_called("pinned:m") == 3
+        assert recorder.arms_called("pinned:m@high") == 1
         assert list(stats.retired_arms) == ["pinned:m@high"]
 
+    def test_the_rejection_itself_is_written_to_the_file(self, tmp_path, monkeypatch):
+        """The row is the evidence the analysis needs to drop the arm."""
+        recorder = _Recorder(reject={"pinned:m@high"})
+        tasks = [
+            runner.Task(arm="pinned:m@high", model="m", item=item(str(i)), effort="high")
+            for i in range(3)
+        ]
+        drive(tmp_path, monkeypatch, tasks, recorder)
+        rows = [
+            json.loads(line)
+            for line in (tmp_path / "out.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        assert len(rows) == 1
+        assert rows[0]["arm_unsupported"] is True
 
-class TestStreamingDefault:
-    def test_streaming_is_on_unless_asked_otherwise(self):
-        """The gateway cuts a non-streaming read at 50s, which deletes the high arms."""
-        config = runner.RunConfig(
-            url="http://router",
-            max_tokens=16,
-            temperature=None,
-            concurrency=1,
-            max_attempts=1,
-            timeout_s=1.0,
-            shuffle_seed=1,
+
+class TestEffortRejectionPredicate:
+    """What retires an arm. Too narrow pays a 400 per question; too wide kills a live arm."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            '{"error": {"param": "reasoning_effort", "message": "unsupported"}}',
+            '{"error": {"message": "reasoning_effort: none is not supported"}}',
+            "unsupported value for reasoning.effort",
+            "this model does not accept a reasoning effort",
+        ],
+    )
+    def test_a_rejected_level_is_recognised(self, body):
+        assert client.rejected_the_effort_level(body, 400) is True
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            '{"error": {"param": "temperature", "message": "must be 1"}}',
+            '{"error": {"message": "context length exceeded"}}',
+            "max_tokens must be a positive integer",
+        ],
+    )
+    def test_another_validation_error_does_not_retire_the_arm(self, body):
+        assert client.rejected_the_effort_level(body, 400) is False
+
+    def test_a_named_parameter_beats_the_prose(self):
+        """A body that lists every accepted field must not retire a working arm."""
+        body = json.dumps(
+            {
+                "error": {
+                    "param": "temperature",
+                    "message": "accepted: temperature, reasoning_effort, max_tokens",
+                }
+            }
         )
-        assert config.stream is True
+        assert client.rejected_the_effort_level(body, 400) is False
+
+    def test_only_a_400_can_retire_an_arm(self):
+        body = '{"error": {"param": "reasoning_effort"}}'
+        assert client.rejected_the_effort_level(body, 500) is False
+
+
+class TestSettingsGuard:
+    """A file holds one setting, because the arm name cannot carry them all."""
+
+    def rows(self, path: Path, **fields):
+        path.write_text(
+            json.dumps({"arm": "pinned:m", "question_id": "1", **fields}) + "\n"
+        )
+
+    def test_a_new_file_is_fine(self, tmp_path):
+        assert runner.settings_conflict(tmp_path / "new.jsonl", config()) is None
+
+    def test_matching_settings_are_fine(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rows(out, stream=True, max_tokens=16)
+        assert runner.settings_conflict(out, config(stream=True, max_tokens=16)) is None
+
+    def test_a_different_budget_is_refused(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rows(out, stream=True, max_tokens=2048)
+        conflict = runner.settings_conflict(out, config(max_tokens=16384, stream=True))
+        assert conflict and "max_tokens" in conflict
+
+    def test_a_different_path_is_refused(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rows(out, stream=False, max_tokens=16)
+        conflict = runner.settings_conflict(out, config(stream=True, max_tokens=16))
+        assert conflict and "stream" in conflict
+
+    def test_rows_from_before_the_fields_existed_are_refused_as_unknown(self, tmp_path):
+        """v1's rows record neither, and are exactly the ones that would be mixed in."""
+        out = tmp_path / "v1.jsonl"
+        self.rows(out)
+        conflict = runner.settings_conflict(out, config())
+        assert conflict and "before the request settings were recorded" in conflict
+
+    def test_the_cli_refuses_rather_than_appends(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rows(out, stream=False, max_tokens=16)
+        with pytest.raises(SystemExit):
+            collect.guard_output(out, config(stream=True, max_tokens=16))
+
+
+class TestExitCode:
+    def test_a_run_with_nothing_left_to_do_has_not_failed(self, capsys):
+        assert collect.report_run(runner.RunStats(), Path("unused")) == 0
+
+    def test_a_run_where_every_call_failed_has_failed(self, capsys):
+        assert collect.report_run(runner.RunStats(failed=3), Path("unused")) == 1
+
+    def test_warnings_do_not_change_the_code(self, capsys):
+        """The Job retries on a non-zero exit, and a retry would re-spend the money."""
+        stats = runner.RunStats(
+            ok=10,
+            retired_arms={"pinned:m@high": "http 400"},
+            scored_by_arm={"pinned:m": 10},
+            truncated_by_arm={"pinned:m": 10},
+        )
+        assert collect.report_run(stats, Path("unused")) == 0
+        printed = capsys.readouterr().out
+        assert "retired" in printed and "completion budget" in printed

@@ -14,6 +14,7 @@ cost that belong to neither.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -33,6 +34,43 @@ VSR_HEADERS = {
 # reached, so a retry is not a second sample of the same question.
 RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
+# How a provider spells "I do not take that effort level". Matched on a 400 only, and
+# on more than one spelling on purpose: the harness retires an arm on this signal, so
+# a spelling it fails to recognise means paying the same 400 once per question for the
+# rest of the run. The names are matched, not the surrounding prose, because prose is
+# what changes between providers.
+EFFORT_REJECTION_MARKERS = (
+    "reasoning_effort",
+    "reasoning.effort",
+    "reasoningeffort",
+    "reasoning effort",
+    "thinking.budget",
+)
+
+
+def rejected_the_effort_level(payload_text: str, status: int) -> bool:
+    """Whether this 400 says the arm's effort level does not exist.
+
+    Read from the structured error field when the provider sends one, since a body
+    that merely enumerates every accepted parameter would otherwise retire a live arm
+    on a validation error about something else.
+    """
+    if status != 400:
+        return False
+    lowered = payload_text.lower()
+    try:
+        payload = json.loads(payload_text)
+    except (json.JSONDecodeError, TypeError):
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        named = ""
+        if isinstance(error, dict):
+            named = str(error.get("param") or error.get("parameter") or "")
+        if named:
+            return any(marker in named.lower() for marker in EFFORT_REJECTION_MARKERS)
+    return any(marker in lowered for marker in EFFORT_REJECTION_MARKERS)
+
 
 @dataclass
 class Call:
@@ -44,6 +82,15 @@ class Call:
     dataset: str
     category: str
     fold: str
+
+    # What was asked for, recorded on the row rather than inferred from the arm name.
+    # Two arms can share a name across runs — a default-effort arm in v2 is spelled
+    # exactly as the same member was in v1 — while having been measured on a
+    # different path, with a different budget. Without these fields a resumed or
+    # concatenated file mixes the two and nothing downstream can tell.
+    requested_effort: str | None = None
+    stream: bool = False
+    max_tokens: int | None = None
 
     started_at: float = 0.0
     latency_ms: float = 0.0
@@ -117,6 +164,7 @@ async def call_once(
     reasoning_effort: str | None = None,
     max_attempts: int = 3,
     timeout_s: float = 300.0,
+    stream_idle_s: float = 90.0,
     extra_headers: dict[str, str] | None = None,
 ) -> Call:
     """POST one chat completion and return its record.
@@ -133,6 +181,9 @@ async def call_once(
         dataset=dataset,
         category=category,
         fold=fold,
+        requested_effort=reasoning_effort,
+        stream=stream,
+        max_tokens=max_tokens,
     )
     body = {
         "model": model,
@@ -161,6 +212,18 @@ async def call_once(
         body["stream_options"] = {"include_usage": True}
     headers = {"content-type": "application/json", **(extra_headers or {})}
 
+    # On the streaming path the deadline is idle time, not total duration. A total
+    # deadline would cut exactly the arms this benchmark exists to price: a high
+    # reasoning effort against a large budget legitimately runs for minutes, and a
+    # cut connection is billed by the provider for every token it had already
+    # generated while the harness records it as a failure. Bytes still flowing means
+    # the call is alive; a stream silent for `stream_idle_s` is not.
+    timeout = (
+        aiohttp.ClientTimeout(total=None, sock_connect=30.0, sock_read=stream_idle_s)
+        if stream
+        else aiohttp.ClientTimeout(total=timeout_s)
+    )
+
     backoff = 1.0
     record.started_at = time.time()
     for attempt in range(1, max_attempts + 1):
@@ -171,7 +234,7 @@ async def call_once(
                 url,
                 json=body,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=timeout_s),
+                timeout=timeout,
             ) as response:
                 record.http_status = response.status
                 record.headers = {
@@ -197,8 +260,9 @@ async def call_once(
                     # A provider refusing this effort level is the arm ceasing to
                     # exist, not a question going unanswered. Flagged so the analysis
                     # drops the arm rather than scoring it on a subset.
-                    if response.status == 400 and "reasoning_effort" in payload_text:
-                        record.arm_unsupported = True
+                    record.arm_unsupported = rejected_the_effort_level(
+                        payload_text, response.status
+                    )
                     return record
 
                 _fill_from_payload(record, payload_text)
@@ -208,6 +272,13 @@ async def call_once(
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             record.latency_ms = (time.perf_counter() - started) * 1000
             record.error = f"{type(exc).__name__}: {exc}"[:500]
+            # A stream that had already produced tokens was billed for them. Asking
+            # again would pay for the same generation a second time, and the retry is
+            # a second sample of a question every other arm was asked once, so the
+            # partial answer is kept as the outcome it is.
+            if record.ttft_ms is not None or record.text:
+                record.error = f"broken mid-stream: {record.error}"[:500]
+                return record
             if attempt < max_attempts:
                 await asyncio.sleep(backoff)
                 backoff *= 2
@@ -227,8 +298,6 @@ async def _consume_stream(record: Call, response: Any, started: float) -> None:
     flowing keep the window open per read, so this path is the only one on which the
     top of the effort dial can be measured at all.
     """
-    import json
-
     parts: list[str] = []
     chunks = 0
     async for raw in response.content:
@@ -281,8 +350,6 @@ async def _consume_stream(record: Call, response: Any, started: float) -> None:
 
 
 def _fill_from_payload(record: Call, payload_text: str) -> None:
-    import json
-
     try:
         payload = json.loads(payload_text)
     except json.JSONDecodeError as exc:

@@ -52,10 +52,6 @@ DEFAULT_RESULTS = HERE / "results"
 # before trusting a comparison, together with the per-arm unparsed rate.
 DEFAULT_MAX_TOKENS = 16384
 
-# A truncation rate above this on any arm means the budget, not the model, decided
-# part of that arm's score.
-TRUNCATION_BUDGET = 0.02
-
 # Total in flight. Members that declare a limit of their own are held below it
 # separately, so this number is about the gateway and not about the smallest
 # member. The gateway sustains two orders of magnitude more than this; the value
@@ -203,10 +199,12 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         api_key=os.environ.get("STRATOCLAVE_API_KEY") or None,
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
         stream=args.stream,
+        stream_idle_s=args.stream_idle,
         per_model_concurrency=member_gates(pool),
     )
     for name, limit in config.per_model_concurrency:
         print(f"[INFO] {name} held at {limit} in flight (declared in the pool)")
+    guard_output(out, config)
     stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
     return report_run(stats, out)
 
@@ -239,8 +237,10 @@ def cmd_repeat(args: argparse.Namespace) -> int:
         api_key=os.environ.get("STRATOCLAVE_API_KEY") or None,
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
         stream=args.stream,
+        stream_idle_s=args.stream_idle,
         per_model_concurrency=member_gates(pool),
     )
+    guard_output(out, config)
     stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
     return report_run(stats, out)
 
@@ -282,6 +282,7 @@ def cmd_mixed(args: argparse.Namespace) -> int:
         api_key=os.environ.get("STRATOCLAVE_API_KEY") or None,
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
         stream=args.stream,
+        stream_idle_s=args.stream_idle,
         per_model_concurrency=member_gates(pool),
     )
     for name, limit in config.per_model_concurrency:
@@ -291,6 +292,7 @@ def cmd_mixed(args: argparse.Namespace) -> int:
         "the request is sent, so check the selected-model distribution before "
         "reading its latency"
     )
+    guard_output(out, config)
     stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
     return report_run(stats, out)
 
@@ -322,9 +324,18 @@ def cmd_routed(args: argparse.Namespace) -> int:
         api_key=os.environ.get("STRATOCLAVE_API_KEY") or None,
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
         stream=args.stream,
+        stream_idle_s=args.stream_idle,
     )
+    guard_output(out, config)
     stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
     return report_run(stats, out)
+
+
+def guard_output(out: Path, config: runner.RunConfig) -> None:
+    """Refuse to append a run to a file collected under different settings."""
+    conflict = runner.settings_conflict(out, config)
+    if conflict:
+        raise SystemExit(f"[FAIL] {conflict}")
 
 
 def report_run(stats: runner.RunStats, out: Path) -> int:
@@ -348,25 +359,32 @@ def report_run(stats: runner.RunStats, out: Path) -> int:
         for name, reason in sorted(stats.retired_arms.items()):
             print(f"    {name:<34}{reason[:90]}")
 
-    truncated = runner.truncation_rates(out)
     over = {
         name: bucket
-        for name, bucket in truncated.items()
-        if bucket["rate"] > TRUNCATION_BUDGET
+        for name, bucket in stats.truncation_rates().items()
+        if bucket["rate"] > runner.TRUNCATION_RATE_THRESHOLD
     }
     if over:
         print(
             f"\n[WARNING] {len(over)} arms hit the completion budget more often than "
-            f"{TRUNCATION_BUDGET:.0%}. A cap costs nothing for the arms that stay under "
-            "it, so raise --max-tokens and re-run these rather than scoring a cut-off "
-            "answer as a wrong one:"
+            f"{runner.TRUNCATION_RATE_THRESHOLD:.0%} in this run. A cap costs nothing "
+            "for the arms that stay under it, so raise --max-tokens and collect these "
+            "again into a new file rather than scoring a cut-off answer as a wrong one:"
         )
         for name, bucket in sorted(over.items(), key=lambda kv: -kv[1]["rate"]):
             print(
                 f"    {name:<34}{int(bucket['truncated'])}/{int(bucket['scored'])}"
                 f"  {bucket['rate']:6.2%}"
             )
-    return 0 if stats.ok else 1
+
+    # Nothing attempted is not a failure: a completed matrix re-run with --resume has
+    # every cell already recorded, and a wrapper that reads the exit code should not
+    # be told that succeeded run failed. The warnings above deliberately do not change
+    # the code either — the Job retries on a non-zero exit, and retrying a run whose
+    # budget was too small would just spend the same money again.
+    if stats.ok:
+        return 0
+    return 1 if stats.failed else 0
 
 
 def _progress():
@@ -423,7 +441,20 @@ def build_parser() -> argparse.ArgumentParser:
         )
         target.set_defaults(stream=True)
         target.add_argument("--max-attempts", type=int, default=3)
-        target.add_argument("--timeout", type=float, default=300.0)
+        target.add_argument(
+            "--timeout",
+            type=float,
+            default=300.0,
+            help="total deadline, used on the non-streaming path only",
+        )
+        target.add_argument(
+            "--stream-idle",
+            type=float,
+            default=90.0,
+            help="how long a stream may go silent before it counts as dead. Replaces "
+            "the total deadline while streaming, because a high-effort arm's total "
+            "duration is a measurement and not a fault",
+        )
         target.add_argument("--shuffle-seed", type=int, default=7)
         target.add_argument("--resume", action="store_true")
 

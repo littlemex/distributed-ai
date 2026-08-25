@@ -262,7 +262,7 @@ Written down because the plan above is longer than any one sitting, and the next
 person to open it — including a later version of the same session — needs to know
 which half is code.
 
-Built and tested (`bench/tests`, 13 cases):
+Built and tested (`bench/tests`, 41 cases):
 
 - The arm as the unit: `catalog.Arm` and `catalog.arms()` expand the pool's
   `effort_levels` declaration, and an undeclared member gets the default level only.
@@ -272,12 +272,22 @@ Built and tested (`bench/tests`, 13 cases):
   does not re-pay for `@high` because `@low` finished.
 - Streaming is the default path, with `--no-stream` kept only for reproducing a v1
   number.
-- Arm retirement: a 400 on `reasoning_effort` retires the arm for the rest of the
-  run, re-checked when a queued cell reaches the front, so the waste is bounded by
-  the concurrency rather than by the length of the task list.
+- Arm retirement: a 400 that names the effort level retires the arm for the rest of
+  the run, re-checked when a queued cell reaches the front, so the waste is bounded
+  by the concurrency rather than by the length of the task list. The predicate reads
+  the provider's named parameter when there is one, because a body that merely
+  enumerates the accepted fields would otherwise retire a working arm.
 - The completion budget is a cap and reported as one: every run prints the per-arm
   rate of `finish_reason = length`, and the default cap is 16,384 rather than v1's
-  2,048, which the effort probe showed binding at the top of the dial.
+  2,048, which the effort probe showed binding at the top of the dial. Raising the
+  cap moved the deadline problem into view, so on the streaming path the deadline is
+  now idle time rather than total duration, and a stream that breaks after producing
+  tokens is kept as a partial instead of being retried and billed twice.
+- Every row records the settings it was measured under, and a run refuses to append
+  to a file collected under different ones. Without this the effort axis was
+  unmeasurable in the worst way: a v2 default arm has the same name as the v1 member,
+  so a resumed run would have silently compared a 2,048-token non-streaming row
+  against a 16,384-token streaming one and called the difference reasoning effort.
 
 Not built yet, in the order the plan needs them:
 

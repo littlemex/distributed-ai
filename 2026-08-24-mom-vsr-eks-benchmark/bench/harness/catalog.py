@@ -128,9 +128,31 @@ def arms(pool_path: Path, members: list[Member]) -> list[Arm]:
 
     A member with no entry gets the default level only, so adding a member never
     silently multiplies the run.
+
+    The reverse mistake is the expensive one and is refused rather than defaulted: a
+    declaration whose key matches no member in the pool means a member was renamed or
+    removed and its effort levels were left behind, and the run would then be paid for
+    without the axis it exists to measure. Silently multiplying a run wastes money;
+    silently shrinking one wastes the whole run.
     """
-    declared = build_config.load_yaml(pool_path).get("effort_levels") or {}
+    pool = build_config.load_yaml(pool_path)
+    declared = pool.get("effort_levels") or {}
     fallback = declared.get(DEFAULT_EFFORT, [DEFAULT_EFFORT])
+    # Checked against the pool file's own roster rather than the members passed in,
+    # so that analysing a subset of the pool is not mistaken for a stale declaration.
+    known = {
+        entry.get("alias")
+        for entry in (pool.get("members") or [])
+        if isinstance(entry, dict)
+    }
+    orphans = sorted(set(declared) - known - {DEFAULT_EFFORT})
+    if orphans:
+        raise ConfigError(
+            f"{pool_path}: effort_levels declares {orphans}, which match no member "
+            "declared in this pool file. Either the member is gone and the declaration "
+            "should be too, or it was renamed and this run would be measured at the "
+            "default level only."
+        )
     out = []
     for member in members:
         levels = declared.get(member.alias, fallback)
