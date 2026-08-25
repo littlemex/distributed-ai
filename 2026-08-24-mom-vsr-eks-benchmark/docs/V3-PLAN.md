@@ -138,30 +138,42 @@ Throughput stops rising at two and only latency grows after that, which is what
 $6.60 for `grok`, $13.20 for `gpt-5.6-terra` and $50.00 for `fable`. So *as configured* the
 self-hosted arm is dearer than both cheap APIs and worth about half a premium one.
 
-**And that ceiling is a configuration, not the hardware.** The server runs with
-`--max-model-len=1048576`. On four L40S at fp8 the KV cache for a single one-million-token
-sequence is about 128 GiB of the roughly 150 GiB left after weights, so barely one sequence
-fits and a batch depth of two is the arithmetic consequence:
+**And that ceiling is a configuration, not the hardware** — but not for the reason first
+written here. An earlier version of this section computed the KV cache over all 64 layers.
+Only 16 of them are full attention; the other 48 are Gated DeltaNet and hold a fixed
+recurrent state instead, so the per-sequence figure was four times too large. The serving
+repository's own model facts have the right numbers: 16 attention layers, 4 KV heads, head
+dim 256, which is 64 KiB of KV per token.
 
-| `--max-model-len` | KV per sequence | Sequences that fit |
-| --- | --- | --- |
-| 1,048,576 (today) | 128 GiB | 1.2 |
-| 262,144 | 32 GiB | 4.7 |
-| 131,072 | 16 GiB | 9.4 |
-| 65,536 | 8 GiB | 18.7 |
+| Window | KV per sequence | Sequences that fit | Measured output tokens/s | $/Mtok |
+| --- | --- | --- | --- | --- |
+| 1,048,576 (as found) | 64 GiB | 2 | 162 | 26.06 |
+| 262,144 (native, now deployed) | 16 GiB | 9 | 293 | **14.41** |
+| 131,072 | 8 GiB | 16 | not measured | — |
 
-An episode of the kind v3 measures needs a hundred thousand tokens of context, not a
-million. Trading the unused nine tenths of the window for a batch depth of nine or more is
-what would take this arm from $26 per million to single digits and make the whole policy
-worth implementing. Two further flags matter for the same reason:
-`--no-enable-prefix-caching` is currently set, so a multi-turn session re-processes its
-whole prompt every turn — the one form of waste this project has just spent two gateway
-fixes eliminating on the paid path.
+Deploying the native window instead of the four-fold YaRN extension raised throughput 81%
+and cut the price 45%, and it did so at a window no traffic on this server has come close
+to using — over 1,533 requests, no prompt exceeded 50,000 tokens. Throughput had not
+saturated at nine concurrent, so the profile cap rather than the machine is what stops it
+there.
 
-Establishing that requires restarting the server with different arguments, and the same
-deployment is currently serving other coding agents in the cluster. That is the one step
-here that interrupts somebody else's work, so it is the one step that waits for a decision
-rather than being taken.
+The other correction is about prefix caching. `--no-enable-prefix-caching` is not an
+oversight to fix: prefix caching is unsupported on the recurrent layers of a hybrid
+linear-attention model, which is a property of the architecture. Measured on the new
+deployment, sending the same prompt twice takes exactly as long the second time. So the
+one economy this project has just spent two gateway fixes securing on the paid path is
+unavailable on this one, and a multi-turn agent session on the self-hosted arm re-processes
+its prompt every turn. That is a real disadvantage of the arm and belongs in its price.
+
+At $14.41 per million output tokens the arm now sits beside `gpt-5.6-terra` at $13.20 and
+above `grok` at $6.60, against `fable` at $50.00. So it is not the cheapest tokens
+available — its case rests entirely on the marginal cost of a machine that is already
+running being zero, which is the argument this policy was proposed on.
+
+The window is now selectable at deploy time rather than edited in place
+(`serving/common/context-profiles.env` in the serving repository, `--context 131k|262k|1m`),
+because the window and the concurrency it permits are one decision and were previously two
+places to get wrong.
 
 **Arm D: route by what the step is for, not by how hard it looks.** v1 killed *inferred*
 difficulty — the domain label carried no accuracy signal at p = 0.58 — but an agent harness
