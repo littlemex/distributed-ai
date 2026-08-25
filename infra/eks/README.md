@@ -618,6 +618,8 @@ production use.
 The profiling platform is installed by [`../scripts/install-profiling.sh`](../scripts/install-profiling.sh),
 which spans this state and `infra/data-layer`; see
 [`../docs/profiling-install.md`](../docs/profiling-install.md) for what it wires and how the plan guard behaves.
+From outside a checkout, [`../scripts/get-profiling.sh`](../scripts/get-profiling.sh) fetches a pinned
+release and runs that installer inside it, so adopting the platform is one command either way.
 
 Once a namespace is wired, a run is submitted with [`bin/kubectl-accelprof`](bin/kubectl-accelprof)
 — a single self-contained file that only needs kubectl — and the workflow is documented in
