@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+# kubectl-profile — submit a profiled run to the cluster, and find its recording afterwards.
+#
+# Install by putting this file on PATH as "kubectl-profile"; kubectl then exposes it as
+# `kubectl profile ...`. It needs nothing but kubectl: no repository checkout, no Helm, no Python.
+# Everything the platform knows — region, trace bucket, MLflow tracking server, platform image — is
+# read from the accelprof-config ConfigMap that the installer publishes into each namespace.
+#
+#   kubectl profile run --alias team1-lora-sweep --image <your image> -- python train.py --lr 3e-4
+#   kubectl profile runs --alias team1-lora-sweep
+#   kubectl profile get <workload-id>
+#
+# run submits and returns immediately. Recording happens in the cluster, so nothing local needs to
+# stay alive; --wait is available when watching one short run is more convenient.
+#
+# run options:
+#   --alias NAME          required. The experiment campaign, named {tenant}-{series}. It is the unit
+#                         of deletion, retention and visibility, so use one per campaign and vary
+#                         --param/--tag inside it instead of minting an alias per run.
+#   --image URI           required. The workload's own image.
+#   -- COMMAND...         required. Everything after -- is the command, verbatim.
+#   --namespace NS        default: the current context's namespace.
+#   --gpu N               request N GPUs and tolerate the GPU pool.
+#   --neuron N            request N Neuron devices and tolerate the Neuron pool.
+#   --profile MODE        nsys (default) | neuron | none. "none" still records the run, so a baseline
+#                         sits beside its profiled siblings in the same experiment.
+#   --profile-ranks R     "0" (default) | comma-separated list | "all". Profiling one rank is a
+#                         sampling choice: a straggler or a skewed shard hides from rank 0.
+#   --nsys-args ARGS      replace the profiler options entirely.
+#   --no-inject-nsys      the image already ships nsys; skip copying it in.
+#   --env K=V             passed to the workload (repeatable).
+#   --param K=V           recorded as a free-form param (repeatable).
+#   --tag K=V             recorded as a free-form tag (repeatable).
+#   --ttl SECONDS         how long the finished Job is kept (default 172800, two days). The run
+#                         itself is permanent; this only bounds the Kubernetes object.
+#   --patch FILE          a strategic-merge patch applied to the Job, for anything without a flag
+#                         (volumes, affinity, imagePullSecrets, sidecars).
+#   --discard-on-fail     do not record a failed run. It is recorded by default, tagged status=failed,
+#                         because a slow or crashing run is usually the one worth profiling.
+#   --wait                wait for the run to finish and print its run id.
+#   --dry-run             print the manifest and exit.
+set -euo pipefail
+
+self="$(basename "$0")"
+say() { printf '\n==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+# The Job shape lives next to this script in the repository, and is embedded below when the script is
+# distributed on its own. The repository copy wins when present, so the shape stays reviewable.
+template_path="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/manifests/profiling-producer.job.yaml.tmpl"
+
+# A bash pattern substitution interprets both & and \ in its replacement text: & expands to the
+# matched text and a backslash escapes the next character. Every value put into the manifest goes
+# through this first, or a command containing quotes or a script containing && comes out corrupted.
+escape_replacement() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//&/\\&}"
+  printf '%s' "$s"
+}
+
+json_string() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\n'/\\n}"
+  printf '"%s"' "$s"
+}
+
+k() { kubectl ${KUBE_CONTEXT:+--context "${KUBE_CONTEXT}"} "$@"; }
+
+resolve_namespace() {
+  local ns="$1"
+  if [ -z "${ns}" ]; then
+    ns="$(k config view --minify -o jsonpath='{..namespace}' 2>/dev/null || true)"
+    ns="${ns:-default}"
+  fi
+  printf '%s' "${ns}"
+}
+
+platform_image() {
+  local ns="$1" image
+  image="$(k get configmap accelprof-config -n "${ns}" \
+    -o jsonpath='{.data.ACCELPROF_PLATFORM_IMAGE}' 2>/dev/null || true)"
+  [ -n "${image}" ] ||
+    die "namespace ${ns} is not wired for profiling (no accelprof-config ConfigMap). Ask the platform owner to add it to PRODUCER_NAMESPACES and re-run infra/install-profiling.sh."
+  printf '%s' "${image}"
+}
+
+mlflow_experiment_url() {
+  local ns="$1" region arn
+  region="$(k get configmap accelprof-config -n "${ns}" -o jsonpath='{.data.ACCELPROF_REGION}' 2>/dev/null || true)"
+  arn="$(k get configmap accelprof-config -n "${ns}" -o jsonpath='{.data.ACCELPROF_TRACKING_URI}' 2>/dev/null || true)"
+  [ -n "${region}" ] && [ -n "${arn}" ] || return 0
+  printf 'https://%s.experiments.sagemaker.aws/  (tracking server %s)\n' "${region}" "${arn##*/}"
+}
+
+cmd_run() {
+  local alias_name="" image="" namespace="" profile="nsys" ranks="0" nsys_args="-t cuda,nvtx,osrt"
+  local gpus="" neurons="" ttl="172800" patch_file="" inject="true" record_on_fail="true"
+  local wait_for="false" dry_run="false" recorder_timeout="86400"
+  local -a envs=() params=() tags=() command=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --alias) alias_name="$2"; shift 2 ;;
+      --image) image="$2"; shift 2 ;;
+      --namespace|-n) namespace="$2"; shift 2 ;;
+      --profile) profile="$2"; shift 2 ;;
+      --profile-ranks) ranks="$2"; shift 2 ;;
+      --nsys-args) nsys_args="$2"; shift 2 ;;
+      --no-inject-nsys) inject="false"; shift ;;
+      --gpu) gpus="$2"; shift 2 ;;
+      --neuron) neurons="$2"; shift 2 ;;
+      --env) envs+=("$2"); shift 2 ;;
+      --param) params+=("$2"); shift 2 ;;
+      --tag) tags+=("$2"); shift 2 ;;
+      --ttl) ttl="$2"; shift 2 ;;
+      --patch) patch_file="$2"; shift 2 ;;
+      --discard-on-fail) record_on_fail="false"; shift ;;
+      --wait) wait_for="true"; shift ;;
+      --dry-run) dry_run="true"; shift ;;
+      -h|--help) usage 0 ;;
+      --) shift; command=("$@"); break ;;
+      *) die "unknown argument: $1 (the workload command goes after --)" ;;
+    esac
+  done
+
+  [ -n "${alias_name}" ] || die "--alias is required"
+  [ -n "${image}" ] || die "--image is required"
+  [ ${#command[@]} -gt 0 ] || die "the workload command is required, after --"
+  case "${profile}" in nsys|neuron|none) : ;; *) die "--profile must be nsys, neuron or none" ;; esac
+  # The alias is a bucket prefix and an MLflow experiment name at once, so it is constrained here and
+  # again in the recorder: an old copy of this client must not be the only thing enforcing it.
+  printf '%s' "${alias_name}" | grep -Eq '^[a-z0-9][a-z0-9-]{1,62}$' ||
+    die "--alias must match ^[a-z0-9][a-z0-9-]{1,62}$ (it becomes an S3 prefix and an MLflow experiment name)"
+  [ -f "${template_path}" ] || die "cannot find the Job template at ${template_path}"
+
+  namespace="$(resolve_namespace "${namespace}")"
+  local platform workload_id job_name
+  platform="$(platform_image "${namespace}")"
+  workload_id="wl-$(date +%y%m%d%H%M%S)-$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  job_name="$(printf 'profile-%s' "${workload_id}")"
+
+  # The profiler is a large tree, so it is only copied when it is going to be used; the shim is a few
+  # kilobytes and always is.
+  local tools_script="mkdir -p /accelprof/tools /accelprof/out && cp /opt/accelprof/entry.sh /accelprof/tools/entry.sh"
+  if [ "${inject}" = "true" ] && [ "${profile}" = "nsys" ]; then
+    tools_script="${tools_script} && cp -a /opt/nvidia/nsight-systems-cli/*/. /accelprof/tools/nsys/ 2>/dev/null || cp -a /opt/nvidia/nsight-systems-cli /accelprof/tools/nsys"
+  fi
+
+  local command_json="["
+  local first=1 arg
+  for arg in "${command[@]}"; do
+    [ ${first} -eq 1 ] || command_json="${command_json}, "
+    command_json="${command_json}$(json_string "${arg}")"
+    first=0
+  done
+  command_json="${command_json}]"
+
+  local manifest
+  manifest="$(cat "${template_path}")"
+  local key value
+  for kv in \
+    "JOB_NAME=${job_name}" "NAMESPACE=${namespace}" "ALIAS=${alias_name}" \
+    "WORKLOAD_ID=${workload_id}" "TTL_SECONDS=${ttl}" "SERVICE_ACCOUNT=mcp-producer" \
+    "PLATFORM_IMAGE=${platform}" "WORKLOAD_IMAGE=${image}" "TOOLS_SCRIPT=${tools_script}" \
+    "PROFILE_MODE=${profile}" "PROFILE_RANKS=${ranks}" "NSYS_ARGS=${nsys_args}" \
+    "CHIP=$([ "${profile}" = "neuron" ] && echo neuron || echo gpu)" \
+    "RECORD_ON_FAILURE=${record_on_fail}" "RECORDER_TIMEOUT=${recorder_timeout}"; do
+    key="${kv%%=*}"; value="$(escape_replacement "${kv#*=}")"
+    manifest="${manifest//@${key}@/${value}}"
+  done
+  manifest="${manifest//@COMMAND_JSON@/$(escape_replacement "${command_json}")}"
+
+  # Optional pieces arrive as one strategic-merge patch so that the template carries no placeholder
+  # for every possible Pod field, and so that anything without a flag is still reachable via --patch.
+  # It has to be a single document: two concatenated patches would each start a "spec" key and the
+  # later one would silently win.
+  local overlay="" containers="" tolerations=""
+  if [ -n "${gpus}" ] || [ -n "${neurons}" ] || [ ${#envs[@]} -gt 0 ]; then
+    containers="${containers}
+        - name: workload"
+    if [ -n "${gpus}" ] || [ -n "${neurons}" ]; then
+      containers="${containers}
+          resources:
+            limits:"
+      [ -n "${gpus}" ] && containers="${containers}
+              nvidia.com/gpu: ${gpus}"
+      [ -n "${neurons}" ] && containers="${containers}
+              aws.amazon.com/neuron: ${neurons}"
+      tolerations="
+      tolerations:"
+      [ -n "${gpus}" ] && tolerations="${tolerations}
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }"
+      [ -n "${neurons}" ] && tolerations="${tolerations}
+        - { key: aws.amazon.com/neuron, operator: Exists, effect: NoSchedule }"
+    fi
+    if [ ${#envs[@]} -gt 0 ]; then
+      containers="${containers}
+          env:"
+      for kv in "${envs[@]}"; do
+        containers="${containers}
+            - name: ${kv%%=*}
+              value: $(json_string "${kv#*=}")"
+      done
+    fi
+  fi
+  if [ ${#params[@]} -gt 0 ] || [ ${#tags[@]} -gt 0 ]; then
+    local params_json="{" tags_json="{" sep=""
+    for kv in ${params[@]+"${params[@]}"}; do
+      params_json="${params_json}${sep}$(json_string "${kv%%=*}"): $(json_string "${kv#*=}")"; sep=", "
+    done
+    params_json="${params_json}}"; sep=""
+    for kv in ${tags[@]+"${tags[@]}"}; do
+      tags_json="${tags_json}${sep}$(json_string "${kv%%=*}"): $(json_string "${kv#*=}")"; sep=", "
+    done
+    tags_json="${tags_json}}"
+    containers="${containers}
+        - name: recorder
+          env:
+            - name: ACCELPROF_PARAMS
+              value: $(json_string "${params_json}")
+            - name: ACCELPROF_TAGS
+              value: $(json_string "${tags_json}")"
+  fi
+  if [ -n "${containers}" ]; then
+    overlay="spec:
+  template:
+    spec:
+      containers:${containers}${tolerations}"
+  fi
+
+  if [ -n "${overlay}" ]; then
+    manifest="$(printf '%s' "${manifest}" |
+      k patch --local -f - --type strategic -p "${overlay}" -o yaml)"
+  fi
+  if [ -n "${patch_file}" ]; then
+    manifest="$(printf '%s' "${manifest}" |
+      k patch --local -f - --type strategic -p "$(cat "${patch_file}")" -o yaml)"
+  fi
+
+  if [ "${dry_run}" = "true" ]; then
+    printf '%s\n' "${manifest}"
+    exit 0
+  fi
+
+  printf '%s' "${manifest}" | k apply -f - >/dev/null
+  say "submitted ${job_name} in ${namespace} (alias ${alias_name}, profile ${profile})"
+  printf '    workload_id: %s\n' "${workload_id}"
+  printf '    logs:        kubectl -n %s logs -f job/%s -c workload\n' "${namespace}" "${job_name}"
+  printf '    run id:      %s get %s -n %s\n' "${self}" "${workload_id}" "${namespace}"
+
+  [ "${wait_for}" = "true" ] || exit 0
+  say "waiting for the run"
+  local deadline conditions
+  deadline=$(( $(date +%s) + ${WAIT_TIMEOUT_SECONDS:-86400} ))
+  while [ "$(date +%s)" -lt "${deadline}" ]; do
+    conditions="$(k get job "${job_name}" -n "${namespace}" \
+      -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)"
+    case "${conditions}" in *Complete*|*SuccessCriteriaMet*|*Failed*) break ;; esac
+    sleep 5
+  done
+  cmd_get "${workload_id}" -n "${namespace}"
+}
+
+cmd_get() {
+  local workload_id="" namespace=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --namespace|-n) namespace="$2"; shift 2 ;;
+      -h|--help) usage 0 ;;
+      *) workload_id="$1"; shift ;;
+    esac
+  done
+  [ -n "${workload_id}" ] || die "usage: ${self} get <workload-id> [-n namespace]"
+  namespace="$(resolve_namespace "${namespace}")"
+  local job
+  job="$(k get jobs -n "${namespace}" -l "accelprof.io/workload-id=${workload_id}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [ -z "${job}" ]; then
+    say "no Job for workload ${workload_id} in ${namespace}; it may have been cleaned up after its TTL"
+    say "the recording is permanent — find it in MLflow by alias and workload id"
+    mlflow_experiment_url "${namespace}"
+    exit 0
+  fi
+  local run_id status
+  run_id="$(k get job "${job}" -n "${namespace}" \
+    -o jsonpath='{.metadata.annotations.accelprof\.io/run-id}' 2>/dev/null || true)"
+  status="$(k get job "${job}" -n "${namespace}" \
+    -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)"
+  printf '    job:         %s\n' "${job}"
+  printf '    status:      %s\n' "${status:-running}"
+  if [ -n "${run_id}" ]; then
+    printf '    run_id:      %s\n' "${run_id}"
+    printf '    analyse it:  call stage_run then analyze with this run id on the analysis MCP server\n'
+  else
+    printf '    run_id:      not recorded yet\n'
+    printf '    recorder:    kubectl -n %s logs job/%s -c recorder\n' "${namespace}" "${job}"
+  fi
+}
+
+cmd_runs() {
+  local alias_name="" namespace=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --alias) alias_name="$2"; shift 2 ;;
+      --namespace|-n) namespace="$2"; shift 2 ;;
+      -h|--help) usage 0 ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  namespace="$(resolve_namespace "${namespace}")"
+  local selector="app.kubernetes.io/name=profiling-producer"
+  [ -n "${alias_name}" ] && selector="${selector},accelprof.io/alias=${alias_name}"
+  k get jobs -n "${namespace}" -l "${selector}" \
+    -o custom-columns='WORKLOAD-ID:.metadata.labels.accelprof\.io/workload-id,ALIAS:.metadata.labels.accelprof\.io/alias,RUN-ID:.metadata.annotations.accelprof\.io/run-id,COMPLETIONS:.status.succeeded,FAILED:.status.failed,AGE:.metadata.creationTimestamp'
+  say "Jobs are kept only until their TTL expires; the recordings are permanent"
+  mlflow_experiment_url "${namespace}"
+}
+
+case "${1:-}" in
+  run) shift; cmd_run "$@" ;;
+  get) shift; cmd_get "$@" ;;
+  runs|list) shift; cmd_runs "$@" ;;
+  ""|-h|--help|help) usage 0 ;;
+  *) die "unknown subcommand: $1 (expected run, get or runs)" ;;
+esac

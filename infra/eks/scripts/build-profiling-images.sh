@@ -39,8 +39,15 @@ build() {
     return 0
   fi
   say "building ${repo}:${tag} from ${dockerfile}"
-  k -n image-builder create configmap "${job}-ctx" \
-    --from-file="Dockerfile=${eks_dir}/images/${dockerfile}" \
+  # The base image bakes in the producer shim and the recorder, so the build context carries them
+  # alongside the Dockerfile. A ConfigMap context is the whole context, so every file must be listed.
+  local ctx_args=(--from-file="Dockerfile=${eks_dir}/images/${dockerfile}")
+  if [ "${dockerfile}" = "Dockerfile.accelprof-analysis" ]; then
+    ctx_args+=(--from-file="accelprof-entry.sh=${eks_dir}/images/accelprof-entry.sh")
+    ctx_args+=(--from-file="accelprof-recorder.py=${eks_dir}/images/accelprof-recorder.py")
+    ctx_args+=(--from-file="accelprof-orphan-check.py=${eks_dir}/images/accelprof-orphan-check.py")
+  fi
+  k -n image-builder create configmap "${job}-ctx" "${ctx_args[@]}" \
     --dry-run=client -o yaml | k apply -f - >/dev/null
   k -n image-builder delete job "${job}-${tag}" --ignore-not-found >/dev/null
 

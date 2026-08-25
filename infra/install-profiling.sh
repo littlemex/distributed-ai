@@ -109,8 +109,11 @@ def base(addr):
     no_index = re.sub(r'\[[^\]]*\]', '', addr)
     return no_index.split('.', 2)[-1] if no_index.startswith('module.') else no_index
 
+# A delete is unrecoverable, and a create of a resource that is supposed to already exist means the
+# state has lost track of it: applying that either fails on a name collision or, worse, reconfigures
+# something the state no longer describes. Both are refused.
 destructive = {"delete"}
-buckets = {"protected": [], "owned": [], "unrelated": []}
+buckets = {"protected": [], "recreate": [], "owned": [], "unrelated": []}
 for rc in plan.get("resource_changes", []):
     actions = [a for a in rc["change"]["actions"] if a != "no-op"]
     if not actions or actions == ["read"]:
@@ -119,12 +122,14 @@ for rc in plan.get("resource_changes", []):
     verb = "+".join(actions)
     if b in protected and destructive.intersection(actions):
         buckets["protected"].append(f"{rc['address']} ({verb})")
+    elif b in protected and "create" in actions:
+        buckets["recreate"].append(f"{rc['address']} ({verb})")
     elif b in owned or b in protected:
         buckets["owned"].append(f"{rc['address']} ({verb})")
     else:
         buckets["unrelated"].append(f"{rc['address']} ({verb})")
 
-for kind in ("protected", "owned", "unrelated"):
+for kind in ("protected", "recreate", "owned", "unrelated"):
     for item in buckets[kind]:
         print(f"    [{kind}] {item}")
 if not any(buckets.values()):
@@ -133,6 +138,12 @@ if not any(buckets.values()):
 if buckets["protected"]:
     sys.exit(f"error: the {label} plan would destroy record-of-record resources; refusing. "
              "Resolve this by hand — this script never destroys data.")
+if buckets["recreate"]:
+    sys.exit(f"error: the {label} plan would CREATE record-of-record resources that should already "
+             "exist (listed above), which means this state no longer tracks them. Applying it would "
+             "collide with the live resource instead of adopting it. Import them into the state "
+             "first; the installer adopts the known ones automatically, so this indicates a case it "
+             "does not cover yet.")
 if buckets["unrelated"] and os.environ["ALLOW_UNRELATED"] != "1" and os.environ["PROFILING_ONLY"] != "1":
     sys.exit(f"error: the {label} plan contains {len(buckets['unrelated'])} change(s) unrelated to "
              "profiling (listed above). This is pre-existing cluster drift, not something this "
@@ -225,6 +236,29 @@ data_vars=(
   -var "s3files_enabled=true"
   -var "mlflow_enabled=true"
 )
+# A record-of-record bucket that exists in AWS but not in this state must be adopted, never
+# re-created: a create either collides on the name or silently reconfigures a bucket the state does
+# not describe. The sub-resources take the bucket name as their import id.
+adopt_bucket() {
+  local bucket="$1" suffix="$2"
+  aws s3api head-bucket --bucket "${bucket}" >/dev/null 2>&1 || return 0
+  local state_list addr
+  state_list="$(terraform -chdir="${data_dir}" state list 2>/dev/null || true)"
+  for addr in "aws_s3_bucket.${suffix}" "aws_s3_bucket_versioning.${suffix}" \
+    "aws_s3_bucket_server_side_encryption_configuration.${suffix}" \
+    "aws_s3_bucket_public_access_block.${suffix}"; do
+    printf '%s\n' "${state_list}" | grep -qF "${addr}" && continue
+    # A missing sub-resource may simply never have been configured on the bucket, in which case the
+    # import fails and the plan creates it — which is correct for a configuration, not for a bucket.
+    if terraform -chdir="${data_dir}" import -input=false -lock-timeout=5m "${data_vars[@]}" \
+      "${addr}" "${bucket}" >/dev/null 2>&1; then
+      say "adopted ${addr} for the existing bucket ${bucket}"
+    fi
+  done
+}
+adopt_bucket "${DATA_LAYER_NAME}-mlflow-artifacts-${account_id}" "mlflow_artifacts"
+adopt_bucket "${DATA_LAYER_NAME}-traces-${AWS_REGION}-${account_id}" "traces[\"${AWS_REGION}\"]"
+
 guard_plan "${data_dir}" "data-layer" "${data_vars[@]}"
 terraform -chdir="${data_dir}" apply -input=false -auto-approve -lock-timeout=5m "${guarded_plan}" >/dev/null
 
@@ -352,6 +386,81 @@ helm --kube-context "${KCTX}" upgrade --install mcp "${eks_dir}/charts/mcp-host"
   -n mcp -f "${values_file}" --wait --timeout 10m >/dev/null
 cp "${values_file}" "${generated}"
 say "deployed; the generated values are kept at ${generated}"
+
+# ── phase 5b: the producer contract in each namespace ──────────────────────────────────────────
+# A profiling workload should not have to know the bucket, the tracking server or the platform image.
+# Publishing them as a ConfigMap in every producer namespace is what lets scripts/profile-run.sh take
+# only an alias, an image and a command. The Role lets the recorder read its own Pod's status, which
+# is how an untrappable kill (an OOM) still becomes a recorded failure rather than a timeout.
+say "Phase 5b/7: publishing the producer contract to ${PRODUCER_NAMESPACES}"
+for ns in "${ns_array[@]}"; do
+  if ! kubectl --context "${KCTX}" get namespace "${ns}" >/dev/null 2>&1; then
+    warn "namespace '${ns}' does not exist yet; its accelprof-config will be published on a later run"
+    continue
+  fi
+  kubectl --context "${KCTX}" create configmap accelprof-config -n "${ns}" \
+    --from-literal="ACCELPROF_REGION=${AWS_REGION}" \
+    --from-literal="ACCELPROF_TRACE_BUCKET=${trace_bucket}" \
+    --from-literal="ACCELPROF_TRACKING_URI=${mlflow_arn}" \
+    --from-literal="ACCELPROF_PLATFORM_IMAGE=${ecr_registry}/accelprof@${analysis_digest}" \
+    --dry-run=client -o yaml | kubectl --context "${KCTX}" apply -f - >/dev/null
+  cat <<RBAC | kubectl --context "${KCTX}" apply -f - >/dev/null
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: accelprof-producer, namespace: ${ns} }
+rules:
+  # The recorder reads its own Pod so that an untrappable kill becomes a recorded failure rather than
+  # a timeout, and annotates its own Job with the run id so it can be found without reading logs.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: accelprof-producer, namespace: ${ns} }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: accelprof-producer }
+subjects:
+  - kind: ServiceAccount
+    name: mcp-producer
+    namespace: ${ns}
+RBAC
+  # No controller reconciles producer Jobs, by design: each Job records itself from inside its Pod.
+  # The one gap that leaves is a Pod that disappears before recording (eviction, node drain, a killed
+  # recorder), which nothing in the Pod can report. This CronJob is monitoring for exactly that: it
+  # lists finished producer Jobs with no run id and fails when it finds any.
+  cat <<CRON | kubectl --context "${KCTX}" apply -f - >/dev/null
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: accelprof-orphan-check, namespace: ${ns} }
+spec:
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: mcp-producer
+          containers:
+            - name: check
+              image: ${ecr_registry}/accelprof@${analysis_digest}
+              command: ["python3","/opt/accelprof/orphan-check.py"]
+              env:
+                - name: POD_NAMESPACE
+                  valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+              resources:
+                requests: { cpu: "50m", memory: "128Mi" }
+                limits: { memory: "256Mi" }
+CRON
+  say "  ${ns}: accelprof-config, the recorder Role and the orphan check are in place"
+done
 
 # ── phase 6: mount probe ───────────────────────────────────────────────────────────────────────
 # Whether the read-only S3 Files mount actually works is decided by the EFS CSI node plugin, which

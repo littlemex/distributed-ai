@@ -18,6 +18,7 @@ infra/install-profiling.sh
 | Data layer (`infra/data-layer`) | Per-region trace bucket, MLflow artifact bucket, KMS CMK, S3 Files filesystem and access point, the managed MLflow tracking server, and the producer / reader / janitor IAM roles |
 | Cluster (`infra/eks`) | S3 Files mount target and its security group, the `mcp` namespace with the read-only `mcp-reader` ServiceAccount, one Pod Identity association per producer namespace, and the two ECR repositories the platform's images live in |
 | Workloads | The `analysis` and `knowledge` MCP servers, deployed by the `mcp-host` chart onto CPU nodes, with the analysis server pinned to the mount's Availability Zone |
+| Producer namespaces | In each namespace listed in `PRODUCER_NAMESPACES`: the `accelprof-config` ConfigMap that tells a workload where the platform is, a Role letting a recorder read its own Pod and annotate its own Job, and an hourly check that reports finished producer Jobs with no recording |
 
 One data layer serves many clusters. It owns the shared MLflow tracking server, so adding a second
 cluster does not add a second server; the trace bucket is per region, so traces stay next to the
@@ -84,19 +85,42 @@ than merely that a Pod started.
 
 ## Recording runs
 
-The installer prints the contract at the end. In each producer namespace, create the ServiceAccount
-that the association targets:
+In each producer namespace, create the ServiceAccount that the Pod Identity association targets:
 
 ```bash
 kubectl --context "$KUBE_CONTEXT" create serviceaccount mcp-producer -n "$NAMESPACE"
 ```
 
-A Pod that uses it records a run with:
+Experimenters then need nothing from this repository. `scripts/kubectl-profile`, on PATH, submits a
+profiled run and finds its recording afterwards; see [PROFILING-PRODUCER.md](eks/PROFILING-PRODUCER.md).
 
-```python
-store.log("tenant-series", chip="gpu", region=REGION, workload_id="variant",
-          metrics={"step_time_ms": 812.4}, artifacts=["/path/to/trace.nsys-rep"])
+```bash
+kubectl profile run --alias team1-lora-sweep --image "$MY_IMAGE" -- python train.py --lr 3e-4
 ```
+
+### Why there is no controller
+
+A producer Job records itself: a container running the platform image waits for the workload beside
+it, reads the files it left in a shared volume and logs one MLflow run. Nothing reconciles anything,
+so there is no operator to deploy, upgrade or watch — the Job is already the controller Kubernetes
+provides, and this workflow is one-shot rather than convergent. The two things a custom resource
+would have added are covered without one: the finished Job is cleaned up by
+`ttlSecondsAfterFinished`, and the run id is written back onto the Job as an annotation.
+
+That leaves exactly one gap, which no in-Pod component can close: a Pod that disappears before its
+recorder runs. The hourly check in each producer namespace reports it. A custom resource becomes
+worth revisiting when two of these are true: several Jobs need orchestrating as one unit (a sweep, a
+queue), the entry point has grown beyond one client and needs a stable API surface, or the platform
+already runs a controller of its own for another reason.
+
+### Why the producer tooling ships in the image
+
+The shim that wraps a command and the recorder that logs the run are baked into the platform image
+rather than mounted from a per-run ConfigMap, so that the code and the `accelprof` version it calls
+are pinned together by one image digest. They are not part of the `accelprof` package either: they
+encode this cluster's contract — how the profiler is invoked, where the shared volume is mounted, how
+a Pod reads its own status — which changes with the platform, not with the library. The package owns
+the recording API and the analysis server; the platform owns when and where they are called.
 
 ### The alias is the unit of everything
 
@@ -146,6 +170,8 @@ and its run metadata, and only the S3 artifacts survive. The trace and artifact 
 | The analysis Pod stays `Pending` | The mount is reachable from one Availability Zone only and the analysis Pod is pinned there. Confirm that the zone has schedulable CPU nodes |
 | The run stops on unrelated cluster changes | Pre-existing drift in the cluster module. Converge only the platform with `PROFILING_ONLY=1`, or accept everything with `ALLOW_UNRELATED=1` |
 | An ECR repository already exists | Expected on a cluster that published images before the repositories were managed here. The installer adopts them into the state |
+| A record-of-record bucket is planned for creation | The state has lost track of a bucket that exists. The installer adopts the buckets it knows about; a refusal here means a case it does not cover, and importing by hand is the fix — never let a create run against a live bucket |
+| A namespace was added to `PRODUCER_NAMESPACES` but its workloads cannot submit | The ConfigMap, Role and check are published per namespace by this installer and a namespace that did not exist during the last run was skipped with a warning. Re-run it |
 
 ## Teardown
 
