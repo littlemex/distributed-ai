@@ -45,6 +45,11 @@ TESTBED = tools.TESTBED
 CONDA_ACTIVATE = tools.CONDA
 # One test file's failures should not hide another's, and a repository's suite can be long.
 DEFAULT_TIMEOUT = 1800
+# Colour codes, which arrive whether or not there is a terminal: several of these repositories
+# force colour from their own configuration. Left in, `^PASSED ` never matches — astropy's
+# suite reported 179 of 179 tests passing and the instance was recorded as impossible to score
+# here, which excludes exactly the repositories with the most opinionated test setup.
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def run(command: str, *, timeout: int = DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
@@ -93,7 +98,7 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
                 "detail": "no tests named: this instance cannot be scored"}
     quoted = " ".join(f'"{test}"' for test in tests)
     try:
-        result = run(f"python -m pytest {quoted} -rA -q", timeout=timeout)
+        result = run(f"python -m pytest {quoted} -rA -q --color=no", timeout=timeout)
     except subprocess.TimeoutExpired:
         # Recorded rather than raised. An uncaught timeout writes no score.json, and the
         # instances whose suites are slowest are the hard ones — so the arm that attempts
@@ -101,7 +106,9 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
         return {"ran": len(tests), "passed": 0, "failed": 0, "skipped": 0, "ok": False,
                 "scoreable": False, "returncode": None, "basis": "timeout",
                 "detail": f"the suite did not finish within {timeout}s"}
-    whole = result.stdout + result.stderr
+    # `--color=no` asks, and stripping the codes makes sure: a plugin or a repository's own
+    # `addopts` can put them back, and the per-test count is the whole verdict.
+    whole = ANSI.sub("", result.stdout + result.stderr)
     passed = len(re.findall(r"^PASSED ", whole, flags=re.MULTILINE))
     failed = len(re.findall(r"^(FAILED|ERROR) ", whole, flags=re.MULTILINE))
     skipped = len(re.findall(r"^(SKIPPED|XFAIL) ", whole, flags=re.MULTILINE))

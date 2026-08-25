@@ -52,6 +52,12 @@ job_name() {
 # row. An episode excluded for any other pre-registered reason stands as it is.
 already_done() {
   local directory="${RESULTS}/${PASS_DIR}$1/$2"
+  if [[ -n "${SCORE_ONLY:-}" ]]; then
+    # Rescoring: the work to redo is every pair that has a diff, and nothing else. A pair with
+    # no diff has no episode to score, whatever its score.json says.
+    [[ -f "${directory}/diff.patch" ]] && return 1
+    return 0
+  fi
   [[ -f "${directory}/score.json" ]] || return 1
   python3 - "${directory}/episode.json" <<'PY'
 import json, sys

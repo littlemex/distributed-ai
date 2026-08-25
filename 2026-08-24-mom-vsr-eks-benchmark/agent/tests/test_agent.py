@@ -118,3 +118,57 @@ class TestOutcomeReading:
         outcome = score.pytest_outcome((), timeout=1)
         assert outcome["ran"] == 0 and outcome["ok"] is False
         assert "cannot be scored" in outcome["detail"]
+
+class TestColouredOutput:
+    """A suite that prints in colour must still be scoreable.
+
+    astropy's own configuration forces colour, so `^PASSED ` matched nothing, the per-test
+    count came out zero, and the instance was recorded as one this environment cannot score —
+    with 179 of 179 tests passing in the very text that was being searched. The repositories
+    with the most opinionated test setup are the ones that would have vanished.
+    """
+
+    def outcome(self, monkeypatch, stdout: str, returncode: int = 0) -> dict:
+        class Result:
+            def __init__(self):
+                self.stdout, self.stderr, self.returncode = stdout, "", returncode
+
+        monkeypatch.setattr(score, "run", lambda command, timeout=None: Result())
+        return score.pytest_outcome(("a.py::test_one", "a.py::test_two"), timeout=1)
+
+    def test_colour_codes_do_not_hide_the_per_test_lines(self, monkeypatch):
+        coloured = (
+            "\x1b[32mPASSED\x1b[0m a.py::\x1b[1mtest_one\x1b[0m\n"
+            "\x1b[32mPASSED\x1b[0m a.py::\x1b[1mtest_two\x1b[0m\n"
+        )
+        result = self.outcome(monkeypatch, coloured)
+        assert result["basis"] == "per-test lines"
+        assert (result["passed"], result["ok"], result["scoreable"]) == (2, True, True)
+
+    def test_a_coloured_failure_is_still_a_failure(self, monkeypatch):
+        coloured = (
+            "\x1b[32mPASSED\x1b[0m a.py::test_one\n"
+            "\x1b[31mFAILED\x1b[0m a.py::test_two\n"
+        )
+        result = self.outcome(monkeypatch, coloured, returncode=1)
+        assert (result["passed"], result["failed"], result["ok"]) == (1, 1, False)
+
+    def test_the_detail_kept_for_the_record_is_readable(self, monkeypatch):
+        result = self.outcome(monkeypatch, "\x1b[32mPASSED\x1b[0m a.py::test_one\n")
+        assert "\x1b" not in result["detail"]
+
+    def test_colour_is_asked_off_as_well_as_stripped(self, monkeypatch):
+        """Stripping is the belt; the flag is the braces, and a suite that respects it keeps
+        the recorded output small enough to read."""
+        seen = {}
+
+        class Result:
+            stdout, stderr, returncode = "PASSED a.py::test_one\n", "", 0
+
+        def fake_run(command, timeout=None):
+            seen["command"] = command
+            return Result()
+
+        monkeypatch.setattr(score, "run", fake_run)
+        score.pytest_outcome(("a.py::test_one",), timeout=1)
+        assert "--color=no" in seen["command"]

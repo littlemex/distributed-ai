@@ -94,6 +94,16 @@ PY
 
 cp "${STRATOCLAVE_DEFAULTS}/pricing.json" "${WORK}/pricing.json"
 
+# `SCORE_ONLY=1` scores a diff that is already on the volume, without spending anything. Two
+# occasions need it: the scorer was corrected after episodes had run — colour codes in a
+# repository's own test output had made 179 passing tests read as an instance that could not be
+# scored — and a verdict is cheap to recompute while an episode is not.
+if [[ -n "${SCORE_ONLY:-}" ]]; then
+  EPISODE_CMD='echo "[INFO] score-only: the diff already on the volume, no model calls"; test -f "$OUT/diff.patch" || { echo "[FAIL] no diff at $OUT/diff.patch"; exit 1; }; status=0'
+else
+  EPISODE_CMD='python /code/loop.py --instance /data/instance.json --tiers /data/tiers.json --pricing /data/pricing.json --policy '"${POLICY}"' --out "$OUT" --max-steps ${MAX_STEPS:-40} --max-tokens ${MAX_TOKENS:-1200000} --max-usd ${MAX_USD:-20.0} 2>&1 | tee "$OUT/loop.log"; status=$?'
+fi
+
 # Results go to a shared volume, not to the pod. The first role-based episode finished, its
 # node was consolidated moments later, and the pod took its logs and its episode.json with
 # it — a completed run with nothing to show is the same as a run that never happened.
@@ -156,12 +166,7 @@ spec:
               OUT=/results/${PASS_DIR}${INSTANCE_ID}/${POLICY}
               mkdir -p "\$OUT"
               cd /work
-              python /code/loop.py --instance /data/instance.json \\
-                --tiers /data/tiers.json --pricing /data/pricing.json \\
-                --policy ${POLICY} --out "\$OUT" \\
-                --max-steps \${MAX_STEPS:-40} --max-usd \${MAX_USD:-20.0} \\
-                2>&1 | tee "\$OUT/loop.log"
-              status=\$?
+              ${EPISODE_CMD}
               echo "--- scoring (the tests are applied only now) ---"
               python /code/score.py --instance /data/instance.json \\
                 --diff "\$OUT/diff.patch" --out "\$OUT/score.json" 2>&1 \\
@@ -172,6 +177,15 @@ spec:
               cat "\$OUT/score.json"
               exit \$status
           env:
+            # The token budget is the same for every arm, and it has to be loose enough that
+            # the policy decides how an episode ends. At 400,000 it was not: the premium arm
+            # finished on its own in eight turns and 120,000 tokens, while every other arm was
+            # cut off mid-episode — which is the dollar ceiling's objection in another currency,
+            # and it fell on exactly the arms whose non-inferiority is the question. 1,200,000
+            # lets forty steps happen at the ~25,000 tokens a step this corpus produces, so the
+            # step limit is the pre-registered bound again.
+            - name: MAX_TOKENS
+              value: "${MAX_TOKENS:-1200000}"
             - name: STRATOCLAVE_API_KEY
               valueFrom:
                 secretKeyRef: {name: ${JOB}-creds, key: api-key}
