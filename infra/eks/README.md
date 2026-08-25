@@ -10,7 +10,7 @@ The design goal is one reusable module that covers the common accelerated-EKS
 shapes — GPU training, GPU/Trainium inference, and Capacity Block campaigns —
 without editing resource blocks. You add a workload by adding a map entry.
 
-> New here? Start with the task-oriented **[Usage Guide](./USAGE.md)** (setup,
+> New here? Start with the task-oriented **[Usage Guide](./docs/usage.md)** (setup,
 > running a GPU job, Capacity Blocks, teardown, troubleshooting). This README is
 > the reference.
 
@@ -329,7 +329,7 @@ is scheduled.
 terraform apply
 kubectl get nodes -l karpenter.sh/capacity-type=reserved
 
-# 4. Verify NCCL / EFA before the real run (see USAGE.md for the full command; GPU/EFA counts
+# 4. Verify NCCL / EFA before the real run (see docs/usage.md for the full command; GPU/EFA counts
 #    come from the live node's allocatable, not a hardcoded number).
 helm template exp ./charts/experiments -n $NS --set namespace=$NS \
   --set ncclSshd.enabled=true --set ncclSshd.nodeRole=<pool> \
@@ -617,11 +617,11 @@ production use.
 
 The profiling platform is installed by [`../scripts/install-profiling.sh`](../scripts/install-profiling.sh),
 which spans this state and `infra/data-layer`; see
-[`../PROFILING-INSTALL.md`](../PROFILING-INSTALL.md) for what it wires and how the plan guard behaves.
+[`../docs/profiling-install.md`](../docs/profiling-install.md) for what it wires and how the plan guard behaves.
 
 Once a namespace is wired, a run is submitted with [`scripts/kubectl-accelprof`](scripts/kubectl-accelprof)
 — a single self-contained file that only needs kubectl — and the workflow is documented in
-[`PROFILING-PRODUCER.md`](PROFILING-PRODUCER.md). The code that is baked into the platform image
+[`docs/profiling-producer.md`](docs/profiling-producer.md). The code that is baked into the platform image
 lives in [`images/accelprof/`](images/accelprof/), and the rendered Job shape is kept as a golden
 manifest in [`tests/golden/profiling-producer.job.yaml`](tests/golden/profiling-producer.job.yaml)
 so that a change to it shows up in review.

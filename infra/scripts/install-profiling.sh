@@ -616,5 +616,5 @@ A Pod using that ServiceAccount records a run with:
             metrics={...}, artifacts=["/path/to/trace.nsys-rep"])
 
 The alias is the deletion, retention and visibility unit: use one alias per experiment campaign and
-vary workload_id and free-form params inside it. See infra/PROFILING-INSTALL.md.
+vary workload_id and free-form params inside it. See infra/docs/profiling-install.md.
 SUMMARY

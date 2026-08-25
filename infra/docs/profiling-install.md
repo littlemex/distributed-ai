@@ -55,11 +55,12 @@ installed from the shipped example.
 ### Where these files live
 
 Anything that spans both Terraform states lives outside them: this document beside
-`S3FILES-RUNBOOK.md` in `infra/`, and the installer in `infra/scripts/`, because neither
+`s3files-runbook.md` in `infra/docs/`, and the installer in `infra/scripts/`, because neither
 `infra/eks` nor `infra/data-layer` owns an operation that applies both. Everything that only
 touches the cluster stays under `infra/eks`: the client and the image build in `scripts/`, the
 code that is baked into the platform image in `images/accelprof/`, and the producer guide in
-`PROFILING-PRODUCER.md`. A second state-spanning script belongs in `infra/scripts/` too.
+`docs/profiling-producer.md`. Every document other than a README lives in a `docs/`
+directory. A second state-spanning script belongs in `infra/scripts/` too.
 
 ## Prerequisites
 
@@ -101,7 +102,7 @@ kubectl --context "$KUBE_CONTEXT" create serviceaccount mcp-producer -n "$NAMESP
 ```
 
 Experimenters then need nothing from this repository. `scripts/kubectl-accelprof`, on PATH, submits a
-profiled run and finds its recording afterwards; see [PROFILING-PRODUCER.md](eks/PROFILING-PRODUCER.md).
+profiled run and finds its recording afterwards; see [profiling-producer.md](../eks/docs/profiling-producer.md).
 
 ```bash
 kubectl accelprof run --alias team1-lora-sweep --image "$MY_IMAGE" -- python train.py --lr 3e-4
