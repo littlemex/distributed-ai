@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Which model each tier is, where it lives, and what it is charged at.",
+    "No address is committed: `url` is filled in by run.sh from the environment, because a",
+    "gateway host is a property of a deployment and not of the experiment.",
+    "",
+    "The self-hosted tier states its own rate. The gateway's table prices it at the top",
+    "tier because Bedrock publishes no list price for the model, and its generic `vllm` key",
+    "is $0.20 per million, which is neither the machine's cost nor anything measured. The",
+    "figure below is the one measured on this deployment at the throughput knee, and",
+    "`rate_basis` is required so it cannot be quietly changed into a nicer number."
+  ],
+  "premium": {
+    "model": "claude-fable-5",
+    "pricing_key": "fable",
+    "reasoning_effort": "high"
+  },
+  "cheap": {
+    "model": "gpt-5.6-terra",
+    "pricing_key": "gpt-5.6-terra"
+  },
+  "self_hosted": {
+    "model": "Qwen/Qwen3.8-27B",
+    "api_key_env": null,
+    "rate": {
+      "fresh_in": 10.68,
+      "out": 10.68,
+      "cache_read": 10.68,
+      "cache_write": 10.68
+    },
+    "rate_basis": "measured 2026-08-26: g6e.12xlarge at $15.2174/h, 396 output tok/s at the 48-concurrent knee, 262k window, throughput tune. Input priced the same as output because the machine bills wall-clock and its prefix caching is unsupported on the hybrid linear-attention layers, so a repeated prompt is recomputed. See docs/V3-PLAN.md."
+  }
+}

@@ -1,0 +1,466 @@
+"""What the agent can do to the repository, and what each action is a step *of*.
+
+Two jobs here, and the second is the one v3 needs.
+
+The obvious job is a small tool set over `/testbed`. It is deliberately small: every tool
+is one the routing question can be asked about, and nothing is provided that would let a
+scaffold's cleverness rather than a model's capability decide the outcome.
+
+The other job is the step label. `docs/V3-PLAN.md` rules out *inferred* difficulty — v1
+measured a plausible-looking feature, the domain label, carrying no accuracy signal at
+p = 0.58 — and rules in the step type on the grounds that a harness does not have to
+predict it. That only holds if the label comes from the action rather than from the model's
+description of the action, so it is derived here from the tool that was called and a model
+cannot relabel its own work by claiming a step was trivial.
+
+The tool syntax is text rather than the provider tool-calling API. The pool spans three
+providers reached through one gateway, and each disagrees about tool schemas, streaming of
+tool deltas and whether an assistant turn may carry both text and a call. A text protocol
+is the same for all of them, which is what makes the arms comparable — the cost is that a
+malformed call has to be handled, and it is, by telling the model what went wrong and
+charging it the turn.
+"""
+
+from __future__ import annotations
+
+import re
+import shlex
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+TESTBED = Path("/testbed")
+CONDA = "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed"
+
+# The label attached to a step, from the tool it used. The routing table in `policy.py`
+# is written against these names.
+STEP_TYPE = {
+    "list_dir": "search",
+    "search": "search",
+    "read_file": "read",
+    "run_tests": "verify",
+    "write_patch": "patch",
+    # Its own type rather than "patch": the worker's handoff turn is cheap investigation
+    # ending, and folding its cost into the patch share would inflate the very figure that
+    # bounds what role-based routing can save.
+    "handoff": "handoff",
+    "done": "finish",
+}
+
+# Enough to read a definition and its neighbourhood; not enough to page a whole module in
+# one turn, which is how a context fills with material no step needed.
+MAX_READ_LINES = 400
+MAX_OUTPUT_CHARS = 6000
+TEST_TIMEOUT_S = 900
+
+
+@dataclass(frozen=True)
+class Action:
+    """One parsed tool call."""
+
+    tool: str
+    args: dict[str, str]
+    raw: str = ""
+
+    @property
+    def step_type(self) -> str:
+        return STEP_TYPE.get(self.tool, "unknown")
+
+    @property
+    def signature(self) -> str:
+        """What counts as "the same action again", for loop detection.
+
+        The arguments that name the target are part of it and the ones that only move a
+        window are not: re-reading the next hundred lines of a file is progress, while
+        reading the same hundred lines four times is the loop the second trigger exists to
+        catch.
+        """
+        keys = ("path", "pattern", "target", "dir")
+        named = " ".join(f"{k}={self.args[k]}" for k in keys if k in self.args)
+        if "old" in self.args:
+            # Three different edits to one file are three actions, not a loop. Without this
+            # they share a signature and the loop detector escalates a working agent.
+            named += f" old#{abs(hash(self.args['old'])) % 100000:05d}"
+        return f"{self.tool}({named})"
+
+
+@dataclass(frozen=True)
+class Observation:
+    """What came back, and whether it was the kind of answer that decides anything."""
+
+    text: str
+    ok: bool = True
+    # Set only by `run_tests`. None means this step said nothing about correctness, which
+    # is different from having said the code is fine — the first trigger depends on the
+    # distinction.
+    tests_passed: bool | None = None
+
+
+# One entry per tool, so a policy that withholds one removes it exactly. An earlier version
+# filtered the description line by line and left the continuation lines of the multi-line
+# entry behind, which advertised half a tool that would then be refused — the arm pays for
+# the harness being inconsistent with itself.
+TOOL_DOCS = {
+    "list_dir": "  list_dir      dir: <path>                      what is in a directory",
+    "search": "  search        pattern: <regex>  [dir: <path>]  where a name appears in the tree",
+    "read_file": "  read_file     path: <path>  [start: <line>]    up to 400 lines from `start`",
+    "run_tests": "  run_tests     target: <pytest target>          run tests that already exist here",
+    "write_patch": """\
+  write_patch   path: <path>                     replace an exact block of a file
+                old: <<<
+                ...the exact lines to replace...
+                >>>
+                new: <<<
+                ...what to put there...
+                >>>""",
+    "handoff": """\
+  handoff       note: <the fix, and the files it touches>
+                you do not write the patch yourself: describe it and hand off""",
+    "done": "  done          note: <why you are finished>",
+}
+
+# What the main loop offers when nothing is withheld.
+DEFAULT_TOOLS = ("list_dir", "search", "read_file", "run_tests", "write_patch", "done")
+
+PROTOCOL_HEAD = """\
+{opening}
+
+<action tool="NAME">
+key: value
+another: value
+</action>
+
+The tools:
+
+{tools}
+
+Rules that are enforced rather than requested:
+
+* Editing a test file fails the task. The tests that judge you are not in this checkout;
+  they are applied after you finish, so there is nothing to be gained by guessing at them.
+{rules}{cadence}"""
+
+ONE_PER_TURN = """\
+Reply with exactly one action per turn, in this form and nothing else after it:"""
+
+AS_MANY_AS_NEEDED = """\
+Reply with actions in this form and nothing else — as many as the work needs:"""
+
+CADENCE_ONE = """\
+* One action per turn. Text before the action is ignored, so put your reasoning there if
+  it helps you, but keep it short — it is charged for.
+"""
+
+CADENCE_MANY = """\
+* Text before the actions is ignored, so put your reasoning there if it helps you, but keep
+  it short — it is charged for.
+"""
+
+# A rule that only makes sense if the tool is on offer. Shown with it and not otherwise,
+# because a prompt is charged for and a rule about a tool the worker does not have is a
+# line of confusion it pays for.
+TOOL_RULES = {
+    "write_patch": (
+        "* `old:` must appear exactly once in the file, whitespace included. If it does "
+        "not, the\n  edit is refused and you are told so.\n"
+    ),
+}
+
+def protocol(
+    withhold: tuple[str, ...] = (),
+    add: tuple[str, ...] = (),
+    one_per_turn: bool = True,
+) -> str:
+    """The protocol text for a policy that does not offer every tool.
+
+    A withheld tool is removed from the description as well as refused at call time.
+    Advertising one and then rejecting it costs the arm a turn for nothing.
+
+    `one_per_turn` is a real setting rather than a constant. The patch handoff asks for as
+    many edits as the fix needs, and an earlier version embedded a protocol that told the
+    same model, twice, to send exactly one action — so the models that follow instructions
+    most closely wrote a single-file patch for a two-file fix.
+    """
+    unknown = sorted((set(withhold) | set(add)) - set(TOOL_DOCS))
+    if unknown:
+        raise ValueError(f"no tool called {unknown}; the tools are {sorted(TOOL_DOCS)}")
+    names = [name for name in DEFAULT_TOOLS if name not in withhold]
+    names += [name for name in add if name not in names]
+    return PROTOCOL_HEAD.format(
+        opening=ONE_PER_TURN if one_per_turn else AS_MANY_AS_NEEDED,
+        cadence=CADENCE_ONE if one_per_turn else CADENCE_MANY,
+        tools="\n".join(TOOL_DOCS[name] for name in names),
+        rules="".join(TOOL_RULES[name] for name in names if name in TOOL_RULES),
+    )
+
+
+# Kept so callers that want every tool need not spell the list out.
+PROTOCOL = protocol()
+
+
+def parse_all(text: str) -> list[Action]:
+    """Every action in an assistant turn, in order.
+
+    The main loop takes one per turn; the patch handoff takes all of them, because a fix
+    that spans two files in one reply is a fix and not a protocol violation.
+    """
+    return [
+        _action(tool, body)
+        for tool, body in re.findall(
+            r'<action\s+tool="([a-z_]+)"\s*>(.*?)</action>', text, flags=re.DOTALL
+        )
+    ]
+
+
+# Which action decides what kind of step a turn was, when a turn contains several. Most
+# consequential first: a turn that patched and then declared itself finished was a patch
+# step, and calling it a "finish" step would move the patch cost out of the figure that
+# bounds what role-based routing can save.
+STEP_PRECEDENCE = ("patch", "verify", "handoff", "read", "search", "finish")
+
+
+def parse(text: str) -> Action | None:
+    """The action a turn is attributed to, when only one is wanted.
+
+    The last one, because a model that reasons out loud sometimes writes an example of the
+    syntax before committing to a call. Callers that execute a turn should use `parse_all`
+    — the first real run showed a premium model emitting its patch and its `done` in one
+    reply, and taking only the last silently threw the patch away and scored the model on
+    having done nothing.
+    """
+    actions = parse_all(text)
+    return actions[-1] if actions else None
+
+
+def principal(actions: list[Action]) -> Action | None:
+    """Which of a turn's actions the turn is recorded as."""
+    if not actions:
+        return None
+    return min(
+        actions,
+        key=lambda a: (
+            STEP_PRECEDENCE.index(a.step_type)
+            if a.step_type in STEP_PRECEDENCE
+            else len(STEP_PRECEDENCE)
+        ),
+    )
+
+
+def _action(tool: str, body: str) -> Action:
+    args: dict[str, str] = {}
+    # Heredoc arguments first, so a patch body containing "path:" is not re-parsed as one.
+    for key, value in re.findall(r"^(\w+):\s*<<<\n(.*?)\n>>>\s*$", body, flags=re.DOTALL | re.MULTILINE):
+        args[key] = value
+    stripped = re.sub(r"^\w+:\s*<<<\n.*?\n>>>\s*$", "", body, flags=re.DOTALL | re.MULTILINE)
+    for line in stripped.splitlines():
+        match = re.match(r"^\s*(\w+):\s*(.*)$", line)
+        if match and match.group(1) not in args:
+            args[match.group(1)] = match.group(2).strip()
+    return Action(tool=tool, args=args, raw=body[:2000])
+
+
+def _run(command: str, *, timeout: int) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["/bin/bash", "-lc", f"cd {TESTBED} && {CONDA} && {command}"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _inside(path: str) -> Path:
+    """Resolve a path under the checkout, refusing anything that leaves it.
+
+    Not a security boundary — the container is the boundary. It stops an agent from
+    reading the instance metadata mounted beside it, which contains the tests and the
+    reference patch, and would turn the episode into a memorisation exercise.
+    """
+    resolved = (TESTBED / path).resolve()
+    # `is_relative_to` rather than a string prefix, which would also accept a sibling
+    # directory called `/testbed-something`. An absolute argument replaces the base
+    # entirely under pathlib, so `/data/instance.json` lands here and is refused.
+    if not resolved.is_relative_to(TESTBED):
+        raise ValueError(f"{path} is outside the checkout")
+    return resolved
+
+
+def read_within(path: str, limit: int = 20_000) -> str:
+    """A file from the checkout, for a caller outside the tool loop.
+
+    Exists so nothing else has to join a path onto `TESTBED` by hand. The one place that
+    did could be handed `/data/instance.json` — which holds the tests and the reference
+    patch — and would have posted it to a model.
+    """
+    return _inside(path).read_text(errors="replace")[:limit]
+
+
+# Anything that decides whether the suite runs, or what it reports. Not only test files:
+# a `conftest.py` that skips everything makes pytest exit zero, which would read as a fix.
+# The names are matched here and in `score.py` through this one function, because the two
+# disagreeing means an edit the agent was allowed to make voids its own episode.
+TEST_CONFIG_FILES = frozenset(
+    {"conftest.py", "pytest.ini", "setup.cfg", "tox.ini", "pyproject.toml"}
+)
+
+
+def is_test_path(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    return bool(
+        re.search(r"(^|/)(tests?|testing)/", path)
+        or re.match(r".*test_[^/]*\.py$", path)
+        or re.match(r".*_test\.py$", path)
+        or name in TEST_CONFIG_FILES
+    )
+
+
+def execute(action: Action) -> Observation:
+    """Carry out one action and describe what happened."""
+    try:
+        return _execute(action)
+    except subprocess.TimeoutExpired:
+        return Observation("the command did not finish in time", ok=False)
+    except (OSError, ValueError) as exc:
+        return Observation(f"{type(exc).__name__}: {exc}", ok=False)
+
+
+def _execute(action: Action) -> Observation:
+    args = action.args
+    if action.tool == "list_dir":
+        target = _inside(args.get("dir", "."))
+        if not target.is_dir():
+            return Observation(f"{args.get('dir')} is not a directory", ok=False)
+        names = sorted(
+            (p.name + ("/" if p.is_dir() else "")) for p in target.iterdir()
+            if not p.name.startswith(".")
+        )
+        return Observation("\n".join(names[:400]) or "(empty)")
+
+    if action.tool == "search":
+        pattern = args.get("pattern")
+        if not pattern:
+            return Observation("search needs a pattern", ok=False)
+        where = shlex.quote(args.get("dir", "."))
+        result = _run(
+            f"grep -rn --include='*.py' -E {shlex.quote(pattern)} {where} | head -60",
+            timeout=120,
+        )
+        return Observation(_clip(result.stdout) or "no match")
+
+    if action.tool == "read_file":
+        path = args.get("path")
+        if not path:
+            return Observation("read_file needs a path", ok=False)
+        target = _inside(path)
+        if not target.is_file():
+            return Observation(f"{path} is not a file", ok=False)
+        lines = target.read_text(errors="replace").splitlines()
+        start = max(1, int(args.get("start") or 1))
+        window = lines[start - 1 : start - 1 + MAX_READ_LINES]
+        numbered = "\n".join(f"{start + i:>6}  {line}" for i, line in enumerate(window))
+        tail = (
+            f"\n... {len(lines) - (start - 1 + len(window))} more lines"
+            if start - 1 + len(window) < len(lines)
+            else ""
+        )
+        return Observation(_clip(numbered) + tail)
+
+    if action.tool == "run_tests":
+        target = args.get("target")
+        if not target:
+            return Observation("run_tests needs a target", ok=False)
+        # `; exit ${PIPESTATUS[0]}` because the exit status is the verdict and a pipe
+        # through `tail` would replace it with tail's own success.
+        result = _run(
+            f"python -m pytest {shlex.quote(target)} -x -q 2>&1 | tail -60; "
+            "exit ${PIPESTATUS[0]}",
+            timeout=TEST_TIMEOUT_S,
+        )
+        return Observation(
+            _clip(result.stdout), ok=True, tests_passed=_verdict(result.returncode)
+        )
+
+    if action.tool == "write_patch":
+        return _write_patch(args)
+
+    if action.tool in ("done", "handoff"):
+        return Observation(args.get("note") or args.get("reason") or "")
+
+    return Observation(
+        f"there is no tool called {action.tool!r}; the tools are "
+        f"{sorted(STEP_TYPE)}",
+        ok=False,
+    )
+
+
+def _verdict(returncode: int) -> bool | None:
+    """What a pytest exit status says about the code, including when it says nothing.
+
+    pytest's own codes, and the distinction matters because the first escalation trigger
+    reads this: 0 is a pass, 1 is a failure, 5 is "collected nothing". A target that
+    matched no test has said nothing about correctness, and reporting that as a failure
+    would escalate an episode on the agent having mistyped a path.
+
+    Read from the status rather than the text, because a suite reporting `1 xfailed`
+    contains the word "failed" and passed.
+    """
+    if returncode == 0:
+        return True
+    # 5 is "collected nothing" and 4 is "the command line was wrong". Neither says anything
+    # about the code, and reporting either as a failure escalates an episode on the agent
+    # having mistyped a path.
+    if returncode in (4, 5):
+        return None
+    return False
+
+
+def _write_patch(args: dict[str, str]) -> Observation:
+    path, old, new = args.get("path"), args.get("old"), args.get("new")
+    if not path or old is None or new is None:
+        return Observation("write_patch needs path, old and new", ok=False)
+    if is_test_path(path):
+        # Refused here as well as failed at scoring time. The scorer is the guarantee;
+        # this is so a model that tries it is told, rather than discovering at the end
+        # that the episode was void.
+        return Observation(
+            f"{path} is a test file. Editing the tests fails the task — fix the library "
+            "instead.",
+            ok=False,
+        )
+    target = _inside(path)
+    if not target.is_file():
+        return Observation(f"{path} is not a file", ok=False)
+    text = target.read_text(errors="replace")
+    occurrences = text.count(old)
+    if occurrences == 0:
+        return Observation(
+            "that exact block is not in the file — whitespace and indentation have to "
+            "match. Read the region again and copy it.",
+            ok=False,
+        )
+    if occurrences > 1:
+        return Observation(
+            f"that block appears {occurrences} times, so the edit is ambiguous. Include "
+            "more surrounding lines.",
+            ok=False,
+        )
+    target.write_text(text.replace(old, new))
+    return Observation(f"{path} updated")
+
+
+def current_diff() -> str:
+    """The agent's edits, as the patch the scorer will be handed.
+
+    Tracked files only. An earlier version ran `git add -A -N` first, to catch new files —
+    and swept in the untracked `build/` tree that ships inside several of these images,
+    producing an 867 KB "patch" that could not be applied to anything. The tool set cannot
+    create a file (`write_patch` requires one that exists), so tracked modifications are
+    exactly the agent's work.
+    """
+    return _run("git diff", timeout=120).stdout
+
+
+def _clip(text: str) -> str:
+    if len(text) <= MAX_OUTPUT_CHARS:
+        return text
+    half = MAX_OUTPUT_CHARS // 2
+    return f"{text[:half]}\n... [{len(text) - MAX_OUTPUT_CHARS} characters cut] ...\n{text[-half:]}"

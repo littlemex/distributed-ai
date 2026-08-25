@@ -116,4 +116,5 @@ class TestOutcomeReading:
     def test_no_tests_named_is_not_a_pass_by_accident(self):
         """An instance with an empty list must not read as a green run."""
         outcome = score.pytest_outcome((), timeout=1)
-        assert outcome["ran"] == 0 and outcome["detail"] == "no tests named"
+        assert outcome["ran"] == 0 and outcome["ok"] is False
+        assert "cannot be scored" in outcome["detail"]

@@ -16,6 +16,12 @@ the whole contract:
    separates a fix from a change that breaks the rest of the library, and it is most of the
    test time.
 
+4. The checkout is reset before anything is applied. The agent edited `/testbed` in place,
+   so re-applying its own diff on top of its own edits fails — and a *correct* fix fails
+   most reliably, because it is the one that applied cleanly the first time. Scoring in the
+   same container as the episode is the normal case, so the reset is done here rather than
+   assumed of whoever runs it.
+
 The scorer never sees the gold patch. It exists in the instance data for the smoke test
 that proves this environment can distinguish a fix from no fix at all.
 """
@@ -29,8 +35,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-TESTBED = Path("/testbed")
-CONDA_ACTIVATE = "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tools  # noqa: E402  (shipped alongside; see below)
+
+# Taken from `tools`, not copied. The two must agree about what counts as touching the
+# examination: if the agent is allowed an edit the scorer voids the episode for, the run
+# produces failures that are the harness disagreeing with itself.
+TESTBED = tools.TESTBED
+CONDA_ACTIVATE = tools.CONDA
 # One test file's failures should not hide another's, and a repository's suite can be long.
 DEFAULT_TIMEOUT = 1800
 
@@ -45,33 +57,80 @@ def run(command: str, *, timeout: int = DEFAULT_TIMEOUT) -> subprocess.Completed
 
 
 def touched_tests(diff: str) -> list[str]:
-    """Files in the agent's diff that look like part of the examination."""
+    """Files in the agent's diff that are part of the examination.
+
+    Test files, and also anything that decides whether the suite runs or what it reports —
+    a `conftest.py` that skips everything makes pytest exit zero, which would otherwise
+    read as a fix.
+    """
     paths = re.findall(r"^\+\+\+ b/(.+)$", diff, flags=re.MULTILINE)
-    return [
-        path
-        for path in paths
-        if re.search(r"(^|/)(tests?|testing)/", path) or re.match(r".*test_[^/]*\.py$", path)
-    ]
+    return [path for path in paths if tools.is_test_path(path)]
+
+
+def reset_checkout() -> None:
+    """Undo the agent's edits before anything is applied.
+
+    Tracked files only, and deliberately no `git clean`: several of these images ship an
+    untracked `build/` tree that belongs to the environment, and deleting it would change
+    what the suite runs against. The tool set cannot create files, so restoring tracked
+    ones restores the checkout.
+    """
+    run("git checkout -- .")
 
 
 def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
-    """Run named tests and report what happened, without interpreting silence as success."""
+    """Run named tests and report what happened, without reading silence as success.
+
+    A zero exit status is not enough on its own. pytest exits zero when every test was
+    skipped, and it exits zero when a `conftest.py` arranged for that, so the verdict here
+    is that every named test reported PASSED. `-rA` lists one line per test, and the count
+    is taken from the whole output rather than a truncated tail — an earlier version
+    counted within the last four thousand characters and then papered over the undercount
+    by trusting the exit status, which is the assumption being removed.
+    """
     if not tests:
-        return {"ran": 0, "passed": 0, "failed": 0, "ok": True, "detail": "no tests named"}
+        return {"ran": 0, "passed": 0, "failed": 0, "ok": False, "scoreable": False,
+                "detail": "no tests named: this instance cannot be scored"}
     quoted = " ".join(f'"{test}"' for test in tests)
-    result = run(f"python -m pytest {quoted} -rA -q", timeout=timeout)
-    tail = (result.stdout + result.stderr)[-4000:]
-    passed = len(re.findall(r"^PASSED ", tail, flags=re.MULTILINE)) or (
-        len(tests) if result.returncode == 0 else 0
-    )
-    failed = len(re.findall(r"^(FAILED|ERROR) ", tail, flags=re.MULTILINE))
+    try:
+        result = run(f"python -m pytest {quoted} -rA -q", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Recorded rather than raised. An uncaught timeout writes no score.json, and the
+        # instances whose suites are slowest are the hard ones — so the arm that attempts
+        # them would silently lose them from its denominator.
+        return {"ran": len(tests), "passed": 0, "failed": 0, "skipped": 0, "ok": False,
+                "scoreable": False, "returncode": None, "basis": "timeout",
+                "detail": f"the suite did not finish within {timeout}s"}
+    whole = result.stdout + result.stderr
+    passed = len(re.findall(r"^PASSED ", whole, flags=re.MULTILINE))
+    failed = len(re.findall(r"^(FAILED|ERROR) ", whole, flags=re.MULTILINE))
+    skipped = len(re.findall(r"^(SKIPPED|XFAIL) ", whole, flags=re.MULTILINE))
+    # Some suites (Django's runner, older pytest) do not emit the per-test lines. Falling
+    # back to the exit status there is right, but it is recorded as a fallback so a
+    # surprising number can be traced to which rule produced it.
+    basis, scoreable = "per-test lines", True
+    if result.returncode == 4:
+        # pytest could not make sense of the target — often a unittest-style id it cannot
+        # collect. That says nothing about the code, and counting it as a failure would put
+        # "could not be scored" into the denominator as "did not solve it". `tools._verdict`
+        # reads the same status the same way, so the loop and the scorer agree.
+        basis, scoreable = "pytest rejected the target (exit 4)", False
+    elif passed == 0 and failed == 0 and skipped == 0:
+        # No per-test lines at all. The exit status is the only evidence left, and it is
+        # weaker than the rule above it — pytest exits zero when everything was skipped — so
+        # the episode is marked unscoreable and excluded rather than counted on trust.
+        basis, scoreable = "exit status only, no per-test lines", False
+        passed = len(tests) if result.returncode == 0 else 0
     return {
         "ran": len(tests),
         "passed": passed,
         "failed": failed,
-        "ok": result.returncode == 0,
+        "skipped": skipped,
+        "ok": result.returncode == 0 and passed >= len(tests),
+        "scoreable": scoreable,
         "returncode": result.returncode,
-        "detail": tail[-1200:],
+        "basis": basis,
+        "detail": whole[-1200:],
     }
 
 
@@ -94,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
 
     diff = args.diff.read_text() if args.diff and args.diff.exists() else ""
     verdict["diff_bytes"] = len(diff)
+    # Before anything is applied: the episode ran in this checkout and left its edits here.
+    reset_checkout()
     if args.apply_gold:
         diff = instance["gold_patch"]
         verdict["scored"] = "gold_patch"
@@ -144,14 +205,26 @@ def main(argv: list[str] | None = None) -> int:
 
     fail_to_pass = pytest_outcome(tuple(instance["fail_to_pass"]), timeout=args.timeout)
     pass_to_pass = pytest_outcome(tuple(instance["pass_to_pass"]), timeout=args.timeout)
+    scoreable = fail_to_pass.get("scoreable", True) and pass_to_pass.get("scoreable", True)
     verdict.update(
         fail_to_pass=fail_to_pass,
         pass_to_pass=pass_to_pass,
         resolved=bool(fail_to_pass["ok"] and pass_to_pass["ok"]),
+        # Whether this episode belongs in the comparison at all. An instance whose suite
+        # this environment cannot run is not evidence that a policy failed to fix it, and
+        # the instances that break hardest are the hard ones — so counting them as failures
+        # would bias against whichever arm reached them.
+        scoreable=scoreable,
     )
+    if not scoreable:
+        verdict["reason"] = (
+            "this instance could not be scored here: "
+            f"fail_to_pass={fail_to_pass.get('basis')}, pass_to_pass={pass_to_pass.get('basis')}"
+        )
     args.out.write_text(json.dumps(verdict, indent=2))
     print(
-        f"[{'OK' if verdict['resolved'] else 'FAIL'}] {instance['instance_id']}: "
+        f"[{'OK' if verdict['resolved'] else 'UNSCOREABLE' if not scoreable else 'FAIL'}] "
+        f"{instance['instance_id']}: "
         f"fail_to_pass={'pass' if fail_to_pass['ok'] else 'fail'} "
         f"pass_to_pass={'pass' if pass_to_pass['ok'] else 'fail'}"
     )
