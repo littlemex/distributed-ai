@@ -101,7 +101,11 @@ model complementarity.
    available; and more than half the apparent disagreement between them is the same arm
    answering differently on a second ask, which makes asking each cell three times the
    cheapest lever and one that no number of extra questions substitutes for. What remains
-   is the effort-axis pilot the screen cannot replace, about 1,800 calls.
+   is the effort-axis pilot the screen cannot replace, about 1,800 calls. **Run —
+   `docs/PILOT.md`.** It confirms the sizing and removes the reason to spend it here:
+   above the lowest effort level the dial is indistinguishable from re-asking the same
+   arm, the one real notch is off-to-on, and nine of twelve arms are dominated. See "The
+   decision after the pilot" below.
 2. **Routing cost in dollars.** The primary claim is "routable gain exceeds routing
    cost", and the right-hand side is currently blank. Feature computation, router
    inference, the added latency, and maintenance all have to be priced, or the inequality
@@ -390,6 +394,31 @@ stratification, regression adjustment on v1's own difficulty estimates — or v2
 run. The final number should come from simulation over a fitted question-random-effect
 model with the measured flip rates and the measured token-cost tail, sized on the
 held-out slice, not from a closed-form calculation on the whole fold.
+
+## The decision after the pilot
+
+v2 was conditional on three things, and the first one answered a question the plan had not
+thought to ask. The power work says the design is affordable at a two-point target. The
+pilot says the mechanism the design would measure is absent from this benchmark: on
+MMLU-Pro the compute dial has a single notch, `off` to `on`, and every step above it moves
+cost by up to nine times and accuracy not at all — by less, in a paired test, than the
+same arm moves when asked a second time.
+
+That makes Δ ≈ 0 not merely an acceptable outcome but a near-certain one, and for a reason
+that is about the dataset rather than about model diversity. Spending 1,200 questions and
+three asks to put a tight interval around zero would buy a correct number and no insight.
+
+**So the next spend goes to a task family where the dial has range**, and the pilot
+protocol becomes the screen that decides whether it does — twelve arms, 137 questions, a
+repeat pass, `power.py --pilot`, about $28 and forty minutes. Candidates in the order they
+are likely to have range: long-form generation scored by a rubric, multi-step or agentic
+tasks where an error compounds, and code with tests as the scorer. What makes them
+different from MMLU-Pro is that the answer is not a letter of the alphabet, so a longer
+chain of thought has somewhere to go.
+
+The rest of this plan stands. If a task family clears the screen, the estimand, the
+cross-fitting, the arm granularity and the three conditions apply to it unchanged — and
+the harness now collects it.
 
 ## Explicitly not in v2
 

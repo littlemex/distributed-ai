@@ -824,3 +824,79 @@ class TestPoolFilter:
         """Ignoring it would produce a run that looks right and answers something else."""
         with pytest.raises(catalog.ConfigError, match="typo"):
             catalog.only([member("sclv/a", "a")], ["a", "typo"])
+
+
+class TestPilotReaders:
+    """The pilot reads rows at arm granularity, which the member-keyed loader cannot."""
+
+    def rows(self, path: Path, rows: list[dict]) -> None:
+        path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    def cell(self, arm, qid, correct, *, error=None, completion=100):
+        return {
+            "arm": arm,
+            "requested_model": "sclv/m",
+            "question_id": qid,
+            "correct": correct,
+            "error": error,
+            "prompt_tokens": 200,
+            "completion_tokens": completion,
+        }
+
+    def test_four_arms_of_one_member_are_four_cells(self, tmp_path):
+        """The member-keyed loader sees four answers to one cell and refuses the file."""
+        out = tmp_path / "m.jsonl"
+        self.rows(out, [
+            self.cell("pinned:sclv/m", "1", True),
+            self.cell("pinned:sclv/m@low", "1", False),
+            self.cell("pinned:sclv/m@high", "1", True),
+        ])
+        cells, qids = power.read_arm_cells([out], [member("sclv/m", "m")])
+        assert set(cells) == {"sclv/m", "sclv/m@low", "sclv/m@high"}
+        assert qids == ["1"]
+
+    def test_only_questions_every_arm_answered_are_scored(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rows(out, [
+            self.cell("pinned:sclv/m", "1", True),
+            self.cell("pinned:sclv/m", "2", True),
+            self.cell("pinned:sclv/m@low", "1", False),
+        ])
+        _, qids = power.read_arm_cells([out], [member("sclv/m", "m")])
+        assert qids == ["1"]
+
+    def test_a_failed_cell_is_not_a_cell(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rows(out, [
+            self.cell("pinned:sclv/m", "1", True),
+            self.cell("pinned:sclv/m@low", "1", None, error="http 502"),
+        ])
+        cells, qids = power.read_arm_cells([out], [member("sclv/m", "m")])
+        assert "sclv/m@low" not in cells and qids == ["1"]
+
+    def test_cost_comes_from_the_member_s_own_rate(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rows(out, [self.cell("pinned:sclv/m", "1", True, completion=1_000_000)])
+        cells, _ = power.read_arm_cells([out], [member("sclv/m", "m")])
+        # 200 prompt at $1/Mtok plus 1M completion at $2/Mtok.
+        assert cells["sclv/m"]["1"]["cost"] == pytest.approx(2.0002)
+
+    def test_flip_rate_compares_the_repeat_against_the_first_ask(self, tmp_path):
+        matrix, repeat = tmp_path / "m.jsonl", tmp_path / "r.jsonl"
+        self.rows(matrix, [
+            self.cell("pinned:sclv/m@low", "1", True),
+            self.cell("pinned:sclv/m@low", "2", True),
+        ])
+        self.rows(repeat, [
+            self.cell("repeat:sclv/m@low", "1", False),  # flipped
+            self.cell("repeat:sclv/m@low", "2", True),   # agreed
+        ])
+        cells, _ = power.read_arm_cells([matrix], [member("sclv/m", "m")])
+        assert power.arm_flip_rates([repeat], cells) == {"sclv/m@low": pytest.approx(0.5)}
+
+    def test_a_repeat_of_a_cell_that_was_never_collected_is_ignored(self, tmp_path):
+        matrix, repeat = tmp_path / "m.jsonl", tmp_path / "r.jsonl"
+        self.rows(matrix, [self.cell("pinned:sclv/m@low", "1", True)])
+        self.rows(repeat, [self.cell("repeat:sclv/m@low", "9", False)])
+        cells, _ = power.read_arm_cells([matrix], [member("sclv/m", "m")])
+        assert power.arm_flip_rates([repeat], cells) == {}

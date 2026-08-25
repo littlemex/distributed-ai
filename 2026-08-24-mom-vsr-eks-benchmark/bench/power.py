@@ -32,6 +32,7 @@ point be".
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
@@ -179,6 +180,75 @@ def at_samples_per_cell(
     return (differences - differences.mean()) * scale + differences.mean()
 
 
+def read_arm_cells(
+    paths: list[Path], members: list[catalog.Member]
+) -> tuple[dict[str, dict[str, dict]], list[str]]:
+    """Rows keyed by arm and question, with each cell's cost.
+
+    Deliberately not `policies.load_matrix`, which keys cells by member: four arms of
+    one member share a `requested_model`, so that loader sees four answers to the same
+    cell and refuses the file. Making it arm-granular is the next real piece of work on
+    the analysis side; the pilot needs the numbers before that lands, and reading the
+    rows here keeps the shortcut visible instead of quietly widening a loader that the
+    rest of the report depends on.
+
+    Returns the cells and the questions every arm answered — an arm may only be scored
+    where every arm could have been.
+    """
+    by_model = {m.name: m for m in members}
+    cells: dict[str, dict[str, dict]] = {}
+    for path in paths:
+        with path.open() as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                arm = row["arm"].split(":", 1)[1] if ":" in row["arm"] else row["arm"]
+                member = by_model.get(row["requested_model"])
+                if member is None or row.get("error"):
+                    continue
+                cells.setdefault(arm, {})[row["question_id"]] = {
+                    "correct": bool(row.get("correct")),
+                    "cost": member.cost_usd(
+                        row.get("prompt_tokens") or 0, row.get("completion_tokens") or 0
+                    ),
+                    "completion_tokens": row.get("completion_tokens") or 0,
+                }
+    if not cells:
+        return cells, []
+    complete = set.intersection(*(set(v) for v in cells.values()))
+    return cells, sorted(complete)
+
+
+def arm_flip_rates(paths: list[Path], cells: dict[str, dict[str, dict]]) -> dict[str, float]:
+    """Per arm, how often a re-asked question changed its verdict."""
+    tally: dict[str, list[int]] = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        with path.open() as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if not str(row.get("arm", "")).startswith("repeat:") or row.get("error"):
+                    continue
+                arm = row["arm"].split(":", 1)[1]
+                first = cells.get(arm, {}).get(row["question_id"])
+                if first is None:
+                    continue
+                bucket = tally.setdefault(arm, [0, 0])
+                bucket[0] += 1
+                if bool(row.get("correct")) != first["correct"]:
+                    bucket[1] += 1
+    return {
+        arm: (flipped / compared if compared else 0.0)
+        for arm, (compared, flipped) in tally.items()
+    }
+
+
 def measured_tokens(
     matrix: policies.Matrix, qids: list[str]
 ) -> dict[str, tuple[float, float]]:
@@ -214,12 +284,108 @@ def design_cost_usd(
     return total
 
 
+def report_pilot(
+    matrix_paths: list[Path],
+    repeat_paths: list[Path],
+    members: list[catalog.Member],
+    pool: Path,
+    targets: list[float],
+) -> int:
+    """The effort axis measured on itself: what the screen could not observe.
+
+    The screen borrowed between-model discordance as a stand-in. This reads the real
+    thing — a member against its own higher levels — which is the quantity the primary
+    estimand turns on, and the one that decides whether the design is affordable.
+    """
+    cells, qids = read_arm_cells(matrix_paths, members)
+    if not qids:
+        raise SystemExit("[FAIL] no question was answered by every arm")
+    arms = catalog.arms(pool, members)
+    print(f"[INFO] {len(cells)} arms over {len(qids)} questions answered by all of them")
+
+    flips = arm_flip_rates(repeat_paths, cells)
+    if flips:
+        print(
+            "[INFO] re-ask disagreement measured on "
+            f"{len(flips)} arms, {min(flips.values()):.1%} to {max(flips.values()):.1%}"
+        )
+    else:
+        print("[WARNING] no repeat pass yet, so measurement noise is not in these numbers")
+
+    def correct(arm: str) -> np.ndarray:
+        return np.array([cells[arm][q]["correct"] for q in qids], dtype=bool)
+
+    def cost(arm: str) -> np.ndarray:
+        return np.array([cells[arm][q]["cost"] for q in qids], dtype=float)
+
+    print("\n== within a member: its own effort levels against each other ==")
+    print(f"    {'pair':<52}{'discord':>9}{'net':>8}{'cost x':>8}")
+    within = []
+    for member in members:
+        levels = [a.name for a in arms if a.member.name == member.name and a.name in cells]
+        for i, a in enumerate(levels):
+            for b in levels[i + 1 :]:
+                ca, cb = correct(a), correct(b)
+                disc = float(np.mean(ca ^ cb))
+                net = float(np.mean(ca.astype(float) - cb.astype(float)))
+                ratio = cost(a).mean() / cost(b).mean() if cost(b).mean() else float("inf")
+                within.append((a, b, disc, net, ratio))
+                label = f"{a.replace('sclv/','')} / {b.replace('sclv/','')}"
+                print(f"    {label:<52}{disc:>8.1%}{net:>+8.1%}{ratio:>8.1f}")
+
+    print("\n== across members, at the same declared level ==")
+    print(f"    {'pair':<52}{'discord':>9}{'net':>8}")
+    across = []
+    names = [a.name for a in arms if a.name in cells]
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            if a.split("@")[0] == b.split("@")[0]:
+                continue
+            suffix_a = a.split("@")[1] if "@" in a else "default"
+            suffix_b = b.split("@")[1] if "@" in b else "default"
+            if suffix_a != suffix_b:
+                continue
+            ca, cb = correct(a), correct(b)
+            disc = float(np.mean(ca ^ cb))
+            across.append(disc)
+            label = f"{a.replace('sclv/','')} / {b.replace('sclv/','')}"
+            print(f"    {label:<52}{disc:>8.1%}{np.mean(ca.astype(float)-cb.astype(float)):>+8.1%}")
+
+    w = [row[2] for row in within]
+    print(
+        f"\n    within-member discordance: {min(w):.1%} to {max(w):.1%}, median "
+        f"{sorted(w)[len(w)//2]:.1%}"
+    )
+    if across:
+        print(
+            f"    across-member at matched level: {min(across):.1%} to {max(across):.1%}, "
+            f"median {sorted(across)[len(across)//2]:.1%}"
+        )
+
+    print("\n== what that implies for the design ==")
+    for label, disc in (
+        ("within-member median", sorted(w)[len(w) // 2]),
+        ("within-member widest", max(w)),
+    ):
+        line = f"    {label:<24}d={disc:5.1%}  MDE at n={len(qids)}: {mde_at(disc, len(qids)):6.2%}"
+        for target in targets:
+            line += f"   n for {target:.0%}: {n_for(disc, target):>7,}"
+        print(line)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--matrix", nargs="+", type=Path, required=True)
     parser.add_argument("--repeat", nargs="*", type=Path, default=[])
+    parser.add_argument(
+        "--pilot",
+        action="store_true",
+        help="read the matrix at arm granularity and report the effort axis instead of "
+        "the model-axis screen",
+    )
     parser.add_argument("--pool", type=Path, default=DEFAULT_POOL)
     parser.add_argument(
         "--only",
@@ -252,6 +418,10 @@ def main(argv: list[str] | None = None) -> int:
     if not defaults:
         raise SystemExit("[FAIL] STRATOCLAVE_DEFAULTS is required (for the rate table)")
     members = catalog.only(catalog.load_pool(args.pool, Path(defaults)), args.only)
+    if args.pilot:
+        return report_pilot(
+            args.matrix, list(args.repeat), members, args.pool, args.targets
+        )
     matrix = policies.load_matrix(args.matrix, members)
     rng = np.random.default_rng(args.seed)
 

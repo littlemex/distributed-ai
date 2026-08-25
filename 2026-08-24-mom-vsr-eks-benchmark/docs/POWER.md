@@ -114,6 +114,14 @@ cheaper. The screen is also optimistic by construction: it compares two fixed ar
 while the estimand chooses both sides, so the real variance carries a selection term
 this does not.
 
+**That pilot has since been run — `docs/PILOT.md`.** It confirms the sizing (within-member
+discordance has a median of 7.3%, so two points needs about 1,400 questions at one ask)
+and undercuts the premise: above the lowest effort level, changing the dial is
+indistinguishable from asking the same arm twice, and nine of twelve arms are dominated.
+The design is affordable; the effect it would measure is not present on this benchmark.
+
+The reasoning that led there is kept below as written.
+
 That leaves one measurement standing between the plan and a decision: a pilot on the
 effort axis. To pin a discordance near 10% to within half its value takes about 140
 questions per pair; to within a quarter, about 550. Three members declare effort levels
