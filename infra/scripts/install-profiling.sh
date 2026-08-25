@@ -8,7 +8,7 @@
 #
 # Usage:
 #   CLUSTER_NAME=my-cluster AWS_REGION=us-east-2 PRODUCER_NAMESPACES=team-a,team-b \
-#     infra/install-profiling.sh
+#     infra/scripts/install-profiling.sh
 #
 # Required:
 #   CLUSTER_NAME          EKS cluster to wire (must already exist)
@@ -32,9 +32,12 @@
 # destroys anything and never rolls back — on failure, fix the cause and run it again.
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-eks_dir="${repo_root}/infra/eks"
-data_dir="${repo_root}/infra/data-layer"
+# Resolved from this script's own location so it works from any working directory. It lives in
+# infra/scripts because it orchestrates BOTH Terraform states: neither infra/eks nor
+# infra/data-layer owns it.
+infra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+eks_dir="${infra_dir}/eks"
+data_dir="${infra_dir}/data-layer"
 work_dir="$(mktemp -d)"
 cleanup() { [ -n "${pf_pid:-}" ] && kill "${pf_pid}" 2>/dev/null || true; rm -rf "${work_dir}"; }
 trap cleanup EXIT

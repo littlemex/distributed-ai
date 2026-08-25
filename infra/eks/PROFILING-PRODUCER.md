@@ -1,24 +1,25 @@
 # Profiling a workload
 
-Put `scripts/kubectl-profile` on your PATH and run your own command under a profiler:
+Put `kubectl-accelprof` on your PATH — it is a single self-contained file, so copying it is enough —
+and run your own command under a profiler:
 
 ```bash
-kubectl profile run --alias team1-lora-sweep --image "$MY_IMAGE" -- python train.py --lr 3e-4
+kubectl accelprof run --alias team1-lora-sweep --image "$MY_IMAGE" -- python train.py --lr 3e-4
 ```
 
 It returns as soon as the run is submitted. The recording happens in the cluster, so nothing on your
 machine has to stay alive. When it finishes, ask for the run:
 
 ```bash
-kubectl profile get "$WORKLOAD_ID"
-kubectl profile runs --alias team1-lora-sweep
+kubectl accelprof get "$WORKLOAD_ID"
+kubectl accelprof runs --alias team1-lora-sweep
 ```
 
 You need nothing but `kubectl`: no repository checkout, no Helm, no Python. Everything about the
 platform — the region, the trace bucket, the MLflow tracking server, the image that carries the
 profiler — is read from the `accelprof-config` ConfigMap that the platform publishes into your
 namespace. If that ConfigMap is missing, the namespace has not been wired for profiling yet; ask the
-platform owner to add it to `PRODUCER_NAMESPACES` and re-run `infra/install-profiling.sh`.
+platform owner to add it to `PRODUCER_NAMESPACES` and re-run `infra/scripts/install-profiling.sh`.
 
 ## Your image needs nothing
 
@@ -58,7 +59,7 @@ cleanup. Use one alias per experiment campaign, named `tenant-series`, and vary 
 inside it:
 
 ```bash
-kubectl profile run --alias team1-attn-sweep --image "$MY_IMAGE" \
+kubectl accelprof run --alias team1-attn-sweep --image "$MY_IMAGE" \
   --param seq_len=4096 --tag variant=flash -- python train.py --seq-len 4096
 ```
 
@@ -110,5 +111,5 @@ than silent.
 ## Where things live
 
 The Job is kept for two days after it finishes and then removed by Kubernetes; the recording is
-permanent. `kubectl profile get` reads the run id from the Job while it exists, and points at MLflow
+permanent. `kubectl accelprof get` reads the run id from the Job while it exists, and points at MLflow
 afterwards, which is the durable way to find a run by alias and workload id.

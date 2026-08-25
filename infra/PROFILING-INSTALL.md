@@ -1,6 +1,6 @@
 # Installing the profiling platform
 
-`infra/install-profiling.sh` wires the profiling platform onto a cluster that `infra/eks` already
+`infra/scripts/install-profiling.sh` wires the profiling platform onto a cluster that `infra/eks` already
 manages. It is the supported way to adopt the platform: one command, re-runnable, and it reads every
 Terraform output itself so that no operator has to move values between states by hand.
 
@@ -8,7 +8,7 @@ Terraform output itself so that no operator has to move values between states by
 export CLUSTER_NAME=my-cluster
 export AWS_REGION=us-east-2
 export PRODUCER_NAMESPACES=team-a,team-b
-infra/install-profiling.sh
+infra/scripts/install-profiling.sh
 ```
 
 ## What it installs
@@ -52,6 +52,15 @@ Remote state is required. The script reads the state bucket, region and lock tab
 live in the same bucket with distinct keys. If `infra/data-layer/backend.tf` is missing it is
 installed from the shipped example.
 
+### Where these files live
+
+Anything that spans both Terraform states lives outside them: this document beside
+`S3FILES-RUNBOOK.md` in `infra/`, and the installer in `infra/scripts/`, because neither
+`infra/eks` nor `infra/data-layer` owns an operation that applies both. Everything that only
+touches the cluster stays under `infra/eks`: the client and the image build in `scripts/`, the
+code that is baked into the platform image in `images/accelprof/`, and the producer guide in
+`PROFILING-PRODUCER.md`. A second state-spanning script belongs in `infra/scripts/` too.
+
 ## Prerequisites
 
 - A cluster managed by `infra/eks`, with remote state configured
@@ -91,11 +100,11 @@ In each producer namespace, create the ServiceAccount that the Pod Identity asso
 kubectl --context "$KUBE_CONTEXT" create serviceaccount mcp-producer -n "$NAMESPACE"
 ```
 
-Experimenters then need nothing from this repository. `scripts/kubectl-profile`, on PATH, submits a
+Experimenters then need nothing from this repository. `scripts/kubectl-accelprof`, on PATH, submits a
 profiled run and finds its recording afterwards; see [PROFILING-PRODUCER.md](eks/PROFILING-PRODUCER.md).
 
 ```bash
-kubectl profile run --alias team1-lora-sweep --image "$MY_IMAGE" -- python train.py --lr 3e-4
+kubectl accelprof run --alias team1-lora-sweep --image "$MY_IMAGE" -- python train.py --lr 3e-4
 ```
 
 ### Why there is no controller

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# kubectl-profile — submit a profiled run to the cluster, and find its recording afterwards.
+# kubectl-accelprof — submit a profiled run to the cluster, and find its recording afterwards.
 #
-# Install by putting this file on PATH as "kubectl-profile"; kubectl then exposes it as
-# `kubectl profile ...`. It needs nothing but kubectl: no repository checkout, no Helm, no Python.
+# Install by putting this file on PATH as "kubectl-accelprof"; kubectl then exposes it
+# as `kubectl accelprof ...`. It needs nothing but kubectl: no repository checkout, no Helm, no Python.
 # Everything the platform knows — region, trace bucket, MLflow tracking server, platform image — is
 # read from the accelprof-config ConfigMap that the installer publishes into each namespace.
 #
-#   kubectl profile run --alias team1-lora-sweep --image <your image> -- python train.py --lr 3e-4
-#   kubectl profile runs --alias team1-lora-sweep
-#   kubectl profile get <workload-id>
+#   kubectl accelprof run --alias team1-lora-sweep --image <your image> -- python train.py --lr 3e-4
+#   kubectl accelprof runs --alias team1-lora-sweep
+#   kubectl accelprof get <workload-id>
 #
 # run submits and returns immediately. Recording happens in the cluster, so nothing local needs to
 # stay alive; --wait is available when watching one short run is more convenient.
@@ -38,7 +38,8 @@
 #   --discard-on-fail     do not record a failed run. It is recorded by default, tagged status=failed,
 #                         because a slow or crashing run is usually the one worth profiling.
 #   --wait                wait for the run to finish and print its run id.
-#   --dry-run             print the manifest and exit.
+#   --dry-run             print the manifest and exit. With ACCELPROF_PLATFORM_IMAGE set, this
+#                         needs no cluster at all, which is how the golden manifest is produced.
 set -euo pipefail
 
 self="$(basename "$0")"
@@ -46,9 +47,91 @@ say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
-# The Job shape lives next to this script in the repository, and is embedded below when the script is
-# distributed on its own. The repository copy wins when present, so the shape stays reviewable.
-template_path="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/manifests/profiling-producer.job.yaml.tmpl"
+# The Job shape is embedded here rather than read from a neighbouring file, because this script is
+# meant to be copied onto PATH as a kubectl plugin: a file-relative template stops resolving the
+# moment that happens, and a client and a template that travel separately drift apart. Set
+# KUBECTL_ACCELPROF_TEMPLATE to a path to override it while developing the shape.
+job_template() {
+  if [ -n "${KUBECTL_ACCELPROF_TEMPLATE:-}" ]; then
+    cat "${KUBECTL_ACCELPROF_TEMPLATE}"
+    return
+  fi
+  cat <<'TEMPLATE'
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "@JOB_NAME@"
+  namespace: "@NAMESPACE@"
+  labels:
+    app.kubernetes.io/name: profiling-producer
+    accelprof.io/alias: "@ALIAS@"
+    accelprof.io/workload-id: "@WORKLOAD_ID@"
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: @TTL_SECONDS@
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: profiling-producer
+        accelprof.io/alias: "@ALIAS@"
+        accelprof.io/workload-id: "@WORKLOAD_ID@"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: "@SERVICE_ACCOUNT@"
+      volumes:
+        - name: accelprof
+          emptyDir: {}
+      initContainers:
+        - name: tools
+          image: "@PLATFORM_IMAGE@"
+          command: ["sh", "-c", "@TOOLS_SCRIPT@"]
+          volumeMounts:
+            - { name: accelprof, mountPath: /accelprof }
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+      containers:
+        - name: workload
+          image: "@WORKLOAD_IMAGE@"
+          command: ["/accelprof/tools/entry.sh"]
+          args: @COMMAND_JSON@
+          env:
+            - { name: ACCELPROF_OUT, value: "/accelprof/out" }
+            - { name: ACCELPROF_TOOLS, value: "/accelprof/tools" }
+            - { name: ACCELPROF_PROFILE_MODE, value: "@PROFILE_MODE@" }
+            - { name: ACCELPROF_PROFILE_RANKS, value: "@PROFILE_RANKS@" }
+            - { name: ACCELPROF_NSYS_ARGS, value: "@NSYS_ARGS@" }
+            - name: ACCELPROF_POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          volumeMounts:
+            - { name: accelprof, mountPath: /accelprof }
+        - name: recorder
+          image: "@PLATFORM_IMAGE@"
+          command: ["python3", "/opt/accelprof/recorder.py"]
+          env:
+            - { name: ACCELPROF_OUT, value: "/accelprof/out" }
+            - { name: ACCELPROF_ALIAS, value: "@ALIAS@" }
+            - { name: ACCELPROF_CHIP, value: "@CHIP@" }
+            - { name: ACCELPROF_WORKLOAD_ID, value: "@WORKLOAD_ID@" }
+            - { name: ACCELPROF_JOB_NAME, value: "@JOB_NAME@" }
+            - { name: ACCELPROF_PROFILE_MODE, value: "@PROFILE_MODE@" }
+            - { name: ACCELPROF_PROFILE_RANKS, value: "@PROFILE_RANKS@" }
+            - { name: ACCELPROF_RECORD_ON_FAILURE, value: "@RECORD_ON_FAILURE@" }
+            - { name: ACCELPROF_RECORDER_TIMEOUT, value: "@RECORDER_TIMEOUT@" }
+            - name: ACCELPROF_POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: ACCELPROF_POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          envFrom:
+            # region, trace bucket and tracking server, published into this namespace by the installer
+            - configMapRef:
+                name: accelprof-config
+          volumeMounts:
+            - { name: accelprof, mountPath: /accelprof }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { memory: "1Gi" }
+TEMPLATE
+}
 
 # A bash pattern substitution interprets both & and \ in its replacement text: & expands to the
 # matched text and a backslash escapes the next character. Every value put into the manifest goes
@@ -82,10 +165,16 @@ resolve_namespace() {
 
 platform_image() {
   local ns="$1" image
+  # An explicit override lets the manifest be rendered without a cluster, which is what makes
+  # --dry-run usable offline and in CI (the golden file under tests/golden is produced this way).
+  if [ -n "${ACCELPROF_PLATFORM_IMAGE:-}" ]; then
+    printf '%s' "${ACCELPROF_PLATFORM_IMAGE}"
+    return
+  fi
   image="$(k get configmap accelprof-config -n "${ns}" \
     -o jsonpath='{.data.ACCELPROF_PLATFORM_IMAGE}' 2>/dev/null || true)"
   [ -n "${image}" ] ||
-    die "namespace ${ns} is not wired for profiling (no accelprof-config ConfigMap). Ask the platform owner to add it to PRODUCER_NAMESPACES and re-run infra/install-profiling.sh."
+    die "namespace ${ns} is not wired for profiling (no accelprof-config ConfigMap). Ask the platform owner to add it to PRODUCER_NAMESPACES and re-run infra/scripts/install-profiling.sh."
   printf '%s' "${image}"
 }
 
@@ -136,7 +225,6 @@ cmd_run() {
   # again in the recorder: an old copy of this client must not be the only thing enforcing it.
   printf '%s' "${alias_name}" | grep -Eq '^[a-z0-9][a-z0-9-]{1,62}$' ||
     die "--alias must match ^[a-z0-9][a-z0-9-]{1,62}$ (it becomes an S3 prefix and an MLflow experiment name)"
-  [ -f "${template_path}" ] || die "cannot find the Job template at ${template_path}"
 
   namespace="$(resolve_namespace "${namespace}")"
   local platform workload_id job_name
@@ -161,7 +249,7 @@ cmd_run() {
   command_json="${command_json}]"
 
   local manifest
-  manifest="$(cat "${template_path}")"
+  manifest="$(job_template)"
   local key value
   for kv in \
     "JOB_NAME=${job_name}" "NAMESPACE=${namespace}" "ALIAS=${alias_name}" \

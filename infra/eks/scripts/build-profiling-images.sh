@@ -5,7 +5,7 @@
 # published digests; building from a working tree is deliberately opt-in (DEV_BUILD=1) because the
 # digest that lands in the cluster then depends on whatever the operator has checked out.
 #
-# Called by infra/install-profiling.sh, or directly:
+# Called by infra/scripts/install-profiling.sh, or directly:
 #   KCTX=profiling-my-cluster AWS_REGION=us-east-2 \
 #     ECR_REGISTRY=<account>.dkr.ecr.us-east-2.amazonaws.com \
 #     infra/eks/scripts/build-profiling-images.sh
@@ -43,9 +43,9 @@ build() {
   # alongside the Dockerfile. A ConfigMap context is the whole context, so every file must be listed.
   local ctx_args=(--from-file="Dockerfile=${eks_dir}/images/${dockerfile}")
   if [ "${dockerfile}" = "Dockerfile.accelprof-analysis" ]; then
-    ctx_args+=(--from-file="accelprof-entry.sh=${eks_dir}/images/accelprof-entry.sh")
-    ctx_args+=(--from-file="accelprof-recorder.py=${eks_dir}/images/accelprof-recorder.py")
-    ctx_args+=(--from-file="accelprof-orphan-check.py=${eks_dir}/images/accelprof-orphan-check.py")
+    for src in entry.sh recorder.py orphan-check.py; do
+      ctx_args+=(--from-file="${src}=${eks_dir}/images/accelprof/${src}")
+    done
   fi
   k -n image-builder create configmap "${job}-ctx" "${ctx_args[@]}" \
     --dry-run=client -o yaml | k apply -f - >/dev/null

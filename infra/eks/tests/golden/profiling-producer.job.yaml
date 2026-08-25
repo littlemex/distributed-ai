@@ -1,0 +1,73 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "profile-wl-000000000000-00000000"
+  namespace: "producer-namespace"
+  labels:
+    app.kubernetes.io/name: profiling-producer
+    accelprof.io/alias: "tenant-series"
+    accelprof.io/workload-id: "wl-000000000000-00000000"
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: profiling-producer
+        accelprof.io/alias: "tenant-series"
+        accelprof.io/workload-id: "wl-000000000000-00000000"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: "mcp-producer"
+      volumes:
+        - name: accelprof
+          emptyDir: {}
+      initContainers:
+        - name: tools
+          image: "image.example/accelprof@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          command: ["sh", "-c", "mkdir -p /accelprof/tools /accelprof/out && cp /opt/accelprof/entry.sh /accelprof/tools/entry.sh && cp -a /opt/nvidia/nsight-systems-cli/*/. /accelprof/tools/nsys/ 2>/dev/null || cp -a /opt/nvidia/nsight-systems-cli /accelprof/tools/nsys"]
+          volumeMounts:
+            - { name: accelprof, mountPath: /accelprof }
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+      containers:
+        - name: workload
+          image: "image.example/workload:tag"
+          command: ["/accelprof/tools/entry.sh"]
+          args: ["python", "train.py", "--lr=3e-4"]
+          env:
+            - { name: ACCELPROF_OUT, value: "/accelprof/out" }
+            - { name: ACCELPROF_TOOLS, value: "/accelprof/tools" }
+            - { name: ACCELPROF_PROFILE_MODE, value: "nsys" }
+            - { name: ACCELPROF_PROFILE_RANKS, value: "0" }
+            - { name: ACCELPROF_NSYS_ARGS, value: "-t cuda,nvtx,osrt" }
+            - name: ACCELPROF_POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          volumeMounts:
+            - { name: accelprof, mountPath: /accelprof }
+        - name: recorder
+          image: "image.example/accelprof@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          command: ["python3", "/opt/accelprof/recorder.py"]
+          env:
+            - { name: ACCELPROF_OUT, value: "/accelprof/out" }
+            - { name: ACCELPROF_ALIAS, value: "tenant-series" }
+            - { name: ACCELPROF_CHIP, value: "gpu" }
+            - { name: ACCELPROF_WORKLOAD_ID, value: "wl-000000000000-00000000" }
+            - { name: ACCELPROF_JOB_NAME, value: "profile-wl-000000000000-00000000" }
+            - { name: ACCELPROF_PROFILE_MODE, value: "nsys" }
+            - { name: ACCELPROF_PROFILE_RANKS, value: "0" }
+            - { name: ACCELPROF_RECORD_ON_FAILURE, value: "true" }
+            - { name: ACCELPROF_RECORDER_TIMEOUT, value: "86400" }
+            - name: ACCELPROF_POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: ACCELPROF_POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          envFrom:
+            # region, trace bucket and tracking server, published into this namespace by the installer
+            - configMapRef:
+                name: accelprof-config
+          volumeMounts:
+            - { name: accelprof, mountPath: /accelprof }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { memory: "1Gi" }
