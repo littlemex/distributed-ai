@@ -26,9 +26,10 @@
 #   ALLOW_UNRELATED=1     apply cluster changes unrelated to profiling (default: stop and report)
 #   PROFILING_ONLY=1      apply ONLY the profiling addresses, leaving unrelated drift untouched
 #   SKIP_ACCEPTANCE=1     skip the final MCP round-trip check
-#   TF_STATE_BUCKET       state bucket, region and lock table for both states. Read from
-#   TF_STATE_REGION       infra/eks/backend.hcl when unset, which suits an operator with a
-#   TF_STATE_LOCK_TABLE   checkout; a pipeline should pass them explicitly.
+#   TF_STATE_BUCKET       state bucket, region, object key and lock table of the cluster state.
+#   TF_STATE_REGION       Read from infra/eks/backend.hcl when unset, which suits an operator with
+#   TF_STATE_KEY          a checkout. A fresh clone has no backend.hcl (it is untracked), so a
+#   TF_STATE_LOCK_TABLE   pipeline or the one-liner installer must pass at least the first three.
 #   DATA_LAYER_STATE_KEY  state key of the data layer (default data-layer/<name>/terraform.tfstate)
 #   AWS_PROFILE           passed through to aws/terraform as usual
 #
@@ -205,15 +206,17 @@ done
 state_bucket="${TF_STATE_BUCKET:-}"
 state_region="${TF_STATE_REGION:-}"
 lock_table="${TF_STATE_LOCK_TABLE:-}"
-if [ -z "${state_bucket}" ] || [ -z "${state_region}" ]; then
+eks_state_key="${TF_STATE_KEY:-}"
+if [ -z "${state_bucket}" ] || [ -z "${state_region}" ] || [ -z "${eks_state_key}" ]; then
   [ -f "${eks_dir}/backend.hcl" ] ||
-    die "set TF_STATE_BUCKET and TF_STATE_REGION, or run infra/eks/scripts/bootstrap-remote-state.sh so that ${eks_dir}/backend.hcl exists (local state is not supported here)"
+    die "set TF_STATE_BUCKET, TF_STATE_REGION and TF_STATE_KEY (the cluster state's object key), or run infra/eks/scripts/bootstrap-remote-state.sh so that ${eks_dir}/backend.hcl exists (local state is not supported here). A fresh checkout has no backend.hcl: it is environment-specific and untracked."
   tf_val() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" "${eks_dir}/backend.hcl" | head -1; }
   state_bucket="${state_bucket:-$(tf_val bucket)}"
   state_region="${state_region:-$(tf_val region)}"
   lock_table="${lock_table:-$(tf_val dynamodb_table)}"
-  [ -n "${state_bucket}" ] && [ -n "${state_region}" ] ||
-    die "could not read bucket and region from ${eks_dir}/backend.hcl; set TF_STATE_BUCKET and TF_STATE_REGION instead"
+  eks_state_key="${eks_state_key:-$(tf_val key)}"
+  [ -n "${state_bucket}" ] && [ -n "${state_region}" ] && [ -n "${eks_state_key}" ] ||
+    die "could not read bucket, region and key from ${eks_dir}/backend.hcl; set TF_STATE_BUCKET, TF_STATE_REGION and TF_STATE_KEY instead"
 fi
 data_state_key="${DATA_LAYER_STATE_KEY:-data-layer/${DATA_LAYER_NAME}/terraform.tfstate}"
 
@@ -304,7 +307,22 @@ esac
 
 # ── phase 3: cluster wiring ────────────────────────────────────────────────────────────────────
 say "Phase 3/7: cluster wiring (S3 Files mount, mcp namespace, mcp-reader, producer associations, ECR)"
-terraform -chdir="${eks_dir}" init -backend-config=backend.hcl -input=false >/dev/null
+# The cluster module ships its S3 backend as an example file, and backend.hcl is untracked because
+# it is environment-specific, so a fresh checkout (what the one-liner installer produces) has
+# neither. Both are materialised from the values resolved in phase 1 rather than read off disk, so
+# this works the same from a long-lived checkout and from a clone made a minute ago.
+if [ ! -f "${eks_dir}/backend.tf" ]; then
+  say "installing ${eks_dir}/backend.tf from the shipped example"
+  cp "${eks_dir}/backend.tf.example" "${eks_dir}/backend.tf"
+fi
+eks_backend=(
+  -backend-config="bucket=${state_bucket}"
+  -backend-config="key=${eks_state_key}"
+  -backend-config="region=${state_region}"
+  -backend-config="encrypt=true"
+)
+[ -n "${lock_table}" ] && eks_backend+=(-backend-config="dynamodb_table=${lock_table}")
+terraform -chdir="${eks_dir}" init -reconfigure -input=false "${eks_backend[@]}" >/dev/null
 
 eks_vars=(
   -var "s3files_enabled=true"
