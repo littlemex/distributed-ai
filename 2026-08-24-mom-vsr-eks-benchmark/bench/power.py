@@ -221,6 +221,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--matrix", nargs="+", type=Path, required=True)
     parser.add_argument("--repeat", nargs="*", type=Path, default=[])
     parser.add_argument("--pool", type=Path, default=DEFAULT_POOL)
+    parser.add_argument(
+        "--only",
+        nargs="+",
+        default=None,
+        help="restrict the analysis to these members, matching the run that collected it",
+    )
     parser.add_argument("--fold", default="test", help="the fold power is computed on")
     parser.add_argument(
         "--fit-fold",
@@ -245,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     defaults = os.environ.get("STRATOCLAVE_DEFAULTS")
     if not defaults:
         raise SystemExit("[FAIL] STRATOCLAVE_DEFAULTS is required (for the rate table)")
-    members = catalog.load_pool(args.pool, Path(defaults))
+    members = catalog.only(catalog.load_pool(args.pool, Path(defaults)), args.only)
     matrix = policies.load_matrix(args.matrix, members)
     rng = np.random.default_rng(args.seed)
 

@@ -116,6 +116,7 @@ class Call:
     # slow arms were cut at different points has a truncation and failure profile
     # that is a function of when it was collected.
     stream_idle_s: float | None = None
+    stream_first_event_s: float | None = None
 
     started_at: float = 0.0
     latency_ms: float = 0.0
@@ -213,6 +214,7 @@ async def call_once(
         max_tokens=max_tokens,
         temperature=temperature,
         stream_idle_s=stream_idle_s if stream else None,
+        stream_first_event_s=stream_first_event_s if stream else None,
     )
     body = {
         "model": model,

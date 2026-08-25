@@ -305,6 +305,7 @@ def censoring_drift(path: Path, config: RunConfig) -> str | None:
     if not path.exists() or not config.stream:
         return None
     idles: set = set()
+    firsts: set = set()
     with path.open() as handle:
         for line in handle:
             line = line.strip()
@@ -316,12 +317,22 @@ def censoring_drift(path: Path, config: RunConfig) -> str | None:
                 continue
             if row.get("stream"):
                 idles.add(row.get("stream_idle_s"))
+                firsts.add(row.get("stream_first_event_s"))
+    drifted = []
     if idles - {config.stream_idle_s}:
+        drifted.append(
+            f"stream_idle_s={sorted(idles, key=str)} (this run: {config.stream_idle_s})"
+        )
+    if firsts - {config.stream_first_event_s}:
+        drifted.append(
+            f"stream_first_event_s={sorted(firsts, key=str)} "
+            f"(this run: {config.stream_first_event_s})"
+        )
+    if drifted:
         return (
-            f"{path} was collected with stream_idle_s={sorted(idles, key=str)} and this "
-            f"run uses {config.stream_idle_s}. Completed calls stay comparable, but "
-            "which slow calls survive does not, so the failure and truncation rates in "
-            "this file will be a mix of two censoring points."
+            f"{path} was collected with " + "; ".join(drifted) + ". Completed calls stay "
+            "comparable, but which slow calls survive does not, so the failure and "
+            "truncation rates in this file will be a mix of two censoring points."
         )
     return None
 

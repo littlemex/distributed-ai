@@ -170,6 +170,27 @@ def arms(pool_path: Path, members: list[Member]) -> list[Arm]:
     return out
 
 
+def only(members: list[Member], aliases: list[str] | None) -> list[Member]:
+    """Narrow the pool to named members, refusing a name that is not in it.
+
+    A pilot measures one thing about a few members and should not pay for the rest, but
+    a silently ignored alias would produce a run that looks right and answers a
+    different question — so a name that matches nothing is an error rather than a
+    filter that quietly returns everyone.
+    """
+    if not aliases:
+        return members
+    wanted = set(aliases)
+    kept = [m for m in members if m.alias in wanted or m.name in wanted]
+    missing = wanted - {m.alias for m in kept} - {m.name for m in kept}
+    if missing:
+        raise ConfigError(
+            f"no member of this pool is called {sorted(missing)}; the pool has "
+            f"{sorted(m.alias for m in members)}"
+        )
+    return kept
+
+
 def worst_case_usd(
     arms: list[Arm], questions: int, max_tokens: int, prompt_tokens: int = 400
 ) -> dict[str, float]:

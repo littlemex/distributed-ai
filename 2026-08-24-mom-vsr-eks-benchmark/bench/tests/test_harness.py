@@ -809,3 +809,18 @@ class TestPowerScreen:
         small = power.bootstrap_power(differences, delta=0.02, n=693, sims=2000, rng=rng)
         large = power.bootstrap_power(differences, delta=0.02, n=4000, sims=2000, rng=rng)
         assert large > small
+
+
+class TestPoolFilter:
+    def test_a_named_subset_is_kept(self):
+        pool = [member("sclv/a", "a"), member("sclv/b", "b")]
+        assert [m.alias for m in catalog.only(pool, ["b"])] == ["b"]
+
+    def test_no_filter_keeps_everyone(self):
+        pool = [member("sclv/a", "a")]
+        assert catalog.only(pool, None) == pool
+
+    def test_a_name_that_matches_nothing_is_an_error(self):
+        """Ignoring it would produce a run that looks right and answers something else."""
+        with pytest.raises(catalog.ConfigError, match="typo"):
+            catalog.only([member("sclv/a", "a")], ["a", "typo"])

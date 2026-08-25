@@ -86,7 +86,7 @@ def load_items(args: argparse.Namespace) -> list[dataset.Item]:
 def members(args: argparse.Namespace) -> list[catalog.Member]:
     pool = args.pool or DEFAULT_POOL
     defaults = Path(env("STRATOCLAVE_DEFAULTS"))
-    return catalog.load_pool(pool, defaults)
+    return catalog.only(catalog.load_pool(pool, defaults), getattr(args, "only", None))
 
 
 def arms(args: argparse.Namespace, pool: list[catalog.Member]) -> list[catalog.Arm]:
@@ -203,6 +203,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
         stream=args.stream,
         stream_idle_s=args.stream_idle,
+        stream_first_event_s=args.stream_first_event,
         per_model_concurrency=member_gates(pool),
     )
     for name, limit in config.per_model_concurrency:
@@ -250,6 +251,7 @@ def cmd_repeat(args: argparse.Namespace) -> int:
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
         stream=args.stream,
         stream_idle_s=args.stream_idle,
+        stream_first_event_s=args.stream_first_event,
         per_model_concurrency=member_gates(pool),
     )
     guard_output(out, config)
@@ -304,6 +306,7 @@ def cmd_mixed(args: argparse.Namespace) -> int:
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
         stream=args.stream,
         stream_idle_s=args.stream_idle,
+        stream_first_event_s=args.stream_first_event,
         per_model_concurrency=member_gates(pool),
     )
     for name, limit in config.per_model_concurrency:
@@ -354,6 +357,7 @@ def cmd_routed(args: argparse.Namespace) -> int:
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
         stream=args.stream,
         stream_idle_s=args.stream_idle,
+        stream_first_event_s=args.stream_first_event,
     )
     guard_output(out, config)
     stats = asyncio.run(
@@ -458,6 +462,13 @@ def build_parser() -> argparse.ArgumentParser:
         target.add_argument("--salt", default=dataset.DEFAULT_SALT)
         target.add_argument("--pool", type=Path, default=None)
         target.add_argument(
+            "--only",
+            nargs="+",
+            default=None,
+            help="restrict the run to these pool members (by alias). A pilot that "
+            "measures one axis should not pay for the members it does not use",
+        )
+        target.add_argument(
             "--out-dir",
             type=Path,
             default=DEFAULT_RESULTS,
@@ -491,6 +502,15 @@ def build_parser() -> argparse.ArgumentParser:
             type=float,
             default=300.0,
             help="total deadline, used on the non-streaming path only",
+        )
+        target.add_argument(
+            "--stream-first-event",
+            type=float,
+            default=600.0,
+            help="how long a stream may say nothing at all before it counts as dead. "
+            "Far looser than --stream-idle on purpose: a provider that buffers its "
+            "thinking sends nothing while doing the work being measured, and one probe "
+            "arm exceeded ten minutes",
         )
         target.add_argument(
             "--stream-idle",
