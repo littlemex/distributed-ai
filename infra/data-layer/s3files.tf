@@ -14,7 +14,7 @@
 # deleted while infra/eks's mount target exists; a data-layer-first destroy deletes the access
 # point (instant outage on live analysis-mcp pods) and then fails on the fs, leaving a half-broken
 # state. This is enforceable only operationally (the mount target lives in another state) — see the
-# runbook infra/S3FILES-RUNBOOK.md. Re-creating later mints a NEW AccessPointId, so every consumer's
+# runbook infra/docs/s3files-runbook.md. Re-creating later mints a NEW AccessPointId, so every consumer's
 # volumeHandle (s3files_volume_handle output) changes; a PV's volumeHandle is IMMUTABLE, so a plain
 # chart re-apply/helm upgrade FAILS — the PVC (and the Deployment holding it) must be deleted and
 # recreated with the new handle (recovery steps in the runbook), not merely re-applied.
