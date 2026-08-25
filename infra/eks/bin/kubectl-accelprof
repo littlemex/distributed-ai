@@ -32,7 +32,10 @@
 #   --param K=V           recorded as a free-form param (repeatable).
 #   --tag K=V             recorded as a free-form tag (repeatable).
 #   --ttl SECONDS         how long the finished Job is kept (default 172800, two days). The run
-#                         itself is permanent; this only bounds the Kubernetes object.
+#                         outlives it; this only bounds the Kubernetes object.
+#   --recorder-timeout S  how long the recorder waits for the workload (default 86400, one day).
+#                         On expiry it records what is on disk with status=unknown, so a run longer
+#                         than this must raise it or the recording lands before the workload ends.
 #   --patch FILE          a strategic-merge patch applied to the Job, for anything without a flag
 #                         (volumes, affinity, imagePullSecrets, sidecars).
 #   --discard-on-fail     do not record a failed run. It is recorded by default, tagged status=failed,
@@ -45,7 +48,9 @@ set -euo pipefail
 self="$(basename "$0")"
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# The help text is the header comment itself, up to the first line that is not a comment, so that
+# adding an option cannot leave the help behind or spill code into it.
+usage() { sed -n '2,${/^[^#]/q;p;}' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 # The Job shape is embedded here rather than read from a neighbouring file, because this script is
 # meant to be copied onto PATH as a kubectl plugin: a file-relative template stops resolving the
@@ -207,6 +212,7 @@ cmd_run() {
       --param) params+=("$2"); shift 2 ;;
       --tag) tags+=("$2"); shift 2 ;;
       --ttl) ttl="$2"; shift 2 ;;
+      --recorder-timeout) recorder_timeout="$2"; shift 2 ;;
       --patch) patch_file="$2"; shift 2 ;;
       --discard-on-fail) record_on_fail="false"; shift ;;
       --wait) wait_for="true"; shift ;;
