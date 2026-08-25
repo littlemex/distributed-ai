@@ -26,6 +26,10 @@
 #   ALLOW_UNRELATED=1     apply cluster changes unrelated to profiling (default: stop and report)
 #   PROFILING_ONLY=1      apply ONLY the profiling addresses, leaving unrelated drift untouched
 #   SKIP_ACCEPTANCE=1     skip the final MCP round-trip check
+#   TF_STATE_BUCKET       state bucket, region and lock table for both states. Read from
+#   TF_STATE_REGION       infra/eks/backend.hcl when unset, which suits an operator with a
+#   TF_STATE_LOCK_TABLE   checkout; a pipeline should pass them explicitly.
+#   DATA_LAYER_STATE_KEY  state key of the data layer (default data-layer/<name>/terraform.tfstate)
 #   AWS_PROFILE           passed through to aws/terraform as usual
 #
 # Re-running is safe: every phase is either natively idempotent or check-then-act. The script never
@@ -192,15 +196,24 @@ for ns in "${ns_array[@]}"; do
     warn "namespace '${ns}' does not exist yet; its association is created and stays dormant until it does"
 done
 
-[ -f "${eks_dir}/backend.hcl" ] ||
-  die "${eks_dir}/backend.hcl not found; run infra/eks/scripts/bootstrap-remote-state.sh first (local state is not supported here)"
-tf_val() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" "${eks_dir}/backend.hcl" | head -1; }
-state_bucket="$(tf_val bucket)"
-state_region="$(tf_val region)"
-lock_table="$(tf_val dynamodb_table)"
-[ -n "${state_bucket}" ] && [ -n "${state_region}" ] ||
-  die "could not read bucket and region from ${eks_dir}/backend.hcl"
-data_state_key="data-layer/${DATA_LAYER_NAME}/terraform.tfstate"
+# The state's location can be given explicitly, which is what a pipeline should do. Reading it from
+# the cluster's backend.hcl is a convenience for an operator working from a checkout, and it is only a
+# convenience: parsing another module's backend configuration is a coupling that breaks the moment
+# that file grows a variant, so an explicit value always wins.
+state_bucket="${TF_STATE_BUCKET:-}"
+state_region="${TF_STATE_REGION:-}"
+lock_table="${TF_STATE_LOCK_TABLE:-}"
+if [ -z "${state_bucket}" ] || [ -z "${state_region}" ]; then
+  [ -f "${eks_dir}/backend.hcl" ] ||
+    die "set TF_STATE_BUCKET and TF_STATE_REGION, or run infra/eks/scripts/bootstrap-remote-state.sh so that ${eks_dir}/backend.hcl exists (local state is not supported here)"
+  tf_val() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" "${eks_dir}/backend.hcl" | head -1; }
+  state_bucket="${state_bucket:-$(tf_val bucket)}"
+  state_region="${state_region:-$(tf_val region)}"
+  lock_table="${lock_table:-$(tf_val dynamodb_table)}"
+  [ -n "${state_bucket}" ] && [ -n "${state_region}" ] ||
+    die "could not read bucket and region from ${eks_dir}/backend.hcl; set TF_STATE_BUCKET and TF_STATE_REGION instead"
+fi
+data_state_key="${DATA_LAYER_STATE_KEY:-data-layer/${DATA_LAYER_NAME}/terraform.tfstate}"
 
 # ── phase 2: data layer ────────────────────────────────────────────────────────────────────────
 say "Phase 2/7: data layer '${DATA_LAYER_NAME}' at s3://${state_bucket}/${data_state_key}"

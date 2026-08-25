@@ -38,6 +38,8 @@ accelerators that produced them.
 | `PROFILING_ONLY` | no | Apply only the platform's own resources, leaving unrelated cluster drift untouched |
 | `ALLOW_UNRELATED` | no | Apply unrelated cluster changes as well |
 | `SKIP_ACCEPTANCE` | no | Skip the closing MCP round trip |
+| `TF_STATE_BUCKET`, `TF_STATE_REGION`, `TF_STATE_LOCK_TABLE` | no | Where both states live. Read from `infra/eks/backend.hcl` when unset, which suits an operator working from a checkout; a pipeline should pass them explicitly rather than rely on another module's backend file |
+| `DATA_LAYER_STATE_KEY` | no | The data layer's state key, when it is not `data-layer/<name>/terraform.tfstate` |
 
 Everything else is fixed or derived, including the `mcp` namespace, the `mcp-reader` and
 `mcp-producer` ServiceAccount names, the mount path `/traces`, the Helm release name, the ECR
@@ -47,15 +49,17 @@ create ways for the three to disagree. The Availability Zone in particular is de
 input: an S3 Files mount is reachable from one zone only, and a zone supplied by hand drifts from the
 mount target that actually exists.
 
-Remote state is required. The script reads the state bucket, region and lock table from
-`infra/eks/backend.hcl` and derives the data layer's state key from `DATA_LAYER_NAME`, so both states
-live in the same bucket with distinct keys. If `infra/data-layer/backend.tf` is missing it is
-installed from the shipped example.
+Remote state is required. Both states live in the same bucket under distinct keys: the data layer's
+key comes from `DATA_LAYER_NAME`, and the bucket, region and lock table are taken from
+`TF_STATE_BUCKET`, `TF_STATE_REGION` and `TF_STATE_LOCK_TABLE` when given, or read from
+`infra/eks/backend.hcl` otherwise. Reading another module's backend file is a convenience for a
+checkout and not a contract, which is why an explicit value always wins. If
+`infra/data-layer/backend.tf` is missing it is installed from the shipped example.
 
 ### Where these files live
 
 Anything that spans both Terraform states lives outside them: this document beside
-`s3files-runbook.md` in `infra/docs/`, and the installer in `infra/scripts/`, because neither
+the installer in `infra/scripts/`, because neither
 `infra/eks` nor `infra/data-layer` owns an operation that applies both. Everything that only
 touches the cluster stays under `infra/eks`: the client and the image build in `scripts/`, the
 code that is baked into the platform image in `images/accelprof/`, and the producer guide in
@@ -101,7 +105,7 @@ In each producer namespace, create the ServiceAccount that the Pod Identity asso
 kubectl --context "$KUBE_CONTEXT" create serviceaccount mcp-producer -n "$NAMESPACE"
 ```
 
-Experimenters then need nothing from this repository. `scripts/kubectl-accelprof`, on PATH, submits a
+Experimenters then need nothing from this repository. `bin/kubectl-accelprof`, on PATH, submits a
 profiled run and finds its recording afterwards; see [profiling-producer.md](../eks/docs/profiling-producer.md).
 
 ```bash
@@ -170,6 +174,19 @@ aws sagemaker stop-mlflow-tracking-server --tracking-server-name "$TRACKING_SERV
 Do not flip `mlflow_enabled` to `false` for that purpose. That is a teardown: it destroys the server
 and its run metadata, and only the S3 artifacts survive. The trace and artifact buckets carry
 `prevent_destroy` for the same reason, and the plan guard refuses any plan that would remove them.
+
+## Checking a change to the Job shape
+
+The Job the client submits is embedded in the client, so the rendered manifest is kept as a golden
+file and compared by a test that needs no cluster:
+
+```bash
+infra/eks/tests/run-render-tests.sh
+infra/eks/tests/run-render-tests.sh --update
+```
+
+This is deliberately not part of `infra/eks/tests/run-tests.sh`, which exercises a live cluster and
+therefore cannot gate every commit. A change to the shape shows up as a golden diff in review.
 
 ## Troubleshooting
 

@@ -4,7 +4,8 @@
 #
 #   kubectl accelprof run --alias team1-lora-sweep --image <your image> -- python train.py
 #
-# This wrapper forwards to it for one release so existing invocations keep working.
+# This wrapper forwards to it so existing invocations keep working. Delete it after 2026-10-01;
+# the date is in the warning so that it is visible on every run rather than only in this comment.
 set -euo pipefail
-printf 'warning: profile-run.sh is deprecated; use kubectl-accelprof (kubectl accelprof run ...)\n' >&2
-exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/kubectl-accelprof" run "$@"
+printf 'warning: profile-run.sh is deprecated and will be deleted after 2026-10-01; use kubectl-accelprof (kubectl accelprof run ...)\n' >&2
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/kubectl-accelprof" run "$@"
