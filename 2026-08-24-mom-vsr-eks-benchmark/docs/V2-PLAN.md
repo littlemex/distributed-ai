@@ -256,6 +256,41 @@ the cross-region path stays in scope.
 | Arm death | A provider rejecting an effort level mid-run is recorded as the arm ceasing to exist, not as a missing answer — providers change the supported set without notice, and scoring a shrunken arm on a subset would break comparability silently. Implemented in the client. |
 | Reasoning-token accounting | Some providers report reasoning tokens in usage and some do not, which distorts the frontier where cost is billed on them. Reconcile usage against the billing export before any cost claim on the effort axis. |
 
+## Implementation status
+
+Written down because the plan above is longer than any one sitting, and the next
+person to open it — including a later version of the same session — needs to know
+which half is code.
+
+Built and tested (`bench/tests`, 13 cases):
+
+- The arm as the unit: `catalog.Arm` and `catalog.arms()` expand the pool's
+  `effort_levels` declaration, and an undeclared member gets the default level only.
+- The collection path is arm-aware end to end: `runner.Task` carries the effort,
+  `pinned_tasks` and `repeat_tasks` are built from arms, arms of one member share
+  that member's in-flight gate, and `--resume` keys on the arm name so a resumed run
+  does not re-pay for `@high` because `@low` finished.
+- Streaming is the default path, with `--no-stream` kept only for reproducing a v1
+  number.
+- Arm retirement: a 400 on `reasoning_effort` retires the arm for the rest of the
+  run, re-checked when a queued cell reaches the front, so the waste is bounded by
+  the concurrency rather than by the length of the task list.
+- The completion budget is a cap and reported as one: every run prints the per-arm
+  rate of `finish_reason = length`, and the default cap is 16,384 rather than v1's
+  2,048, which the effort probe showed binding at the top of the dial.
+
+Not built yet, in the order the plan needs them:
+
+1. **The analysis side is still member-granular.** `policies.load_matrix` and
+   `analyze.py` key on members, so the arm-level frontier, the utility contests at
+   λ, and arm-granular cross-fitting have no home yet. This is the largest piece and
+   it gates every number v2 reports.
+2. **The three preconditions**, none of which is code today: the power analysis for
+   a small Δ (pure computation on the v1 matrix, no spend, and it decides the price
+   of everything after it), routing cost in dollars, and a temporal held-out.
+3. **The load sweep and the cross-region path** for the self-hosted arm, which the
+   dominance argument no longer disposes of.
+
 ## Explicitly not in v2
 
 - **Per-step routing inside an agentic task.** Probably where MoM's real value is, and

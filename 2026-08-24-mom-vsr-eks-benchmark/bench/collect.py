@@ -34,18 +34,27 @@ from harness import catalog, classify, dataset, runner  # noqa: E402
 DEFAULT_POOL = HERE.parent / "vsr" / "pool.yaml"
 DEFAULT_RESULTS = HERE / "results"
 
-# Every member gets the same completion budget, which is what makes the
-# accuracies comparable at all. The number is measured, not preferred: on the same
-# 40 calls, a budget of 64 left 4 of 10 members with no letter at all, 512 left
-# 6 answers unparsed out of 40, and 2048 left 2. The members that run out are the
+# Every arm gets the same completion budget, which is what makes the accuracies
+# comparable at all. The number is measured, not preferred: on the same 40 calls,
+# a budget of 64 left 4 of 10 members with no letter at all, 512 left 6 answers
+# unparsed out of 40, and 2048 left 2. The arms that run out are the
 # reasoning-capable ones, which either narrate before answering or spend the whole
 # budget on hidden thinking tokens — so a tight budget does not measure knowledge,
 # it measures verbosity and charges it as error.
 #
-# Re-measure with `matrix --samples 2` and read the per-member unparsed rate
-# before trusting a full run: a rate that differs across members contaminates the
-# accuracy comparison no matter how many questions are asked.
-DEFAULT_MAX_TOKENS = 2048
+# The 2048 that v1 used was calibrated on default-effort arms only, and the effort
+# probe showed it binding hard at the top of the dial: `grok-4.6` at `high` spent
+# all 2048 on hidden reasoning and emitted no answer, and did the same at 4096. A
+# budget is a cap and not a charge — an arm that stops at 200 tokens costs the same
+# whatever the cap is, and only the arms that use it pay — so the cap is set high
+# enough that truncation is rare for every arm, and the actual tokens remain the
+# cost. Every run prints its per-arm truncation rate; that is the number to read
+# before trusting a comparison, together with the per-arm unparsed rate.
+DEFAULT_MAX_TOKENS = 16384
+
+# A truncation rate above this on any arm means the budget, not the model, decided
+# part of that arm's score.
+TRUNCATION_BUDGET = 0.02
 
 # Total in flight. Members that declare a limit of their own are held below it
 # separately, so this number is about the gateway and not about the smallest
@@ -84,13 +93,28 @@ def members(args: argparse.Namespace) -> list[catalog.Member]:
     return catalog.load_pool(pool, defaults)
 
 
+def arms(args: argparse.Namespace, pool: list[catalog.Member]) -> list[catalog.Arm]:
+    """The members expanded by the effort levels the pool declares.
+
+    A member with no declaration gets the default level only, so the arm list is
+    the v1 pool until the pool file says otherwise and adding a member never
+    silently multiplies a run.
+    """
+    return catalog.arms(args.pool or DEFAULT_POOL, pool)
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     """Report the shape and the price of a run before spending anything."""
     items = load_items(args)
     pool = members(args)
+    arm_list = arms(args, pool)
     counts = dataset.fold_counts(items)
     print(f"[INFO] dataset={args.dataset} items={len(items)} fold={args.fold or 'all'}")
-    print(f"[INFO] members={len(pool)}")
+    print(f"[INFO] members={len(pool)} arms={len(arm_list)}")
+    for member in pool:
+        levels = [a.effort for a in arm_list if a.member.name == member.name]
+        if len(levels) > 1:
+            print(f"    {member.name:<30}{', '.join(levels)}")
     thin = {
         category: folds
         for category, folds in sorted(counts.items())
@@ -104,8 +128,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
             f"{args.thin_threshold}; per-domain claims there will not be separable"
         )
 
-    calls = len(items) * len(pool)
-    print(f"[INFO] matrix calls: {len(items)} x {len(pool)} = {calls}")
+    calls = len(items) * len(arm_list)
+    print(f"[INFO] matrix calls: {len(items)} x {len(arm_list)} arms = {calls}")
     print(
         "[INFO] token cost is not estimated here; run `matrix --samples 2` first and "
         "multiply the measured mean, so the projection uses this pool's real prompts"
@@ -153,16 +177,20 @@ def member_gates(pool: list[catalog.Member]) -> tuple[tuple[str, int], ...]:
 def cmd_matrix(args: argparse.Namespace) -> int:
     items = load_items(args)
     pool = members(args)
+    arm_list = arms(args, pool)
     out = args.out or args.out_dir / f"matrix-{args.fold or 'all'}.jsonl"
     skip = runner.completed_cells(out) if args.resume else set()
     tasks = runner.plan(
-        runner.pinned_tasks(items, [m.name for m in pool]),
+        runner.pinned_tasks(items, arm_list),
         seed=args.shuffle_seed,
         skip=skip,
     )
     if skip:
         print(f"[INFO] resuming: {len(skip)} cells already recorded")
-    print(f"[INFO] {len(tasks)} calls at concurrency {args.concurrency} -> {out}")
+    print(
+        f"[INFO] {len(tasks)} calls over {len(arm_list)} arms at concurrency "
+        f"{args.concurrency} -> {out}"
+    )
 
     config = runner.RunConfig(
         url=env("VSR_URL"),
@@ -174,13 +202,13 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         shuffle_seed=args.shuffle_seed,
         api_key=os.environ.get("STRATOCLAVE_API_KEY") or None,
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
+        stream=args.stream,
         per_model_concurrency=member_gates(pool),
     )
     for name, limit in config.per_model_concurrency:
         print(f"[INFO] {name} held at {limit} in flight (declared in the pool)")
     stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
-    print(f"\n[OK] ok={stats['ok']} failed={stats['failed']} unparsed={stats['unparsed']}")
-    return 0 if stats["ok"] else 1
+    return report_run(stats, out)
 
 
 def cmd_repeat(args: argparse.Namespace) -> int:
@@ -195,7 +223,7 @@ def cmd_repeat(args: argparse.Namespace) -> int:
     out = args.out or args.out_dir / f"repeat-{args.fold or 'all'}.jsonl"
     skip = runner.completed_cells(out) if args.resume else set()
     tasks = runner.plan(
-        runner.repeat_tasks(items, [m.name for m in pool]),
+        runner.repeat_tasks(items, arms(args, pool)),
         seed=args.shuffle_seed + 1,
         skip=skip,
     )
@@ -210,11 +238,11 @@ def cmd_repeat(args: argparse.Namespace) -> int:
         shuffle_seed=args.shuffle_seed,
         api_key=os.environ.get("STRATOCLAVE_API_KEY") or None,
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
+        stream=args.stream,
         per_model_concurrency=member_gates(pool),
     )
     stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
-    print(f"\n[OK] ok={stats['ok']} failed={stats['failed']} unparsed={stats['unparsed']}")
-    return 0 if stats["ok"] else 1
+    return report_run(stats, out)
 
 
 def cmd_mixed(args: argparse.Namespace) -> int:
@@ -232,13 +260,14 @@ def cmd_mixed(args: argparse.Namespace) -> int:
     out = args.out or args.out_dir / f"mixed-{args.fold or 'all'}.jsonl"
     skip = runner.completed_cells(out) if args.resume else set()
 
-    tasks = runner.pinned_tasks(items, [m.name for m in pool])
+    arm_list = arms(args, pool)
+    tasks = runner.pinned_tasks(items, arm_list)
     tasks += runner.routed_tasks(items, args.entrypoint, f"routed:{args.arm}")
     tasks = runner.plan(tasks, seed=args.shuffle_seed, skip=skip)
     if skip:
         print(f"[INFO] resuming: {len(skip)} cells already recorded")
     print(
-        f"[INFO] {len(tasks)} calls ({len(pool)} pinned arms + routed:{args.arm}) "
+        f"[INFO] {len(tasks)} calls ({len(arm_list)} pinned arms + routed:{args.arm}) "
         f"at concurrency {args.concurrency} -> {out}"
     )
 
@@ -252,6 +281,7 @@ def cmd_mixed(args: argparse.Namespace) -> int:
         shuffle_seed=args.shuffle_seed,
         api_key=os.environ.get("STRATOCLAVE_API_KEY") or None,
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
+        stream=args.stream,
         per_model_concurrency=member_gates(pool),
     )
     for name, limit in config.per_model_concurrency:
@@ -262,8 +292,7 @@ def cmd_mixed(args: argparse.Namespace) -> int:
         "reading its latency"
     )
     stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
-    print(f"\n[OK] ok={stats['ok']} failed={stats['failed']} unparsed={stats['unparsed']}")
-    return 0 if stats["ok"] else 1
+    return report_run(stats, out)
 
 
 def cmd_routed(args: argparse.Namespace) -> int:
@@ -292,10 +321,52 @@ def cmd_routed(args: argparse.Namespace) -> int:
         shuffle_seed=args.shuffle_seed,
         api_key=os.environ.get("STRATOCLAVE_API_KEY") or None,
         bench_root=Path(os.environ["VSR_BENCH_ROOT"]),
+        stream=args.stream,
     )
     stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
-    print(f"\n[OK] ok={stats['ok']} failed={stats['failed']} unparsed={stats['unparsed']}")
-    return 0 if stats["ok"] else 1
+    return report_run(stats, out)
+
+
+def report_run(stats: runner.RunStats, out: Path) -> int:
+    """Print what the run produced, and the two facts that invalidate a comparison.
+
+    An arm the provider retired and an arm the budget truncated both look like a
+    lower accuracy in the results file and neither is one, so both are surfaced
+    here rather than left for the analysis to notice.
+    """
+    print(
+        f"\n[OK] ok={stats.ok} failed={stats.failed} unparsed={stats.unparsed}"
+        + (f" skipped={stats.skipped}" if stats.skipped else "")
+    )
+    if stats.retired_arms:
+        print(
+            f"[WARNING] {len(stats.retired_arms)} arms were retired mid-run: the "
+            "provider rejected the effort level, so the arm stopped existing and its "
+            "remaining questions were not attempted. Scoring it on the subset it did "
+            "answer would compare arms over different question sets."
+        )
+        for name, reason in sorted(stats.retired_arms.items()):
+            print(f"    {name:<34}{reason[:90]}")
+
+    truncated = runner.truncation_rates(out)
+    over = {
+        name: bucket
+        for name, bucket in truncated.items()
+        if bucket["rate"] > TRUNCATION_BUDGET
+    }
+    if over:
+        print(
+            f"\n[WARNING] {len(over)} arms hit the completion budget more often than "
+            f"{TRUNCATION_BUDGET:.0%}. A cap costs nothing for the arms that stay under "
+            "it, so raise --max-tokens and re-run these rather than scoring a cut-off "
+            "answer as a wrong one:"
+        )
+        for name, bucket in sorted(over.items(), key=lambda kv: -kv[1]["rate"]):
+            print(
+                f"    {name:<34}{int(bucket['truncated'])}/{int(bucket['scored'])}"
+                f"  {bucket['rate']:6.2%}"
+            )
+    return 0 if stats.ok else 1
 
 
 def _progress():
@@ -342,6 +413,15 @@ def build_parser() -> argparse.ArgumentParser:
             help="omitted by default; no value in this pool is accepted by every member",
         )
         target.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+        target.add_argument(
+            "--no-stream",
+            dest="stream",
+            action="store_false",
+            help="send on the non-streaming path, as v1 did. The gateway caps a "
+            "non-streaming read at 50 seconds, so the high-effort arms are "
+            "unmeasurable there; only use this to reproduce a v1 number",
+        )
+        target.set_defaults(stream=True)
         target.add_argument("--max-attempts", type=int, default=3)
         target.add_argument("--timeout", type=float, default=300.0)
         target.add_argument("--shuffle-seed", type=int, default=7)

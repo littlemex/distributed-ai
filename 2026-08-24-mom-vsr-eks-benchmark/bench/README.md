@@ -2,13 +2,23 @@
 
 One expensive measurement, and a report that is otherwise free.
 
-The expensive thing is a **correctness matrix**: every pool member answers every
-question, through the router, with the model pinned. Once that exists, the best
-single member, the cheapest member, an existential upper bound, a uniform random
-choice, and any offline per-domain assignment policy are all readings of the same
-file and cost nothing further. Only the router deciding for itself needs its own
-traffic, because the selector's latency and load terms move with live traffic and
+The expensive thing is a **correctness matrix**: every arm answers every question,
+through the router, with the model pinned. Once that exists, the best single arm,
+the cheapest arm, an existential upper bound, a uniform random choice, and any
+offline per-domain assignment policy are all readings of the same file and cost
+nothing further. Only the router deciding for itself needs its own traffic,
+because the selector's latency and load terms move with live traffic and
 end-to-end latency and failures exist only on the data path.
+
+An **arm is a member at one reasoning effort**, not a member. v1 drew the frontier
+over members and found that routing between them bought no accuracy; the effort
+dial moves accuracy, cost and latency together inside a single member, and a
+frontier drawn without it omits the deployable alternatives a router should be
+compared against. The pool file declares which levels each member gets
+(`effort_levels`), a member with no declaration gets the default level only, and
+`plan` prints the resulting arm count before anything is spent. Levels are never
+compared across providers as levels — GPT's `low` and Grok's `minimal` share no
+unit — only the measured points are.
 
 ```
 collect.py    plan | classify | matrix | mixed       spend, or find out what it would cost
@@ -77,7 +87,7 @@ export STRATOCLAVE_DEFAULTS=<gateway repo>/backend/mvp/defaults
 ./run.sh plan-01 plan --dataset mmlu --samples 200 \
   --categories math law health engineering economics philosophy "computer science"
 
-# the expensive one: every member, every calibration question
+# the expensive one: every arm, every calibration question
 ./run.sh calib-01 matrix --fold calibration --dataset mmlu --samples 200 \
   --categories math law health engineering economics philosophy "computer science"
 
@@ -122,7 +132,25 @@ fitting.
   members could not emit an answer letter at all — the reasoning-capable ones
   spend the budget thinking. `analyze.py` prints the per-member unparsed rate
   before any comparison for exactly this reason: a rate that differs across the
-  pool means part of the accuracy column is answer formatting.
+  pool means part of the accuracy column is answer formatting. The budget is a cap
+  and not a charge, so it is set high rather than tight: an arm that stops at two
+  hundred tokens costs the same whatever the cap is, and only the arms that use it
+  pay. Every run prints the per-arm rate of `finish_reason = length`; anything
+  above a couple of percent means the cap, not the model, decided part of that
+  arm's score.
+- **High effort is unmeasurable without streaming.** The gateway caps a
+  non-streaming read at fifty seconds on purpose, so a slow call fails as a
+  parseable JSON 502 rather than as an HTML timeout from the CDN. `grok-4.6` at
+  `high` exceeds that. Runs therefore stream by default, which also makes TTFT and
+  the visible decode rate measurable; `--no-stream` exists only to reproduce a v1
+  number, and mixing the two paths inside one run would put the path's own latency
+  into the between-arm comparison.
+- **A rejected effort level retires the arm.** Providers change the supported set
+  without notice, and a 400 on `reasoning_effort` means the arm has ceased to
+  exist rather than that a question went unanswered. The first rejection is
+  recorded as the evidence, the arm's remaining cells are not attempted, and the
+  run prints what it retired. Scoring a retired arm on the subset it did answer
+  would compare arms over different question sets.
 - **A question one member failed is dropped from every arm.** Keeping it would
   compare a nine-member pool against a ten-member one and call the difference
   routing.
