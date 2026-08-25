@@ -155,9 +155,9 @@ class RunStats:
         }
 
 
-# A truncation rate above this on any arm means the budget, and not the model,
-# decided part of that arm's score.
-TRUNCATION_RATE_THRESHOLD = 0.02
+# The thresholds that turn these counters into "this run cannot be compared" live in
+# `harness.quality`: counting is the runner's job, and the line between a worse arm and
+# a differently measured one is measurement policy that the analysis needs too.
 
 
 class _Unbounded:
@@ -201,6 +201,32 @@ def completed_cells(path: Path) -> set[str]:
                 continue
             done.add(cell_key(row["arm"], row["question_id"], row.get("dataset", "")))
     return done
+
+
+def retired_arms(path: Path) -> dict[str, str]:
+    """Arms an earlier run found do not exist, read back from the results file.
+
+    Retirement has to survive the process. It is a fact about the provider, not about
+    one run, and the file already holds the evidence: the row whose request was
+    refused. Without reading it back, a resumed run re-attempts every remaining
+    question of an arm that is known to be gone and pays a 400 for each one — the
+    money the retirement logic exists to save, given away one process restart later.
+    """
+    gone: dict[str, str] = {}
+    if not path.exists():
+        return gone
+    with path.open() as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("arm_unsupported"):
+                gone.setdefault(row["arm"], row.get("error") or "rejected earlier")
+    return gone
 
 
 def settings_conflict(path: Path, config: RunConfig) -> str | None:
@@ -361,15 +387,29 @@ async def run(
     out_path: Path,
     *,
     on_record: Callable[[client.Call], None] | None = None,
+    already_retired: dict[str, str] | None = None,
 ) -> RunStats:
-    """Execute tasks with bounded concurrency, appending records as they finish."""
+    """Execute tasks with bounded concurrency, appending records as they finish.
+
+    `already_retired` carries forward what an earlier run learned about arms the
+    provider refuses, so a resumed run does not buy the same 400 once per question.
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     semaphore = asyncio.Semaphore(config.concurrency)
     per_model = {
         name: asyncio.Semaphore(limit) for name, limit in config.per_model_concurrency
     }
+    # Until an arm has come back once, only one of its calls is allowed out. An arm
+    # whose effort level does not exist is discovered by the first response, and every
+    # call sent before that response arrives is a 400 that was paid for; scheduling
+    # the whole cross product at once means that would otherwise be a slotful of them.
+    # The gate costs one serialised call per arm at the start of a run.
+    unproven_gate = {task.arm: asyncio.Semaphore(1) for task in tasks}
+    proven: set[str] = set()
     write_lock = asyncio.Lock()
-    stats = RunStats()
+    stats = RunStats(retired_arms=dict(already_retired or {}))
+    if stats.retired_arms:
+        proven.update(stats.retired_arms)
     extra_headers = (
         {"authorization": f"Bearer {config.api_key}"} if config.api_key else {}
     )
@@ -393,27 +433,41 @@ async def run(
                 if task.arm in stats.retired_arms:
                     stats.skipped += 1
                     return
-                record = await client.call_once(
-                    session,
-                    config.url,
-                    stream=config.stream,
-                    arm=task.arm,
-                    model=task.model,
-                    prompt=task.item.prompt,
-                    item_id=task.item.question_id,
-                    dataset=task.item.dataset,
-                    category=task.item.category,
-                    fold=task.item.fold,
-                    max_tokens=config.max_tokens,
-                    temperature=config.temperature,
-                    reasoning_effort=task.effort,
-                    max_attempts=config.max_attempts,
-                    timeout_s=config.timeout_s,
-                    stream_idle_s=config.stream_idle_s,
-                    stream_first_event_s=config.stream_first_event_s,
-                    stream_ceiling_s=config.stream_ceiling_s,
-                    extra_headers=extra_headers,
-                )
+
+                async def ask() -> client.Call:
+                    return await client.call_once(
+                        session,
+                        config.url,
+                        stream=config.stream,
+                        arm=task.arm,
+                        model=task.model,
+                        prompt=task.item.prompt,
+                        item_id=task.item.question_id,
+                        dataset=task.item.dataset,
+                        category=task.item.category,
+                        fold=task.item.fold,
+                        max_tokens=config.max_tokens,
+                        temperature=config.temperature,
+                        reasoning_effort=task.effort,
+                        max_attempts=config.max_attempts,
+                        timeout_s=config.timeout_s,
+                        stream_idle_s=config.stream_idle_s,
+                        stream_first_event_s=config.stream_first_event_s,
+                        stream_ceiling_s=config.stream_ceiling_s,
+                        extra_headers=extra_headers,
+                    )
+
+                if task.arm in proven:
+                    record = await ask()
+                else:
+                    async with unproven_gate[task.arm]:
+                        # Re-checked twice over: the arm may have been retired, or
+                        # proven, while this call waited for the gate.
+                        if task.arm in stats.retired_arms:
+                            stats.skipped += 1
+                            return
+                        record = await ask()
+                    proven.add(task.arm)
             if record.arm_unsupported:
                 stats.retired_arms.setdefault(task.arm, record.error or "rejected")
             if record.error is None:

@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from harness import catalog, classify, dataset, runner  # noqa: E402
+from harness import catalog, classify, dataset, quality, runner  # noqa: E402
 
 DEFAULT_POOL = HERE.parent / "vsr" / "pool.yaml"
 DEFAULT_RESULTS = HERE / "results"
@@ -126,9 +126,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
     calls = len(items) * len(arm_list)
     print(f"[INFO] matrix calls: {len(items)} x {len(arm_list)} arms = {calls}")
+    worst = catalog.worst_case_usd(arm_list, len(items), args.max_tokens)
     print(
-        "[INFO] token cost is not estimated here; run `matrix --samples 2` first and "
-        "multiply the measured mean, so the projection uses this pool's real prompts"
+        f"[INFO] ceiling at a {args.max_tokens}-token budget: ${worst['total']:.2f}. "
+        "That is what it costs if every arm fills the budget, which reasoning arms can; "
+        "run `matrix --samples 2` and multiply the measured mean for the likely figure"
     )
     return 0
 
@@ -187,6 +189,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         f"[INFO] {len(tasks)} calls over {len(arm_list)} arms at concurrency "
         f"{args.concurrency} -> {out}"
     )
+    guard_spend(arm_list, len(items), args.max_tokens, args.max_spend_usd)
 
     config = runner.RunConfig(
         url=env("VSR_URL"),
@@ -205,7 +208,15 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     for name, limit in config.per_model_concurrency:
         print(f"[INFO] {name} held at {limit} in flight (declared in the pool)")
     guard_output(out, config)
-    stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
+    stats = asyncio.run(
+        runner.run(
+            tasks,
+            config,
+            out,
+            on_record=_progress(),
+            already_retired=runner.retired_arms(out),
+        )
+    )
     return report_run(stats, out)
 
 
@@ -226,6 +237,7 @@ def cmd_repeat(args: argparse.Namespace) -> int:
         skip=skip,
     )
     print(f"[INFO] {len(tasks)} repeat calls over {len(items)} questions -> {out}")
+    guard_spend(arms(args, pool), len(items), args.max_tokens, args.max_spend_usd)
     config = runner.RunConfig(
         url=env("VSR_URL"),
         max_tokens=args.max_tokens,
@@ -241,7 +253,15 @@ def cmd_repeat(args: argparse.Namespace) -> int:
         per_model_concurrency=member_gates(pool),
     )
     guard_output(out, config)
-    stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
+    stats = asyncio.run(
+        runner.run(
+            tasks,
+            config,
+            out,
+            on_record=_progress(),
+            already_retired=runner.retired_arms(out),
+        )
+    )
     return report_run(stats, out)
 
 
@@ -270,6 +290,7 @@ def cmd_mixed(args: argparse.Namespace) -> int:
         f"[INFO] {len(tasks)} calls ({len(arm_list)} pinned arms + routed:{args.arm}) "
         f"at concurrency {args.concurrency} -> {out}"
     )
+    guard_spend(arm_list, len(items), args.max_tokens, args.max_spend_usd)
 
     config = runner.RunConfig(
         url=env("VSR_URL"),
@@ -293,7 +314,15 @@ def cmd_mixed(args: argparse.Namespace) -> int:
         "reading its latency"
     )
     guard_output(out, config)
-    stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
+    stats = asyncio.run(
+        runner.run(
+            tasks,
+            config,
+            out,
+            on_record=_progress(),
+            already_retired=runner.retired_arms(out),
+        )
+    )
     return report_run(stats, out)
 
 
@@ -327,8 +356,45 @@ def cmd_routed(args: argparse.Namespace) -> int:
         stream_idle_s=args.stream_idle,
     )
     guard_output(out, config)
-    stats = asyncio.run(runner.run(tasks, config, out, on_record=_progress()))
+    stats = asyncio.run(
+        runner.run(
+            tasks,
+            config,
+            out,
+            on_record=_progress(),
+            already_retired=runner.retired_arms(out),
+        )
+    )
     return report_run(stats, out)
+
+
+def guard_spend(
+    arm_list: list[catalog.Arm], questions: int, max_tokens: int, limit: float | None
+) -> None:
+    """Show what the completion budget could cost, and stop if it is too much.
+
+    Printed on every collecting run, because the cap is not the neutral setting it
+    looks like: a reasoning arm can expand to fill whatever it is given, so raising
+    the cap raises the ceiling on the bill by the same factor. `--max-spend-usd` turns
+    that ceiling into a refusal instead of a surprise.
+    """
+    worst = catalog.worst_case_usd(arm_list, questions, max_tokens)
+    print(
+        f"[INFO] ceiling if every arm spends the whole {max_tokens}-token budget: "
+        f"${worst['total']:.2f} ({questions} questions x {len(arm_list)} arms). "
+        "Arms that stop early pay far less; this is the bound, not an estimate."
+    )
+    if limit is not None and worst["total"] > limit:
+        dearest = sorted(
+            ((v, k) for k, v in worst.items() if k != "total"), reverse=True
+        )[:3]
+        raise SystemExit(
+            f"[FAIL] the ceiling ${worst['total']:.2f} exceeds --max-spend-usd "
+            f"{limit:.2f}. Dearest arms: "
+            + ", ".join(f"{name} ${cost:.2f}" for cost, name in dearest)
+            + ". Lower --max-tokens, cut questions or arms, or raise the limit "
+            "deliberately."
+        )
 
 
 def guard_output(out: Path, config: runner.RunConfig) -> None:
@@ -342,56 +408,19 @@ def guard_output(out: Path, config: runner.RunConfig) -> None:
 
 
 def report_run(stats: runner.RunStats, out: Path) -> int:
-    """Print what the run produced, and the two facts that invalidate a comparison.
+    """Print what the run produced, then anything that makes it uncomparable.
 
-    An arm the provider retired and an arm the budget truncated both look like a
-    lower accuracy in the results file and neither is one, so both are surfaced
-    here rather than left for the analysis to notice.
+    The judgement of what counts as uncomparable lives in `harness.quality`, because
+    the analysis has to apply the same policy and must not import a CLI to find it.
     """
     print(
         f"\n[OK] ok={stats.ok} failed={stats.failed} unparsed={stats.unparsed}"
         + (f" skipped={stats.skipped}" if stats.skipped else "")
     )
-    if stats.retired_arms:
-        print(
-            f"[WARNING] {len(stats.retired_arms)} arms were retired mid-run: the "
-            "provider rejected the effort level, so the arm stopped existing and its "
-            "remaining questions were not attempted. Scoring it on the subset it did "
-            "answer would compare arms over different question sets."
-        )
-        for name, reason in sorted(stats.retired_arms.items()):
-            print(f"    {name:<34}{reason[:90]}")
-
-    failure_rates = stats.failure_asymmetry()
-    if failure_rates and max(failure_rates.values()) - min(failure_rates.values()) > 0.02:
-        print(
-            "\n[WARNING] the arms did not fail alike, and a failed cell counts as "
-            "collected: the arms below were asked fewer questions than the others, "
-            "which is the assumption every paired comparison here rests on. Collect "
-            "the missing cells into a new file before scoring:"
-        )
-        for name, rate in sorted(failure_rates.items(), key=lambda kv: -kv[1])[:8]:
-            failed = stats.failed_by_arm.get(name, 0)
-            attempted = failed + stats.scored_by_arm.get(name, 0)
-            print(f"    {name:<34}{failed}/{attempted}  {rate:6.2%}")
-
-    over = {
-        name: bucket
-        for name, bucket in stats.truncation_rates().items()
-        if bucket["rate"] > runner.TRUNCATION_RATE_THRESHOLD
-    }
-    if over:
-        print(
-            f"\n[WARNING] {len(over)} arms hit the completion budget more often than "
-            f"{runner.TRUNCATION_RATE_THRESHOLD:.0%} in this run. A cap costs nothing "
-            "for the arms that stay under it, so raise --max-tokens and collect these "
-            "again into a new file rather than scoring a cut-off answer as a wrong one:"
-        )
-        for name, bucket in sorted(over.items(), key=lambda kv: -kv[1]["rate"]):
-            print(
-                f"    {name:<34}{int(bucket['truncated'])}/{int(bucket['scored'])}"
-                f"  {bucket['rate']:6.2%}"
-            )
+    for finding in quality.review(stats):
+        print(f"\n[WARNING] {finding.headline}")
+        for name, detail in finding.rows:
+            print(f"    {name:<34}{detail}")
 
     # Nothing attempted is not a failure: a completed matrix re-run with --resume has
     # every cell already recorded, and a wrapper that reads the exit code should not
@@ -471,12 +500,20 @@ def build_parser() -> argparse.ArgumentParser:
             "the total deadline while streaming, because a high-effort arm's total "
             "duration is a measurement and not a fault",
         )
+        target.add_argument(
+            "--max-spend-usd",
+            type=float,
+            default=None,
+            help="refuse to start if the completion budget's worst case exceeds this. "
+            "The ceiling is always printed; this makes it a stop rather than a surprise",
+        )
         target.add_argument("--shuffle-seed", type=int, default=7)
         target.add_argument("--resume", action="store_true")
 
     p_plan = sub.add_parser("plan", help="shape and cost of a run, without spending")
     common(p_plan)
     p_plan.add_argument("--thin-threshold", type=int, default=40)
+    p_plan.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     p_plan.set_defaults(func=cmd_plan)
 
     p_classify = sub.add_parser("classify", help="decisions only; no model is called")

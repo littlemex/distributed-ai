@@ -30,7 +30,7 @@ if str(BENCH) not in sys.path:
     sys.path.insert(0, str(BENCH))
 
 import collect  # noqa: E402
-from harness import catalog, client, dataset, runner  # noqa: E402
+from harness import catalog, client, dataset, quality, runner  # noqa: E402
 
 POOL = BENCH.parent / "vsr" / "pool.yaml"
 
@@ -340,8 +340,10 @@ class TestTruncationCounting:
         stats = drive(tmp_path, monkeypatch, tasks, recorder)
         assert stats.truncation_rates()["pinned:m"]["rate"] == 0.0
 
-    def test_the_threshold_is_a_rate_and_lives_with_the_counter(self):
-        assert 0 < runner.TRUNCATION_RATE_THRESHOLD < 1
+    def test_the_threshold_is_policy_and_lives_outside_the_runner(self):
+        """Counting is the runner's job; where the line falls is measurement policy."""
+        assert 0 < quality.TRUNCATION_RATE < 1
+        assert not hasattr(runner, "TRUNCATION_RATE_THRESHOLD")
 
 
 class TestArmRetirement:
@@ -396,6 +398,103 @@ class TestArmRetirement:
         ]
         assert len(rows) == 1
         assert rows[0]["arm_unsupported"] is True
+
+
+class TestRetirementSurvivesTheProcess:
+    """Retirement is a fact about the provider, not about one run."""
+
+    def rejection_row(self, path: Path, arm: str) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "arm": arm,
+                    "question_id": "0",
+                    "dataset": "MMLU-Pro",
+                    "arm_unsupported": True,
+                    "error": "http 400: unsupported reasoning_effort",
+                    "stream": True,
+                    "max_tokens": 16,
+                    "temperature": None,
+                }
+            )
+            + "\n"
+        )
+
+    def test_a_rejection_in_the_file_is_read_back(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rejection_row(out, "pinned:m@high")
+        assert "pinned:m@high" in runner.retired_arms(out)
+
+    def test_a_resumed_run_does_not_buy_the_dead_arm_again(self, tmp_path, monkeypatch):
+        out = tmp_path / "out.jsonl"
+        self.rejection_row(out, "pinned:m@high")
+        recorder = _Recorder(reject={"pinned:m@high"})
+        monkeypatch.setattr(runner.client, "call_once", recorder.call_once)
+        monkeypatch.setattr(runner.score, "grade", lambda *a, **k: _Graded())
+        tasks = [
+            runner.Task(arm="pinned:m@high", model="m", item=item(str(i)), effort="high")
+            for i in range(1, 6)
+        ]
+        stats = asyncio.run(
+            runner.run(
+                tasks,
+                config(stream=True, max_tokens=16),
+                out,
+                already_retired=runner.retired_arms(out),
+            )
+        )
+        assert recorder.calls == []
+        assert stats.skipped == 5
+
+    def test_an_unproven_arm_sends_one_call_at_a_time(self, tmp_path, monkeypatch):
+        """Until an arm answers once, a rejection would be bought once per slot."""
+        recorder = _Recorder(reject={"pinned:m@high"})
+        tasks = [
+            runner.Task(arm="pinned:m@high", model="m", item=item(str(i)), effort="high")
+            for i in range(12)
+        ]
+        stats = drive(tmp_path, monkeypatch, tasks, recorder, concurrency=8)
+        assert len(recorder.calls) == 1
+        assert stats.skipped == 11
+
+    def test_a_proven_arm_is_not_serialised(self, tmp_path, monkeypatch):
+        """The gate costs one call per arm, not the throughput of the run."""
+        recorder = _Recorder()
+        tasks = [
+            runner.Task(arm="pinned:m", model="m", item=item(str(i))) for i in range(12)
+        ]
+        drive(tmp_path, monkeypatch, tasks, recorder, concurrency=4)
+        assert len(recorder.calls) == 12
+        assert recorder.peak_in_flight > 1
+
+
+class TestSpendCeiling:
+    """A completion cap is only free if the model does not expand to fill it."""
+
+    def arms(self, price: float = 10.0):
+        return [
+            catalog.Arm(member=member("sclv/m", "m"), effort=effort)
+            for effort in ("default", "high")
+        ]
+
+    def test_the_ceiling_is_per_arm_and_summed(self):
+        worst = catalog.worst_case_usd(self.arms(), questions=100, max_tokens=1_000_000)
+        # 2 USD per million completion tokens, 1 USD per million prompt tokens.
+        assert worst["sclv/m"] == pytest.approx(100 * (2.0 + 400 / 1_000_000))
+        assert worst["total"] == pytest.approx(2 * worst["sclv/m"])
+
+    def test_raising_the_budget_raises_the_ceiling_proportionally(self):
+        small = catalog.worst_case_usd(self.arms(), 10, 2048)["total"]
+        large = catalog.worst_case_usd(self.arms(), 10, 16384)["total"]
+        assert large > small * 7
+
+    def test_a_run_over_the_limit_stops_before_calling(self, capsys):
+        with pytest.raises(SystemExit, match="exceeds --max-spend-usd"):
+            collect.guard_spend(self.arms(), questions=1000, max_tokens=16384, limit=1.0)
+
+    def test_without_a_limit_the_ceiling_is_still_printed(self, capsys):
+        collect.guard_spend(self.arms(), questions=10, max_tokens=2048, limit=None)
+        assert "ceiling" in capsys.readouterr().out
 
 
 class TestEffortRejectionPredicate:

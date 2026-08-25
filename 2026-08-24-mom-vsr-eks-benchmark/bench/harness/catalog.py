@@ -170,6 +170,26 @@ def arms(pool_path: Path, members: list[Member]) -> list[Arm]:
     return out
 
 
+def worst_case_usd(
+    arms: list[Arm], questions: int, max_tokens: int, prompt_tokens: int = 400
+) -> dict[str, float]:
+    """What this run costs if every arm spends its whole completion budget.
+
+    The claim that a completion cap is free holds only if raising it does not change
+    what the model does, and for a reasoning arm it demonstrably can: the probe that
+    justified raising the cap is an arm that used all 2,048 tokens and then all 4,096.
+    So the budget is an intervention with a price, and the price is worth seeing before
+    the run rather than in a bill afterwards. This is the ceiling, not an estimate —
+    the arms that stop early pay far less — and the prompt length is a stated
+    assumption because it is not known until the questions are rendered.
+    """
+    per_arm = {
+        arm.name: arm.member.cost_usd(prompt_tokens, max_tokens) * questions
+        for arm in arms
+    }
+    return {"total": sum(per_arm.values()), **per_arm}
+
+
 def domains(pool_path: Path) -> list[str]:
     """The classifier labels the router is configured to route on."""
     return list(build_config.load_yaml(pool_path)["domains"])

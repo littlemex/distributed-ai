@@ -262,7 +262,7 @@ Written down because the plan above is longer than any one sitting, and the next
 person to open it — including a later version of the same session — needs to know
 which half is code.
 
-Built and tested (`bench/tests`, 53 cases):
+Built and tested (`bench/tests`, 61 cases):
 
 - The arm as the unit: `catalog.Arm` and `catalog.arms()` expand the pool's
   `effort_levels` declaration, and an undeclared member gets the default level only.
@@ -289,7 +289,8 @@ Built and tested (`bench/tests`, 53 cases):
   so a resumed run would have silently compared a 2,048-token non-streaming row
   against a 16,384-token streaming one and called the difference reasoning effort.
 
-Two rounds of adversarial review on that code changed it in ways worth recording,
+Three rounds of adversarial review on that code — two with one reviewer, one with a
+second and independent one — changed it in ways worth recording,
 because each was a way of paying for a matrix that answers a different question:
 
 - The first fix for the deadline problem used a per-read socket deadline. That is
@@ -304,6 +305,17 @@ because each was a way of paying for a matrix that answers a different question:
   merely lists the accepted parameters would have retired a working arm.
 - Failures are counted per arm, because a failed cell counts as collected: an outage
   landing on one arm shortens it permanently and moves the run's total hardly at all.
+- Retirement was in memory only, so a restart or a resume bought the dead arm's
+  remaining questions all over again. It is read back from the rejection rows now, and
+  an arm that has not yet answered sends one call at a time, which bounds the cost of
+  discovering that an arm is gone at one call instead of one per concurrency slot.
+- The completion cap is not free. "A cap is not a charge" assumes the model does not
+  expand to fill it, which is exactly what a reasoning arm does — so raising the
+  default from 2,048 to 16,384 multiplied the worst case by eight. Every run now prints
+  the ceiling it could reach and `--max-spend-usd` refuses to start above a limit.
+- The line between "this arm was worse" and "this arm was measured differently" moved
+  out of the runner and the CLI into `harness/quality.py`, because the analysis has to
+  apply the same policy and should not import a CLI to find it.
 
 Not built yet, in the order the plan needs them:
 
@@ -324,9 +336,17 @@ Not built yet, in the order the plan needs them:
 
 ## How the power analysis has to be done, and why it may end the plan
 
-Condition 1 is the next piece of work and it is pure computation on the v1 matrix, so
-it costs nothing and decides the price of everything after it. The form it has to take,
-after review:
+Condition 1 is the next piece of work. It starts as pure computation on the v1 matrix,
+which costs nothing, but it cannot finish there — v1 measured the model axis, and the
+quantity that decides power is the discordance *between a member's own effort levels*,
+which no v1 row observes. Treating v1's between-member discordance as a stand-in
+assumes the two axes behave alike, and the reason for running v2 at all is the probe's
+finding that they do not. So the design is: the v1 computation is a screen that can
+only reject, and a small arm-level pilot — a few dozen questions across a handful of
+members at every declared level — supplies the discordance, the cost tail and the
+per-arm failure and truncation asymmetries that the real calculation needs.
+
+The form it has to take, after review:
 
 The estimand is a paired per-question difference, `D_q = u_frontier(q) − u_best(q)`,
 averaged over questions. Pairing is the whole design: the question main effect — by far
@@ -336,11 +356,20 @@ the dominant remaining variance. Both sides are selections, so both must be cros
 on the same split, or the winner's curse inflates Δ̂ and can flip its sign.
 
 Power is then not a function of accuracy but of **discordance**: the share of questions
-where exactly one side is right, the McNemar structure. Flip rate enters as measurement
-error and is unbiased in the mean, so it does not shrink Δ̂ — it inflates the variance,
-which means the answer is more samples per cell rather than a correction to the estimate.
-v1 has repeat data, so the per-cell flip variance is a measured plug-in and not an
-assumption. The λ-utility versions have a heavy right tail in cost, so the primary
+where exactly one side is right, the McNemar structure. Cross-fitting has to happen
+*inside* the bootstrap — every resample re-runs the frontier choice, the best-arm choice
+and any policy fitting, and resamples whole questions as clusters — or the interval
+omits the selection variance that is the largest thing being estimated.
+
+Flip rate enters as measurement error and is unbiased in the mean, so it does not shrink
+Δ̂ — it inflates the variance, which means the answer is more samples per cell rather
+than a correction to the estimate. That holds only while the error is symmetric across
+arms, and here it is not guaranteed to be: parse failure, truncation and timeout all
+vary with effort level, and any of them landing asymmetrically moves the mean rather
+than the variance. So the flip variance is estimated per arm and per failure mode, and
+an asymmetry is treated as bias to be removed rather than noise to be averaged. v1 has
+repeat data, so the flip term is a measured plug-in for the model axis; the effort axis
+needs the pilot. The λ-utility versions have a heavy right tail in cost, so the primary
 estimator has to be pre-registered as winsorised or log-cost, with question-level
 percentile-t bootstrap rather than a normal approximation, and one λ chosen in advance or
 a simultaneous band over the grid.

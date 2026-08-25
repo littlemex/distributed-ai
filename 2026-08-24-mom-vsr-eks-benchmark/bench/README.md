@@ -176,12 +176,20 @@ fitting.
   lands on one arm silently shortens it and the loss is permanent. Each run reports
   its per-arm failure rate and flags a spread; re-collecting the missing cells into
   a new file is the remedy, and there is not yet a mode that does it for you.
-- **A rejected effort level retires the arm.** Providers change the supported set
-  without notice, and a 400 on `reasoning_effort` means the arm has ceased to
-  exist rather than that a question went unanswered. The first rejection is
-  recorded as the evidence, the arm's remaining cells are not attempted, and the
-  run prints what it retired. Scoring a retired arm on the subset it did answer
-  would compare arms over different question sets.
+- **A rejected effort level retires the arm, and the retirement outlives the run.**
+  Providers change the supported set without notice, and a 400 naming the effort
+  field means the arm has ceased to exist rather than that a question went
+  unanswered. The first rejection is recorded as the evidence, the arm's remaining
+  cells are not attempted, and a later run reads those rows back — otherwise one
+  process restart would buy the same 400 once per remaining question. Until an arm
+  has answered once, only one of its calls is in flight at a time, so discovering
+  that an arm is gone costs exactly one call rather than a slotful.
+- **The completion cap has a price, and the run says so before spending.** "A cap is
+  not a charge" holds only while the model does not expand to fill it, and a
+  reasoning arm demonstrably can — the probe that justified raising the cap is an arm
+  that used all of 2,048 and then all of 4,096. So every collecting run prints the
+  ceiling it could reach at the current budget, and `--max-spend-usd` turns that
+  ceiling into a refusal before the first call instead of a surprise afterwards.
 - **A question one member failed is dropped from every arm.** Keeping it would
   compare a nine-member pool against a ten-member one and call the difference
   routing.
