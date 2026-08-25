@@ -125,10 +125,7 @@ DEFAULT_TOOLS = ("list_dir", "search", "read_file", "run_tests", "write_patch", 
 PROTOCOL_HEAD = """\
 {opening}
 
-<action tool="NAME">
-key: value
-another: value
-</action>
+{example}
 
 The tools:
 
@@ -139,6 +136,21 @@ Rules that are enforced rather than requested:
 * Editing a test file fails the task. The tests that judge you are not in this checkout;
   they are applied after you finish, so there is nothing to be gained by guessing at them.
 {rules}{cadence}"""
+
+# A worked example, chosen from the tools on offer. It carries a real hint that a generic
+# `key: value` skeleton does not: paths are relative to the checkout. With the skeleton in
+# its place a cheap model sent `/testbed/requests/requests/models.py` and its only edit was
+# refused.
+EXAMPLES = {
+    "read_file": '<action tool="read_file">\npath: requests/models.py\nstart: 120\n</action>',
+    "search": '<action tool="search">\npattern: def prepare_body\n</action>',
+    "write_patch": (
+        '<action tool="write_patch">\npath: requests/models.py\n'
+        "old: <<<\n    if length is not None:\n>>>\n"
+        "new: <<<\n    if length:\n>>>\n</action>"
+    ),
+}
+
 
 ONE_PER_TURN = """\
 Reply with exactly one action per turn, in this form and nothing else after it:"""
@@ -186,8 +198,13 @@ def protocol(
         raise ValueError(f"no tool called {unknown}; the tools are {sorted(TOOL_DOCS)}")
     names = [name for name in DEFAULT_TOOLS if name not in withhold]
     names += [name for name in add if name not in names]
+    example = next(
+        (EXAMPLES[name] for name in ("read_file", "search", "write_patch") if name in names),
+        EXAMPLES["write_patch"],
+    )
     return PROTOCOL_HEAD.format(
         opening=ONE_PER_TURN if one_per_turn else AS_MANY_AS_NEEDED,
+        example=example,
         cadence=CADENCE_ONE if one_per_turn else CADENCE_MANY,
         tools="\n".join(TOOL_DOCS[name] for name in names),
         rules="".join(TOOL_RULES[name] for name in names if name in TOOL_RULES),
@@ -255,8 +272,20 @@ def _action(tool: str, body: str) -> Action:
     for line in stripped.splitlines():
         match = re.match(r"^\s*(\w+):\s*(.*)$", line)
         if match and match.group(1) not in args:
-            args[match.group(1)] = match.group(2).strip()
+            args[match.group(1)] = _unquote(match.group(2).strip())
     return Action(tool=tool, args=args, raw=body[:2000])
+
+
+def _unquote(value: str) -> str:
+    """Strip a pair of surrounding quotes from a scalar argument.
+
+    Models write `path: "requests/models.py"` about as often as they write it bare, and a
+    path with quotes in it does not exist, so the edit is refused and the turn is wasted on
+    the harness being literal about punctuation.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
 
 
 def _run(command: str, *, timeout: int) -> subprocess.CompletedProcess:

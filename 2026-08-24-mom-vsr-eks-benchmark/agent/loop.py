@@ -386,10 +386,30 @@ def _drive(
             flush=True,
         )
 
-        if any(a.tool == "done" for a in actions):
-            return "the agent said it was finished"
+        # Only as the last action of the turn: a `done` with work after it is not a finish,
+        # and an illustrated one in the middle of a plan is not either.
+        if actions and actions[-1].tool == "done":
+            if state.has_patched:
+                return "the agent said it was finished"
+            # A turn that declared itself finished having changed nothing. The cheap tier
+            # did exactly this on its first turn, alongside an edit that was refused, and
+            # the episode ended in one step with an empty diff — which reads as a model
+            # that cannot fix the bug rather than one that was not asked again.
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Nothing has been changed yet, so the bug is still there. Use "
+                        "`write_patch` to change the library, then say `done`."
+                        if "write_patch" not in strategy.withholds
+                        else "Nothing has been changed yet. Hand off so the fix can be "
+                        "written, then say `done`."
+                    ),
+                }
+            )
+            continue
 
-        if any(a.tool == "handoff" for a in actions) and strategy.hands_off_patch:
+        if actions and actions[-1].tool == "handoff" and strategy.hands_off_patch:
             if handoffs >= budget.max_handoffs:
                 messages.append(
                     {

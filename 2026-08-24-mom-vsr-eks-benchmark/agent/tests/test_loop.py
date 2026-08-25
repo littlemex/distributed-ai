@@ -97,6 +97,21 @@ class TestTurnsWithSeveralActions:
         assert tools.principal([]) is None
 
 
+class TestArgumentQuoting:
+    def test_a_quoted_path_is_unquoted(self):
+        """Models write it both ways, and a path with quotes in it does not exist."""
+        action = tools.parse('<action tool="read_file">\npath: "requests/models.py"\n</action>')
+        assert action.args["path"] == "requests/models.py"
+
+    def test_a_single_quoted_path_too(self):
+        action = tools.parse("<action tool=\"read_file\">\npath: 'a/b.py'\n</action>")
+        assert action.args["path"] == "a/b.py"
+
+    def test_an_apostrophe_inside_a_value_is_left_alone(self):
+        action = tools.parse('<action tool="search">\npattern: don\'t\n</action>')
+        assert action.args["pattern"] == "don\'t"
+
+
 class TestProtocolText:
     def test_a_withheld_tool_is_not_advertised(self):
         """Offering a tool and then refusing it charges the arm a turn for nothing."""
@@ -112,6 +127,17 @@ class TestProtocolText:
     def test_a_rule_about_a_withheld_tool_goes_with_it(self):
         assert "appear exactly once" in tools.protocol()
         assert "appear exactly once" not in tools.protocol(withhold=("write_patch",))
+
+    def test_the_example_uses_a_tool_that_is_on_offer(self):
+        """A generic skeleton lost the hint that paths are relative, and the next cheap
+        model sent an absolute one with the repository name twice."""
+        assert "path: requests/models.py" in tools.protocol()
+        patch_only = tools.protocol(
+            withhold=("list_dir", "search", "read_file", "run_tests", "done"),
+            one_per_turn=False,
+        )
+        assert 'tool="write_patch"' in patch_only
+        assert 'tool="read_file"' not in patch_only
 
     def test_a_tool_that_does_not_exist_is_an_error(self):
         with pytest.raises(ValueError):
