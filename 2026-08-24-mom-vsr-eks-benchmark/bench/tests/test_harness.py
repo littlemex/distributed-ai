@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -32,6 +33,7 @@ if str(BENCH) not in sys.path:
 
 import collect  # noqa: E402
 import power  # noqa: E402
+import switch_economics  # noqa: E402
 from harness import catalog, client, dataset, quality, runner  # noqa: E402
 
 POOL = BENCH.parent / "vsr" / "pool.yaml"
@@ -900,3 +902,57 @@ class TestPilotReaders:
         self.rows(repeat, [self.cell("repeat:sclv/m@low", "9", False)])
         cells, _ = power.read_arm_cells([matrix], [member("sclv/m", "m")])
         assert power.arm_flip_rates([repeat], cells) == {}
+
+
+class TestSwitchEconomics:
+    """The arithmetic that decides whether escalation can pay for itself at all."""
+
+    DEFAULTS = Path(os.environ.get("STRATOCLAVE_DEFAULTS", "")) if os.environ.get(
+        "STRATOCLAVE_DEFAULTS"
+    ) else None
+
+    def rate(self, **kw):
+        base = dict(name="m", fresh_in=10.0, out=50.0, cache_read=1.0, cache_write=12.5)
+        base.update(kw)
+        return switch_economics.Rate(**base)
+
+    def test_a_warm_model_pays_the_cache_price_for_the_prefix(self):
+        session = switch_economics.Session(steps=1, start_context=1_000_000, growth=0, output=0)
+        warm = switch_economics.cost_of_run(self.rate(), session, 1, 1, warm=True)
+        assert warm == pytest.approx(1.0)  # 1M prefix tokens at $1/Mtok cache read
+
+    def test_a_cold_model_pays_the_switch_tax_once(self):
+        session = switch_economics.Session(steps=2, start_context=1_000_000, growth=0, output=0)
+        cold = switch_economics.cost_of_run(self.rate(), session, 1, 2, warm=False)
+        # One cache write on the prefix, then the second step reads it warm.
+        assert cold == pytest.approx(12.5 + 1.0)
+
+    def test_the_tax_grows_with_how_late_the_switch_happens(self):
+        session = switch_economics.Session(steps=40)
+        early = switch_economics.cost_of_run(self.rate(), session, 5, 40, warm=False)
+        late = switch_economics.cost_of_run(self.rate(), session, 30, 40, warm=False)
+        early_tax = session.context_before(5) / 1e6 * 12.5
+        late_tax = session.context_before(30) / 1e6 * 12.5
+        assert late_tax > early_tax
+        # Yet escalating later is still cheaper overall, because fewer premium steps run.
+        assert late < early
+
+    def test_one_escalation_beats_the_baseline_only_after_enough_cheap_steps(self):
+        premium = self.rate()
+        cheap = self.rate(name="c", fresh_in=2.2, out=13.2, cache_read=0.22, cache_write=2.75)
+        r = switch_economics.escalation_break_even(
+            premium, cheap, switch_economics.Session(steps=60)
+        )
+        assert r["earliest_win"] > 1, "switching at step 1 cannot beat never switching"
+        assert r["best_switch_step"] == 60, "cost alone always prefers escalating later"
+        assert 0 < r["best_saving"] < 1
+
+    def test_a_cheaper_model_widens_the_window(self):
+        premium = self.rate()
+        session = switch_economics.Session(steps=60)
+        cheapish = self.rate(name="a", fresh_in=2.2, out=13.2, cache_read=0.22, cache_write=2.75)
+        cheaper = self.rate(name="b", fresh_in=1.0, out=5.0, cache_read=0.1, cache_write=1.25)
+        a = switch_economics.escalation_break_even(premium, cheapish, session)
+        b = switch_economics.escalation_break_even(premium, cheaper, session)
+        assert b["earliest_win"] <= a["earliest_win"]
+        assert b["best_saving"] > a["best_saving"]
