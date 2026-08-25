@@ -23,6 +23,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 BENCH = Path(__file__).resolve().parents[1]
@@ -30,6 +31,7 @@ if str(BENCH) not in sys.path:
     sys.path.insert(0, str(BENCH))
 
 import collect  # noqa: E402
+import power  # noqa: E402
 from harness import catalog, client, dataset, quality, runner  # noqa: E402
 
 POOL = BENCH.parent / "vsr" / "pool.yaml"
@@ -757,3 +759,53 @@ class TestExitCode:
         assert collect.report_run(stats, Path("unused")) == 0
         printed = capsys.readouterr().out
         assert "retired" in printed and "completion budget" in printed
+
+
+class TestPowerScreen:
+    """The screen decides whether v2 runs at all, so its arithmetic is fixed here."""
+
+    def test_a_disagreement_rate_is_twice_the_variance_of_one_ask(self):
+        """Two asks disagree with probability 2p(1-p); one ask has variance p(1-p)."""
+        assert power.per_ask_variance(0.2) == pytest.approx(0.1)
+
+    def test_required_n_scales_with_discordance_and_inversely_with_the_square(self):
+        assert power.n_for(0.1, 0.02) == pytest.approx(power.n_for(0.05, 0.02) * 2, rel=0.01)
+        assert power.n_for(0.1, 0.01) == pytest.approx(power.n_for(0.1, 0.02) * 4, rel=0.01)
+
+    def test_the_detectable_difference_at_a_given_n(self):
+        # 2.8016 * sqrt(0.1/693) = 0.03366
+        assert power.mde_at(0.1, 693) == pytest.approx(0.0337, abs=1e-4)
+
+    def test_the_variance_split_floors_at_zero(self):
+        """A noise term larger than the spread means the two are not separable here."""
+        differences = np.array([0.1, -0.1, 0.0, 0.05])
+        truth, measurement = power.variance_split(differences, flip_a=0.9, flip_b=0.9)
+        assert truth == 0.0 and measurement == pytest.approx(0.9)
+
+    def test_more_asks_per_cell_narrows_the_spread(self):
+        differences = np.array([1.0, -1.0, 0.0, 1.0, -1.0] * 20)
+        one = power.at_samples_per_cell(differences, flip_a=0.1, flip_b=0.1, samples=1)
+        three = power.at_samples_per_cell(differences, flip_a=0.1, flip_b=0.1, samples=3)
+        assert one.var(ddof=1) > three.var(ddof=1)
+        assert one.mean() == pytest.approx(three.mean())
+
+    def test_one_ask_is_the_data_as_measured(self):
+        """The observed rows already contain one draw of the noise."""
+        differences = np.array([1.0, -1.0, 0.0])
+        same = power.at_samples_per_cell(differences, flip_a=0.1, flip_b=0.2, samples=1)
+        assert np.allclose(same, differences)
+
+    def test_the_test_holds_its_size_under_the_null(self):
+        rng = np.random.default_rng(3)
+        differences = rng.normal(0.0, 0.25, 693)
+        rejected = power.bootstrap_power(
+            differences, delta=0.0, n=693, sims=4000, rng=rng
+        )
+        assert 0.03 < rejected < 0.08
+
+    def test_power_rises_with_n(self):
+        rng = np.random.default_rng(5)
+        differences = rng.normal(0.0, 0.25, 693)
+        small = power.bootstrap_power(differences, delta=0.02, n=693, sims=2000, rng=rng)
+        large = power.bootstrap_power(differences, delta=0.02, n=4000, sims=2000, rng=rng)
+        assert large > small

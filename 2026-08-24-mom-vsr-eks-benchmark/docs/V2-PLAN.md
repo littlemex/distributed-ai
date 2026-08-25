@@ -90,12 +90,18 @@ model complementarity.
 
 ## Three conditions. Without all three, do not run v2
 
-1. **Power for a small Δ.** Δ is expected to be one to two utility points. 693 questions
-   at one sample per cell will not resolve that, and the flip-rate measurement (1.7–20%
-   per cell) says a second sample changes the verdict a few percent of the time. Run the
-   power analysis for a paired, fully-crossed design *before* spending, and note that the
-   question random effect absorbs most of the variance, so the naive unpaired n ≈ 600 per
-   cell is likely a large overestimate.
+1. **Power for a small Δ.** Computed — `docs/POWER.md`, from v1's matrix, no new calls.
+   The condition is **half met, and it settles the target**: one utility point needs
+   2,700 questions at three asks per cell for accuracy alone and about 4,900 for the
+   λ = 20 utility, which is four to eight times v1's spend before the selection variance
+   the screen leaves out, so one point is not worth chasing. Two points clears 80% at
+   1,200 questions and three asks, for a few hundred dollars. Two findings changed the
+   design rather than merely sizing it: the two strongest arms are the *least* discordant
+   pair in the pool at 5.3%, so the questions a router could earn on are the scarcest
+   available; and more than half the apparent disagreement between them is the same arm
+   answering differently on a second ask, which makes asking each cell three times the
+   cheapest lever and one that no number of extra questions substitutes for. What remains
+   is the effort-axis pilot the screen cannot replace, about 1,800 calls.
 2. **Routing cost in dollars.** The primary claim is "routable gain exceeds routing
    cost", and the right-hand side is currently blank. Feature computation, router
    inference, the added latency, and maintenance all have to be priced, or the inequality
@@ -262,7 +268,7 @@ Written down because the plan above is longer than any one sitting, and the next
 person to open it — including a later version of the same session — needs to know
 which half is code.
 
-Built and tested (`bench/tests`, 61 cases):
+Built and tested (`bench/tests`, 69 cases):
 
 - The arm as the unit: `catalog.Arm` and `catalog.arms()` expand the pool's
   `effort_levels` declaration, and an undeclared member gets the default level only.
