@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
-# get-profiling.sh — fetch this repository at the release this file belongs to, then install the
-# profiling platform onto an existing infra/eks cluster. One command, re-runnable.
+# get-profiling.sh — fetch this repository at the release this file belongs to and install the
+# kubectl-accelprof plugin from it, then run the platform installer if this machine has what the
+# cluster's Terraform needs. One command, re-runnable.
 #
-# It exists because install-profiling.sh needs the repository around it (two Terraform states, the
-# Helm chart, the image definitions), so "one command" cannot be a single file: it has to be a
-# command that GETS the pinned tree and then runs the installer inside it. That is all this does.
+# Two audiences, one script:
+#
+#   Someone who profiles workloads needs the client and nothing else. One line gives them the plugin
+#   from a known release, with no checkout and no Terraform.
+#
+#   The platform owner also runs install-profiling.sh. That reaches into the cluster's Terraform
+#   state, which is configured by files this repository deliberately does not track (backend.hcl and
+#   terraform.tfvars are environment-specific). A clone made by this script therefore cannot plan the
+#   cluster on its own: without those files Terraform would resolve variable defaults and produce a
+#   destructive plan. So the installer runs from here only when the state's location is supplied and
+#   the cluster's variables are present; otherwise this script stops after installing the plugin and
+#   says what is missing. The install itself is then one command from the checkout that owns them.
 #
 # Usage:
 #   export CLUSTER_NAME=my-cluster AWS_REGION=us-east-2 PRODUCER_NAMESPACES=team-a,team-b
@@ -15,21 +25,28 @@
 # install a different release, use that release's URL rather than overriding PIN.
 #
 # Required:
-#   CLUSTER_NAME          EKS cluster to wire (must already exist)
+#   CLUSTER_NAME          EKS cluster to work with
 #   AWS_REGION            region of the cluster
 #   PRODUCER_NAMESPACES   comma-separated namespaces whose workloads may collect profiles. They must
 #                         already exist, with a mcp-producer ServiceAccount in each; the installer
 #                         skips namespaces that do not.
 #
+# To have this script also run the installer, additionally:
+#   TF_STATE_BUCKET       where the cluster's Terraform state lives, its region and its object key
+#   TF_STATE_REGION       (TF_STATE_LOCK_TABLE too, if the state is locked with DynamoDB), and
+#   TF_STATE_KEY          EKS_TFVARS pointing at the cluster's terraform.tfvars, which is copied
+#   EKS_TFVARS            into the checkout. Without these, the plugin is installed and this script
+#                         stops, because a plan without the cluster's variables is a destructive one.
+#
 # Optional:
 #   PROFILING_DIR         where to keep the checkout (default ~/distributed-ai-<release>)
 #   PROFILING_BIN_DIR     where to install the kubectl plugin (default ~/.local/bin)
-#   RUN_INSTALL=0         fetch the tree and install the plugin, but do not run the installer
+#   RUN_INSTALL=0         never run the installer, even when everything for it is present
 #   CREATE_DATA_LAYER=1   first install in an account: allow creating the shared data layer
 #   PIN                   override the git ref to check out. Only for developing this script.
 #
-# Everything else (DATA_LAYER_NAME, ALLOW_UNRELATED, TF_STATE_*, AWS_PROFILE, ...) is passed straight
-# through to install-profiling.sh; see infra/docs/profiling-install.md.
+# Everything else (DATA_LAYER_NAME, ALLOW_UNRELATED, PROFILING_ONLY, AWS_PROFILE, ...) is passed
+# straight through to install-profiling.sh; see infra/docs/profiling-install.md.
 set -euo pipefail
 
 # The release this file was published with. It is written out in full rather than derived, so that a
@@ -94,11 +111,33 @@ case ":${PATH}:" in
   *) warn "${bin_dir} is not on PATH. Add it to use the plugin: export PATH=\"${bin_dir}:\$PATH\"" ;;
 esac
 
-if [ "${RUN_INSTALL:-1}" != "1" ]; then
-  say "RUN_INSTALL=0, stopping before the installer"
-  printf '    run it yourself with: %s\n' "${installer}"
+# ── the installer, when this machine has what the cluster's Terraform needs ──────────────────────
+# Checked before running rather than after failing, because the failure mode of a plan without the
+# cluster's variables is not an error message: it is a plan that proposes to destroy the cluster's
+# storage and add-ons, and the operator then has to recognise that.
+missing_for_install=""
+[ -n "${TF_STATE_BUCKET:-}" ] || missing_for_install="${missing_for_install} TF_STATE_BUCKET"
+[ -n "${TF_STATE_REGION:-}" ] || missing_for_install="${missing_for_install} TF_STATE_REGION"
+[ -n "${TF_STATE_KEY:-}" ] || missing_for_install="${missing_for_install} TF_STATE_KEY"
+[ -n "${EKS_TFVARS:-}" ] || missing_for_install="${missing_for_install} EKS_TFVARS"
+
+if [ "${RUN_INSTALL:-1}" != "1" ] || [ -n "${missing_for_install}" ]; then
+  say "the plugin is installed; not running the installer"
+  if [ -n "${missing_for_install}" ]; then
+    printf '    %s\n' "this clone has no cluster configuration of its own, and these are unset:${missing_for_install}"
+    printf '    %s\n' "install the platform from the checkout that manages ${CLUSTER_NAME}:"
+    printf '\n      CLUSTER_NAME=%s AWS_REGION=%s PRODUCER_NAMESPACES=%s \\\n        infra/scripts/install-profiling.sh\n\n' \
+      "${CLUSTER_NAME}" "${AWS_REGION}" "${PRODUCER_NAMESPACES}"
+    printf '    %s\n' "or set the four variables above and re-run this one-liner."
+  else
+    printf '    run it yourself with: %s\n' "${installer}"
+  fi
   exit 0
 fi
+
+[ -f "${EKS_TFVARS}" ] || die "EKS_TFVARS=${EKS_TFVARS} does not exist"
+say "copying ${EKS_TFVARS} into the checkout"
+cp "${EKS_TFVARS}" "${dir}/infra/eks/terraform.tfvars"
 
 # stdin is redirected because this script is usually read from a pipe (curl | bash): whatever is left
 # on stdin belongs to bash, not to the installer.
