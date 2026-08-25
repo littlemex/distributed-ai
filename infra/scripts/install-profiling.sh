@@ -46,7 +46,9 @@ work_dir="$(mktemp -d)"
 cleanup() { [ -n "${pf_pid:-}" ] && kill "${pf_pid}" 2>/dev/null || true; rm -rf "${work_dir}"; }
 trap cleanup EXIT
 
-usage() { sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# The help text is the header comment itself, up to the first line that is not a comment, so that
+# documenting a new variable cannot leave the help behind or spill code into it.
+usage() { sed -n '2,${/^[^#]/q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 say() { printf '\n==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }

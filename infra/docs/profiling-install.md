@@ -11,6 +11,26 @@ export PRODUCER_NAMESPACES=team-a,team-b
 infra/scripts/install-profiling.sh
 ```
 
+## Without a checkout
+
+`infra/scripts/get-profiling.sh` is the same install for someone who does not have this repository
+yet. It fetches the tree at a pinned release, installs the `kubectl-accelprof` plugin onto `PATH`,
+and then runs the installer inside that tree. The release is written into the script, and the URL is
+that release's URL, so the one-liner and the tree it installs cannot drift apart.
+
+```bash
+export CLUSTER_NAME=my-cluster
+export AWS_REGION=us-east-2
+export PRODUCER_NAMESPACES=team-a,team-b
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/refs/tags/release/eks-distributed-ai/v0.0.2/infra/scripts/get-profiling.sh | bash
+```
+
+The checkout lands in `~/distributed-ai-<release>` (`PROFILING_DIR`) and the plugin in
+`~/.local/bin` (`PROFILING_BIN_DIR`). `RUN_INSTALL=0` stops after fetching, for a look at the plan
+before anything is applied. Re-running is safe: the checkout is a detached tag, so a newer release's
+one-liner installs beside this one rather than moving it. To install a different release, use that
+release's URL; overriding `PIN` is for developing the script itself.
+
 ## What it installs
 
 | Layer | Contents |
