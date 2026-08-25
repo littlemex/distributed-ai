@@ -234,6 +234,8 @@ infra/eks/*.tfstate
 infra/eks/*.tfstate.*
 infra/eks/backend.hcl
 infra/eks/backend.tf
+infra/data-layer/backend.tf
+infra/eks/charts/mcp-host/values-*.generated.yaml
 infra/eks/bootstrap/.terraform/
 infra/eks/bootstrap/*.tfstate
 infra/eks/bootstrap/*.tfstate.*
