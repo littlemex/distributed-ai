@@ -1,0 +1,100 @@
+{
+  "config": {
+    "target": "gateway",
+    "base_url": "https://d8b03j8erit4k.cloudfront.net",
+    "api_key_file": "/root/gw-bench/.sclv-key",
+    "model": "gemma-4",
+    "direct_transport": "mantle",
+    "direct_bedrock_model_id": "google.gemma-4-31b",
+    "direct_region": "us-east-2",
+    "concurrency": [
+      1,
+      4,
+      16,
+      64
+    ],
+    "requests_multiplier": 3,
+    "min_requests_per_stage": 8,
+    "max_requests_per_stage": 40,
+    "max_tokens": 32,
+    "stream": true,
+    "prompt": "Reply with a single short sentence about the weather.",
+    "timeout": 60.0,
+    "stage_gap_s": 2.0,
+    "out": "/root/gw-bench/gateway-stream.json"
+  },
+  "stages": [
+    {
+      "concurrency": 1,
+      "n_requests": 8,
+      "duration_s": 4.581,
+      "n_ok": 8,
+      "n_error": 0,
+      "throughput_ok_req_s": 1.75,
+      "attempted_req_s": 1.75,
+      "lat_p50_ms": 621,
+      "lat_p95_ms": 745,
+      "lat_max_ms": 745,
+      "ttft_p50_ms": 374,
+      "ttft_p95_ms": 506,
+      "status_counts": {
+        "200": 8
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 4,
+      "n_requests": 12,
+      "duration_s": 2.608,
+      "n_ok": 12,
+      "n_error": 0,
+      "throughput_ok_req_s": 4.6,
+      "attempted_req_s": 4.6,
+      "lat_p50_ms": 719,
+      "lat_p95_ms": 1493,
+      "lat_max_ms": 1493,
+      "ttft_p50_ms": 481,
+      "ttft_p95_ms": 1093,
+      "status_counts": {
+        "200": 12
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 16,
+      "n_requests": 40,
+      "duration_s": 8.799,
+      "n_ok": 40,
+      "n_error": 0,
+      "throughput_ok_req_s": 4.55,
+      "attempted_req_s": 4.55,
+      "lat_p50_ms": 3014,
+      "lat_p95_ms": 6276,
+      "lat_max_ms": 6281,
+      "ttft_p50_ms": 2302,
+      "ttft_p95_ms": 3584,
+      "status_counts": {
+        "200": 40
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 64,
+      "n_requests": 40,
+      "duration_s": 9.763,
+      "n_ok": 40,
+      "n_error": 0,
+      "throughput_ok_req_s": 4.1,
+      "attempted_req_s": 4.1,
+      "lat_p50_ms": 8777,
+      "lat_p95_ms": 9683,
+      "lat_max_ms": 9757,
+      "ttft_p50_ms": 8305,
+      "ttft_p95_ms": 8365,
+      "status_counts": {
+        "200": 40
+      },
+      "err_counts": {}
+    }
+  ]
+}

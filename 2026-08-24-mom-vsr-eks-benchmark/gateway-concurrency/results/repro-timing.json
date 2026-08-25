@@ -1,0 +1,100 @@
+{
+  "config": {
+    "target": "gateway",
+    "base_url": "https://d8b03j8erit4k.cloudfront.net",
+    "api_key_file": "/root/gw-repro/.sclv-key",
+    "model": "gemma-4",
+    "direct_transport": "mantle",
+    "direct_bedrock_model_id": "google.gemma-4-31b",
+    "direct_region": "us-east-2",
+    "concurrency": [
+      32,
+      32,
+      32,
+      32
+    ],
+    "requests_multiplier": 3,
+    "min_requests_per_stage": 100,
+    "max_requests_per_stage": 100,
+    "max_tokens": 16,
+    "stream": false,
+    "prompt": "Reply with a single short sentence about the weather.",
+    "timeout": 120.0,
+    "stage_gap_s": 2.0,
+    "out": "/root/gw-repro/repro.json"
+  },
+  "stages": [
+    {
+      "concurrency": 32,
+      "n_requests": 100,
+      "duration_s": 16.347,
+      "n_ok": 100,
+      "n_error": 0,
+      "throughput_ok_req_s": 6.12,
+      "attempted_req_s": 6.12,
+      "lat_p50_ms": 421,
+      "lat_p95_ms": 1339,
+      "lat_max_ms": 15341,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 100
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 32,
+      "n_requests": 100,
+      "duration_s": 1.705,
+      "n_ok": 100,
+      "n_error": 0,
+      "throughput_ok_req_s": 58.65,
+      "attempted_req_s": 58.65,
+      "lat_p50_ms": 410,
+      "lat_p95_ms": 681,
+      "lat_max_ms": 816,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 100
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 32,
+      "n_requests": 100,
+      "duration_s": 1.856,
+      "n_ok": 100,
+      "n_error": 0,
+      "throughput_ok_req_s": 53.88,
+      "attempted_req_s": 53.88,
+      "lat_p50_ms": 384,
+      "lat_p95_ms": 831,
+      "lat_max_ms": 1063,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 100
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 32,
+      "n_requests": 100,
+      "duration_s": 1.596,
+      "n_ok": 100,
+      "n_error": 0,
+      "throughput_ok_req_s": 62.67,
+      "attempted_req_s": 62.67,
+      "lat_p50_ms": 372,
+      "lat_p95_ms": 778,
+      "lat_max_ms": 1301,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 100
+      },
+      "err_counts": {}
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "config": {
+    "target": "direct",
+    "base_url": "https://d8b03j8erit4k.cloudfront.net",
+    "api_key_file": "~/tmp/mom-bench/.sclv-key",
+    "model": "gemma-4",
+    "direct_transport": "converse",
+    "direct_bedrock_model_id": "qwen.qwen3-next-80b-a3b",
+    "direct_region": "us-east-1",
+    "concurrency": [
+      1,
+      4,
+      16
+    ],
+    "requests_multiplier": 2,
+    "min_requests_per_stage": 5,
+    "max_requests_per_stage": 15,
+    "max_tokens": 16,
+    "stream": false,
+    "prompt": "Reply with a single short sentence about the weather.",
+    "timeout": 60.0,
+    "stage_gap_s": 2.0,
+    "out": "/root/gw-bench/direct-converse-qwen.json"
+  },
+  "stages": [
+    {
+      "concurrency": 1,
+      "n_requests": 5,
+      "duration_s": 1.572,
+      "n_ok": 5,
+      "n_error": 0,
+      "throughput_ok_req_s": 3.18,
+      "attempted_req_s": 3.18,
+      "lat_p50_ms": 319,
+      "lat_p95_ms": 336,
+      "lat_max_ms": 336,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 5
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 4,
+      "n_requests": 8,
+      "duration_s": 0.775,
+      "n_ok": 8,
+      "n_error": 0,
+      "throughput_ok_req_s": 10.32,
+      "attempted_req_s": 10.32,
+      "lat_p50_ms": 397,
+      "lat_p95_ms": 503,
+      "lat_max_ms": 503,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 8
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 16,
+      "n_requests": 15,
+      "duration_s": 1.078,
+      "n_ok": 15,
+      "n_error": 0,
+      "throughput_ok_req_s": 13.92,
+      "attempted_req_s": 13.92,
+      "lat_p50_ms": 767,
+      "lat_p95_ms": 1057,
+      "lat_max_ms": 1057,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 15
+      },
+      "err_counts": {}
+    }
+  ]
+}
