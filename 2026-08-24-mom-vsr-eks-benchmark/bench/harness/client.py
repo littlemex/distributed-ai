@@ -143,6 +143,13 @@ class Call:
     completion_tokens: int | None = None
     total_tokens: int | None = None
     reasoning_tokens: int | None = None
+    # Input tokens the provider served from its prompt cache, and the ones it stored for
+    # later reuse. A cache read costs about a tenth of a fresh token, so in a long
+    # session these decide the bill — and a model switch throws the cache away, which is
+    # the cost that decides whether escalating mid-session can pay for itself. Recorded
+    # separately because "prompt tokens" alone cannot be priced.
+    cached_prompt_tokens: int | None = None
+    cache_write_tokens: int | None = None
 
     headers: dict[str, str] = field(default_factory=dict)
 
@@ -188,6 +195,7 @@ async def call_once(
     max_tokens: int,
     temperature: float | None,
     reasoning_effort: str | None = None,
+    messages: list[dict] | None = None,
     max_attempts: int = 3,
     timeout_s: float = 300.0,
     stream_idle_s: float = 90.0,
@@ -216,10 +224,13 @@ async def call_once(
         stream_idle_s=stream_idle_s if stream else None,
         stream_first_event_s=stream_first_event_s if stream else None,
     )
+    # A whole conversation when the caller has one, a single question otherwise. The
+    # multi-turn form exists because an agent session is one growing conversation, and
+    # what it costs depends on the prefix being reused rather than resent.
     body = {
         "model": model,
         "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages or [{"role": "user", "content": prompt}],
     }
     # Sent only when asked for. This pool cannot agree on a temperature: Claude 5
     # rejects the field as deprecated, GPT-5.6 accepts only its default of 1, and
@@ -405,11 +416,7 @@ async def _consume_stream(
 
             usage = event.get("usage")
             if usage:
-                record.prompt_tokens = usage.get("prompt_tokens")
-                record.completion_tokens = usage.get("completion_tokens")
-                record.total_tokens = usage.get("total_tokens")
-                details = usage.get("completion_tokens_details") or {}
-                record.reasoning_tokens = details.get("reasoning_tokens")
+                _fill_usage(record, usage)
             if event.get("model"):
                 record.served_model = event["model"]
 
@@ -438,6 +445,34 @@ async def _consume_stream(
         record.text = "".join(parts)
 
 
+def _fill_usage(record: Call, usage: dict[str, Any]) -> None:
+    """Read one usage block, whichever spelling it arrives in.
+
+    Providers disagree about where cached input is reported: OpenAI-protocol upstreams put
+    it under `prompt_tokens_details`, Bedrock's Converse calls it `cacheReadInputTokens`,
+    and a gateway in between may relay either. All of them are read, because a prompt
+    token whose cache state is unknown cannot be priced — and in a long session the cache
+    state is most of the bill.
+    """
+    record.prompt_tokens = usage.get("prompt_tokens", record.prompt_tokens)
+    record.completion_tokens = usage.get("completion_tokens", record.completion_tokens)
+    record.total_tokens = usage.get("total_tokens", record.total_tokens)
+    out_details = usage.get("completion_tokens_details") or {}
+    if "reasoning_tokens" in out_details:
+        record.reasoning_tokens = out_details.get("reasoning_tokens")
+    in_details = usage.get("prompt_tokens_details") or {}
+    for key in ("cached_tokens", "cacheReadInputTokens", "cache_read_input_tokens"):
+        value = in_details.get(key, usage.get(key))
+        if value is not None:
+            record.cached_prompt_tokens = value
+            break
+    for key in ("cache_write_tokens", "cacheWriteInputTokens", "cache_creation_input_tokens"):
+        value = in_details.get(key, usage.get(key))
+        if value is not None:
+            record.cache_write_tokens = value
+            break
+
+
 def _fill_from_payload(record: Call, payload_text: str) -> None:
     try:
         payload = json.loads(payload_text)
@@ -446,12 +481,7 @@ def _fill_from_payload(record: Call, payload_text: str) -> None:
         return
 
     record.served_model = payload.get("model")
-    usage = payload.get("usage") or {}
-    record.prompt_tokens = usage.get("prompt_tokens")
-    record.completion_tokens = usage.get("completion_tokens")
-    record.total_tokens = usage.get("total_tokens")
-    details = usage.get("completion_tokens_details") or {}
-    record.reasoning_tokens = details.get("reasoning_tokens")
+    _fill_usage(record, payload.get("usage") or {})
 
     choices = payload.get("choices") or []
     if not choices:

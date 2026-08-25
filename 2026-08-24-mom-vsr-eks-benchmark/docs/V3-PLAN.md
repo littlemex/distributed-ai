@@ -80,6 +80,66 @@ unaffordable, so the policy escalates once and stays.
 — go straight into cost per solved task. The switch tax is also reported on its own as a
 diagnostic, because it is the term that decides whether the strategy can work at all.
 
+## Two more policies, and the distinction that makes them work
+
+Escalating the main thread is one mechanism. Two others were proposed after the desk
+calculation, and they are not variations of it — they avoid the switch tax entirely, for a
+reason worth stating plainly.
+
+**The tax is charged for handing over the conversation, not for using a cheap model.** A
+side task issued with its own small context — find the file that defines this symbol,
+summarise this diff, read this test and say what it asserts — carries none of the
+accumulated prefix, so there is nothing to re-establish. It can therefore happen as often
+as the work calls for it, which is the opposite of the one-way constraint that governs the
+main thread. Two mechanisms, two economics.
+
+**Arm C: fill the capacity that is already paid for.** The self-hosted vLLM runs on a
+g6e.12xlarge at $15.2174 an hour whether or not a request arrives, so its marginal cost up
+to its throughput ceiling is zero and its true price is the hourly rate divided by what it
+actually serves. That makes utilisation the price: this policy changes its own cost, which
+is why v1's three readings for a self-hosted member — average realised, marginal
+spare-capacity, saturated replacement — stop being an appendix and become the main table.
+
+The policy is admission control: route to the self-hosted model while its in-flight count
+is below a measured ceiling times a safety factor, and spill to a paid API above it. The
+ceiling has to be measured first, and v1 shows why it is not a detail. At
+`--max-num-seqs=2` the self-hosted arm measured 220 output tokens a second and a blended
+$8.80 per million — 44 times the operator rate it was assumed to have, and dominated on
+both axes. That was a serving configuration, not a model: the same box at a real batch
+depth is an order of magnitude cheaper per token. So the sweep decides whether this arm
+exists at all.
+
+It also has a quality floor to clear, and on MMLU-Pro it did not: the self-hosted member
+scored 0.652 against 0.832 for the best arm, eighteen points down. Which is exactly why the
+next policy matters.
+
+**Arm D: route by what the step is for, not by how hard it looks.** v1 killed *inferred*
+difficulty — the domain label carried no accuracy signal at p = 0.58 — but an agent harness
+does not have to infer anything. It knows what each step is for: searching, reading tests,
+summarising, drafting, producing the final patch. The step type is a label we control rather
+than one we predict, and it is causally connected to the capability the step needs. So the
+policy is a pre-registered table from step type to tier, with drafting and searching on the
+self-hosted or cheap tier and the decisive steps on the premium one.
+
+The two compose: role-based routing produces exactly the stream of small, self-contained
+side calls that capacity-first routing wants to fill a paid-for GPU with, and neither pays
+the switch tax. If they work, they also answer the original requirement more directly than
+escalation does — the expensive model is kept for the steps that decide the outcome, and
+the cheap capacity absorbs the volume.
+
+### What they add to the pilot
+
+1. **The self-hosted throughput ceiling.** Sweep `max-num-seqs` over {2, 8, 16, 32} and
+   concurrency past saturation; take the knee where p95 latency crosses the tier's SLO;
+   apply a safety factor; report the effective price at that operating point from the
+   hourly rate. The existing `gateway-concurrency` sweep is the tool.
+2. **Per-step-type quality, by ablation.** Downgrade one step type at a time and measure the
+   change in episode success. This is the only honest way to attribute quality to a step
+   type, and at pilot scale it is a screen rather than an estimate.
+3. **The share of a session that is side work** — steps and tokens — from our own traces and
+   the AgentX ones. It bounds what capacity-first and role-based routing can save before
+   either is implemented.
+
 ## Power, and what the pilot has to establish
 
 Paired over tasks, McNemar structure, so the sample size is set by the discordance rate d

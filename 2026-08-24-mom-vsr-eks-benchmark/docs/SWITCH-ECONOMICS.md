@@ -73,16 +73,39 @@ the switch, so **escalating immediately after a context compaction is far cheape
 escalating just before one**. Any harness that summarises or compacts creates natural
 cheap escalation points, and a trigger that can wait for one should.
 
+## Verified, and two things had to be fixed first
+
+The premise is now measured rather than assumed (`bench/cache_probe.py`, raw rows in
+`bench/results/cache-probe-final.json`). A 10,000-token conversation through the router:
+
+| Call | Prompt tokens | Served from cache |
+| --- | --- | --- |
+| `claude-opus-5`, first sight | 9,984 | 0 |
+| `claude-opus-5`, same prompt again | 9,984 | 9,982 |
+| the same prompt handed to `claude-sonnet-5` | 9,984 | 0 |
+
+The last row is the switch tax, measured: a prefix cached by one model is worth nothing to
+another. Cross-region inference profiles are not the obstacle — every model above is a
+`us.` profile.
+
+Two gateway defects stood in the way and are now fixed and deployed. The Converse path
+never sent a cache breakpoint, so Claude models were billed fresh for the whole history
+every turn while OpenAI-protocol models were cached by their provider unasked — an
+artefact that inflated the apparent premium-to-cheap cost ratio from 4.4x to 30x. And once
+caching was on, Bedrock reports cached input *outside* `inputTokens`, so a cached
+ten-thousand-token turn arrived as two prompt tokens and looked nearly free; the usage
+block now carries the split.
+
 ## What this does not settle
 
-- **Whether the discount is really applied.** The rate table prices cache reads, but
-  whether each provider behind the gateway actually reports cached input — and whether the
-  gateway passes it through — is unverified. If it is not applied, the baseline gets much
-  more expensive and escalation looks better than this analysis says. This is the first
-  thing the pilot checks.
 - **The tax is priced as a cache write** ($12.50 per million for `fable`), which is the
   expensive reading. If a switch pays only fresh input ($10.00), the tax is a fifth
   smaller. The ordering of every conclusion above is unchanged.
 - **The session model is stated, not fitted.** Linear context growth, one fixed output
   length, no compaction. The AgentX traces are the right source for real distributions and
   the pilot should replace these parameters with measured ones.
+- **The tax is a property of handing over the main thread, not of using a cheap model.**
+  A side task issued with its own small context — search a file, summarise a diff, read a
+  test — carries no accumulated prefix and therefore pays no tax at all. Everything above
+  concerns the main conversation. `V3-PLAN.md` treats the two as separate mechanisms
+  because their economics have nothing in common.
