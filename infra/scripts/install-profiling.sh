@@ -619,15 +619,18 @@ Profiling platform ready on ${CLUSTER_NAME}.
   Producer namespaces    : ${PRODUCER_NAMESPACES}
   kubectl context        : ${KCTX}
 
-In each producer namespace, create the ServiceAccount the association targets:
+In each producer namespace, create the ServiceAccount the association targets (the contract is only
+published to namespaces that exist when this runs, so re-run after creating one):
 
   kubectl --context ${KCTX} create serviceaccount mcp-producer -n <namespace>
 
-A Pod using that ServiceAccount records a run with:
+Then profile a workload with the client, which needs nothing from the workload's image:
 
-  store.log("<tenant>-<series>", chip="gpu", region="${AWS_REGION}", workload_id="<variant>",
-            metrics={...}, artifacts=["/path/to/trace.nsys-rep"])
+  export PATH="\$(git rev-parse --show-toplevel)/infra/eks/bin:\$PATH"
+  kubectl accelprof run --alias <tenant>-<series> --namespace <namespace> \\
+    --image <your image> --gpu 1 -- python3 train.py
 
 The alias is the deletion, retention and visibility unit: use one alias per experiment campaign and
-vary workload_id and free-form params inside it. See infra/docs/profiling-install.md.
+vary workload_id and free-form params inside it. See infra/docs/profiling-install.md, and
+infra/eks/docs/profiling-producer.md for the producer side.
 SUMMARY
