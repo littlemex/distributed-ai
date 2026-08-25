@@ -4,7 +4,12 @@
 # EXISTING cluster (cluster creation is out of scope). Default engine is vLLM (verified); SGLang is
 # an opt-in faster engine that needs a prebuilt image (see serving/sglang/README.md).
 #
-#   ./scripts/deploy.sh [--engine vllm|sglang] [--only pool|serving|agents] [--skip-pool] [--websearch] [--yes] [--skip-smoke]
+#   ./scripts/deploy.sh [--engine vllm|sglang] [--context 131k|262k|1m] [--only pool|serving|agents]
+#                       [--skip-pool] [--websearch] [--yes] [--skip-smoke]
+#
+# --context picks the window and, with it, how many sequences fit: 131k/16, 262k/9 (default,
+# the model's native window and so no rope scaling), 1m/2 (YaRN). See
+# serving/common/context-profiles.env for why the two move together.
 #   ./scripts/deploy.sh --down [--purge-pool] [--yes]
 #
 # --skip-pool (alias --skip-gpu): run the full flow WITHOUT the GPU NodePool phase, for a cluster that
@@ -28,6 +33,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
 ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; PURGE_POOL=0; SKIP_POOL=0; WEBSEARCH="${QWEN_WEBSEARCH:-0}"
 while [ $# -gt 0 ]; do case "$1" in
   --engine) ENGINE="${2:?}"; shift 2;;
+  --context) QWEN_CONTEXT="${2:?}"; shift 2;;
   --only) ONLY="${2:?}"; shift 2;;
   --yes) ASSUME_YES=1; shift;;
   --skip-smoke) SKIP_SMOKE=1; shift;;
@@ -59,6 +65,7 @@ QWEN_BEDROCK_REGION="${QWEN_BEDROCK_REGION:-us-east-1}"   # Bedrock web_search: 
 CLUSTER_NAME="${CLUSTER_NAME:-$(printf '%s' "$CTX_CLUSTER" | sed 's#.*/##')}"
 # shellcheck source=/dev/null
 . serving/common/model.env
+. serving/common/context-profiles.env
 
 log(){ printf '\n\033[1;32m[deploy]\033[0m %s\n' "$*"; }
 die(){ printf '\033[1;31m[deploy][FAIL]\033[0m %s\n' "$*" >&2; exit 1; }
@@ -100,6 +107,7 @@ confirm_target(){
   echo "  cluster : ${CTX_CLUSTER:-?}"
   echo "  account : $acct"
   echo "  namespace: $NS   engine: $ENGINE   web_search: $([ "$WEBSEARCH" = 1 ] && echo on || echo off)"
+  echo "  context : ${QWEN_CONTEXT:-262k} (window $MAX_CONTEXT, up to $MAX_NUM_SEQS concurrent)"
   read -r -p "Proceed against this target? [y/N] " a
   [ "$a" = y ] || [ "$a" = Y ] || die "aborted by user"
 }
@@ -111,8 +119,17 @@ render_vllm(){
 model: $MODEL_ID
 servedModelName: $SERVED_MODEL_NAME
 maxModelLen: $MAX_CONTEXT
+maxNumSeqs: $MAX_NUM_SEQS
+MV
+  # YaRN only when the window asked for is longer than the model's own. Below native it
+  # buys nothing and is not free: rope scaling trades short-context accuracy for reach, so
+  # applying it at 131072 on a model whose native window is 262144 would pay that price
+  # for length nobody requested.
+  if [ "$MAX_CONTEXT" -gt "$NATIVE_CONTEXT" ]; then
+    cat >> "$mv" <<MV
 hfOverrides: '{"rope_scaling":{"rope_type":"yarn","factor":${YARN_FACTOR}.0,"original_max_position_embeddings":${NATIVE_CONTEXT}}}'
 MV
+  fi
   helm template x serving/charts/vllm-serving \
     -f serving/values/qwen3.8-27b.values.yaml -f "$mv" -n "$NS"
   rm -f "$mv"

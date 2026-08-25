@@ -8,17 +8,25 @@
 #  - 48 of 64 layers are linear_attention (Gated DeltaNet). Prefix caching is NOT supported
 #    for the recurrent-state layers -> enablePrefixCaching stays false. Do not advertise
 #    "cheap repeated system prompts" for this model.
-#  - The recurrent state, not the paged KV pool, caps concurrency -> maxNumSeqs kept low.
+#  - Which resource caps concurrency depends on the window. The 48 recurrent layers hold a
+#    fixed state per sequence regardless of length, so at a short window they are the
+#    binding constraint. At a very long one the 16 full-attention layers dominate: 64 KiB of
+#    KV per token means a million-token sequence reserves ~64 GiB and only two fit. Measured
+#    on this deployment, throughput saturated at two concurrent requests under the 1M window.
 #  - bf16 weights ~54 GiB do not fit one 48 GiB L40S -> tensorParallelSize 4 on g6e.12xlarge
 #    (num_kv_heads=4 divides TP4). TP2 also works on a 2-GPU slice if the pool changes.
-#  - native context is 262144; capped to 32768 for a first bring-up.
+#  - native context is 262144; the deployed window comes from common/model.env, and YaRN is
+#    injected by deploy.sh only when that window exceeds native.
 
 image: vllm/vllm-openai:v0.27.1
 nodeRole: gpu-l40s
 gpuCount: 4
 tensorParallelSize: 4
 gpuMemoryUtilization: 0.92
-maxNumSeqs: 2               # 1M KV ~16GiB/rank per seq; keep concurrency low for the long-context test
+# maxNumSeqs is deliberately absent: it is set by the context profile
+# (serving/common/context-profiles.env) because it is the same decision as the window. The
+# chart's default of 16 applies if this is rendered without deploy.sh, which is only safe at
+# a short window.
 
 # Online FP8: halves the weight bytes read per decode token (measured FP8+MTP c=1 ~1.7x faster than
 # bf16 no-spec; FP8 is near-lossless and MTP is lossless). served-model-name stays Qwen/Qwen3.8-27B
