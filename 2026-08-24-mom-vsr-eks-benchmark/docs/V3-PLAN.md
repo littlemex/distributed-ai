@@ -28,16 +28,35 @@ and a published premium-to-cheap gap of 20–30 points, so the non-inferiority c
 vacuous. Its structure matches the requirement too: searching, reproducing and reading
 tests is replaceable labour, while designing the patch is the step worth paying for.
 
+One branch has to be pre-registered here: if the pilot finds the premium and cheap arms
+within three points of each other on single-run success, the non-inferiority claim is
+vacuous before it starts — there is no quality to preserve. The response is to restrict to
+a harder stratum, or to change the outcome from success to effort-to-success, and not to
+report a comfortable null.
+
 **Estimand: the reduction in cost per solved task, subject to non-inferior success.** Not
 success at matched cost. The requirement is "do not lose quality, spend less", so quality
 is the constraint and spend is the objective; reversing them answers a different question.
-Non-inferiority margin **5 points of success rate, one-sided, paired by task**. Wider than
-one would like, and set by what the budget can resolve rather than by taste — v1's
-measurements put the detectable difference at a few points for several hundred paired
-units, so a 2-point margin cannot be tested here and a 10-point one would make "no loss of
-quality" meaningless. The unit is **cost per *solved* task**, which is the only unit that
-charges a cheap model for taking more turns, and charges a failed episode's tokens to
-whatever policy failed.
+The unit is **cost per *solved* task**, which is the only unit that charges a cheap model
+for taking more turns, and charges a failed episode's tokens to whatever policy failed.
+
+**The margin and the sample size are the same decision, and the wording has to follow it.**
+One-sided at 5% with 80% power needs `n ≈ 6.18 · d / Δ²` paired tasks:
+
+| Discordance d | 3-point margin | 5-point margin |
+| --- | --- | --- |
+| 0.05 | 343 | 124 |
+| 0.10 | 687 | 247 |
+| 0.15 | 1,030 | 371 |
+
+So 200–250 tasks buys a **5-point** margin, not a 3-point one. A 5-point margin at 250
+tasks permits twelve or thirteen extra failures, which is not "no loss of quality" — the
+second reviewer was right to object to the phrasing, and the fix is the phrasing, not the
+number. **The first run claims "at most five points of success rate given up, for X% less
+money", and nothing stronger.** If it comes back with the difference near zero, the
+pre-registered follow-up is roughly 690 tasks at the same design, which converts the same
+result into a 3-point claim for about 2.8 times the spend. Deciding that ladder in advance
+is what stops the margin from being chosen after seeing the answer.
 
 **Triggers, three, all computable from logs with no extra model call:**
 
@@ -64,9 +83,8 @@ diagnostic, because it is the term that decides whether the strategy can work at
 ## Power, and what the pilot has to establish
 
 Paired over tasks, McNemar structure, so the sample size is set by the discordance rate d
-(the share of tasks exactly one policy solves), not by either policy's success rate:
-n ≈ (z_α + z_β)² · d / Δ². At a 5-point margin and 80% power, d = 0.10 needs about 250
-tasks and d = 0.15 about 370.
+(the share of tasks exactly one policy solves), not by either policy's success rate. The
+table under the estimand is the whole calculation; the pilot's job is to supply d.
 
 A 20–30 episode pilot, before anything larger, measures four things:
 
@@ -98,9 +116,18 @@ been a costly way to buy a null that arithmetic already implied.
 It did not come back empty. It came back saying cost prefers escalating as late as
 possible while quality prefers escalating sooner, which makes the answer depend on exactly
 one unmeasured quantity: **how well a trigger identifies the step where cheap work stops
-being good enough**. That is what v3 buys, and it is also the part with the weakest
-external validity, since it depends on the scaffold. Both facts should be in the write-up
-from the start.
+being good enough**. That is what v3 buys.
+
+It is also the part with the weakest external validity, because how a trigger performs
+depends on how the scaffold searches, when it runs tests, and whether it compacts. Both
+reviewers landed on that as the strongest objection, and the second one proposed the
+answer: **two scaffolds over the same subset with the same policy and budget, reported
+separately rather than pooled.** One lightweight agent loop and one of a different design;
+if the direction of the result agrees across them, the claim is about one-way escalation on
+long-horizon code work rather than about one harness's habits. That is a better use of the
+same money than a single scaffold at larger n, and it is the design v3 adopts — with the
+caveat that if the goal ever narrows to a go/no-go for one internal harness, external
+validity stops being worth paying for and a single scaffold is correct.
 
 ## What carries over unchanged
 
