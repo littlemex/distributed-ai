@@ -27,18 +27,30 @@ KC="kubectl --context ${KUBE_CONTEXT} -n ${NAMESPACE}"
 # Lower-cased and with the double underscore flattened: a Job name is a DNS label.
 SAFE_ID="$(echo "${INSTANCE_ID}" | tr '[:upper:]_' '[:lower:]-')"
 JOB="ep-${SAFE_ID}-$(echo "${POLICY}" | tr -d '[:space:]')"
-JOB="${JOB:0:60}"
+JOB="${JOB:0:57}${PASS:+-p${PASS}}"
+# A repeat of the same (instance, policy) writes beside the first rather than over it: the
+# re-run flip rate is one of the four things the pilot has to measure, and it needs both
+# answers. `PASS=2` puts them under /results/pass2/, one level deeper, which is why the
+# report's first-pass glob does not pick them up.
+PASS_DIR="${PASS:+pass${PASS}/}"
 IMAGE="swebench/sweb.eval.x86_64.${INSTANCE_ID//__/_1776_}:latest"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
 echo "[INFO] ${INSTANCE_ID} / ${POLICY} / ${IMAGE}"
 
-PYTHONPATH="${HERE}" python3 - "$INSTANCE_ID" "${WORK}/instance.json" <<'PY'
+# Cached outside the repository: submitting a sweep of a hundred episodes means asking the
+# datasets server for the same five pages a hundred times, which is slow and eventually
+# answered with a 429 halfway through a run.
+CACHE="${SWEBENCH_CACHE:-${HOME}/.cache/swebench-verified.json}"
+mkdir -p "$(dirname "${CACHE}")"
+
+PYTHONPATH="${HERE}" python3 - "$INSTANCE_ID" "${WORK}/instance.json" "${CACHE}" <<'PY'
 import json, sys
+from pathlib import Path
 import dataset
-wanted, out = sys.argv[1], sys.argv[2]
-match = [i for i in dataset.load() if i.instance_id == wanted]
+wanted, out, cache = sys.argv[1], sys.argv[2], Path(sys.argv[3])
+match = [i for i in dataset.load(cache) if i.instance_id == wanted]
 if not match:
     raise SystemExit(f"[FAIL] no instance called {wanted}")
 i = match[0]
@@ -120,6 +132,10 @@ metadata:
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 86400
+  # A runaway guard only. The loop stops itself on steps and on spend; this is for the case
+  # where a call neither answers nor fails, which in a sweep would stall every episode behind
+  # it. Well above the longest episode measured, so it is not a condition of the experiment.
+  activeDeadlineSeconds: ${EPISODE_DEADLINE:-3600}
   template:
     spec:
       restartPolicy: Never
@@ -130,7 +146,7 @@ spec:
           args:
             - |
               set -o pipefail
-              OUT=/results/${INSTANCE_ID}/${POLICY}
+              OUT=/results/${PASS_DIR}${INSTANCE_ID}/${POLICY}
               mkdir -p "\$OUT"
               cd /work
               python /code/loop.py --instance /data/instance.json \\
@@ -175,5 +191,5 @@ YAML
 
 echo "[INFO] follow with:"
 echo "  kubectl --context ${KUBE_CONTEXT} -n ${NAMESPACE} logs -f job/${JOB}"
-echo "[INFO] results land on the shared volume at /results/${INSTANCE_ID}/${POLICY}/"
+echo "[INFO] results land on the shared volume at /results/${PASS_DIR}${INSTANCE_ID}/${POLICY}/"
 echo "       and survive the pod: ./collect.sh copies them out"
