@@ -19,7 +19,7 @@ import json
 import math
 import random
 import statistics
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +50,8 @@ class Episode:
     estimated_usd: float
     context_at_first_trigger: int | None
     notes: list[str]
+    binding: str
+    step_types: dict[str, dict]
 
     @property
     def usable(self) -> bool:
@@ -99,8 +101,35 @@ def load(root: Path) -> list[Episode]:
                     first_trigger["prompt_tokens"] if first_trigger else None
                 ),
                 notes=episode.get("notes") or [],
+                binding=episode.get("binding_constraint", "unknown"),
+                step_types=episode.get("step_types") or {},
             )
         )
+    return out
+
+
+def side_work(episodes: list[Episode]) -> dict[str, dict]:
+    """What share of an episode is searching, reading and testing rather than patching.
+
+    This is the ceiling on what any routing policy can save, and it is worth reading off a run
+    where no routing happened: if reading and searching are a tenth of the bill, moving them to
+    a cheaper tier cannot save much however good that tier turns out to be. Shares of money,
+    not of turns — a turn is not the unit anybody pays in.
+    """
+    out: dict[str, dict] = {}
+    for policy in sorted({e.policy for e in episodes if e.usable}):
+        totals: dict[str, float] = defaultdict(float)
+        spent = 0.0
+        for episode in (e for e in episodes if e.usable and e.policy == policy):
+            for kind, row in episode.step_types.items():
+                totals[kind] += row.get("usd", 0.0)
+                spent += row.get("usd", 0.0)
+        if not spent:
+            continue
+        out[policy] = {
+            "usd": spent,
+            "shares": {kind: value / spent for kind, value in sorted(totals.items())},
+        }
     return out
 
 
@@ -162,6 +191,17 @@ def per_policy(episodes: list[Episode]) -> dict[str, dict]:
             "steps_median": statistics.median([e.steps for e in group]),
             "wall_median": statistics.median([e.wall_s for e in group]),
             "estimated_usd": sum(e.estimated_usd for e in group),
+            "tokens_median": statistics.median(
+                [e.prompt_tokens + e.completion_tokens for e in group]
+            ),
+            # What stopped the episodes, which decides whether the budget or the policy is
+            # being measured. An arm whose episodes mostly end on a limit is being described
+            # by the limit.
+            "binding": dict(
+                sorted(
+                    Counter(e.binding for e in group).items(), key=lambda kv: -kv[1]
+                )
+            ),
         }
     return out
 
@@ -374,8 +414,8 @@ def render(
         "## What an episode costs, and how often it works",
         "",
         "| Policy | Solved | Rate | Median $ | $ per solved | $ per solved, marginal "
-        "| Median steps | Median wall |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Median steps | Median tokens | Median wall | What stopped them |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for policy, row in per_policy(episodes).items():
         per_solved = (
@@ -386,10 +426,12 @@ def render(
             if row["usd_per_solved_marginal"] is not None
             else "-"
         )
+        binding = ", ".join(f"{k} x{v}" for k, v in row["binding"].items())
         lines.append(
             f"| `{policy}` | {row['solved']}/{row['episodes']} | {row['rate']:.0%} "
             f"| ${row['usd_median']:.3f} | {per_solved} | {marginal} "
-            f"| {row['steps_median']:.0f} | {row['wall_median']:.0f}s |"
+            f"| {row['steps_median']:.0f} | {row['tokens_median']:,.0f} "
+            f"| {row['wall_median']:.0f}s | {binding} |"
         )
     lines += [
         "",
@@ -399,6 +441,29 @@ def render(
         "throughput knee. Neither is wrong; they answer different questions.",
         "",
     ]
+
+    work = side_work(episodes)
+    if work:
+        kinds = sorted({kind for row in work.values() for kind in row["shares"]})
+        lines += [
+            "## Where the money goes inside an episode",
+            "",
+            "| Policy | " + " | ".join(kinds) + " |",
+            "| --- | " + " | ".join("---" for _ in kinds) + " |",
+        ]
+        for policy, row in work.items():
+            cells = [
+                f"{row['shares'].get(kind, 0.0):.0%}" if kind in row["shares"] else "-"
+                for kind in kinds
+            ]
+            lines.append(f"| `{policy}` | " + " | ".join(cells) + " |")
+        lines += [
+            "",
+            "Shares of spend, not of turns. This is the ceiling on what any routing policy can "
+            "save: a step type that is a tenth of the bill cannot be moved to a cheaper tier "
+            "for more than a tenth, whatever that tier turns out to be worth.",
+            "",
+        ]
 
     lines += [
         "## Whether the cache discount survives the gateway",

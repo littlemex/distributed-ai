@@ -30,6 +30,8 @@ def episode(
     comparable=True,
     steps=5,
     triggers=None,
+    binding="the agent decided",
+    step_types=None,
 ) -> report.Episode:
     return report.Episode(
         instance=instance,
@@ -50,6 +52,8 @@ def episode(
         estimated_usd=0.0,
         context_at_first_trigger=None,
         notes=[],
+        binding=binding,
+        step_types=step_types or {},
     )
 
 
