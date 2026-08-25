@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -96,7 +97,11 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
     if not tests:
         return {"ran": 0, "passed": 0, "failed": 0, "ok": False, "scoreable": False,
                 "detail": "no tests named: this instance cannot be scored"}
-    quoted = " ".join(f'"{test}"' for test in tests)
+    # `shlex.quote`, not double quotes around each id. A parametrised id can contain spaces,
+    # quotes and backslashes — astropy's unit tests are named after the unit strings they
+    # parse — and hand-quoting split 732 ids into fragments pytest could not find, which came
+    # back as exit 4 and read as "this instance cannot be scored here".
+    quoted = " ".join(shlex.quote(test) for test in tests)
     try:
         result = run(f"python -m pytest {quoted} -rA -q --color=no", timeout=timeout)
     except subprocess.TimeoutExpired:

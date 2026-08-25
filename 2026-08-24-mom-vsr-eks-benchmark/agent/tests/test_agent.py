@@ -7,6 +7,7 @@ that looks like a model result and is not one.
 
 from __future__ import annotations
 
+import shlex
 import sys
 from pathlib import Path
 
@@ -172,3 +173,51 @@ class TestColouredOutput:
         monkeypatch.setattr(score, "run", fake_run)
         score.pytest_outcome(("a.py::test_one",), timeout=1)
         assert "--color=no" in seen["command"]
+
+
+class TestAwkwardTestIds:
+    """A parametrised id is not a shell word.
+
+    astropy names its unit-format tests after the strings they parse, so the ids contain
+    spaces, quotes and backslashes. Quoted by hand, 732 of them became fragments pytest could
+    not find, the run came back exit 4, and every arm's attempt at the instance was recorded as
+    unscoreable — which removes the hardest repositories from the denominator.
+    """
+
+    def command_for(self, monkeypatch, tests):
+        seen = {}
+
+        class Result:
+            stdout = "".join(f"PASSED {t}\n" for t in tests)
+            stderr = ""
+            returncode = 0
+
+        def fake_run(command, timeout=None):
+            seen["command"] = command
+            return Result()
+
+        monkeypatch.setattr(score, "run", fake_run)
+        outcome = score.pytest_outcome(tuple(tests), timeout=1)
+        return seen["command"], outcome
+
+    def test_a_space_inside_the_brackets_survives(self, monkeypatch):
+        test_id = "astropy/units/tests/test_format.py::test_powers[-10-1 / 10]"
+        command, outcome = self.command_for(monkeypatch, [test_id])
+        assert shlex.split(command)[3] == test_id
+        assert outcome["ok"]
+
+    def test_a_quote_inside_the_brackets_survives(self, monkeypatch):
+        test_id = 'a/b.py::test_unit[m\'s-"x"]'
+        command, _ = self.command_for(monkeypatch, [test_id])
+        assert shlex.split(command)[3] == test_id
+
+    def test_a_backslash_inside_the_brackets_survives(self, monkeypatch):
+        test_id = "a/b.py::test_unicode[\\u212b]"
+        command, _ = self.command_for(monkeypatch, [test_id])
+        assert shlex.split(command)[3] == test_id
+
+    def test_many_ids_are_all_still_there(self, monkeypatch):
+        ids = [f"a/b.py::test_one[case {i} of many]" for i in range(200)]
+        command, outcome = self.command_for(monkeypatch, ids)
+        assert shlex.split(command)[3:203] == ids
+        assert outcome["passed"] == 200
