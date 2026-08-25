@@ -12,6 +12,19 @@
 #   finch build --platform linux/amd64 -f Dockerfile.accelprof-analysis -t $ECR/accelprof:v1 .
 FROM python:3.12-slim
 RUN pip install --no-cache-dir "accelprof[mcp,sagemaker]==0.1.0"
+# The producer side of the platform travels with this image, not with the workload's: the shim that
+# wraps a command under the profiler, and the recorder that turns the files it leaves behind into one
+# MLflow run. They live here rather than in a per-run ConfigMap so that the code and the accelprof
+# version it calls are pinned by a single image digest, and rather than in the accelprof package
+# because they encode this cluster's contract (how the profiler is invoked, where the shared
+# directory is mounted, how a Pod reads its own status) which is the platform's concern.
+#
+# The init container of a producer Job copies entry.sh into the shared volume so that an ordinary
+# training image can run it without carrying anything itself.
+COPY entry.sh /opt/accelprof/entry.sh
+COPY recorder.py /opt/accelprof/recorder.py
+COPY orphan-check.py /opt/accelprof/orphan-check.py
+RUN chmod 0755 /opt/accelprof/entry.sh /opt/accelprof/recorder.py /opt/accelprof/orphan-check.py
 RUN useradd -u 1000 -m mcp
 ENV HOME=/tmp MCP_PORT=8080
 USER 1000

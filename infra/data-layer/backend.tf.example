@@ -1,0 +1,25 @@
+# Copy this file to backend.tf to keep the data layer's state in S3 instead of locally.
+#
+# The data layer holds the record of record — the trace buckets, the MLflow artifact bucket and the
+# tracking server. Local state for it is a data-loss risk: losing the state file makes the platform
+# unmanageable and, because the buckets are prevent_destroy, painful to reconcile by hand. Remote
+# state is therefore the supported configuration, and infra/install-profiling.sh installs this file
+# automatically when it is missing.
+#
+# The block is shipped as an example rather than as active config because Terraform treats a
+# committed empty `backend "s3" {}` as a real S3 backend and fails `init` until the bucket and key
+# arrive via -backend-config. Keeping it opt-in leaves a plain `terraform init` working on a
+# throwaway sandbox.
+#
+# Opt-in flow (the installer does exactly this):
+#
+#   cp backend.tf.example backend.tf
+#   terraform init -reconfigure \
+#     -backend-config="bucket=<state bucket>" \
+#     -backend-config="key=data-layer/<name>/terraform.tfstate" \
+#     -backend-config="region=<state region>" \
+#     -backend-config="dynamodb_table=<lock table>" \
+#     -backend-config="encrypt=true"
+terraform {
+  backend "s3" {}
+}

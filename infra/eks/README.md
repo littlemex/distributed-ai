@@ -612,3 +612,16 @@ operates the environment.
 Sample/reference code provided as-is under the repository's license. Not an
 official AWS project; no support or SLA is implied. Review and harden before any
 production use.
+
+## Profiling a workload
+
+The profiling platform is installed by [`../scripts/install-profiling.sh`](../scripts/install-profiling.sh),
+which spans this state and `infra/data-layer`; see
+[`../docs/profiling-install.md`](../docs/profiling-install.md) for what it wires and how the plan guard behaves.
+
+Once a namespace is wired, a run is submitted with [`bin/kubectl-accelprof`](bin/kubectl-accelprof)
+— a single self-contained file that only needs kubectl — and the workflow is documented in
+[`docs/profiling-producer.md`](docs/profiling-producer.md). The code that is baked into the platform image
+lives in [`images/accelprof/`](images/accelprof/), and the rendered Job shape is kept as a golden
+manifest in [`tests/golden/profiling-producer.job.yaml`](tests/golden/profiling-producer.job.yaml)
+so that a change to it shows up in review.
