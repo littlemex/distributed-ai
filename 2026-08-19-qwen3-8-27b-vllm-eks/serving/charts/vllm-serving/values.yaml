@@ -66,6 +66,11 @@ hfOverrides: ""
 #   '{"method": "mtp", "num_speculative_tokens": 3}'
 # num_speculative_tokens > 1 reuses the single MTP layer autoregressively (measured 1.42x at 1,
 # 1.69x at 3 vs no-spec, FP8/random). Leave empty to disable speculative decoding.
+# Tokens the scheduler may put through in one step. Empty lets vLLM choose, which is right
+# until speculative decoding is on: with MTP the engine derates this to 2048 and says so in
+# a startup warning, and that becomes the throughput ceiling long before the KV cache does.
+maxNumBatchedTokens: ""
+
 speculativeConfig: ""
 
 # --- extra container env (e.g. VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 for YaRN-extended context) ---

@@ -8,8 +8,9 @@
 #                       [--skip-pool] [--websearch] [--yes] [--skip-smoke]
 #
 # --context picks the window and, with it, how many sequences fit: 131k/16, 262k/9 (default,
-# the model's native window and so no rope scaling), 1m/2 (YaRN). See
-# serving/common/context-profiles.env for why the two move together.
+# the model's native window and so no rope scaling), 1m/2 (YaRN). --tune picks what to
+# optimise: latency (MTP speculative decoding, the default) or throughput (MTP off, a large
+# scheduler budget, more sequences). See serving/common/context-profiles.env.
 #   ./scripts/deploy.sh --down [--purge-pool] [--yes]
 #
 # --skip-pool (alias --skip-gpu): run the full flow WITHOUT the GPU NodePool phase, for a cluster that
@@ -34,6 +35,7 @@ ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; PURGE_POOL=0; SKIP_POO
 while [ $# -gt 0 ]; do case "$1" in
   --engine) ENGINE="${2:?}"; shift 2;;
   --context) QWEN_CONTEXT="${2:?}"; shift 2;;
+  --tune) QWEN_TUNE="${2:?}"; shift 2;;
   --only) ONLY="${2:?}"; shift 2;;
   --yes) ASSUME_YES=1; shift;;
   --skip-smoke) SKIP_SMOKE=1; shift;;
@@ -108,6 +110,7 @@ confirm_target(){
   echo "  account : $acct"
   echo "  namespace: $NS   engine: $ENGINE   web_search: $([ "$WEBSEARCH" = 1 ] && echo on || echo off)"
   echo "  context : ${QWEN_CONTEXT:-262k} (window $MAX_CONTEXT, up to $MAX_NUM_SEQS concurrent)"
+  echo "  tune    : ${QWEN_TUNE:-latency} (step budget ${MAX_BATCHED_TOKENS:-auto}, mtp $([ -n "$SPEC_CONFIG" ] && echo on || echo off))"
   read -r -p "Proceed against this target? [y/N] " a
   [ "$a" = y ] || [ "$a" = Y ] || die "aborted by user"
 }
@@ -120,6 +123,8 @@ model: $MODEL_ID
 servedModelName: $SERVED_MODEL_NAME
 maxModelLen: $MAX_CONTEXT
 maxNumSeqs: $MAX_NUM_SEQS
+maxNumBatchedTokens: "$MAX_BATCHED_TOKENS"
+speculativeConfig: '$SPEC_CONFIG'
 MV
   # YaRN only when the window asked for is longer than the model's own. Below native it
   # buys nothing and is not free: rope scaling trades short-context accuracy for reach, so

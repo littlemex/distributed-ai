@@ -175,6 +175,44 @@ The window is now selectable at deploy time rather than edited in place
 because the window and the concurrency it permits are one decision and were previously two
 places to get wrong.
 
+### The actual ceiling, and what limits it
+
+The nine concurrent requests above are a profile cap, not the machine. Two more settings
+were holding throughput down, and one of them was announced in the server's own startup log:
+with MTP self-speculative decoding on, vLLM derates the scheduler's step budget to 2,048
+tokens and warns that this "may lead to suboptimal performance". So the ceiling needed the
+sequence cap, the step budget and speculative decoding moved together, which is now a second
+axis of the profile (`--tune latency|throughput`).
+
+Measured in-cluster at the 262k window with the cap raised to 96:
+
+| In flight | Output tokens/s | p50 | $/Mtok | Cost of going further |
+| --- | --- | --- | --- | --- |
+| 9 | 224 | 5.1 s | 18.89 | |
+| 16 | 307 | 6.7 s | 13.78 | |
+| 32 | 353 | 11.6 s | 11.98 | |
+| **48** | **396** | 15.5 s | **10.68** | **the knee** |
+| 64 | 405 | 20.2 s | 10.44 | +2% throughput for +30% latency |
+| 96 | 423 | 28.9 s | 9.98 | +7% over the knee for double the latency |
+
+**The compute limit is about 48 concurrent requests**, at 396 output tokens a second and
+$10.68 per million. Past it latency grows roughly linearly while throughput barely moves.
+The KV cache is nowhere near binding for this traffic — 48 short sequences is some tens of
+thousands of tokens against a measured capacity near two million — so what saturates is the
+GPU, which is the answer for a policy that wants to fill it.
+
+From where this started, that is 162 output tokens a second at $26.06 to 423 at $9.98: 2.6
+times the throughput for 62% less per token, on the same hardware, from three settings. At
+$10.68 the arm now undercuts `gpt-5.6-terra` at $13.20 and approaches `grok` at $6.60 — and
+that is its *attributed* cost, before the argument that a machine already running has a
+marginal cost of zero.
+
+The two tunes are a genuine trade rather than a free win. At one request in flight, MTP gives
+83.7 output tokens a second against 52.7 without it, so the throughput setting makes every
+individual answer about 40% slower. The interactive agents on this cluster feel that and
+batch work does not, so the deployment is left in `latency` mode and the throughput profile
+is one flag away when a batch run wants the machine.
+
 **Arm D: route by what the step is for, not by how hard it looks.** v1 killed *inferred*
 difficulty — the domain label carried no accuracy signal at p = 0.58 — but an agent harness
 does not have to infer anything. It knows what each step is for: searching, reading tests,

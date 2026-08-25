@@ -63,6 +63,9 @@ spec:
             {{- if .Values.hfOverrides }}
             - {{ printf "--hf-overrides=%s" .Values.hfOverrides | quote }}
             {{- end }}
+            {{- if .Values.maxNumBatchedTokens }}
+            - --max-num-batched-tokens={{ int64 .Values.maxNumBatchedTokens }}
+            {{- end }}
             {{- if .Values.speculativeConfig }}
             - {{ printf "--speculative-config=%s" .Values.speculativeConfig | quote }}
             {{- end }}
