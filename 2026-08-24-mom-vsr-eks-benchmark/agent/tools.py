@@ -400,8 +400,7 @@ def _execute(action: Action) -> Observation:
         # `; exit ${PIPESTATUS[0]}` because the exit status is the verdict and a pipe
         # through `tail` would replace it with tail's own success.
         result = _run(
-            f"python -m pytest {shlex.quote(target)} -x -q 2>&1 | tail -60; "
-            "exit ${PIPESTATUS[0]}",
+            f"{test_command(target)} 2>&1 | tail -60; exit ${{PIPESTATUS[0]}}",
             timeout=TEST_TIMEOUT_S,
         )
         return Observation(
@@ -419,6 +418,62 @@ def _execute(action: Action) -> Observation:
         f"{sorted(STEP_TYPE)}",
         ok=False,
     )
+
+
+# Django ships no pytest and runs its suite through its own script, so `python -m pytest`
+# answers "No module named pytest" on every Django image — which read as an instance this
+# environment cannot score, and left the agent unable to test its own patch. Django is 46% of
+# SWE-bench Verified, so that is not a corner to leave open. Detected from the checkout rather
+# than from the instance name: what matters is what this repository actually runs.
+DJANGO_RUNNER = "tests/runtests.py"
+# Mirrors the official evaluation: an in-memory SQLite settings module, one process so the
+# per-test lines are not interleaved, and verbosity 2 so there are per-test lines at all.
+DJANGO_COMMAND = "./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1"
+
+
+def _cached(fn):
+    """One-shot memo. The answer is a property of the image, and asking costs a subprocess."""
+    answer = {}
+
+    def inner():
+        if "value" not in answer:
+            answer["value"] = fn()
+        return answer["value"]
+
+    inner.forget = answer.clear
+    return inner
+
+
+@_cached
+def uses_django_runner() -> bool:
+    return (
+        (Path(TESTBED) / DJANGO_RUNNER).is_file()
+        and _run("python -c 'import pytest'", timeout=120).returncode != 0
+    )
+
+
+def django_label(target: str) -> str:
+    """A pytest-shaped target as Django's runner wants it: a dotted label under `tests/`.
+
+    Models write `tests/queries/tests.py` because that is what the repository looks like, and
+    the runner wants `queries.tests`. Translating is better than refusing: the alternative is
+    an arm that cannot run a test on the repository that is nearly half the corpus.
+    """
+    path, _, rest = target.strip().partition("::")
+    if path.endswith(".py"):
+        path = path[: -len(".py")]
+    label = ".".join(part for part in (path.strip("/").replace("/", "."), *rest.split("::")) if part)
+    for prefix in ("tests.", "."):
+        if label.startswith(prefix):
+            label = label[len(prefix) :]
+    return label
+
+
+def test_command(target: str) -> str:
+    """How this repository runs the tests it already has, for one target."""
+    if uses_django_runner():
+        return f"{DJANGO_COMMAND} {shlex.quote(django_label(target))}"
+    return f"python -m pytest {shlex.quote(target)} -x -q"
 
 
 def _verdict(returncode: int) -> bool | None:

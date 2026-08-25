@@ -51,6 +51,10 @@ DEFAULT_TIMEOUT = 1800
 # suite reported 179 of 179 tests passing and the instance was recorded as impossible to score
 # here, which excludes exactly the repositories with the most opinionated test setup.
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# One argument to `execve` is capped at 128 KiB on Linux, and the whole `bash -lc` script is
+# one argument. xarray names 785 tests to keep passing; quoted, that is 137 KiB, and the
+# scorer raised "argument list too long" after the episode had already run.
+MAX_COMMAND_CHARS = 60_000
 
 
 def run(command: str, *, timeout: int = DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
@@ -93,57 +97,140 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int) -> dict:
     is taken from the whole output rather than a truncated tail — an earlier version
     counted within the last four thousand characters and then papered over the undercount
     by trusting the exit status, which is the assumption being removed.
+
+    Long id lists are run in batches. Linux caps a single argument at 128 KiB, and xarray
+    names 785 `PASS_TO_PASS` tests: one command was 137 KiB and `subprocess` raised
+    "argument list too long" *after* the episode had run, so a finished attempt had no verdict
+    at all. The batches are aggregated below rather than the first one being reported.
     """
     if not tests:
         return {"ran": 0, "passed": 0, "failed": 0, "ok": False, "scoreable": False,
                 "detail": "no tests named: this instance cannot be scored"}
-    # `shlex.quote`, not double quotes around each id. A parametrised id can contain spaces,
-    # quotes and backslashes — astropy's unit tests are named after the unit strings they
-    # parse — and hand-quoting split 732 ids into fragments pytest could not find, which came
-    # back as exit 4 and read as "this instance cannot be scored here".
-    quoted = " ".join(shlex.quote(test) for test in tests)
-    try:
-        result = run(f"python -m pytest {quoted} -rA -q --color=no", timeout=timeout)
-    except subprocess.TimeoutExpired:
-        # Recorded rather than raised. An uncaught timeout writes no score.json, and the
-        # instances whose suites are slowest are the hard ones — so the arm that attempts
-        # them would silently lose them from its denominator.
-        return {"ran": len(tests), "passed": 0, "failed": 0, "skipped": 0, "ok": False,
-                "scoreable": False, "returncode": None, "basis": "timeout",
-                "detail": f"the suite did not finish within {timeout}s"}
-    # `--color=no` asks, and stripping the codes makes sure: a plugin or a repository's own
-    # `addopts` can put them back, and the per-test count is the whole verdict.
-    whole = ANSI.sub("", result.stdout + result.stderr)
-    passed = len(re.findall(r"^PASSED ", whole, flags=re.MULTILINE))
-    failed = len(re.findall(r"^(FAILED|ERROR) ", whole, flags=re.MULTILINE))
-    skipped = len(re.findall(r"^(SKIPPED|XFAIL) ", whole, flags=re.MULTILINE))
-    # Some suites (Django's runner, older pytest) do not emit the per-test lines. Falling
-    # back to the exit status there is right, but it is recorded as a fallback so a
-    # surprising number can be traced to which rule produced it.
-    basis, scoreable = "per-test lines", True
-    if result.returncode == 4:
-        # pytest could not make sense of the target — often a unittest-style id it cannot
-        # collect. That says nothing about the code, and counting it as a failure would put
-        # "could not be scored" into the denominator as "did not solve it". `tools._verdict`
-        # reads the same status the same way, so the loop and the scorer agree.
+    django = tools.uses_django_runner()
+    batches = _batched(tests)
+    results = []
+    for batch in batches:
+        try:
+            results.append(_run_batch(batch, django=django, timeout=timeout))
+        except subprocess.TimeoutExpired:
+            # Recorded rather than raised. An uncaught timeout writes no score.json, and the
+            # instances whose suites are slowest are the hard ones — so the arm that attempts
+            # them would silently lose them from its denominator.
+            return {"ran": len(tests), "passed": 0, "failed": 0, "skipped": 0, "ok": False,
+                    "scoreable": False, "returncode": None, "basis": "timeout",
+                    "detail": f"a batch did not finish within {timeout}s"}
+
+    passed = sum(r["passed"] for r in results)
+    failed = sum(r["failed"] for r in results)
+    skipped = sum(r["skipped"] for r in results)
+    codes = [r["returncode"] for r in results]
+    returncode = next((c for c in codes if c != 0), 0)
+    detail = "\n".join(r["text"][-1200 // len(results):] for r in results)
+
+    basis, scoreable = ("django per-test lines" if django else "per-test lines"), True
+    if any(r["load_error"] for r in results):
+        # A label the runner could not import. That says nothing about the code, and counting
+        # it as a failure would put "could not be scored" into the denominator as "did not
+        # solve it".
+        basis, scoreable = "the runner could not load a named test", False
+    elif returncode == 4 and not django:
+        # pytest could not make sense of the target. `tools._verdict` reads the same status the
+        # same way, so the loop and the scorer agree.
         basis, scoreable = "pytest rejected the target (exit 4)", False
     elif passed == 0 and failed == 0 and skipped == 0:
         # No per-test lines at all. The exit status is the only evidence left, and it is
         # weaker than the rule above it — pytest exits zero when everything was skipped — so
         # the episode is marked unscoreable and excluded rather than counted on trust.
         basis, scoreable = "exit status only, no per-test lines", False
-        passed = len(tests) if result.returncode == 0 else 0
+        passed = len(tests) if returncode == 0 else 0
     return {
         "ran": len(tests),
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
-        "ok": result.returncode == 0 and passed >= len(tests),
+        "batches": len(results),
+        "ok": returncode == 0 and passed >= len(tests),
         "scoreable": scoreable,
-        "returncode": result.returncode,
+        "returncode": returncode,
         "basis": basis,
-        "detail": whole[-1200:],
+        "detail": detail[-1600:],
     }
+
+
+def _batched(tests: tuple[str, ...], *, budget: int | None = None) -> list[tuple[str, ...]]:
+    """Split ids into commands short enough to hand to a shell.
+
+    The limit is per argument, not per command line: the whole `bash -lc` script is one
+    argument, and Linux caps it at 128 KiB whatever `ARG_MAX` says.
+    """
+    budget = budget or MAX_COMMAND_CHARS
+    out: list[tuple[str, ...]] = []
+    current: list[str] = []
+    length = 0
+    for test in tests:
+        cost = len(shlex.quote(test)) + 1
+        if current and length + cost > budget:
+            out.append(tuple(current))
+            current, length = [], 0
+        current.append(test)
+        length += cost
+    if current:
+        out.append(tuple(current))
+    return out
+
+
+def _run_batch(tests: tuple[str, ...], *, django: bool, timeout: int) -> dict:
+    """One invocation of whichever runner this repository uses, and what it reported."""
+    quoted = " ".join(shlex.quote(_django_label(test) if django else test) for test in tests)
+    command = (
+        f"{tools.DJANGO_COMMAND} {quoted}"
+        if django
+        else f"python -m pytest {quoted} -rA -q --color=no"
+    )
+    result = run(command, timeout=timeout)
+    # `--color=no` asks, and stripping the codes makes sure: a plugin or a repository's own
+    # `addopts` can put them back, and the per-test count is the whole verdict.
+    whole = ANSI.sub("", result.stdout + result.stderr)
+    counts = _django_counts(whole) if django else _pytest_counts(whole)
+    return {**counts, "returncode": result.returncode, "text": whole}
+
+
+def _pytest_counts(whole: str) -> dict:
+    return {
+        "passed": len(re.findall(r"^PASSED ", whole, flags=re.MULTILINE)),
+        "failed": len(re.findall(r"^(FAILED|ERROR) ", whole, flags=re.MULTILINE)),
+        "skipped": len(re.findall(r"^(SKIPPED|XFAIL) ", whole, flags=re.MULTILINE)),
+        "load_error": False,
+    }
+
+
+def _django_counts(whole: str) -> dict:
+    """Count unittest's verbosity-2 lines.
+
+    Matched at the end of the line rather than the start, because a test with a docstring puts
+    the docstring where the name would be: `test_x (mod.Class)` then `Does the thing ... ok`.
+    """
+    return {
+        "passed": len(re.findall(r"\.\.\. ok$", whole, flags=re.MULTILINE)),
+        "failed": len(re.findall(r"\.\.\. (FAIL|ERROR)$", whole, flags=re.MULTILINE)),
+        "skipped": len(re.findall(r"\.\.\. (skipped|expected failure)", whole)),
+        # The runner reports a label it could not import as a test that errored, which would
+        # otherwise be indistinguishable from the code being broken.
+        "load_error": "unittest.loader._FailedTest" in whole,
+    }
+
+
+def _django_label(test_id: str) -> str:
+    """`test_x (mod.Class)` or `test_x (mod.Class.test_x)` as a label the runner accepts.
+
+    SWE-bench records Django's ids in unittest's own reporting format, which is not the form
+    the runner takes on its command line.
+    """
+    match = re.match(r"^(\S+)\s+\((.+)\)$", test_id.strip())
+    if not match:
+        return test_id.strip()
+    name, dotted = match.group(1), match.group(2)
+    return dotted if dotted.split(".")[-1] == name else f"{dotted}.{name}"
 
 
 def main(argv: list[str] | None = None) -> int:

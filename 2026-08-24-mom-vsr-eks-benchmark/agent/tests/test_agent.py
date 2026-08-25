@@ -19,6 +19,7 @@ if str(AGENT) not in sys.path:
 
 import dataset  # noqa: E402
 import score  # noqa: E402
+import tools  # noqa: E402
 
 
 def instance(instance_id: str, repo: str, difficulty: str) -> dataset.Instance:
@@ -221,3 +222,169 @@ class TestAwkwardTestIds:
         command, outcome = self.command_for(monkeypatch, ids)
         assert shlex.split(command)[3:203] == ids
         assert outcome["passed"] == 200
+
+
+class TestBatching:
+    """785 ids do not fit in one command, and the failure arrived after the episode had run.
+
+    Linux caps a single argument at 128 KiB and the whole `bash -lc` script is one argument, so
+    xarray's `PASS_TO_PASS` list raised "argument list too long" in the scorer — a finished
+    attempt with no verdict, which is indistinguishable from a policy that solved nothing.
+    """
+
+    def test_a_short_list_is_one_batch(self):
+        assert score._batched(("a", "b", "c")) == [("a", "b", "c")]
+
+    def test_a_long_list_is_split(self):
+        ids = tuple(f"tests/test_module.py::test_case_{i}" for i in range(400))
+        batches = score._batched(ids, budget=1000)
+        assert len(batches) > 1
+        assert sum(len(b) for b in batches) == len(ids)
+        assert [i for b in batches for i in b] == list(ids)
+
+    def test_no_batch_exceeds_the_budget(self):
+        ids = tuple("x" * 50 for _ in range(100))
+        for batch in score._batched(ids, budget=200):
+            assert len(" ".join(batch)) <= 200
+
+    def test_one_id_larger_than_the_budget_is_still_attempted(self):
+        """Refusing it would drop the instance; the runner is allowed to be the one to fail."""
+        assert score._batched(("x" * 500,), budget=100) == (("x" * 500,),) or score._batched(
+            ("x" * 500,), budget=100
+        ) == [("x" * 500,)]
+
+    def test_the_counts_are_summed_over_batches(self, monkeypatch):
+        calls = []
+
+        def fake_run(command, timeout=None):
+            calls.append(command)
+            named = [w for w in shlex.split(command)[3:] if not w.startswith("-")]
+
+            class Result:
+                stdout = "".join(f"PASSED {n}\n" for n in named)
+                stderr = ""
+                returncode = 0
+
+            return Result()
+
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: False)
+        monkeypatch.setattr(score, "run", fake_run)
+        monkeypatch.setattr(score, "MAX_COMMAND_CHARS", 400)
+        ids = tuple(f"a/b.py::test_{i}" for i in range(300))
+        outcome = score.pytest_outcome(ids, timeout=1)
+        assert len(calls) > 1
+        assert outcome["passed"] == 300
+        assert outcome["ok"] and outcome["scoreable"]
+
+    def test_one_failing_batch_fails_the_whole(self, monkeypatch):
+        state = {"n": 0}
+
+        def fake_run(command, timeout=None):
+            state["n"] += 1
+
+            class Result:
+                stdout = "PASSED a/b.py::test_one\n" if state["n"] == 1 else "FAILED a/b.py::test_two\n"
+                stderr = ""
+                returncode = 0 if state["n"] == 1 else 1
+
+            return Result()
+
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: False)
+        monkeypatch.setattr(score, "run", fake_run)
+        monkeypatch.setattr(score, "MAX_COMMAND_CHARS", 250)
+        ids = tuple(f"a/b.py::test_{'x' * 200}_{i}" for i in range(2))
+        outcome = score.pytest_outcome(ids, timeout=1)
+        assert outcome["returncode"] == 1
+        assert not outcome["ok"]
+
+
+class TestDjangoScoring:
+    """Django ships no pytest, so every Django image answered "No module named pytest".
+
+    That is 46% of SWE-bench Verified reading as instances this environment cannot score, and
+    an agent that cannot run a test on any of them.
+    """
+
+    def test_an_id_in_unittest_reporting_form_becomes_a_label(self):
+        assert (
+            score._django_label("test_conflicting (queries.tests.BitwiseTests)")
+            == "queries.tests.BitwiseTests.test_conflicting"
+        )
+
+    def test_an_id_that_already_names_the_method_is_not_doubled(self):
+        assert (
+            score._django_label("test_x (aggregation.tests.Pruning.test_x)")
+            == "aggregation.tests.Pruning.test_x"
+        )
+
+    def test_something_that_is_already_a_label_is_left_alone(self):
+        assert score._django_label("queries.tests.Bitwise.test_x") == "queries.tests.Bitwise.test_x"
+
+    def test_the_runner_is_used_when_the_repository_has_one(self, monkeypatch):
+        seen = {}
+
+        def fake_run(command, timeout=None):
+            seen["command"] = command
+
+            class Result:
+                stdout = "test_x (m.C.test_x) ... ok\n"
+                stderr = ""
+                returncode = 0
+
+            return Result()
+
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: True)
+        monkeypatch.setattr(score, "run", fake_run)
+        outcome = score.pytest_outcome(("test_x (m.C)",), timeout=1)
+        assert "runtests.py" in seen["command"]
+        assert "m.C.test_x" in seen["command"]
+        assert outcome["basis"] == "django per-test lines"
+        assert outcome["ok"]
+
+    def test_a_docstring_does_not_hide_the_result(self):
+        """unittest puts the docstring where the name would be, so the result is matched at the
+        end of the line rather than the start."""
+        text = (
+            "test_x (m.C.test_x)\nDoes the thing ... ok\n"
+            "test_y (m.C.test_y)\nDoes another ... FAIL\n"
+        )
+        counts = score._django_counts(text)
+        assert (counts["passed"], counts["failed"]) == (1, 1)
+
+    def test_a_label_the_runner_cannot_import_is_not_a_failing_test(self):
+        text = "NoSuch (unittest.loader._FailedTest.NoSuch) ... ERROR\n"
+        assert score._django_counts(text)["load_error"] is True
+
+    def test_that_makes_the_instance_unscoreable(self, monkeypatch):
+        class Result:
+            stdout = "NoSuch (unittest.loader._FailedTest.NoSuch) ... ERROR\n"
+            stderr = ""
+            returncode = 1
+
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: True)
+        monkeypatch.setattr(score, "run", lambda command, timeout=None: Result())
+        outcome = score.pytest_outcome(("test_x (m.C)",), timeout=1)
+        assert outcome["scoreable"] is False
+        assert "could not load" in outcome["basis"]
+
+
+class TestAgentTestCommand:
+    def test_pytest_by_default(self, monkeypatch):
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: False)
+        assert tools.test_command("tests/test_x.py") == "python -m pytest tests/test_x.py -x -q"
+
+    def test_django_gets_a_dotted_label(self, monkeypatch):
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: True)
+        command = tools.test_command("tests/queries/tests.py")
+        assert command.endswith("queries.tests")
+        assert "runtests.py" in command
+
+    def test_a_pytest_style_node_id_is_translated(self, monkeypatch):
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: True)
+        assert tools.test_command("tests/queries/tests.py::Bitwise::test_x").endswith(
+            "queries.tests.Bitwise.test_x"
+        )
+
+    def test_a_label_the_model_already_got_right_is_untouched(self, monkeypatch):
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: True)
+        assert tools.test_command("queries.tests").endswith("queries.tests")

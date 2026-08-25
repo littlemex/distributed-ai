@@ -101,7 +101,7 @@ cp "${STRATOCLAVE_DEFAULTS}/pricing.json" "${WORK}/pricing.json"
 if [[ -n "${SCORE_ONLY:-}" ]]; then
   EPISODE_CMD='echo "[INFO] score-only: the diff already on the volume, no model calls"; test -f "$OUT/diff.patch" || { echo "[FAIL] no diff at $OUT/diff.patch"; exit 1; }; status=0'
 else
-  EPISODE_CMD='python /code/loop.py --instance /data/instance.json --tiers /data/tiers.json --pricing /data/pricing.json --policy '"${POLICY}"' --out "$OUT" --max-steps ${MAX_STEPS:-40} --max-tokens ${MAX_TOKENS:-1200000} --max-usd ${MAX_USD:-20.0} 2>&1 | tee "$OUT/loop.log"; status=$?'
+  EPISODE_CMD='"$HARNESS_PY" /code/loop.py --instance /data/instance.json --tiers /data/tiers.json --pricing /data/pricing.json --policy '"${POLICY}"' --out "$OUT" --max-steps ${MAX_STEPS:-40} --max-tokens ${MAX_TOKENS:-1200000} --max-usd ${MAX_USD:-20.0} 2>&1 | tee "$OUT/loop.log"; status=$?'
 fi
 
 # Results go to a shared volume, not to the pod. The first role-based episode finished, its
@@ -166,9 +166,24 @@ spec:
               OUT=/results/${PASS_DIR}${INSTANCE_ID}/${POLICY}
               mkdir -p "\$OUT"
               cd /work
+              # The harness needs a 3.7 interpreter and the image's default is whatever the
+              # repository needed: scikit-learn 0.21 and Django 3.0 ship 3.6.13, where the
+              # harness would not even parse and five episodes died before their first call.
+              # The tests still run in the repository's own environment — the agent's tools
+              # activate it explicitly — so this only decides what runs the loop.
+              for candidate in /opt/miniconda3/bin/python3 /usr/bin/python3 python3 python; do
+                if command -v "\$candidate" >/dev/null 2>&1 && "\$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 7) else 1)' >/dev/null 2>&1; then
+                  HARNESS_PY="\$candidate"; break
+                fi
+              done
+              if [ -z "\${HARNESS_PY:-}" ]; then
+                echo "[FAIL] this image has no interpreter at 3.7 or above" | tee "\$OUT/loop.log"
+                exit 1
+              fi
+              echo "[INFO] harness on \$HARNESS_PY (\$("\$HARNESS_PY" -V 2>&1))"
               ${EPISODE_CMD}
               echo "--- scoring (the tests are applied only now) ---"
-              python /code/score.py --instance /data/instance.json \\
+              "\$HARNESS_PY" /code/score.py --instance /data/instance.json \\
                 --diff "\$OUT/diff.patch" --out "\$OUT/score.json" 2>&1 \\
                 | tee "\$OUT/score.log"
               echo "--- episode.json ---"
