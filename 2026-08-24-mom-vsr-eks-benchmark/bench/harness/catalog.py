@@ -140,11 +140,16 @@ def arms(pool_path: Path, members: list[Member]) -> list[Arm]:
     fallback = declared.get(DEFAULT_EFFORT, [DEFAULT_EFFORT])
     # Checked against the pool file's own roster rather than the members passed in,
     # so that analysing a subset of the pool is not mistaken for a stale declaration.
+    roster = pool.get("members") or []
     known = {
-        entry.get("alias")
-        for entry in (pool.get("members") or [])
-        if isinstance(entry, dict)
+        entry.get("alias") if isinstance(entry, dict) else entry for entry in roster
     }
+    if declared and not known:
+        raise ConfigError(
+            f"{pool_path}: effort_levels is declared but the member roster could not be "
+            "read, so a declaration cannot be matched to a member. Every arm would be "
+            "measured at the default level."
+        )
     orphans = sorted(set(declared) - known - {DEFAULT_EFFORT})
     if orphans:
         raise ConfigError(

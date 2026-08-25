@@ -145,21 +145,37 @@ fitting.
   the visible decode rate measurable; `--no-stream` exists only to reproduce a v1
   number, and mixing the two paths inside one run would put the path's own latency
   into the between-arm comparison.
-- **While streaming, the deadline is idle time and not total duration.** A total
-  deadline cuts exactly the arms this exists to price — a high effort against a
-  large budget legitimately runs for minutes — and a cut connection is billed by
-  the provider for every token it had already produced. So `--timeout` applies to
-  the non-streaming path and `--stream-idle` bounds a silent stream. For the same
-  reason a stream that breaks after producing tokens is not retried: the answer is
-  kept as the partial it is, because asking again pays twice and gives that one
-  question a second sample no other arm got.
+- **While streaming, the deadline is progress and not duration.** A total deadline
+  cuts exactly the arms this exists to price — a high effort against a large budget
+  legitimately runs for minutes — and a cut connection is billed by the provider for
+  every token it had already produced. Three separate limits replace it, because
+  they are three different quantities: `--stream-idle` between SSE *events* once the
+  stream has started, a much looser first-event window because a provider that
+  buffers its thinking sends nothing at all while it works, and a loose ceiling so
+  one call cannot hold a slot forever. Deliberately not `sock_read`: a keep-alive
+  comment is a byte arriving, so a byte-level deadline would read a hung upstream as
+  a healthy one and would also kill the slowest arms on their first token.
+- **A deadline is never retried.** A timeout says nothing about whether the provider
+  did the work; it very likely did, and billed for it. So a timed-out call is
+  recorded as the outcome it is, and only a connection-level failure that produced
+  nothing is retried. A stream that breaks after producing tokens keeps its fragment
+  on the row, which is the only record of what the money bought — it is counted as a
+  failure, not scored as an answer.
 - **One results file holds one setting.** A run appends, and the arm name cannot
   carry the whole configuration: a default-effort arm in v2 is spelled exactly as
   the same member was in v1, having been measured on the other path at an eighth of
-  the budget. Every row therefore records its own `stream`, `max_tokens` and
-  `requested_effort`, and a run that would append to a file collected differently
-  refuses to start. v1's rows predate those fields, so they read as unknown and are
-  refused rather than assumed to match — collect into a new file.
+  the budget. Every row therefore records its own `requested_effort`, `stream`,
+  `max_tokens`, `temperature` and idle deadline, and a run that would append to a
+  file collected under different request settings refuses to start. A different idle
+  deadline warns instead of refusing: it does not change what a completed call
+  means, only which slow calls complete. v1's rows predate these fields, so they
+  read as unknown and are refused rather than assumed to match — collect into a new
+  file. One run per file; nothing locks it.
+- **Arms that fail unequally break the pairing, and a failed cell counts as
+  collected.** Every comparison here is paired over questions, so an outage that
+  lands on one arm silently shortens it and the loss is permanent. Each run reports
+  its per-arm failure rate and flags a spread; re-collecting the missing cells into
+  a new file is the remedy, and there is not yet a mode that does it for you.
 - **A rejected effort level retires the arm.** Providers change the supported set
   without notice, and a 400 on `reasoning_effort` means the arm has ceased to
   exist rather than that a question went unanswered. The first rejection is

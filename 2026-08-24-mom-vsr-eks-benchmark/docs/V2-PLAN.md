@@ -262,7 +262,7 @@ Written down because the plan above is longer than any one sitting, and the next
 person to open it — including a later version of the same session — needs to know
 which half is code.
 
-Built and tested (`bench/tests`, 41 cases):
+Built and tested (`bench/tests`, 53 cases):
 
 - The arm as the unit: `catalog.Arm` and `catalog.arms()` expand the pool's
   `effort_levels` declaration, and an undeclared member gets the default level only.
@@ -289,8 +289,29 @@ Built and tested (`bench/tests`, 41 cases):
   so a resumed run would have silently compared a 2,048-token non-streaming row
   against a 16,384-token streaming one and called the difference reasoning effort.
 
+Two rounds of adversarial review on that code changed it in ways worth recording,
+because each was a way of paying for a matrix that answers a different question:
+
+- The first fix for the deadline problem used a per-read socket deadline. That is
+  wrong twice over — a keep-alive comment is a byte, so a hung upstream looks alive,
+  and the first body byte legitimately takes minutes on a provider that buffers its
+  thinking, so it would cut the slowest arms and bill for them. The deadline is now a
+  watchdog on SSE events with a separate first-event window and a loose ceiling.
+- Retrying a timeout pays twice for work the provider had already done and gives that
+  question a second sample no other arm got. Only connection failures that produced
+  nothing are retried now.
+- The retirement predicate matched any mention of the effort field, so a 400 that
+  merely lists the accepted parameters would have retired a working arm.
+- Failures are counted per arm, because a failed cell counts as collected: an outage
+  landing on one arm shortens it permanently and moves the run's total hardly at all.
+
 Not built yet, in the order the plan needs them:
 
+0. **A re-collection mode for failed cells.** The pairing assumes every arm answered
+   every question, and nothing currently repairs an arm that lost cells to an outage.
+   It is listed first because the power design below assumes equal sampling, and it
+   needs an answer on the analysis side too — a re-collected cell has to supersede the
+   failed one rather than appear beside it.
 1. **The analysis side is still member-granular.** `policies.load_matrix` and
    `analyze.py` key on members, so the arm-level frontier, the utility contests at
    λ, and arm-granular cross-fitting have no home yet. This is the largest piece and
@@ -300,6 +321,40 @@ Not built yet, in the order the plan needs them:
    of everything after it), routing cost in dollars, and a temporal held-out.
 3. **The load sweep and the cross-region path** for the self-hosted arm, which the
    dominance argument no longer disposes of.
+
+## How the power analysis has to be done, and why it may end the plan
+
+Condition 1 is the next piece of work and it is pure computation on the v1 matrix, so
+it costs nothing and decides the price of everything after it. The form it has to take,
+after review:
+
+The estimand is a paired per-question difference, `D_q = u_frontier(q) − u_best(q)`,
+averaged over questions. Pairing is the whole design: the question main effect — by far
+the largest variance component — cancels inside `D_q`, and what remains is the
+question-by-arm interaction, which is simultaneously the source of any routing gain and
+the dominant remaining variance. Both sides are selections, so both must be cross-fitted
+on the same split, or the winner's curse inflates Δ̂ and can flip its sign.
+
+Power is then not a function of accuracy but of **discordance**: the share of questions
+where exactly one side is right, the McNemar structure. Flip rate enters as measurement
+error and is unbiased in the mean, so it does not shrink Δ̂ — it inflates the variance,
+which means the answer is more samples per cell rather than a correction to the estimate.
+v1 has repeat data, so the per-cell flip variance is a measured plug-in and not an
+assumption. The λ-utility versions have a heavy right tail in cost, so the primary
+estimator has to be pre-registered as winsorised or log-cost, with question-level
+percentile-t bootstrap rather than a normal approximation, and one λ chosen in advance or
+a simultaneous band over the grid.
+
+The order-of-magnitude check is discouraging and is the reason this is a gate rather
+than a formality. At a discordance of about ten percent, the standard error on 693
+questions is roughly √(0.1/693) ≈ 1.2 points, so the smallest detectable Δ at eighty
+percent power is around 3.4 points. The Δ this experiment is looking for is one to two.
+On the temporal held-out slice, which is smaller than the full fold, it is worse. So
+either the design changes — more questions, three or more samples per cell, category
+stratification, regression adjustment on v1's own difficulty estimates — or v2 does not
+run. The final number should come from simulation over a fitted question-random-effect
+model with the measured flip rates and the measured token-cost tail, sized on the
+held-out slice, not from a closed-form calculation on the whole fold.
 
 ## Explicitly not in v2
 

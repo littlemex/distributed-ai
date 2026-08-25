@@ -336,6 +336,9 @@ def guard_output(out: Path, config: runner.RunConfig) -> None:
     conflict = runner.settings_conflict(out, config)
     if conflict:
         raise SystemExit(f"[FAIL] {conflict}")
+    drift = runner.censoring_drift(out, config)
+    if drift:
+        print(f"[WARNING] {drift}")
 
 
 def report_run(stats: runner.RunStats, out: Path) -> int:
@@ -358,6 +361,19 @@ def report_run(stats: runner.RunStats, out: Path) -> int:
         )
         for name, reason in sorted(stats.retired_arms.items()):
             print(f"    {name:<34}{reason[:90]}")
+
+    failure_rates = stats.failure_asymmetry()
+    if failure_rates and max(failure_rates.values()) - min(failure_rates.values()) > 0.02:
+        print(
+            "\n[WARNING] the arms did not fail alike, and a failed cell counts as "
+            "collected: the arms below were asked fewer questions than the others, "
+            "which is the assumption every paired comparison here rests on. Collect "
+            "the missing cells into a new file before scoring:"
+        )
+        for name, rate in sorted(failure_rates.items(), key=lambda kv: -kv[1])[:8]:
+            failed = stats.failed_by_arm.get(name, 0)
+            attempted = failed + stats.scored_by_arm.get(name, 0)
+            print(f"    {name:<34}{failed}/{attempted}  {rate:6.2%}")
 
     over = {
         name: bucket

@@ -83,9 +83,14 @@ class RunConfig:
     # non-streaming read window.
     stream: bool = True
     # How long a stream may go silent before it is treated as dead. On the streaming
-    # path this replaces the total deadline, because total duration is what the
-    # high-effort arms are being measured on.
+    # path these replace the total deadline, because total duration is what the
+    # high-effort arms are being measured on: `stream_idle_s` between events once the
+    # stream has started, a far looser `stream_first_event_s` before the first one
+    # because a provider that buffers its thinking sends nothing while it works, and
+    # `stream_ceiling_s` so that no single call can hold a slot indefinitely.
     stream_idle_s: float = 90.0
+    stream_first_event_s: float = 600.0
+    stream_ceiling_s: float = 1800.0
 
 
 @dataclass
@@ -110,6 +115,26 @@ class RunStats:
     # and mixing those into the rate would hide exactly what the rate is for.
     scored_by_arm: dict[str, int] = field(default_factory=dict)
     truncated_by_arm: dict[str, int] = field(default_factory=dict)
+    # Failures per arm, not just the run's total. The paired design assumes every arm
+    # was asked every question, and a transient outage that lands on one arm breaks
+    # that assumption without changing the run's total by much. A failed cell counts
+    # as collected, so the loss is permanent unless someone sees it here.
+    failed_by_arm: dict[str, int] = field(default_factory=dict)
+
+    def failure_asymmetry(self) -> dict[str, float]:
+        """Per arm, the share of its attempted cells that failed.
+
+        Reported for every arm rather than only the worst, because the number that
+        matters is the spread: arms failing alike costs power, one arm failing alone
+        costs comparability.
+        """
+        rates = {}
+        for arm in set(self.failed_by_arm) | set(self.scored_by_arm):
+            failed = self.failed_by_arm.get(arm, 0)
+            attempted = failed + self.scored_by_arm.get(arm, 0)
+            if attempted:
+                rates[arm] = failed / attempted
+        return rates
 
     def truncation_rates(self) -> dict[str, dict[str, float]]:
         """Per arm, how often the completion budget was the thing that stopped it.
@@ -148,8 +173,11 @@ class _Unbounded:
 _UNBOUNDED = _Unbounded()
 
 
-def cell_key(arm: str, question_id: str) -> str:
-    return f"{arm}\t{question_id}"
+def cell_key(arm: str, question_id: str, dataset: str = "") -> str:
+    """Identity of one cell. The dataset is part of it because question ids are not
+    unique across corpora, and the plan is for benchmarks to plug in: two datasets
+    sharing an id would silently mark each other's cells as collected."""
+    return f"{arm}\t{dataset}\t{question_id}"
 
 
 def completed_cells(path: Path) -> set[str]:
@@ -171,7 +199,7 @@ def completed_cells(path: Path) -> set[str]:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            done.add(cell_key(row["arm"], row["question_id"]))
+            done.add(cell_key(row["arm"], row["question_id"], row.get("dataset", "")))
     return done
 
 
@@ -187,13 +215,21 @@ def settings_conflict(path: Path, config: RunConfig) -> str | None:
     collected — and the effort axis is precisely a comparison between a member's
     default arm and its own higher levels.
 
-    Rows written before these fields existed have no settings to check, and are
-    reported as the unknown they are rather than assumed to match.
+    A row missing any of the fields is treated as unknown rather than as a match: the
+    rows that predate them are exactly the ones that would be mixed in.
+
+    Not defended here: two processes appending to one file. The check happens before
+    the first write and nothing holds a lock, so concurrent runs to the same path both
+    pass it. One run per file.
     """
     if not path.exists():
         return None
-    streams: set[bool | None] = set()
-    budgets: set[int | None] = set()
+    # The request fields that change what the model does, and so what its accuracy and
+    # cost mean. Censoring settings are checked separately: they change which calls
+    # survive rather than what a surviving call is.
+    checked = {"stream": config.stream, "max_tokens": config.max_tokens,
+               "temperature": config.temperature}
+    seen: dict[str, set] = {name: set() for name in checked}
     unlabelled = 0
     with path.open() as handle:
         for line in handle:
@@ -204,26 +240,22 @@ def settings_conflict(path: Path, config: RunConfig) -> str | None:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if "stream" not in row and "max_tokens" not in row:
+            if any(name not in row for name in checked):
                 unlabelled += 1
                 continue
-            streams.add(row.get("stream"))
-            budgets.add(row.get("max_tokens"))
+            for name in checked:
+                seen[name].add(row.get(name))
     if unlabelled:
         return (
             f"{path} holds {unlabelled} rows from before the request settings were "
             "recorded, so whether they were measured the same way cannot be checked. "
             "Write this run to a new file."
         )
-    mismatched = []
-    if streams - {config.stream}:
-        mismatched.append(
-            f"stream={sorted(streams, key=str)} (this run: {config.stream})"
-        )
-    if budgets - {config.max_tokens}:
-        mismatched.append(
-            f"max_tokens={sorted(budgets, key=str)} (this run: {config.max_tokens})"
-        )
+    mismatched = [
+        f"{name}={sorted(values, key=str)} (this run: {checked[name]})"
+        for name, values in sorted(seen.items())
+        if values - {checked[name]}
+    ]
     if mismatched:
         return (
             f"{path} was collected with different request settings: "
@@ -235,6 +267,39 @@ def settings_conflict(path: Path, config: RunConfig) -> str | None:
     return None
 
 
+def censoring_drift(path: Path, config: RunConfig) -> str | None:
+    """Whether this run would cut slow calls at a different point than the file did.
+
+    A different idle deadline does not change what a completed call means, so it is
+    not a reason to refuse the file. It does change *which* calls complete, and the
+    arms it changes that for are the slow ones — so a file collected under two
+    deadlines has a failure and truncation profile that is partly a function of when
+    each row was collected.
+    """
+    if not path.exists() or not config.stream:
+        return None
+    idles: set = set()
+    with path.open() as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("stream"):
+                idles.add(row.get("stream_idle_s"))
+    if idles - {config.stream_idle_s}:
+        return (
+            f"{path} was collected with stream_idle_s={sorted(idles, key=str)} and this "
+            f"run uses {config.stream_idle_s}. Completed calls stay comparable, but "
+            "which slow calls survive does not, so the failure and truncation rates in "
+            "this file will be a mix of two censoring points."
+        )
+    return None
+
+
 def plan(
     tasks: Iterable[Task], *, seed: int, skip: set[str] | None = None
 ) -> list[Task]:
@@ -242,7 +307,8 @@ def plan(
     remaining = [
         task
         for task in tasks
-        if not skip or cell_key(task.arm, task.item.question_id) not in skip
+        if not skip
+        or cell_key(task.arm, task.item.question_id, task.item.dataset) not in skip
     ]
     rng = random.Random(seed)
     rng.shuffle(remaining)
@@ -344,6 +410,8 @@ async def run(
                     max_attempts=config.max_attempts,
                     timeout_s=config.timeout_s,
                     stream_idle_s=config.stream_idle_s,
+                    stream_first_event_s=config.stream_first_event_s,
+                    stream_ceiling_s=config.stream_ceiling_s,
                     extra_headers=extra_headers,
                 )
             if record.arm_unsupported:
@@ -362,6 +430,7 @@ async def run(
                     )
             else:
                 stats.failed += 1
+                stats.failed_by_arm[task.arm] = stats.failed_by_arm.get(task.arm, 0) + 1
 
             async with write_lock:
                 sink.write(json.dumps(record.to_json(), ensure_ascii=False) + "\n")

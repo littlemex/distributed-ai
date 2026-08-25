@@ -146,7 +146,10 @@ class TestTasks:
     def test_resume_skips_by_arm_and_question(self, tmp_path):
         out = tmp_path / "matrix.jsonl"
         out.write_text(
-            json.dumps({"arm": "pinned:m@low", "question_id": "1"}) + "\n"
+            json.dumps(
+                {"arm": "pinned:m@low", "question_id": "1", "dataset": "MMLU-Pro"}
+            )
+            + "\n"
         )
         done = runner.completed_cells(out)
         tasks = [
@@ -161,11 +164,36 @@ class TestTasks:
         out = tmp_path / "matrix.jsonl"
         out.write_text(
             json.dumps(
-                {"arm": "pinned:m", "question_id": "1", "error": "http 502"}
+                {
+                    "arm": "pinned:m",
+                    "question_id": "1",
+                    "dataset": "MMLU-Pro",
+                    "error": "http 502",
+                }
             )
             + "\n"
         )
-        assert runner.completed_cells(out) == {"pinned:m\t1"}
+        assert runner.completed_cells(out) == {runner.cell_key("pinned:m", "1", "MMLU-Pro")}
+
+    def test_the_same_question_id_in_another_dataset_is_another_cell(self, tmp_path):
+        """Ids are not unique across corpora, and benchmarks are meant to plug in."""
+        out = tmp_path / "matrix.jsonl"
+        out.write_text(
+            json.dumps(
+                {"arm": "pinned:m", "question_id": "1", "dataset": "MMLU-Pro"}
+            )
+            + "\n"
+        )
+        other = dataset.Item(
+            question_id="1",
+            dataset="GPQA",
+            category="math",
+            fold="test",
+            prompt="q",
+            question={"answer": "A"},
+        )
+        tasks = [runner.Task(arm="pinned:m", model="m", item=other)]
+        assert runner.plan(tasks, seed=1, skip=runner.completed_cells(out)) == tasks
 
 
 class _Recorder:
@@ -408,18 +436,131 @@ class TestEffortRejectionPredicate:
         )
         assert client.rejected_the_effort_level(body, 400) is False
 
+    def test_mentioning_the_field_is_not_enough_without_a_refusal(self):
+        """The same trap with no `param` to go on: an enumeration is not a rejection."""
+        body = json.dumps(
+            {"error": {"message": "accepted fields: temperature, reasoning_effort"}}
+        )
+        assert client.rejected_the_effort_level(body, 400) is False
+
     def test_only_a_400_can_retire_an_arm(self):
         body = '{"error": {"param": "reasoning_effort"}}'
         assert client.rejected_the_effort_level(body, 500) is False
 
 
+class _Stream:
+    """A response whose SSE lines arrive on a schedule, for testing the watchdog."""
+
+    def __init__(self, lines: list[tuple[float, bytes]]):
+        self._lines = list(lines)
+        self.content = self
+
+    async def readline(self) -> bytes:
+        if not self._lines:
+            return b""
+        delay, line = self._lines.pop(0)
+        await asyncio.sleep(delay)
+        return line
+
+
+def sse(**event) -> bytes:
+    return b"data: " + json.dumps(event).encode() + b"\n"
+
+
+def chunk(text: str) -> bytes:
+    return sse(choices=[{"delta": {"content": text}}])
+
+
+def consume(response, **kwargs) -> client.Call:
+    record = client.Call(
+        arm="pinned:m",
+        requested_model="m",
+        question_id="1",
+        dataset="MMLU-Pro",
+        category="math",
+        fold="test",
+    )
+    asyncio.run(
+        client._consume_stream(record, response, 0.0, **kwargs)
+    )
+    return record
+
+
+class TestStreamWatchdog:
+    """What the deadline is measured on decides which arms survive."""
+
+    def test_a_keep_alive_is_not_progress(self):
+        """A byte-level deadline would call a hung upstream healthy."""
+        response = _Stream([(0.0, b": ping\n")] * 5 + [(0.0, chunk("A"))])
+        with pytest.raises(asyncio.TimeoutError):
+            consume(response, idle_s=0.0, first_event_s=0.0)
+
+    def test_a_slow_first_event_is_allowed(self):
+        """A provider that buffers its thinking says nothing while doing the work."""
+        response = _Stream([(0.05, chunk("Answer: A"))])
+        record = consume(response, idle_s=0.01, first_event_s=5.0)
+        assert record.text == "Answer: A"
+
+    def test_a_stream_that_stops_mid_answer_is_cut(self):
+        response = _Stream([(0.0, chunk("Ans")), (0.5, chunk("wer"))])
+        with pytest.raises(asyncio.TimeoutError):
+            consume(response, idle_s=0.05, first_event_s=5.0)
+
+    def test_what_arrived_before_the_break_is_kept(self):
+        """Those tokens were generated and billed; the fragment is the only record."""
+        record = client.Call(
+            arm="pinned:m",
+            requested_model="m",
+            question_id="1",
+            dataset="MMLU-Pro",
+            category="math",
+            fold="test",
+        )
+        response = _Stream([(0.0, chunk("partial")), (0.5, chunk("never arrives"))])
+        with pytest.raises(asyncio.TimeoutError):
+            asyncio.run(
+                client._consume_stream(
+                    record, response, 0.0, idle_s=0.05, first_event_s=5.0
+                )
+            )
+        assert record.text == "partial"
+        assert record.content_chunks == 1
+
+    def test_usage_and_finish_reason_are_read(self):
+        response = _Stream(
+            [
+                (0.0, chunk("Answer: A")),
+                (
+                    0.0,
+                    sse(
+                        choices=[{"finish_reason": "length"}],
+                        usage={
+                            "prompt_tokens": 10,
+                            "completion_tokens": 20,
+                            "completion_tokens_details": {"reasoning_tokens": 15},
+                        },
+                    ),
+                ),
+                (0.0, b"data: [DONE]\n"),
+            ]
+        )
+        record = consume(response, idle_s=1.0, first_event_s=1.0)
+        assert record.finish_reason == "length"
+        assert record.completion_tokens == 20
+        assert record.reasoning_tokens == 15
+
+
 class TestSettingsGuard:
     """A file holds one setting, because the arm name cannot carry them all."""
 
-    def rows(self, path: Path, **fields):
-        path.write_text(
-            json.dumps({"arm": "pinned:m", "question_id": "1", **fields}) + "\n"
-        )
+    def rows(self, path: Path, *, labelled: bool = True, **fields):
+        """One recorded row. `labelled` writes every field the guard checks, since a
+        row missing any of them is unknown rather than matching or mismatching."""
+        row = {"arm": "pinned:m", "question_id": "1", "dataset": "MMLU-Pro"}
+        if labelled:
+            row.update({"stream": True, "max_tokens": 16, "temperature": None})
+        row.update(fields)
+        path.write_text(json.dumps(row) + "\n")
 
     def test_a_new_file_is_fine(self, tmp_path):
         assert runner.settings_conflict(tmp_path / "new.jsonl", config()) is None
@@ -444,9 +585,31 @@ class TestSettingsGuard:
     def test_rows_from_before_the_fields_existed_are_refused_as_unknown(self, tmp_path):
         """v1's rows record neither, and are exactly the ones that would be mixed in."""
         out = tmp_path / "v1.jsonl"
-        self.rows(out)
+        self.rows(out, labelled=False)
         conflict = runner.settings_conflict(out, config())
         assert conflict and "before the request settings were recorded" in conflict
+
+    def test_a_row_missing_one_field_is_unknown_and_not_a_mismatch(self, tmp_path):
+        """Reporting it as a mismatch would name the wrong reason for refusing."""
+        out = tmp_path / "half.jsonl"
+        self.rows(out, labelled=False, stream=True)  # no max_tokens, no temperature
+        conflict = runner.settings_conflict(out, config(stream=True, max_tokens=16))
+        assert conflict and "before the request settings were recorded" in conflict
+
+    def test_a_different_temperature_is_refused(self, tmp_path):
+        out = tmp_path / "m.jsonl"
+        self.rows(out, stream=True, max_tokens=16, temperature=0.0)
+        conflict = runner.settings_conflict(out, config(temperature=None))
+        assert conflict and "temperature" in conflict
+
+    def test_a_different_censoring_point_warns_but_does_not_refuse(self, tmp_path):
+        """A completed call still means the same thing; which calls complete does not."""
+        out = tmp_path / "m.jsonl"
+        self.rows(out, stream=True, max_tokens=16, temperature=None, stream_idle_s=30.0)
+        cfg = config(stream=True, max_tokens=16, stream_idle_s=90.0)
+        assert runner.settings_conflict(out, cfg) is None
+        drift = runner.censoring_drift(out, cfg)
+        assert drift and "stream_idle_s" in drift
 
     def test_the_cli_refuses_rather_than_appends(self, tmp_path):
         out = tmp_path / "m.jsonl"
@@ -461,6 +624,28 @@ class TestExitCode:
 
     def test_a_run_where_every_call_failed_has_failed(self, capsys):
         assert collect.report_run(runner.RunStats(failed=3), Path("unused")) == 1
+
+    def test_an_arm_that_failed_alone_is_reported(self, capsys):
+        """A failed cell counts as collected, so an asymmetric outage is permanent."""
+        stats = runner.RunStats(
+            ok=18,
+            failed=9,
+            scored_by_arm={"pinned:m": 9, "pinned:m@low": 9, "pinned:m@high": 0},
+            failed_by_arm={"pinned:m@high": 9},
+        )
+        assert collect.report_run(stats, Path("unused")) == 0
+        printed = capsys.readouterr().out
+        assert "did not fail alike" in printed and "pinned:m@high" in printed
+
+    def test_arms_failing_alike_is_not_flagged_as_asymmetry(self, capsys):
+        stats = runner.RunStats(
+            ok=18,
+            failed=2,
+            scored_by_arm={"pinned:m": 9, "pinned:m@low": 9},
+            failed_by_arm={"pinned:m": 1, "pinned:m@low": 1},
+        )
+        collect.report_run(stats, Path("unused"))
+        assert "did not fail alike" not in capsys.readouterr().out
 
     def test_warnings_do_not_change_the_code(self, capsys):
         """The Job retries on a non-zero exit, and a retry would re-spend the money."""
