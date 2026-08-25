@@ -113,6 +113,56 @@ It also has a quality floor to clear, and on MMLU-Pro it did not: the self-hoste
 scored 0.652 against 0.832 for the best arm, eighteen points down. Which is exactly why the
 next policy matters.
 
+**Measured, 2026-08-26** (`bench/serving_ceiling.py`, rows in
+`bench/results/serving-ceiling.json`). Three facts, and the third is the one that decides
+whether this arm is worth anything.
+
+The machine is almost entirely idle. Over 97 hours it served 1,440 requests and generated
+328,702 output tokens — an average of 0.94 tokens a second — at a rate of $15.2174 an hour.
+That is $1,476 spent and a **realised price of about $4,500 per million output tokens**,
+ninety times the list price of the most expensive model in the pool. The number says nothing
+about the model and everything about utilisation, and it is the strongest argument for this
+policy: the marginal cost of using the machine is zero and the average cost is absurd.
+
+Its ceiling is two concurrent requests, exactly as configured:
+
+| In flight | Output tokens/s | p50 | p95 | $/Mtok of output |
+| --- | --- | --- | --- | --- |
+| 1 | 110 | 1.2 s | 1.2 s | 38.54 |
+| 2 | 162 | 1.6 s | 1.6 s | 26.06 |
+| 4 | 167 | 3.1 s | 3.3 s | 25.31 |
+| 8 | 166 | 6.1 s | 6.3 s | 25.54 |
+
+Throughput stops rising at two and only latency grows after that, which is what
+`--max-num-seqs=2` predicts. At the knee a token costs about $26 per million — against
+$6.60 for `grok`, $13.20 for `gpt-5.6-terra` and $50.00 for `fable`. So *as configured* the
+self-hosted arm is dearer than both cheap APIs and worth about half a premium one.
+
+**And that ceiling is a configuration, not the hardware.** The server runs with
+`--max-model-len=1048576`. On four L40S at fp8 the KV cache for a single one-million-token
+sequence is about 128 GiB of the roughly 150 GiB left after weights, so barely one sequence
+fits and a batch depth of two is the arithmetic consequence:
+
+| `--max-model-len` | KV per sequence | Sequences that fit |
+| --- | --- | --- |
+| 1,048,576 (today) | 128 GiB | 1.2 |
+| 262,144 | 32 GiB | 4.7 |
+| 131,072 | 16 GiB | 9.4 |
+| 65,536 | 8 GiB | 18.7 |
+
+An episode of the kind v3 measures needs a hundred thousand tokens of context, not a
+million. Trading the unused nine tenths of the window for a batch depth of nine or more is
+what would take this arm from $26 per million to single digits and make the whole policy
+worth implementing. Two further flags matter for the same reason:
+`--no-enable-prefix-caching` is currently set, so a multi-turn session re-processes its
+whole prompt every turn — the one form of waste this project has just spent two gateway
+fixes eliminating on the paid path.
+
+Establishing that requires restarting the server with different arguments, and the same
+deployment is currently serving other coding agents in the cluster. That is the one step
+here that interrupts somebody else's work, so it is the one step that waits for a decision
+rather than being taken.
+
 **Arm D: route by what the step is for, not by how hard it looks.** v1 killed *inferred*
 difficulty — the domain label carried no accuracy signal at p = 0.58 — but an agent harness
 does not have to infer anything. It knows what each step is for: searching, reading tests,
