@@ -228,10 +228,11 @@ cat <<EOF
 
 Cluster ${cluster} is applied and registered.
 
-Every chapter from here starts with these two lines:
+Every chapter from here starts with these three lines:
 
+  cd ${infra_dir%/infra}
   export CLUSTER_NAME=${cluster}
-  source "\$(git rev-parse --show-toplevel)/infra/scripts/distai-env.sh"
+  source infra/scripts/distai-env.sh
 
 That resolves the region, the account, the state's location and the attached data layers from the
 registry, so no chapter needs a bucket name or a state key again.

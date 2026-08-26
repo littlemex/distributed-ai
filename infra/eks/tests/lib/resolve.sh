@@ -105,7 +105,9 @@ resolve_storage_vars() {
   fsx_pv="$(resolve_clone_source_pv_by_driver fsx.csi.aws.com)"
   openzfs_pv="$(resolve_clone_source_pv_by_driver fsx.openzfs.csi.aws.com)"
   if [ -z "$fsx_pv" ] || [ -z "$openzfs_pv" ]; then
-    log_fail "source FSx and OpenZFS PVs not found"
+    # A skip, not a failure: a cluster built without shared storage has no source PVs to clone, and
+    # log_fail here printed [NG] immediately before the SKIP line, which reads as a broken cluster.
+    log_info "source FSx and OpenZFS PVs not found; shared storage is not enabled on this cluster"
     return 2
   fi
 
