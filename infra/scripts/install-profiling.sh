@@ -59,6 +59,11 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 [ "${1:-}" = "-h" ] && usage 0
 
+# What "record of record" covers, and why it is more than the buckets themselves: a retention rule that
+# expires objects sooner, versioning turned off, or an encryption key swapped out all destroy or lock
+# away recorded experiments without deleting a single resource. Those configurations are therefore
+# protected alongside the things they configure, and a plan that changes them has to say so.
+#
 # ── the profiling platform's own terraform addresses in infra/eks ───────────────────────────────
 # Everything the platform owns on the cluster side. Used both to classify a plan (anything else is
 # unrelated drift) and, with PROFILING_ONLY=1, to apply only these.
@@ -89,6 +94,12 @@ aws_sagemaker_mlflow_tracking_server.this
 aws_kms_key.data
 aws_cloudcontrolapi_resource.s3files_fs
 aws_cloudcontrolapi_resource.s3files_ap
+aws_s3_bucket_versioning.traces
+aws_s3_bucket_versioning.mlflow_artifacts
+aws_s3_bucket_lifecycle_configuration.traces
+aws_s3_bucket_server_side_encryption_configuration.traces
+aws_s3_bucket_server_side_encryption_configuration.mlflow_artifacts
+terraform_data.lifecycle_guard
 ADDR
 }
 
@@ -109,7 +120,6 @@ guard_plan() {
   profiling_addresses >"${work_dir}/owned.txt"
   protected_addresses >"${work_dir}/protected.txt"
   ALLOW_UNRELATED="${ALLOW_UNRELATED:-0}" PROFILING_ONLY="${PROFILING_ONLY:-0}" LABEL="${label}" \
-    NEW_STATE="${new_data_layer:-0}" \
     python3 - "${plan_file}.json" "${work_dir}/owned.txt" "${work_dir}/protected.txt" <<'PY'
 import json, os, re, sys
 
@@ -119,24 +129,31 @@ protected = [l.strip() for l in open(sys.argv[3]) if l.strip()]
 label = os.environ["LABEL"]
 
 def base(addr):
-    # strip module path and index so "module.x.aws_s3_bucket.traces[\"a\"]" matches "aws_s3_bucket.traces"
+    # Strip every module segment and every index, so that module.a.module.b.aws_s3_bucket.traces["x"]
+    # still matches aws_s3_bucket.traces. Peeling only one segment left a nested address matching
+    # nothing, which in the data layer meant it fell through to "owned" — a protected delete applied
+    # without a word. One level of module nesting was enough to disable this guard entirely.
     no_index = re.sub(r'\[[^\]]*\]', '', addr)
-    return no_index.split('.', 2)[-1] if no_index.startswith('module.') else no_index
+    return re.sub(r'^(module\.[^.]+\.)+', '', no_index)
 
-# A delete is unrecoverable, and a create of a resource that is supposed to already exist means the
-# state has lost track of it: applying that either fails on a name collision or, worse, reconfigures
-# something the state no longer describes. Both are refused — except that on the run which creates a
-# data layer for the first time, creating them is the whole point. That case is not inferred from the
-# plan (an empty state and a lost state look identical in it) but stated by the caller, which knows it
-# just decided to create one because no state existed and CREATE_DATA_LAYER said it may.
+# What this guard exists to prevent is losing data, and the only action that loses data is a delete (a
+# replacement counts, since it is a delete and a create). Those are refused with no override.
+#
+# A create is NOT refused, and it took three false alarms to accept why. The plan cannot distinguish
+# "this state never had the resource" from "this state lost the resource": an empty state, a state left
+# half-applied by an earlier failure, and a state whose resources were removed from it all propose the
+# same create. Refusing on that shape blocked the first install of a data layer, and then blocked
+# resuming the one that had failed half way — both legitimate. And what it was guarding against is not
+# data loss: creating a bucket, a KMS alias or a tracking server that already exists fails loudly with
+# an AWS error and changes nothing. The likely case, a bucket that exists outside the state, is adopted
+# by import before the plan is even made.
 destructive = {"delete"}
-new_state = os.environ.get("NEW_STATE") == "1"
 
 # Everything in the data layer's state belongs to this platform: that state holds nothing else. The
 # owned list describes the cluster's state, where the platform is a guest among a cluster's resources,
 # so applying it to the data layer would file the data layer's own IAM roles as "unrelated drift".
 whole_state_is_ours = label.startswith("data-layer")
-buckets = {"protected": [], "recreate": [], "owned": [], "unrelated": []}
+buckets = {"protected": [], "record-update": [], "owned": [], "unrelated": []}
 for rc in plan.get("resource_changes", []):
     actions = [a for a in rc["change"]["actions"] if a != "no-op"]
     if not actions or actions == ["read"]:
@@ -145,14 +162,18 @@ for rc in plan.get("resource_changes", []):
     verb = "+".join(actions)
     if b in protected and destructive.intersection(actions):
         buckets["protected"].append(f"{rc['address']} ({verb})")
-    elif b in protected and "create" in actions and not new_state:
-        buckets["recreate"].append(f"{rc['address']} ({verb})")
+    elif b in protected and "update" in actions:
+        # An update to the record of record is not automatically safe: a shorter lifecycle expiration,
+        # a narrowed bucket or key policy, or a changed Cloud Control desired_state all arrive as a
+        # plain update and can lose or lock away what is already recorded. Converging these is
+        # sometimes exactly what is wanted, so it is allowed — but only when asked for by name.
+        buckets["record-update"].append(f"{rc['address']} ({verb})")
     elif whole_state_is_ours or b in owned or b in protected:
         buckets["owned"].append(f"{rc['address']} ({verb})")
     else:
         buckets["unrelated"].append(f"{rc['address']} ({verb})")
 
-for kind in ("protected", "recreate", "owned", "unrelated"):
+for kind in ("protected", "record-update", "owned", "unrelated"):
     for item in buckets[kind]:
         print(f"    [{kind}] {item}")
 if not any(buckets.values()):
@@ -161,17 +182,20 @@ if not any(buckets.values()):
 if buckets["protected"]:
     sys.exit(f"error: the {label} plan would destroy record-of-record resources; refusing. "
              "Resolve this by hand — this script never destroys data.")
-if buckets["recreate"]:
-    sys.exit(f"error: the {label} plan would CREATE record-of-record resources that should already "
-             "exist (listed above), which means this state no longer tracks them. Applying it would "
-             "collide with the live resource instead of adopting it. Import them into the state "
-             "first; the installer adopts the known ones automatically, so this indicates a case it "
-             "does not cover yet.")
-if buckets["unrelated"] and os.environ["ALLOW_UNRELATED"] != "1" and os.environ["PROFILING_ONLY"] != "1":
+if buckets["record-update"] and os.environ.get("ALLOW_RECORD_UPDATES") != "1":
+    sys.exit(f"error: the {label} plan would MODIFY record-of-record resources (listed above). A "
+             "shorter retention, a narrowed policy or a changed filesystem definition arrives as an "
+             "update and can lose what is already recorded. Read the plan, then re-run with "
+             "ALLOW_RECORD_UPDATES=1 if the change is intended.")
+# PROFILING_ONLY changes how the plan is MADE (it targets the platform's own addresses); it does not
+# make an unrelated change in the resulting plan safe to apply. Terraform can pull a dependency of a
+# target into a targeted plan, and the saved plan is what gets applied, so the only override for
+# unrelated changes is the one that says so.
+if buckets["unrelated"] and os.environ["ALLOW_UNRELATED"] != "1":
     sys.exit(f"error: the {label} plan contains {len(buckets['unrelated'])} change(s) unrelated to "
              "profiling (listed above). This is pre-existing cluster drift, not something this "
-             "installer introduced. Re-run with PROFILING_ONLY=1 to apply only the profiling "
-             "resources, or ALLOW_UNRELATED=1 to apply everything.")
+             "installer introduced. Re-run with PROFILING_ONLY=1 to plan only the profiling "
+             "resources, or ALLOW_UNRELATED=1 to apply everything as listed.")
 PY
 }
 
@@ -287,6 +311,34 @@ data_vars=(
 # A record-of-record bucket that exists in AWS but not in this state must be adopted, never
 # re-created: a create either collides on the name or silently reconfigures a bucket the state does
 # not describe. The sub-resources take the bucket name as their import id.
+# Whether an address is already in the data layer's state. Read once per call rather than kept, so a
+# just-imported address is seen by the next check.
+#
+# The list is captured before it is searched, not piped straight into grep: under `set -o pipefail`,
+# `grep -q` closes the pipe on its first match, terraform dies of SIGPIPE, and the pipeline reports
+# failure for a search that succeeded. That inverted the answer and made this installer refuse to
+# adopt a KMS key that was already in its own state.
+in_state() {
+  local list
+  list="$(terraform -chdir="${data_dir}" state list 2>/dev/null || true)"
+  printf '%s\n' "${list}" | grep -qxF "$1"
+}
+
+# Adopting the record of record is what makes a create safe to allow. A create is refused for nothing
+# in this installer, so the guarantee has to come from here: anything that exists in AWS is brought
+# into the state BEFORE the plan is made, and what the plan then proposes to create genuinely does not
+# exist. The reason this matters more than it sounds: a KMS key and an S3 Files filesystem have no
+# unique name, so a create does not collide — it silently makes a second one, the outputs point at the
+# empty one, and the real data becomes unmanaged with no error anywhere.
+adopt_or_stop() {
+  local addr="$1" id="$2" what="$3"
+  in_state "${addr}" && return 0
+  say "adopting the existing ${what} into the state (${id})"
+  terraform -chdir="${data_dir}" import -input=false -lock-timeout=5m "${data_vars[@]}" \
+    "${addr}" "${id}" >/dev/null ||
+    die "found an existing ${what} (${id}) that this state does not track, and importing it failed. Applying now would create a second one and leave the first unmanaged. Resolve by hand: terraform -chdir=${data_dir} import ${addr} ${id}"
+}
+
 adopt_bucket() {
   local bucket="$1" suffix="$2"
   aws s3api head-bucket --bucket "${bucket}" >/dev/null 2>&1 || return 0
@@ -320,6 +372,42 @@ fi
 
 adopt_bucket "${DATA_LAYER_NAME}-mlflow-artifacts-${account_id}" "mlflow_artifacts"
 adopt_bucket "${DATA_LAYER_NAME}-traces-${AWS_REGION}-${account_id}" "traces[\"${AWS_REGION}\"]"
+
+# The KMS key, found through its alias because a key has no name of its own. Left unadopted, a create
+# succeeds and makes a second key; the bucket's encryption then points at the new one, and every object
+# already written under the old key becomes unreadable the day that key is removed.
+kms_alias="alias/${DATA_LAYER_NAME}-data-layer"
+kms_key_id="$(aws kms describe-key --key-id "${kms_alias}" --region "${AWS_REGION}" \
+  --query KeyMetadata.KeyId --output text 2>/dev/null || true)"
+if [ -n "${kms_key_id}" ] && [ "${kms_key_id}" != "None" ]; then
+  adopt_or_stop "aws_kms_key.data" "${kms_key_id}" "KMS key behind ${kms_alias}"
+  in_state "aws_kms_alias.data" ||
+    terraform -chdir="${data_dir}" import -input=false -lock-timeout=5m "${data_vars[@]}" \
+      "aws_kms_alias.data" "${kms_alias}" >/dev/null 2>&1 || true
+fi
+
+# The tracking server, found by the name this data layer would give it. A create collides loudly rather
+# than duplicating, but adopting turns a dead end into a resumable run.
+mlflow_name="${DATA_LAYER_NAME}-mlflow"
+case "${existing_mlflow:-}" in *:mlflow-tracking-server/*) mlflow_name="${existing_mlflow##*/}" ;; esac
+if aws sagemaker describe-mlflow-tracking-server --tracking-server-name "${mlflow_name}" \
+  --region "${AWS_REGION}" >/dev/null 2>&1; then
+  adopt_or_stop "aws_sagemaker_mlflow_tracking_server.this[0]" "${mlflow_name}" \
+    "MLflow tracking server ${mlflow_name}"
+fi
+
+# The S3 Files filesystem and its access point, matched by the trace bucket they front. This is the
+# quiet one: a filesystem has no name, so a create makes a NEW EMPTY filesystem, the volume handle
+# output points at it, the cluster mounts nothing, and the filesystem holding every trace is simply
+# forgotten — with no error at any step.
+trace_bucket_arn="arn:aws:s3:::${DATA_LAYER_NAME}-traces-${AWS_REGION}-${account_id}"
+s3files_fs_arn="$(aws cloudcontrol list-resources --type-name AWS::S3Files::FileSystem \
+  --region "${AWS_REGION}" --query 'ResourceDescriptions[].[Identifier,Properties]' --output text 2>/dev/null |
+  grep -F "${trace_bucket_arn}" | awk '{print $1}' | head -1 || true)"
+if [ -n "${s3files_fs_arn}" ]; then
+  adopt_or_stop "aws_cloudcontrolapi_resource.s3files_fs[0]" "${s3files_fs_arn}" \
+    "S3 Files filesystem fronting ${trace_bucket_arn}"
+fi
 
 guard_plan "${data_dir}" "data-layer" "${data_vars[@]}"
 terraform -chdir="${data_dir}" apply -input=false -auto-approve -lock-timeout=5m "${guarded_plan}" >/dev/null

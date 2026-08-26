@@ -92,6 +92,7 @@ done
 valid_suite "$SUITE" || { echo "Unknown suite: $SUITE" >&2; exit 1; }
 
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/plan-guard.sh"
 source "$SCRIPT_DIR/cases/registry.sh"
 source "$SCRIPT_DIR/cases/static.sh"
 # shellcheck disable=SC1091

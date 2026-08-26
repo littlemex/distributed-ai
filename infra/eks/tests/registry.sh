@@ -16,6 +16,7 @@ register_test() {
 }
 
 register_all_tests() {
+  register_test plan-guard-table                test_plan_guard_table                    baseline static "$TIMEOUT_STATIC"
   register_test registry-matches-state          test_registry_matches_state              baseline static "$TIMEOUT_STATIC" terraform
   register_test registry-default-layer-attached test_registry_default_data_layer_is_attached baseline static "$TIMEOUT_STATIC"
   register_test registry-preamble-contract      test_registry_preamble_contract          baseline static "$TIMEOUT_STATIC"
