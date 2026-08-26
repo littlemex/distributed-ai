@@ -46,7 +46,10 @@
 #                         (volumes, affinity, imagePullSecrets, sidecars).
 #   --discard-on-fail     do not record a failed run. It is recorded by default, tagged status=failed,
 #                         because a slow or crashing run is usually the one worth profiling.
-#   --wait                wait for the run to finish and print its run id.
+#   --wait                wait for the recording to exist and print its run id. The Job reaching
+#                         Complete is not the end: the recorder writes the id onto it afterwards, so
+#                         this waits for the id, with a grace period after the Job finishes
+#                         (WAIT_RECORDER_GRACE_SECONDS, default 120) before reporting without one.
 #   -o id | run-id        print only that value on stdout, for use in a shell variable. Everything
 #                         else goes to stderr. "run-id" implies --wait, since a run id does not
 #                         exist until the recorder has written it.
@@ -431,12 +434,30 @@ cmd_run() {
 
   [ "${wait_for}" = "true" ] || exit 0
   say "waiting for the run" >&"${prose}"
-  local deadline conditions
+  # What --wait is for is the run id, so that is what it waits for. Waiting only for the Job to reach
+  # Complete returns too early: the recorder writes the id onto the Job as its last act, and the Job
+  # is already Complete by the time it does. Reporting "not recorded yet" from a command whose whole
+  # purpose was to hand back the id is a promise the flag does not keep.
+  #
+  # The id is therefore the condition, with the Job's own terminal state as the fallback: a run that
+  # fails before the recorder runs at all would otherwise be waited on until the timeout. Once the Job
+  # has finished, the recorder is given a grace period to catch up before the answer is reported
+  # without an id.
+  local deadline conditions run_id grace_deadline=""
   deadline=$(( $(date +%s) + ${WAIT_TIMEOUT_SECONDS:-86400} ))
   while [ "$(date +%s)" -lt "${deadline}" ]; do
+    run_id="$(k get job "${job_name}" -n "${namespace}" \
+      -o jsonpath='{.metadata.annotations.accelprof\.io/run-id}' 2>/dev/null || true)"
+    [ -z "${run_id}" ] || break
     conditions="$(k get job "${job_name}" -n "${namespace}" \
       -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)"
-    case "${conditions}" in *Complete*|*SuccessCriteriaMet*|*Failed*) break ;; esac
+    case "${conditions}" in
+      *Complete* | *SuccessCriteriaMet* | *Failed*)
+        [ -n "${grace_deadline}" ] ||
+          grace_deadline=$(( $(date +%s) + ${WAIT_RECORDER_GRACE_SECONDS:-120} ))
+        [ "$(date +%s)" -lt "${grace_deadline}" ] || break
+        ;;
+    esac
     sleep 5
   done
   if [ "${out}" = "run-id" ]; then

@@ -152,3 +152,44 @@ test_accelprof_client_chip_follows_the_request() {
   [ "$got" = "cpu" ] || { printf 'FAIL --profile none: chip=%s\n' "$got" >&2; fails=$((fails + 1)); }
   [ "$fails" -eq 0 ] || return 1
 }
+
+# --wait exists to hand back the run id, so it has to wait for the id and not for the Job. The
+# recorder writes the id onto the Job as its last act, so a wait that stops at Complete reports "not
+# recorded yet" — which is what the flag was supposed to save the reader from.
+test_accelprof_client_wait_waits_for_the_recording() {
+  local client
+  client="$(_ac_client)"
+  [ -x "$client" ] || return 2
+  local dir out
+  dir="$(mktemp -d)"
+  mkdir -p "$dir/bin"
+  # A kubectl whose Job is Complete from the first look but only grows the run-id annotation on the
+  # third, which is the ordering the real recorder produces.
+  cat >"$dir/bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+state="${STATE_FILE:?}"
+case "$args" in
+  *configmap*) printf 'image.example/accelprof@sha256:aaa\n' ;;
+  *"apply -f"*) cat >/dev/null; printf 'job.batch/x created\n' ;;
+  *"config view"*) printf 'ns\n' ;;
+  *run-id*)
+    n=$(( $(cat "$state" 2>/dev/null || echo 0) + 1 ))
+    printf '%s' "$n" >"$state"
+    [ "$n" -lt 3 ] || printf 'RUNID-42\n'
+    ;;
+  *conditions*) printf 'Complete \n' ;;
+  *"-l accelprof.io/workload-id="*) printf 'profile-x\n' ;;
+esac
+STUB
+  chmod +x "$dir/bin/kubectl"
+  out="$(STATE_FILE="$dir/n" ACCELPROF_PLATFORM_IMAGE="image.example/accelprof@sha256:aaa" \
+    PATH="$dir/bin:$PATH" KUBE_CONTEXT="" "$client" run --alias t-s --namespace ns \
+    --image image.example/w:t --wait -- true 2>&1)"
+  rm -rf "$dir"
+  case "$out" in
+    *"RUNID-42"*) ;;
+    *) printf 'FAIL --wait returned before the recording existed: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2
+       return 1 ;;
+  esac
+}
