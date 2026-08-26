@@ -16,7 +16,7 @@
 resource "aws_sagemaker_mlflow_tracking_server" "this" {
   count = var.mlflow_enabled ? 1 : 0
 
-  tracking_server_name         = var.mlflow_app_name
+  tracking_server_name         = var.mlflow_app_name != "" ? var.mlflow_app_name : "${var.name_prefix}-mlflow"
   artifact_store_uri           = "s3://${aws_s3_bucket.mlflow_artifacts.bucket}/mlflow"
   role_arn                     = aws_iam_role.mlflow_app.arn
   tracking_server_size         = var.mlflow_tracking_server_size

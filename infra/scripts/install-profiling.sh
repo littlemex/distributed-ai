@@ -304,6 +304,20 @@ adopt_bucket() {
     fi
   done
 }
+# The tracking server's name is derived from the data layer's name now, so that two data layers in one
+# account and region do not collide on it. A data layer created before that carries whatever name the
+# old fixed default gave it, and re-deriving would ask Terraform to REPLACE the server — destroying
+# every run's metadata. Its current name is therefore read from the state and passed back in.
+if [ "${new_data_layer}" = "0" ]; then
+  existing_mlflow="$(terraform -chdir="${data_dir}" output -raw mlflow_app_arn 2>/dev/null || true)"
+  case "${existing_mlflow}" in
+    *:mlflow-tracking-server/*)
+      data_vars+=(-var "mlflow_app_name=${existing_mlflow##*/}")
+      say "keeping the existing tracking server name '${existing_mlflow##*/}'"
+      ;;
+  esac
+fi
+
 adopt_bucket "${DATA_LAYER_NAME}-mlflow-artifacts-${account_id}" "mlflow_artifacts"
 adopt_bucket "${DATA_LAYER_NAME}-traces-${AWS_REGION}-${account_id}" "traces[\"${AWS_REGION}\"]"
 

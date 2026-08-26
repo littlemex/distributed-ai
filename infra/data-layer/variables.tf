@@ -35,9 +35,14 @@ variable "mlflow_enabled" {
 }
 
 variable "mlflow_app_name" {
-  description = "Name of the SageMaker MLflow tracking server (when mlflow_enabled)."
+  description = <<-EOT
+    Name of the SageMaker MLflow tracking server (when mlflow_enabled). Empty derives it from
+    name_prefix, which is what keeps two data layers in one account and region from colliding: every
+    other resource here is already named after the prefix, and a fixed default made the tracking
+    server the one name a second data layer could not have.
+  EOT
   type        = string
-  default     = "mcp-profiling"
+  default     = ""
 }
 
 variable "mlflow_tracking_server_size" {
