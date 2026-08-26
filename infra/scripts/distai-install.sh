@@ -17,8 +17,10 @@
 set -euo pipefail
 
 # The release this file was published with, written out rather than derived so that a copy of this
-# script fetched from anywhere still installs one known tree.
-PIN_DEFAULT="main"
+# script fetched from anywhere still installs one known tree. It has to be the tag this file is
+# published under: a default of "main" would make the URL pin a release and the clone pin something
+# else, and a reader who followed the book would get a tree the book was never written against.
+PIN_DEFAULT="release/eks-distributed-ai/v0.1.0"
 pin="${PIN:-${PIN_DEFAULT}}"
 repo_url="${DISTAI_REPO_URL:-https://github.com/littlemex/distributed-ai.git}"
 dir="${DISTAI_DIR:-${HOME}/distributed-ai-${pin##*/}}"
