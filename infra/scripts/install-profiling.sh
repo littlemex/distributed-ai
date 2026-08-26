@@ -109,6 +109,7 @@ guard_plan() {
   profiling_addresses >"${work_dir}/owned.txt"
   protected_addresses >"${work_dir}/protected.txt"
   ALLOW_UNRELATED="${ALLOW_UNRELATED:-0}" PROFILING_ONLY="${PROFILING_ONLY:-0}" LABEL="${label}" \
+    NEW_STATE="${new_data_layer:-0}" \
     python3 - "${plan_file}.json" "${work_dir}/owned.txt" "${work_dir}/protected.txt" <<'PY'
 import json, os, re, sys
 
@@ -124,8 +125,17 @@ def base(addr):
 
 # A delete is unrecoverable, and a create of a resource that is supposed to already exist means the
 # state has lost track of it: applying that either fails on a name collision or, worse, reconfigures
-# something the state no longer describes. Both are refused.
+# something the state no longer describes. Both are refused — except that on the run which creates a
+# data layer for the first time, creating them is the whole point. That case is not inferred from the
+# plan (an empty state and a lost state look identical in it) but stated by the caller, which knows it
+# just decided to create one because no state existed and CREATE_DATA_LAYER said it may.
 destructive = {"delete"}
+new_state = os.environ.get("NEW_STATE") == "1"
+
+# Everything in the data layer's state belongs to this platform: that state holds nothing else. The
+# owned list describes the cluster's state, where the platform is a guest among a cluster's resources,
+# so applying it to the data layer would file the data layer's own IAM roles as "unrelated drift".
+whole_state_is_ours = label.startswith("data-layer")
 buckets = {"protected": [], "recreate": [], "owned": [], "unrelated": []}
 for rc in plan.get("resource_changes", []):
     actions = [a for a in rc["change"]["actions"] if a != "no-op"]
@@ -135,9 +145,9 @@ for rc in plan.get("resource_changes", []):
     verb = "+".join(actions)
     if b in protected and destructive.intersection(actions):
         buckets["protected"].append(f"{rc['address']} ({verb})")
-    elif b in protected and "create" in actions:
+    elif b in protected and "create" in actions and not new_state:
         buckets["recreate"].append(f"{rc['address']} ({verb})")
-    elif b in owned or b in protected:
+    elif whole_state_is_ours or b in owned or b in protected:
         buckets["owned"].append(f"{rc['address']} ({verb})")
     else:
         buckets["unrelated"].append(f"{rc['address']} ({verb})")
@@ -237,11 +247,16 @@ say "Phase 2/7: data layer '${DATA_LAYER_NAME}' at s3://${state_bucket}/${data_s
 
 # Creating a second data layer by accident splits the platform in two, so an absent state is only
 # created when the operator asks for it.
+# Whether this run is creating the data layer decides how its plan is read. An empty state and a state
+# that lost track of live resources produce the same plan — both propose creating the record of record —
+# so the difference cannot be inferred from the plan and is recorded here, where it is known.
+new_data_layer=0
 if ! aws s3api head-object --bucket "${state_bucket}" --key "${data_state_key}" \
   --region "${state_region}" >/dev/null 2>&1; then
   [ "${CREATE_DATA_LAYER:-0}" = "1" ] ||
     die "no data layer state at s3://${state_bucket}/${data_state_key}. Point DATA_LAYER_NAME at an existing data layer, or pass CREATE_DATA_LAYER=1 to create a new one."
   say "creating a new data layer (CREATE_DATA_LAYER=1)"
+  new_data_layer=1
 fi
 
 # The data layer ships its S3 backend as an example file so that a plain `terraform init` still
