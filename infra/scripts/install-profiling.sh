@@ -67,20 +67,22 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 # ── the profiling platform's own terraform addresses in infra/eks ───────────────────────────────
 # Everything the platform owns on the cluster side. Used both to classify a plan (anything else is
 # unrelated drift) and, with PROFILING_ONLY=1, to apply only these.
+# Derived from the files that define the platform's cluster-side resources, not written out by hand. A
+# hand-kept list drifts the moment a resource is added, and the failure is silent in the worst
+# direction: the new resource is filed as someone else's drift and the installer refuses to run. That
+# happened with the three IAM resources the S3 Files mount needs, which are in s3files-mount.tf and
+# were missing here. If a new file gains platform resources it has to be added below, and a test in
+# infra/eks/tests asserts that no other file carries the platform's own toggles.
+profiling_source_files() {
+  printf '%s\n' "${eks_dir}/s3files-mount.tf" "${eks_dir}/iam-mcp.tf" "${eks_dir}/ecr-profiling.tf"
+}
+
 profiling_addresses() {
-  cat <<'ADDR'
-aws_cloudcontrolapi_resource.s3files_mt
-aws_security_group.s3files_mt
-aws_vpc_security_group_ingress_rule.s3files_mt_from_nodes
-aws_iam_role_policy.efs_csi_s3files
-aws_iam_role_policy.efs_csi_node_s3files
-kubectl_manifest.mcp_namespace
-kubectl_manifest.mcp_reader_sa
-aws_eks_pod_identity_association.mcp_reader
-aws_eks_pod_identity_association.producer
-aws_ecr_repository.profiling
-aws_ecr_lifecycle_policy.profiling
-ADDR
+  local files
+  files="$(profiling_source_files)"
+  # shellcheck disable=SC2086
+  grep -hoE '^resource "[^"]+" "[^"]+"' ${files} |
+    sed 's/^resource "//; s/" "/./; s/"$//' | sort -u
 }
 
 # Resources whose destruction loses the record of record. A plan that deletes or replaces one of
@@ -153,10 +155,27 @@ destructive = {"delete"}
 # owned list describes the cluster's state, where the platform is a guest among a cluster's resources,
 # so applying it to the data layer would file the data layer's own IAM roles as "unrelated drift".
 whole_state_is_ours = label.startswith("data-layer")
+# A change whose only difference is a credential that is re-fetched on every plan is not drift. The
+# helm provider recomputes repository_password (an ECR auth token) each time, so every plan on a cluster
+# whose charts come from ECR carries two of these forever. Reporting them as unrelated drift would make
+# the operator pass ALLOW_UNRELATED on every single run, which is how a guard stops being read at all —
+# and then the change that mattered goes through with it.
+EPHEMERAL = {"repository_password"}
+
+def only_ephemeral(change):
+    if change["actions"] != ["update"]:
+        return False
+    before, after = change.get("before") or {}, change.get("after") or {}
+    unknown = {k for k, v in (change.get("after_unknown") or {}).items() if v}
+    differing = {k for k in set(before) | set(after) if before.get(k) != after.get(k)} | unknown
+    return bool(differing) and differing <= EPHEMERAL
+
 buckets = {"protected": [], "record-update": [], "owned": [], "unrelated": []}
 for rc in plan.get("resource_changes", []):
     actions = [a for a in rc["change"]["actions"] if a != "no-op"]
     if not actions or actions == ["read"]:
+        continue
+    if only_ephemeral(rc["change"]):
         continue
     b = base(rc["address"])
     verb = "+".join(actions)

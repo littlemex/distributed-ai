@@ -25,14 +25,21 @@ open(sys.argv[2], "w").write(src[start:end])
 PY
 }
 
-# addr -> actions, rendered as a terraform show -json plan
+# addr=actions[@@before_json@@after_json] rendered as a terraform show -json plan. The before/after form
+# is needed to test the changes that are ignored for being nothing but a re-fetched credential. The
+# separator is @@ rather than a colon, which JSON already uses.
 _pg_plan() {
   python3 - "$@" <<'PY'
 import json, sys
 changes = []
-for pair in sys.argv[1:]:
-    addr, actions = pair.split("=", 1)
-    changes.append({"address": addr, "change": {"actions": actions.split(",")}})
+for spec in sys.argv[1:]:
+    parts = spec.split("@@", 2)
+    addr, actions = parts[0].split("=", 1)
+    change = {"actions": actions.split(",")}
+    if len(parts) == 3:
+        change["before"] = json.loads(parts[1])
+        change["after"] = json.loads(parts[2])
+    changes.append({"address": addr, "change": change})
 print(json.dumps({"resource_changes": changes}))
 PY
 }
@@ -43,9 +50,11 @@ _pg_verdict() {
   local dir out rc
   dir="$(mktemp -d)"
   _pg_extract "$dir/guard.py"
-  # The real address lists, read out of the installer, for the same reason as the body.
-  sed -n '/^profiling_addresses()/,/^ADDR/p' "$(_pg_installer)" | sed '1d;$d' | tail -n +2 >"$dir/owned.txt"
-  sed -n '/^protected_addresses()/,/^ADDR/p' "$(_pg_installer)" | sed '1d;$d' | tail -n +2 >"$dir/protected.txt"
+  # The real address lists, obtained the way the installer obtains them: the owned list is derived from
+  # the Terraform sources by a function in the installer, so it is sourced and called rather than
+  # scraped, and the protected list is still a literal.
+  eks_dir="$SCRIPT_DIR/.." bash -c "source <(sed -n '/^profiling_source_files()/,/^}/p;/^profiling_addresses()/,/^}/p' '$(_pg_installer)'); profiling_addresses" >"$dir/owned.txt"
+  sed -n '/^protected_addresses()/,/^ADDR/p' "$(_pg_installer)" | sed '1,2d;$d' >"$dir/protected.txt"
   _pg_plan "$@" >"$dir/plan.json"
   out=$(LABEL="$label" ALLOW_UNRELATED="$allow" PROFILING_ONLY="$only" \
     ALLOW_RECORD_UPDATES="$records" python3 "$dir/guard.py" "$dir/plan.json" "$dir/owned.txt" "$dir/protected.txt" 2>&1)
@@ -116,9 +125,50 @@ test_plan_guard_table() {
   PG_ALLOW_RECORD_UPDATES=1 _pg_expect refused "and never covers a delete" data-layer 1 1 \
     'aws_kms_key.data=delete' || fails=$((fails + 1))
 
+  # The helm provider re-fetches an ECR auth token on every plan, so a cluster whose charts come from
+  # ECR carries two of these updates forever. Reporting them would make ALLOW_UNRELATED a habit.
+  _pg_expect ok "a change that is only a re-fetched credential is not drift" cluster 0 0 \
+    'helm_release.karpenter=update@@{"repository_password":"old","version":"1.0"}@@{"repository_password":"new","version":"1.0"}' \
+    || fails=$((fails + 1))
+  # But a real change to the same resource is still drift.
+  _pg_expect refused "a real helm change is still drift" cluster 0 0 \
+    'helm_release.karpenter=update@@{"repository_password":"old","version":"1.0"}@@{"repository_password":"new","version":"1.1"}' \
+    || fails=$((fails + 1))
+
   # And a delete on the cluster side is still refused, override or not.
   _pg_expect refused "cluster delete of the record of record" cluster 1 1 \
     'aws_cloudcontrolapi_resource.s3files_fs[0]=delete' || fails=$((fails + 1))
 
   [ "$fails" -eq 0 ] || { printf '%d guard case(s) failed\n' "$fails" >&2; return 1; }
+}
+
+# The owned list is derived from the files that define the platform's cluster-side resources. This
+# asserts the derivation actually covers them — the omission it replaces (three IAM resources the S3
+# Files mount needs) stopped an install with "unrelated drift" that was the platform itself.
+test_plan_guard_owned_list_is_complete() {
+  local installer missing=""
+  installer="$(_pg_installer)"
+  local derived
+  derived="$(eks_dir="$SCRIPT_DIR/.." bash -c "source <(sed -n '/^profiling_source_files()/,/^}/p;/^profiling_addresses()/,/^}/p' '$installer'); profiling_addresses")"
+  local addr
+  while IFS= read -r addr; do
+    [ -n "$addr" ] || continue
+    printf '%s\n' "$derived" | grep -qxF "$addr" || missing="${missing} ${addr}"
+  done <<EOF
+$(grep -hoE '^resource "[^"]+" "[^"]+"' "$SCRIPT_DIR/../s3files-mount.tf" "$SCRIPT_DIR/../iam-mcp.tf" \
+  "$SCRIPT_DIR/../ecr-profiling.tf" | sed 's/^resource "//; s/" "/./; s/"$//')
+EOF
+  [ -z "$missing" ] || { printf 'not in the derived owned list:%s\n' "$missing" >&2; return 1; }
+}
+
+# A new file carrying the platform's own toggles would put resources outside the derivation above, and
+# they would come back as someone else's drift. This is the tripwire for that.
+test_plan_guard_no_platform_resources_elsewhere() {
+  local stray
+  stray="$(grep -lE 'var\.(s3files_enabled|analysis_mcp_enabled)' "$SCRIPT_DIR"/../*.tf |
+    grep -vE '/(s3files-mount|iam-mcp|ecr-profiling|variables|outputs)\.tf$' || true)"
+  [ -z "$stray" ] || {
+    printf 'these files use the platform toggles but are not in profiling_source_files:\n%s\n' "$stray" >&2
+    return 1
+  }
 }
