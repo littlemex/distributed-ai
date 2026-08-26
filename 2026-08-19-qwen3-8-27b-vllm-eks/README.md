@@ -1,3 +1,9 @@
+> **The serving reference moved.** The reusable parts of this experiment — the Helm chart, the
+> per-model profiles and `deploy.sh` — are a maintained asset now and live in [`../serving/`](../serving/).
+> This directory is frozen as the record of the August 2026 experiment: the question it asked, the
+> configuration it ran, and what came out. Read it for what was true then; read `../serving/` for what
+> is true now.
+
 # Qwen3.8-27B on EKS — vLLM serving + self-hosted agents
 
 Reference deployment of `Qwen/Qwen3.8-27B` on EKS. vLLM serves the model with FP8 weights, a

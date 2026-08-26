@@ -1,0 +1,85 @@
+# The first run: prove the plumbing on a family whose quality is cheap to verify, and take the box's
+# box-time at the operating point in the same run. Two cells, not one -- p_i wants determinism and
+# S_box is a property of the batch.
+id: 2026-08-27-classification-seed
+serving_ref: sha256:PLACEHOLDER-set-by-deploy
+
+layers:
+  - id: box-qwen36-tp2x2
+    kind: self_hosted
+    model: Qwen/Qwen3.6-35B-A3B
+    endpoint: http://qwen-serving.qwen-trial.svc.cluster.local:8000
+    hourly_usd: 15.2174
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+    # Derived from measured throughput, not from a list: prefill 17,947 tok/s aggregate at 16 in
+    # flight, decode 1,025 tok/s at c=16 (the latter still on the TP=4 configuration).
+    input_usd_per_mtok: 0.236
+    output_usd_per_mtok: 4.12
+    pricing_status: measured
+  - id: api-haiku-4-5
+    kind: api
+    model: claude-haiku-4-5
+    endpoint: https://GATEWAY/v1/chat/completions
+    input_usd_per_mtok: 1.00
+    output_usd_per_mtok: 5.00
+    cache_read_usd_per_mtok: 0.10
+    pricing_status: list
+
+suites:
+  - id: classification-enum-v1
+    family: classification
+    items: s3://REPLACE/canary/classification/held-out-v1.jsonl
+    task_plugin: tasks.classification_enum
+    scorer: scorers.exact_label
+    # The floor's comparison layer is the cheapest API that meets it, because that is what the family
+    # would otherwise have paid.
+    baseline_layer: api-haiku-4-5
+    floor:
+      kind: paired_non_inferiority
+      metric: exact_label
+      margin_pp: 2.0
+      confidence: 0.80          # one-sided; the loss from a wrong admission is bounded by the validator
+    length_bins: [512, 2048, 8192]
+
+policies:
+  - id: direct
+    steps:
+      - layer_ref: box-qwen36-tp2x2
+
+operation_points:
+  - id: quality-c1
+    cell_kind: quality
+    concurrency: 1
+    input_tokens: 2048
+    output_tokens: 16
+    ephemeral_storage: 8Gi
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+  - id: perf-c16
+    cell_kind: perf
+    concurrency: 16
+    input_tokens: 2048
+    output_tokens: 16
+    ephemeral_storage: 30Gi     # the sglang image is large; a smaller request evicted a node once
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+    replicas: 2
+    tensor_parallel: 2
+
+cells:
+  - id: cls-box-quality
+    suite: classification-enum-v1
+    layer: box-qwen36-tp2x2
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260827
+  - id: cls-baseline-quality
+    suite: classification-enum-v1
+    layer: api-haiku-4-5
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260827
+  - id: cls-box-perf
+    suite: classification-enum-v1
+    layer: box-qwen36-tp2x2
+    policy: direct
+    operation_point: perf-c16
+    seed: 20260827

@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# One-shot workload bring-up / teardown for the Qwen3.8-27B serving reference.
+# One-shot workload bring-up / teardown for the vLLM / SGLang serving reference.
+#
+# This directory is a maintained asset, not an experiment record: it carries no date, its truth is
+# the current code, and the dated directory it grew out of
+# (2026-08-19-qwen3-8-27b-vllm-eks) is frozen as the record of that experiment.
 # Deploys the GPU pool, one serving engine, the agents, and the qwen-serving Service alias onto an
 # EXISTING cluster (cluster creation is out of scope). Default engine is vLLM (verified); SGLang is
-# an opt-in faster engine that needs a prebuilt image (see serving/sglang/README.md).
+# an opt-in faster engine that needs a prebuilt image (see sglang/README.md).
 #
 #   ./scripts/deploy.sh [--model NAME] [--tp N] [--replicas N] [--engine vllm|sglang]
 #                       [--context 131k|262k|1m]
 #                       [--only pool|serving|agents]
 #                       [--skip-pool] [--websearch] [--yes] [--skip-smoke]
 #
-# --model picks which directory under serving/models supplies the model's facts, its
-# context/concurrency table and its engine tuning. `ls serving/models` lists what is available.
+# --model picks which directory under models/ supplies the model's facts, its
+# context/concurrency table and its engine tuning. `ls models` lists what is available.
 # --context picks the window and, with it, how many sequences fit: 131k/16, 262k/9 (default,
 # the model's native window and so no rope scaling), 1m/2 (YaRN). --tune picks what to
 # optimise: latency (MTP speculative decoding, the default) or throughput (MTP off, a large
-# scheduler budget, more sequences). See serving/common/context-profiles.env.
+# scheduler budget, more sequences). See models/<name>/profiles.env.
 #   ./scripts/deploy.sh --down [--purge-pool] [--yes]
 #
 # --skip-pool (alias --skip-gpu): run the full flow WITHOUT the GPU NodePool phase, for a cluster that
@@ -38,7 +42,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
 ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; PURGE_POOL=0; SKIP_POOL=0; WEBSEARCH="${QWEN_WEBSEARCH:-0}"
 # Which model to serve. Everything that differs between models -- the id, the native window, the
 # KV geometry, the context/concurrency table, the engine tuning -- lives in one directory per
-# model under serving/models, so swapping one in is a flag and not an edit.
+# model under models/, so swapping one in is a flag and not an edit.
 QWEN_MODEL="${QWEN_MODEL:-qwen3.8-27b}"
 # Tensor-parallel width, and with it how many GPUs one replica takes. A deployment shape rather than
 # a model fact, so it is a flag and not in the model's directory. It matters for more than speed:
@@ -86,9 +90,9 @@ QWEN_REGION="${QWEN_REGION:-$(printf '%s' "$CTX_CLUSTER" | sed -n 's#^arn:aws:ek
 QWEN_REGION="${QWEN_REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || true)}}}"
 QWEN_BEDROCK_REGION="${QWEN_BEDROCK_REGION:-us-east-1}"   # Bedrock web_search: us-east-1|us-east-2|us-west-2
 CLUSTER_NAME="${CLUSTER_NAME:-$(printf '%s' "$CTX_CLUSTER" | sed 's#.*/##')}"
-MODEL_DIR="serving/models/${QWEN_MODEL}"
+MODEL_DIR="models/${QWEN_MODEL}"
 [ -d "$MODEL_DIR" ] || { printf 'unknown --model %s; have: %s\n' "$QWEN_MODEL" \
-  "$(ls serving/models 2>/dev/null | tr '\n' ' ')" >&2; exit 2; }
+  "$(ls models 2>/dev/null | tr '\n' ' ')" >&2; exit 2; }
 # shellcheck source=/dev/null
 . "$MODEL_DIR/model.env"
 . "$MODEL_DIR/profiles.env"
@@ -171,7 +175,7 @@ MV
 hfOverrides: '{"rope_scaling":{"rope_type":"yarn","factor":${YARN_FACTOR}.0,"original_max_position_embeddings":${NATIVE_CONTEXT}}}'
 MV
   fi
-  helm template x serving/charts/vllm-serving \
+  helm template x charts/vllm-serving \
     -f "$MODEL_DIR/values.yaml" -f "$mv" -n "$NS"
   rm -f "$mv"
 }
@@ -179,13 +183,13 @@ MV
 # with the model, so it is rendered rather than applied from a file with a name baked in.
 render_alias_vllm(){
   sed "s#app.kubernetes.io/instance: .*#app.kubernetes.io/instance: $(vllm_deploy_name)#" \
-    serving/alias-vllm.yaml
+    alias-vllm.yaml
 }
 render_sglang(){
   local m="$MODEL_DIR/sglang.yaml"
   [ -f "$m" ] || die "no sglang manifest for ${QWEN_MODEL} (expected $m)"
   # shellcheck source=/dev/null
-  . serving/sglang/image/image.env
+  . sglang/image/image.env
   local acct sgimg; acct="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)"
   sgimg="${acct}.dkr.ecr.${QWEN_REGION}.amazonaws.com/${ECR_REPO}:${TAG}"
   # shellcheck disable=SC2016
@@ -205,16 +209,16 @@ vllm_deploy_name(){
 engine_deploy(){ [ "$1" = vllm ] && vllm_deploy_name || echo sglang-qwen; }
 
 # NodePool is cluster-scoped; -n is irrelevant, so apply with the plain context.
-phase_pool(){ log "pool"; retry kubectl --context "$CTX" apply -f serving/pool/nodepool-gpu-l40s.yaml; }
+phase_pool(){ log "pool"; retry kubectl --context "$CTX" apply -f pool/nodepool-gpu-l40s.yaml; }
 
 phase_serving(){
   log "serving ($ENGINE)"
   if [ "$ENGINE" = sglang ]; then
     # shellcheck source=/dev/null
-    [ -f serving/sglang/image/image.env ] && . serving/sglang/image/image.env
+    [ -f sglang/image/image.env ] && . sglang/image/image.env
     if [ -n "${ECR_REPO:-}" ] && ! aws ecr describe-images --region "$QWEN_REGION" \
          --repository-name "$ECR_REPO" --image-ids imageTag="${TAG:-}" >/dev/null 2>&1; then
-      die "SGLang image ${ECR_REPO}:${TAG:-} not found. Run serving/sglang/image/build.sh first (see serving/sglang/README.md)."
+      die "SGLang image ${ECR_REPO}:${TAG:-} not found. Run sglang/image/build.sh first (see sglang/README.md)."
     fi
   fi
   local dname other; dname="$(engine_deploy "$ENGINE")"; other="$(engine_deploy "$(other_engine)")"
@@ -248,7 +252,7 @@ phase_serving(){
   fi
   log "alias qwen-serving -> $ENGINE ($dname)"
   if [ "$ENGINE" = vllm ]; then render_alias_vllm | kapply_stdin
-  else retry "${K[@]}" apply -f serving/alias-sglang.yaml; fi
+  else retry "${K[@]}" apply -f alias-sglang.yaml; fi
 }
 
 ensure_websearch_role(){
@@ -354,13 +358,13 @@ down(){
   for d in "$(engine_deploy vllm)" "$(engine_deploy sglang)"; do
     "${K[@]}" delete "deploy/$d" "svc/$d" --ignore-not-found >/dev/null 2>&1 || true
   done
-  "${K[@]}" delete -f serving/alias-vllm.yaml -f serving/alias-sglang.yaml --ignore-not-found >/dev/null 2>&1 || true
+  "${K[@]}" delete -f alias-vllm.yaml -f alias-sglang.yaml --ignore-not-found >/dev/null 2>&1 || true
   for a in opencode qwen-code hermes openclaw; do
     "${K[@]}" delete -f "agents/$a/deployment.yaml" --ignore-not-found >/dev/null 2>&1 || true
     disassociate_pod_identity "$a"   # unconditional: an auto-created role's ARN is not in env at teardown
   done
   if [ "$PURGE_POOL" = 1 ]; then
-    kubectl --context "$CTX" delete -f serving/pool/nodepool-gpu-l40s.yaml --ignore-not-found >/dev/null 2>&1 || true
+    kubectl --context "$CTX" delete -f pool/nodepool-gpu-l40s.yaml --ignore-not-found >/dev/null 2>&1 || true
     log "removed the cluster-scoped GPU NodePool (--purge-pool)"
   else
     log "kept the cluster-scoped GPU NodePool gpu-l40s (pass --purge-pool to remove it — it is shared)"
