@@ -410,7 +410,10 @@ if [ -n "${s3files_fs_arn}" ]; then
 fi
 
 guard_plan "${data_dir}" "data-layer" "${data_vars[@]}"
-terraform -chdir="${data_dir}" apply -input=false -auto-approve -lock-timeout=5m "${guarded_plan}" >/dev/null
+# The apply is the longest thing this script does — a tracking server takes tens of minutes, and
+# an S3 Files filesystem minutes more — so its output is NOT swallowed. Sending it to /dev/null
+# made a normal wait indistinguishable from a hang, which is its own kind of failure.
+terraform -chdir="${data_dir}" apply -input=false -auto-approve -lock-timeout=5m "${guarded_plan}"
 
 dl_out() { terraform -chdir="${data_dir}" output -raw "$1"; }
 mlflow_arn="$(dl_out mlflow_app_arn)"
@@ -482,7 +485,10 @@ if [ "${PROFILING_ONLY:-0}" = "1" ]; then
   # The narrowed plan is a different plan, so it is inspected in its own right before being applied.
   guard_plan "${eks_dir}" "cluster-targeted" "${targets[@]}" "${eks_vars[@]}"
 fi
-terraform -chdir="${eks_dir}" apply -input=false -auto-approve -lock-timeout=5m "${guarded_plan}" >/dev/null
+# The apply is the longest thing this script does — a tracking server takes tens of minutes, and
+# an S3 Files filesystem minutes more — so its output is NOT swallowed. Sending it to /dev/null
+# made a normal wait indistinguishable from a hang, which is its own kind of failure.
+terraform -chdir="${eks_dir}" apply -input=false -auto-approve -lock-timeout=5m "${guarded_plan}"
 mount_zone="$(terraform -chdir="${eks_dir}" output -raw s3files_mount_target_az)"
 [ -n "${mount_zone}" ] || die "s3files_mount_target_az output came back empty"
 say "S3 Files mount is reachable from ${mount_zone} only; the MCP pods are pinned there"
@@ -547,8 +553,10 @@ if [ -f "${generated}" ] && ! diff -q "${generated}" "${values_file}" >/dev/null
   say "values changed since the last run:"
   diff -u "${generated}" "${values_file}" || true
 fi
+# Not silenced either: --wait blocks for up to ten minutes while the pods come up, and a reader with
+# no output cannot tell that from a hang.
 helm --kube-context "${KCTX}" upgrade --install mcp "${eks_dir}/charts/mcp-host" \
-  -n mcp -f "${values_file}" --wait --timeout 10m >/dev/null
+  -n mcp -f "${values_file}" --wait --timeout 10m
 cp "${values_file}" "${generated}"
 say "deployed; the generated values are kept at ${generated}"
 
