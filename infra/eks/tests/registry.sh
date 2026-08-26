@@ -27,6 +27,7 @@ register_all_tests() {
   register_test registry-stale-context-dropped  test_registry_failed_resolve_drops_context baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-latest        test_accelprof_client_resolves_newest_run baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-hints         test_accelprof_client_hints_are_plugin_form baseline static "$TIMEOUT_STATIC"
+  register_test accelprof-client-chip          test_accelprof_client_chip_follows_the_request baseline static "$TIMEOUT_STATIC"
   register_test static-terraform-validate test_static_terraform_validate baseline static "$TIMEOUT_STATIC" terraform
 
   register_test image-build-ddp-sample-golden test_image_build_ddp_sample_golden baseline static "$TIMEOUT_STATIC" helm

@@ -122,3 +122,33 @@ test_accelprof_client_hints_are_plugin_form() {
     return 1
   }
 }
+
+# The chip a run is filed under has to be the one the reader asked for. It was hardwired to gpu, so a
+# CPU run came back labelled gpu and the reader could not tell whether the platform had understood
+# what they submitted. It is also the key that alias-based resolution uses, so a wrong value hides a
+# run from the search that is meant to find it.
+test_accelprof_client_chip_follows_the_request() {
+  local client
+  client="$(_ac_client)"
+  [ -x "$client" ] || return 2
+  local fails=0
+  render() {
+    ACCELPROF_PLATFORM_IMAGE="image.example/accelprof@sha256:0" KUBE_CONTEXT="" "$client" run \
+      --alias t-s --namespace ns --image image.example/w:t --dry-run "$@" -- true |
+      # Two spellings have to be read: the template's inline mapping, and the re-serialised block form
+      # the client emits once it has to inject device resources.
+      grep -A1 ACCELPROF_CHIP | tr -d '",{}' | grep -o 'value: *[a-z]*' | head -1 | awk '{ print $2 }'
+  }
+  local got
+  got="$(render)"
+  [ "$got" = "cpu" ] || { printf 'FAIL no device: chip=%s\n' "$got" >&2; fails=$((fails + 1)); }
+  got="$(render --gpu 1)"
+  [ "$got" = "gpu" ] || { printf 'FAIL --gpu: chip=%s\n' "$got" >&2; fails=$((fails + 1)); }
+  got="$(render --neuron 2)"
+  [ "$got" = "neuron" ] || { printf 'FAIL --neuron: chip=%s\n' "$got" >&2; fails=$((fails + 1)); }
+  got="$(render --profile neuron)"
+  [ "$got" = "neuron" ] || { printf 'FAIL --profile neuron: chip=%s\n' "$got" >&2; fails=$((fails + 1)); }
+  got="$(render --profile none)"
+  [ "$got" = "cpu" ] || { printf 'FAIL --profile none: chip=%s\n' "$got" >&2; fails=$((fails + 1)); }
+  [ "$fails" -eq 0 ] || return 1
+}

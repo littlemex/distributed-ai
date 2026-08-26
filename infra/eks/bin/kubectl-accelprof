@@ -289,6 +289,17 @@ cmd_run() {
     die "--alias must match ^[a-z0-9][a-z0-9-]{1,62}$ (it becomes an S3 prefix and an MLflow experiment name)"
 
   namespace="$(resolve_namespace "${namespace}")"
+
+  # The chip a run is filed under is the one it asked for. It is a label the reader searches with
+  # (alias + chip resolves a run when the id is not at hand) and reads in the output, so it has to
+  # match what they typed, not where the scheduler happened to put the Pod: a CPU job that lands on
+  # a GPU node borrowed for the day is still a CPU run. Neuron is decided by the device request too;
+  # the profiler mode follows from the chip rather than the other way round.
+  local chip="cpu"
+  [ -z "${gpus}" ] || chip="gpu"
+  [ -z "${neurons}" ] || chip="neuron"
+  [ "${profile}" != "neuron" ] || chip="neuron"
+
   local platform workload_id job_name
   platform="$(platform_image "${namespace}")"
   workload_id="wl-$(date +%y%m%d%H%M%S)-$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -318,7 +329,7 @@ cmd_run() {
     "WORKLOAD_ID=${workload_id}" "TTL_SECONDS=${ttl}" "SERVICE_ACCOUNT=mcp-producer" \
     "PLATFORM_IMAGE=${platform}" "WORKLOAD_IMAGE=${image}" "TOOLS_SCRIPT=${tools_script}" \
     "PROFILE_MODE=${profile}" "PROFILE_RANKS=${ranks}" "NSYS_ARGS=${nsys_args}" \
-    "CHIP=$([ "${profile}" = "neuron" ] && echo neuron || echo gpu)" \
+    "CHIP=${chip}" \
     "RECORD_ON_FAILURE=${record_on_fail}" "RECORDER_TIMEOUT=${recorder_timeout}"; do
     key="${kv%%=*}"; value="$(escape_replacement "${kv#*=}")"
     manifest="${manifest//@${key}@/${value}}"
