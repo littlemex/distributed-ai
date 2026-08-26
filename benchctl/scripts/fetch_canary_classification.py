@@ -25,6 +25,10 @@ SPLIT = "test"
 ROWS = "https://datasets-server.huggingface.co/rows?dataset={d}&config={c}&split={s}&offset={o}&length={n}"
 # The dataset ships integer labels; this is its documented order.
 LABELS = {"0": "ポジティブ", "1": "ニュートラル", "2": "ネガティブ"}
+# The neutral class is a three-star rating rather than a judgement, and a first run showed every miss on
+# both layers landing there while positive and negative were perfect. A suite that only separates layers
+# on the ambiguous class measures the label convention, so it is droppable and dropped by default.
+DROPPABLE = ("ニュートラル",)
 BINS = (256, 1024, 4096)
 
 
@@ -45,6 +49,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, default=Path("specs/items/classification-ja-public-v1.jsonl"))
     ap.add_argument("--per-bin", type=int, default=20, help="items per length bin per label")
+    ap.add_argument("--keep-neutral", action="store_true",
+                    help="keep the three-star class. Off by default: see DROPPABLE")
     ap.add_argument("--scan", type=int, default=1200, help="how many rows to read while stratifying")
     ap.add_argument("--split-rows", type=int, default=3000, help="rows in the split, for spreading")
     args = ap.parse_args()
@@ -61,6 +67,8 @@ def main() -> None:
             text = (row.get("text") or "").strip()
             label = LABELS.get(str(row.get("label")))
             if not text or not label or text in seen:
+                continue
+            if label in DROPPABLE and not args.keep_neutral:
                 continue
             seen.add(text)
             key = (bin_of(text), label)
@@ -81,8 +89,9 @@ def main() -> None:
     print(f"[OK] {len(items)} items -> {args.out}")
     for key in sorted(counts):
         print(f"     bin<={key[0]:>5}  {key[1]:<12} {counts[key]}")
-    print("[NOTE] a public dataset, not held-out production traffic: this proves the path, and the "
-          "rate it yields is not admissible evidence for routing")
+    kept = "3 classes" if args.keep_neutral else "2 classes (the three-star class dropped)"
+    print(f"[NOTE] {kept}. A public dataset, not held-out production traffic: this proves the path, "
+          "and the rate it yields is not admissible evidence for routing")
 
 
 if __name__ == "__main__":
