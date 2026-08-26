@@ -270,7 +270,11 @@ HCL
       *) note=" (unreachable: $(printf '%s' "${probe}" | tail -1))" ;;
     esac
     _distai_say "kubectl: context ${DISTAI_CONTEXT}, namespace ${DISTAI_NAMESPACE} at ${server:-an unknown endpoint}${note}"
-    _distai_say "k is kubectl --context ${DISTAI_CONTEXT}; KUBECONFIG is ${KUBECONFIG}"
+    if [ "${DISTAI_DEFINE_K:-1}" = "1" ]; then
+      _distai_say "k is kubectl --context ${DISTAI_CONTEXT}; KUBECONFIG is ${KUBECONFIG}"
+    else
+      _distai_say "KUBECONFIG is ${KUBECONFIG}; k was left as it was (DISTAI_DEFINE_K=0)"
+    fi
   else
     _distai_warn "kubectl is not pointed at ${cluster}; nothing in the chapters that uses k will work yet"
   fi
