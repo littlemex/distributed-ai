@@ -468,3 +468,101 @@ class TestRepairingTheDatasetsOwnIds:
             missing_first_run=[f"a/b.py::test_{i}" for i in range(15)],
         )
         assert result["scoreable"] is False
+
+
+class TestWhoBrokeTheSuite:
+    """A patch that stops the suite from running is a failed attempt, not an exclusion.
+
+    Recorded as unscoreable, it leaves the comparison — which excuses exactly the arms whose
+    patches do not parse. One self-hosted episode replaced a method definition in Django's
+    query.py with an unclosed heredoc marker; every test then failed to import, and the episode
+    was on course to be dropped rather than failed.
+    """
+
+    def test_the_patch_is_blamed_when_the_clean_checkout_runs(self):
+        broken = {"scoreable": False, "basis": "exit status only, no per-test lines"}
+        clean = {"scoreable": True, "basis": "per-test lines"}
+        assert score.blames_the_patch(broken, clean)
+
+    def test_the_environment_is_blamed_when_the_clean_checkout_fails_too(self):
+        broken = {"scoreable": False, "basis": "exit status only, no per-test lines"}
+        clean = {"scoreable": False, "basis": "exit status only, no per-test lines"}
+        assert not score.blames_the_patch(broken, clean)
+
+    def test_a_dataset_problem_is_never_the_patch(self):
+        """Ids the checkout does not contain are missing whatever the agent did."""
+        broken = {"scoreable": False, "basis": "ids this checkout does not contain"}
+        clean = {"scoreable": True, "basis": "per-test lines"}
+        assert not score.blames_the_patch(broken, clean)
+
+    def test_a_scoreable_run_is_not_reinterpreted(self):
+        assert not score.blames_the_patch(
+            {"scoreable": True, "basis": "per-test lines"},
+            {"scoreable": True, "basis": "per-test lines"},
+        )
+
+
+class TestUnclosedPatchBlocks:
+    def test_an_unclosed_block_is_refused_rather_than_applied(self):
+        """`new: <<<` with no terminator leaves the marker as the value, and applying it writes
+        `<<<` into the repository."""
+        observation = tools._write_patch({"path": "a.py", "old": "x", "new": "<<<"})
+        assert not observation.ok
+        assert "never closed" in observation.text
+
+    def test_the_same_for_the_old_side(self):
+        observation = tools._write_patch({"path": "a.py", "old": "<<<", "new": "y"})
+        assert not observation.ok
+
+    def test_a_patch_that_merely_mentions_the_marker_is_fine(self, monkeypatch):
+        """Refusing any patch containing `<<<` would refuse a fix to a conflict-marker parser."""
+        seen = {}
+        monkeypatch.setattr(
+            tools, "_edit", lambda path, old, new: seen.setdefault("called", True), raising=False
+        )
+        observation = tools._write_patch(
+            {"path": "a.py", "old": "if x:\n    pass", "new": "if x:  # <<< see below\n    pass"}
+        )
+        assert "never closed" not in observation.text
+
+
+class TestDjangosPollutedList:
+    def test_a_docstring_line_is_not_a_test_name(self):
+        """unittest prints the docstring under the name, and SWE-bench's parser kept some of
+        those lines as if they were tests: 14 of django-17084's 107 are English sentences."""
+        labels, rest = score._django_ids(
+            (
+                "test_x (aggregation.tests.Pruning.test_x)",
+                "Random() is not included in the GROUP BY when used for ordering.",
+                "test_y (aggregation.tests.Pruning)",
+            )
+        )
+        assert labels == (
+            "aggregation.tests.Pruning.test_x",
+            "aggregation.tests.Pruning.test_y",
+        )
+        assert rest == ("Random() is not included in the GROUP BY when used for ordering.",)
+
+    def test_a_list_that_is_mostly_prose_is_not_evidence(self, monkeypatch):
+        monkeypatch.setattr(tools, "uses_django_runner", lambda: True)
+        outcome = score.pytest_outcome(
+            ("A sentence.", "Another sentence.", "test_x (m.C)"), timeout=1
+        )
+        assert outcome["scoreable"] is False
+        assert "not test names" in outcome["basis"]
+
+
+class TestFragmentsWithNoTail:
+    def test_two_truncated_ids_are_not_welded_together(self):
+        """matplotlib keeps the head of each parametrised id and drops the tail, so bracket
+        balance alone would join `[args0-Length` to `[args1-Length` and lose both."""
+        ids = (
+            "t.py::test_shape_error[args0-Length",
+            "t.py::test_shape_error[args1-Length",
+            "t.py::test_other",
+        )
+        assert score.repair_ids(ids) == ids
+
+    def test_a_real_continuation_is_still_joined(self):
+        ids = ("t.py::test_powers[-10-1", "/", "10]", "t.py::test_x")
+        assert score.repair_ids(ids) == ("t.py::test_powers[-10-1 / 10]", "t.py::test_x")

@@ -55,6 +55,14 @@ ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # one argument. xarray names 785 tests to keep passing; quoted, that is 137 KiB, and the
 # scorer raised "argument list too long" after the episode had already run.
 MAX_COMMAND_CHARS = 60_000
+# How much of a regression list may be missing from the checkout before the instance stops
+# being evidence. Not zero, because the dataset's own lists are damaged in ways nothing here
+# can repair: matplotlib keeps only the first word of a parametrised id and drops the rest, and
+# Django's list contains docstring lines its log parser mistook for test names. A tenth was too
+# strict to keep instances that are otherwise perfectly runnable; a quarter still leaves three
+# quarters of the regression suite guarding the fix, and what was dropped is named in the
+# verdict either way.
+MAX_DROPPED_SHARE = 0.25
 
 
 def run(command: str, *, timeout: int = DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
@@ -107,7 +115,16 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int, decisive: bool = Fal
         return {"ran": 0, "passed": 0, "failed": 0, "ok": False, "scoreable": False,
                 "detail": "no tests named: this instance cannot be scored"}
     django = tools.uses_django_runner()
-    tests = tests if django else repair_ids(tests)
+    not_ids: tuple[str, ...] = ()
+    if django:
+        tests, not_ids = _django_ids(tests)
+        if not tests or len(not_ids) > MAX_DROPPED_SHARE * (len(tests) + len(not_ids)):
+            return {"ran": len(tests) + len(not_ids), "passed": 0, "failed": 0, "skipped": 0,
+                    "ok": False, "scoreable": False, "returncode": None,
+                    "basis": "the dataset's list is mostly not test names",
+                    "not_in_checkout": sorted(not_ids)[:20], "detail": ""}
+    else:
+        tests = repair_ids(tests)
     batches = _batched(tests)
     results = []
     for batch in batches:
@@ -128,7 +145,7 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int, decisive: bool = Fal
         # The decisive list has to be complete: scoring "did you fix it" on a subset of the
         # tests that define the fix is a different question with the same name. A regression
         # list may lose a few and say so — but not most of itself.
-        if not decisive and remaining and len(remaining) >= 0.9 * len(tests):
+        if not decisive and remaining and len(remaining) >= (1 - MAX_DROPPED_SHARE) * len(tests):
             dropped = tuple(sorted(missing))
             results = [_run_batch(b, django=django, timeout=timeout) for b in _batched(remaining)]
             tests = remaining
@@ -136,7 +153,7 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int, decisive: bool = Fal
             return {"ran": len(tests), "passed": 0, "failed": 0, "skipped": 0, "ok": False,
                     "scoreable": False, "returncode": 4,
                     "basis": "ids this checkout does not contain",
-                    "not_in_checkout": sorted(missing)[:20],
+                    "not_in_checkout": sorted({*missing, *not_ids})[:20],
                     "detail": "\n".join(r["text"][-600:] for r in results)[-1600:]}
 
     passed = sum(r["passed"] for r in results)
@@ -170,7 +187,7 @@ def pytest_outcome(tests: tuple[str, ...], *, timeout: int, decisive: bool = Fal
         "batches": len(results),
         # Named, not just counted: a reader has to be able to check that what was dropped was
         # a fragment of the dataset's own list and not a test the episode broke.
-        "not_in_checkout": list(dropped),
+        "not_in_checkout": sorted({*dropped, *not_ids}),
         "ok": returncode == 0 and passed >= len(tests),
         "scoreable": scoreable,
         "returncode": returncode,
@@ -196,6 +213,12 @@ def repair_ids(tests: tuple[str, ...]) -> tuple[str, ...]:
     out: list[str] = []
     pending: list[str] = []
     for test in tests:
+        # Only a continuation is absorbed, and a continuation never names a module: matplotlib's
+        # list keeps the head of each truncated id and drops the tail entirely, so joining on
+        # bracket balance alone would weld `[args0-Length` to `[args1-Length` and lose both.
+        if pending and "::" in test:
+            out.extend(pending)
+            pending = []
         pending.append(test)
         joined = " ".join(pending)
         if joined.count("[") <= joined.count("]"):
@@ -241,7 +264,7 @@ def _batched(tests: tuple[str, ...], *, budget: int | None = None) -> list[tuple
 
 def _run_batch(tests: tuple[str, ...], *, django: bool, timeout: int) -> dict:
     """One invocation of whichever runner this repository uses, and what it reported."""
-    quoted = " ".join(shlex.quote(_django_label(test) if django else test) for test in tests)
+    quoted = " ".join(shlex.quote(test) for test in tests)
     command = (
         f"{tools.DJANGO_COMMAND} {quoted}"
         if django
@@ -280,6 +303,24 @@ def _django_counts(whole: str) -> dict:
     }
 
 
+def _django_ids(tests: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split the dataset's Django list into labels the runner can take, and the rest.
+
+    unittest prints a test's docstring on the line after its name, and SWE-bench's log parser
+    kept some of those lines as if they were test names: 14 of django-17084's 107
+    `PASS_TO_PASS` entries are English sentences. Handing one to the runner raises "Empty module
+    name" and takes the whole instance out of the comparison, so they are separated here and
+    named in the verdict.
+    """
+    labels: list[str] = []
+    rest: list[str] = []
+    for test in tests:
+        label = _django_label(test)
+        looks_like_a_label = bool(re.fullmatch(r"[\w.]+", label)) and "." in label
+        (labels if looks_like_a_label else rest).append(label if looks_like_a_label else test)
+    return tuple(labels), tuple(rest)
+
+
 def _django_label(test_id: str) -> str:
     """`test_x (mod.Class)` or `test_x (mod.Class.test_x)` as a label the runner accepts.
 
@@ -291,6 +332,27 @@ def _django_label(test_id: str) -> str:
         return test_id.strip()
     name, dotted = match.group(1), match.group(2)
     return dotted if dotted.split(".")[-1] == name else f"{dotted}.{name}"
+
+
+# The bases that can be the patch's fault. A run that produced no per-test lines either could
+# not import the code or was stopped before collection, and a patch is quite capable of causing
+# both. The other bases are properties of the dataset or of the image and cannot be.
+BLAMEABLE = ("exit status only, no per-test lines",)
+
+
+def blames_the_patch(outcome: dict, baseline: dict) -> bool:
+    """Whether the patch, rather than this environment, is why nothing ran.
+
+    Without this the two are the same verdict: an episode whose patch broke the module produced
+    no per-test lines, was recorded unscoreable, and left the comparison — which excuses exactly
+    the arms whose patches do not parse, and those are the cheap ones. The baseline run is the
+    same suite with the agent's diff reverted and only the test patch applied.
+    """
+    return (
+        not outcome.get("scoreable")
+        and outcome.get("basis") in BLAMEABLE
+        and bool(baseline.get("scoreable"))
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -367,6 +429,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     pass_to_pass = pytest_outcome(tuple(instance["pass_to_pass"]), timeout=args.timeout)
     scoreable = fail_to_pass.get("scoreable", True) and pass_to_pass.get("scoreable", True)
+
+    # A patch that stops the suite from running at all is a failure, not an exclusion. Asked
+    # only when something did not run and the agent had changed something, because it costs a
+    # second run of the decisive tests.
+    if not scoreable and verdict.get("patch_applied") and not args.apply_gold:
+        reset_checkout()
+        subprocess.run(
+            ["/bin/bash", "-lc", f"cd {TESTBED} && git apply -v -"],
+            input=instance["test_patch"], capture_output=True, text=True,
+        )
+        baseline = pytest_outcome(
+            tuple(instance["fail_to_pass"]), timeout=args.timeout, decisive=True
+        )
+        if blames_the_patch(fail_to_pass, baseline) or blames_the_patch(pass_to_pass, baseline):
+            scoreable = True
+            verdict["broke_the_suite"] = True
+            verdict["reason"] = (
+                "the patch stopped the suite from running; the same tests run on this checkout "
+                "with the patch reverted, so this is a failed attempt and not an instance the "
+                "environment cannot score"
+            )
+        else:
+            verdict["baseline_basis"] = baseline.get("basis")
     verdict.update(
         fail_to_pass=fail_to_pass,
         pass_to_pass=pass_to_pass,
@@ -377,7 +462,7 @@ def main(argv: list[str] | None = None) -> int:
         # would bias against whichever arm reached them.
         scoreable=scoreable,
     )
-    if not scoreable:
+    if not scoreable and "reason" not in verdict:
         verdict["reason"] = (
             "this instance could not be scored here: "
             f"fail_to_pass={fail_to_pass.get('basis')}, pass_to_pass={pass_to_pass.get('basis')}"

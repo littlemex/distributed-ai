@@ -501,6 +501,18 @@ def _write_patch(args: dict[str, str]) -> Observation:
     path, old, new = args.get("path"), args.get("old"), args.get("new")
     if not path or old is None or new is None:
         return Observation("write_patch needs path, old and new", ok=False)
+    # A block that was opened and never closed leaves the marker itself as the value, and
+    # applying that writes `<<<` into the repository: one episode replaced a method definition
+    # in Django's query.py with it, and every test then failed to import. The usual cause is a
+    # turn cut off at the output limit, so the refusal says so.
+    for name, value in (("old", old), ("new", new)):
+        if value.strip() in ("<<<", ">>>"):
+            return Observation(
+                f"the {name} block was opened with <<< and never closed with >>>, so there is "
+                "nothing to apply. Send it again — and if the turn was cut off at the output "
+                "limit, send a smaller edit.",
+                ok=False,
+            )
     if is_test_path(path):
         # Refused here as well as failed at scoring time. The scorer is the guarantee;
         # this is so a model that tries it is told, rather than discovering at the end
