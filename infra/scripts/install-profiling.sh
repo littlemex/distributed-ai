@@ -16,9 +16,12 @@
 #   PRODUCER_NAMESPACES   comma-separated namespaces whose workloads may collect profiles
 #
 # Optional:
-#   DATA_LAYER_NAME       data layer to use (default "mcp"). One data layer serves many clusters: it
-#                         owns the shared MLflow tracking server and the per-region trace buckets.
-#                         Reuse is the default; creating one needs CREATE_DATA_LAYER=1.
+#   DATA_LAYER_NAME       data layer to use. Read from the registry (this cluster's default) when
+#                         unset, and there is no fallback: a wrong data layer is a wrong record of
+#                         record. One data layer serves many clusters — it owns the shared MLflow
+#                         tracking server and the per-region trace buckets. Reuse is the default;
+#                         creating one needs CREATE_DATA_LAYER=1. A successful install attaches it to
+#                         this cluster in the registry.
 #   CREATE_DATA_LAYER=1   allow creating a data layer that does not exist yet (first install)
 #   ANALYSIS_DIGEST       digest of the analysis MCP image (default: resolve tag v1-nsys)
 #   KNOWLEDGE_DIGEST      digest of the knowledge MCP image (default: resolve tag v1)
@@ -166,7 +169,16 @@ PY
 : "${CLUSTER_NAME:?set CLUSTER_NAME to the existing EKS cluster to wire}"
 : "${AWS_REGION:?set AWS_REGION to the cluster region}"
 : "${PRODUCER_NAMESPACES:?set PRODUCER_NAMESPACES to a comma-separated namespace list}"
-DATA_LAYER_NAME="${DATA_LAYER_NAME:-mcp}"
+# Which data layer this cluster records into is a relationship between two Terraform states, so it is
+# read from the registry rather than defaulted. The old default was "mcp", and it silently pointed a
+# cluster at a data layer in another region: an unattached cluster is now an error with a name.
+if [ -z "${DATA_LAYER_NAME:-}" ]; then
+  DATA_LAYER_NAME="$(aws ssm get-parameter --region "${AWS_REGION}" \
+    --name "/distai/v1/clusters/${CLUSTER_NAME}/defaults/data-layer" \
+    --query Parameter.Value --output text 2>/dev/null || true)"
+  [ -n "${DATA_LAYER_NAME}" ] && [ "${DATA_LAYER_NAME}" != "None" ] ||
+    die "no data layer is attached to ${CLUSTER_NAME}. Pass DATA_LAYER_NAME=<name> to use or create one; it is then recorded as this cluster's default."
+fi
 
 for tool in terraform kubectl helm aws python3 curl; do
   command -v "$tool" >/dev/null || die "$tool is required but not on PATH"
@@ -628,6 +640,13 @@ else
     *) die "the analysis server did not expose analyze (got: ${tools:-nothing})" ;;
   esac
 fi
+
+# Recorded after the install succeeded, which is when the relationship becomes true. This is what
+# lets the next run — and every chapter — resolve the data layer from the cluster's name alone.
+say "attaching '${DATA_LAYER_NAME}' to ${CLUSTER_NAME} in the registry"
+"${infra_dir}/scripts/distai-attach-data-layer.sh" -c "${CLUSTER_NAME}" -l "${DATA_LAYER_NAME}" \
+  -r "${AWS_REGION}" >/dev/null ||
+  warn "the platform is installed, but recording the attachment failed. Re-run distai-attach-data-layer.sh, or later runs will ask for DATA_LAYER_NAME again."
 
 cat <<SUMMARY
 
