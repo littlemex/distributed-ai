@@ -8,7 +8,7 @@ layers:
   - id: box-qwen36-tp2x2
     kind: self_hosted
     model: Qwen/Qwen3.6-35B-A3B
-    endpoint: http://qwen-serving.qwen-trial.svc.cluster.local:8000
+    endpoint: http://qwen-serving.qwen-trial.svc.cluster.local:8000/v1/chat/completions
     hourly_usd: 15.2174
     serving_ref: sha256:PLACEHOLDER-set-by-deploy
     # Derived from measured throughput, not from a list: prefill 17,947 tok/s aggregate at 16 in
@@ -19,7 +19,7 @@ layers:
   - id: api-haiku-4-5
     kind: api
     model: claude-haiku-4-5
-    endpoint: https://GATEWAY/v1/chat/completions
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
     input_usd_per_mtok: 1.00
     output_usd_per_mtok: 5.00
     cache_read_usd_per_mtok: 0.10
@@ -28,7 +28,10 @@ layers:
 suites:
   - id: classification-enum-v1
     family: classification
-    items: s3://REPLACE/canary/classification/held-out-v1.jsonl
+    # A public review-sentiment set, NOT held-out production traffic. This run proves the path; the
+    # rate it yields is not admissible evidence for routing and must be re-measured on real traffic.
+    items_provenance: public-dataset
+    items: specs/items/classification-ja-public-v1.jsonl
     task_plugin: tasks.classification_enum
     scorer: scorers.exact_label
     # The floor's comparison layer is the cheapest API that meets it, because that is what the family

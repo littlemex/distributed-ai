@@ -190,3 +190,53 @@ class TestIdentifiers:
         data["id"] = "2026-08-27-Classification"
         with pytest.raises(spec.SpecError, match="lowercase identifier"):
             spec.load_run(write(tmp_path, data))
+
+
+class TestPairedStatistic:
+    """The number admission rests on. Every case here is a way it could say yes when it should not."""
+
+    def stat(self, box, base, **kw):
+        from benchctl import scorers
+        return scorers.paired_non_inferiority(box, base, margin_pp=kw.pop("margin_pp", 2.0), **kw)
+
+    def test_identical_layers_are_non_inferior(self):
+        r = self.stat([True] * 40 + [False] * 10, [True] * 40 + [False] * 10)
+        assert r.difference_pp == 0.0 and r.non_inferior
+        assert r.only_box == 0 and r.only_baseline == 0
+
+    def test_a_clearly_worse_layer_is_refused(self):
+        box = [True] * 20 + [False] * 30
+        base = [True] * 45 + [False] * 5
+        r = self.stat(box, base)
+        assert r.difference_pp < -40 and not r.non_inferior
+
+    def test_only_the_discordant_pairs_move_the_difference(self):
+        """Items both layers get right or both get wrong carry no information about the difference,
+        which is why the paired design needs so many fewer items than an absolute bound."""
+        box = [True] * 30 + [False, True] + [False] * 18
+        base = [True] * 30 + [True, False] + [False] * 18
+        r = self.stat(box, base)
+        assert (r.only_baseline, r.only_box) == (1, 1)
+        assert r.difference_pp == 0.0
+
+    def test_the_bound_is_one_sided_and_below_the_estimate(self):
+        box = [True] * 38 + [False] * 10
+        base = [True] * 36 + [False] * 12
+        r = self.stat(box, base, confidence=0.80)
+        assert r.lcb_pp <= r.difference_pp
+
+    def test_a_higher_confidence_gives_a_lower_bound(self):
+        box = [True] * 38 + [False] * 10
+        base = [True] * 36 + [False] * 12
+        assert self.stat(box, base, confidence=0.95).lcb_pp <= self.stat(box, base, confidence=0.80).lcb_pp
+
+    def test_mismatched_lengths_are_refused(self):
+        import pytest as _pytest
+        with _pytest.raises(ValueError, match="same items"):
+            self.stat([True, False], [True])
+
+    def test_an_absolute_bound_at_this_n_would_have_refused_it(self):
+        """Why the design is paired: the same data, described absolutely, does not clear a 0.85 floor."""
+        from benchctl import scorers
+        assert scorers.wilson_lower(38, 48, 0.80) < 0.85
+        assert self.stat([True] * 38 + [False] * 10, [True] * 36 + [False] * 12).non_inferior
