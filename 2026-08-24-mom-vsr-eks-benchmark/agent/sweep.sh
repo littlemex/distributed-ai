@@ -122,6 +122,21 @@ wait_for() {
   done
 }
 
+# A gateway that has run out of credit answers every request the same way, and a sweep that
+# keeps going pulls a hundred more images to write a hundred more episodes that end on the same
+# wall. Checked per instance rather than per episode: one 402 can be a per-model quota, but a
+# whole instance ending that way is the account.
+credit_wall() {
+  local instance="$1" walled=0 seen=0
+  for policy in ${POLICIES}; do
+    local episode="${RESULTS}/${PASS_DIR}${instance}/${policy}/episode.json"
+    [[ -f "${episode}" ]] || continue
+    seen=$((seen + 1))
+    grep -q "credit_exhausted" "${episode}" && walled=$((walled + 1))
+  done
+  [[ "${seen}" -gt 0 && "${walled}" -eq "${seen}" ]]
+}
+
 batch=()
 for instance in "${INSTANCES[@]}"; do
   launch_instance "${instance}"
@@ -129,6 +144,13 @@ for instance in "${INSTANCES[@]}"; do
   if [[ "${#batch[@]}" -ge "${IN_FLIGHT}" ]]; then
     wait_for "${batch[@]}"
     "${HERE}/collect.sh" "${RESULTS}" | tail -8
+    for done_instance in "${batch[@]}"; do
+      if credit_wall "${done_instance}"; then
+        echo "[FAIL] every episode of ${done_instance} ended on exhausted credit; stopping here"
+        echo "       raise the budget and re-run: the sweep skips what is already scored"
+        exit 1
+      fi
+    done
     batch=()
   fi
 done
