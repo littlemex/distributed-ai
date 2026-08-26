@@ -208,6 +208,20 @@ phase_serving(){
   "${K[@]}" rollout status "deploy/$dname" --timeout=45m || {
     "${K[@]}" get pods 2>/dev/null; kubectl --context "$CTX" get nodeclaims 2>/dev/null | tail -5
     die "serving not Ready — check GPU quota and Karpenter NodeClaims"; }
+  # What the engine DID, not what it was asked to do. vLLM silently declines settings a model does
+  # not support -- prefix caching was requested on a hybrid-attention model and the engine reported
+  # enable_prefix_caching=False without a word on the command line, which turned a measurement into
+  # a measurement of a disabled flag. Printing the effective values makes that visible at deploy
+  # time instead of a week later.
+  if [ "$ENGINE" = vllm ]; then
+    log "effective engine settings (what vLLM actually used)"
+    "${K[@]}" logs "deploy/$dname" 2>/dev/null \
+      | grep -m1 "Initializing a V1 LLM engine" | tr ',' '\n' \
+      | grep -E "enable_prefix_caching|speculative_config|kv_cache_dtype|max_model_len|max_num_seqs|quantization" \
+      | sed 's/^ */  /' || echo "  (engine config line not found yet)"
+    "${K[@]}" logs "deploy/$dname" 2>/dev/null \
+      | grep -m1 "GPU KV cache size" | sed 's/^.*INFO/  INFO/' || true
+  fi
   log "alias qwen-serving -> $ENGINE ($dname)"
   if [ "$ENGINE" = vllm ]; then render_alias_vllm | kapply_stdin
   else retry "${K[@]}" apply -f serving/alias-sglang.yaml; fi

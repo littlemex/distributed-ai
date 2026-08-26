@@ -48,20 +48,49 @@ Short prompt, 256 output tokens, aggregate over the requests in flight.
 The knee is around 16 to 32. Past 32 aggregate throughput gains 5% while TTFT jumps from 0.24 s to
 5.6 s, which is queueing rather than work.
 
-### Prefix caching: still unavailable
+### Prefix caching: the engine refuses it, and that is the answer
 
-The same 37,792-token prompt sent three times took 4.33 s, 4.34 s, 4.34 s to first token —
-**1.00x**. The linear-attention layers hold a recurrent state that cannot be re-used, as on the
-dense sibling. Measured rather than inferred from the architecture, and it is why
-`enablePrefixCaching` stays false. Do not advertise cheap repeated prompts for this model.
+Measured twice, and the first measurement was worthless. With `--no-enable-prefix-caching`
+inherited from the dense sibling the same 37,792-token prompt took 4.33 / 4.34 / 4.34 s to first
+token — which measured a disabled flag, not an architecture. With the flag removed it took
+4.31 / 4.32 / 4.32 s, and the engine's own config line says why:
 
-### KV capacity
+```
+enable_prefix_caching=False        # with no --no-enable-prefix-caching passed
+```
+
+vLLM v0.27.1 falls back to off for this architecture without saying so on the command line. So the
+answer is the engine's, not the configuration's: **1.00x, no re-use, on a model where caching was
+asked for.**
+
+Why it is all or nothing rather than "10 of 40 layers work". Rebuilding a linear-attention layer's
+recurrent state requires forwarding the prefix from layer one, because layer n's input is layer
+n−1's output — so re-using only the full-attention KV saves the KV writes and nothing else. A
+working implementation has to snapshot the recurrent state alongside the paged KV, and then the
+saving is nearly the whole prefix rather than a quarter of it. That is what makes this worth
+re-testing on every vLLM upgrade: the payoff is large, and 94.9% of an agent episode's prompt
+tokens are a re-read.
+
+Two consequences for routing. Single-shot short work belongs on this box (its input is
+$0.551/Mtok against $1.00 for `claude-haiku-4-5` and $2.20 for `gpt-5.6-terra`). Multi-turn agent
+loops belong on an API, whose **cache read** is $0.10 to $0.22 and therefore beats this box's
+uncached input. The break-even, with a warm/cold TTFT ratio r, is $0.551 x r: caching would have to
+reach r < 0.18 to beat haiku and r < 0.40 to beat terra.
+
+### KV capacity, and the cheaper way to double it
 
 The engine reports 29.71 GiB of KV per rank and **3,092,774 tokens** of GPU KV cache, against about
 1.99M on Qwen3.8-27B. That is 40 KiB per token in practice, not the 20 KiB the geometry implies:
 `num_kv_heads` is 2 and does not divide `tensor-parallel-size` 4, so vLLM replicates the KV heads
 across ranks. Correct, and affordable here, but it is the first thing to check if the cache comes
 out smaller than expected. Maximum concurrency at a full 262,144-token request: 11.8x.
+
+The replication is also a lever. **TP=2 removes it** — 40 KiB per token becomes 20 — and at fp8 the
+35B weights are about 17.5 GiB a GPU, so two GPUs hold a replica with room for KV. That is the
+counterpart to `--kv-cache-dtype fp8`, which buys the same capacity by lowering the precision of
+the ten layers this architecture concentrates all of its long-range attention in. Prefer the
+configuration change to the numerical one, and if fp8 KV is tried anyway, validate it on long-context
+retrieval (needle / RULER) and not only on short tasks.
 
 ## What this means for routing
 
@@ -76,6 +105,9 @@ re-sent every turn belong on an API until prefix caching works on this architect
 
 - Quality. Nothing here says whether the model is any good; the canary suite (classification,
   extraction, translation, summarisation, OCR, GAIA L1, a small SWE-bench sample) has not run.
-- MTP on/off. `profiles.env` defaults to `throughput` (MTP off) on the argument that this workload's
-  decode is a rounding error, but the A/B has not been run on this model.
+- MTP on/off. `profiles.env` defaults to `throughput` (MTP off). Two arguments say that is right
+  before any A/B: decode is 0.5% of this workload's tokens, so the ceiling on speeding it up is
+  0.5%; and speculative decoding's benefit shrinks as the batch deepens, because at c=16 to 64 the
+  GPU is already compute-bound and a rejected draft token is wasted work. MTP is a c=1 to 4
+  latency instrument, not a throughput one at this operating point.
 - Vision throughput. Image tokens inflate prefill; the OCR family's box time is unmeasured.

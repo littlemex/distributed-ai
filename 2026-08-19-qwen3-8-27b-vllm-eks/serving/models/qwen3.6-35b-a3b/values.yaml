@@ -32,9 +32,13 @@ limitMmPerPrompt: '{"image": 2, "video": 1}'
 extraEnv:
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"   # allow max_model_len > native; YaRN handles the extension
 
-# Unsupported on the linear-attention layers, as on the dense sibling. Flipped only by measurement:
-# send the same 40k prompt twice and compare TTFT.
-enablePrefixCaching: false
+# ON, and this is the measurement that matters most for this box. 94.9% of the prompt tokens in a
+# measured agent episode were a re-read of the previous turn, which is 58% of the machine's time, so
+# whether vLLM can keep the full-attention layers' KV across turns for a hybrid model decides
+# whether the agent families belong here at all. The dense sibling could not; that was inherited as
+# an assumption into this file and then "measured" with the flag still off, which measured nothing.
+# If the engine refuses the combination it says so at startup, and that refusal is the answer.
+enablePrefixCaching: true
 
 # tool calling: Qwen3 chat templates emit XML (<tool_call><function=..><parameter=..>), so the
 # matching vLLM parser is qwen3_coder. hermes expects JSON and would fail to parse.
