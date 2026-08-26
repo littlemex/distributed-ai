@@ -4,7 +4,8 @@
 # EXISTING cluster (cluster creation is out of scope). Default engine is vLLM (verified); SGLang is
 # an opt-in faster engine that needs a prebuilt image (see serving/sglang/README.md).
 #
-#   ./scripts/deploy.sh [--model NAME] [--engine vllm|sglang] [--context 131k|262k|1m]
+#   ./scripts/deploy.sh [--model NAME] [--tp N] [--replicas N] [--engine vllm|sglang]
+#                       [--context 131k|262k|1m]
 #                       [--only pool|serving|agents]
 #                       [--skip-pool] [--websearch] [--yes] [--skip-smoke]
 #
@@ -39,9 +40,21 @@ ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; PURGE_POOL=0; SKIP_POO
 # KV geometry, the context/concurrency table, the engine tuning -- lives in one directory per
 # model under serving/models, so swapping one in is a flag and not an edit.
 QWEN_MODEL="${QWEN_MODEL:-qwen3.8-27b}"
+# Tensor-parallel width, and with it how many GPUs one replica takes. A deployment shape rather than
+# a model fact, so it is a flag and not in the model's directory. It matters for more than speed:
+# vLLM replicates KV heads across ranks when num_kv_heads does not divide the width, so a model with
+# two KV heads stores its cache twice at TP=4 and once at TP=2.
+QWEN_TP="${QWEN_TP:-}"
+# How many engine replicas share the node, behind the one Service. With --tp 2 on a four-GPU node,
+# two replicas use the whole node and each keeps its own KV pool, which is measurably more work per
+# GPU than one four-way replica: measured on Qwen3.6-35B-A3B, TP=2 on two GPUs reached 94% of the
+# prefill of TP=4 on four, so two of them is nearly twice the machine's throughput for the same money.
+QWEN_REPLICAS="${QWEN_REPLICAS:-}"
 while [ $# -gt 0 ]; do case "$1" in
   --engine) ENGINE="${2:?}"; shift 2;;
   --model) QWEN_MODEL="${2:?}"; shift 2;;
+  --tp) QWEN_TP="${2:?}"; shift 2;;
+  --replicas) QWEN_REPLICAS="${2:?}"; shift 2;;
   --context) QWEN_CONTEXT="${2:?}"; shift 2;;
   --tune) QWEN_TUNE="${2:?}"; shift 2;;
   --only) ONLY="${2:?}"; shift 2;;
@@ -120,7 +133,7 @@ confirm_target(){
   echo "  cluster : ${CTX_CLUSTER:-?}"
   echo "  account : $acct"
   echo "  namespace: $NS   engine: $ENGINE   web_search: $([ "$WEBSEARCH" = 1 ] && echo on || echo off)"
-  echo "  model   : ${QWEN_MODEL} ($MODEL_ID)"
+  echo "  model   : ${QWEN_MODEL} ($MODEL_ID)${QWEN_TP:+ at TP=$QWEN_TP}${QWEN_REPLICAS:+ x$QWEN_REPLICAS replicas}"
   echo "  context : ${QWEN_CONTEXT:-262k} (window $MAX_CONTEXT, up to $MAX_NUM_SEQS concurrent)"
   echo "  tune    : ${QWEN_TUNE:-latency} (step budget ${MAX_BATCHED_TOKENS:-auto}, mtp $([ -n "$SPEC_CONFIG" ] && echo on || echo off))"
   read -r -p "Proceed against this target? [y/N] " a
@@ -138,6 +151,17 @@ maxNumSeqs: $MAX_NUM_SEQS
 maxNumBatchedTokens: "$MAX_BATCHED_TOKENS"
 speculativeConfig: '$SPEC_CONFIG'
 MV
+  if [ -n "$QWEN_TP" ]; then
+    cat >> "$mv" <<MV
+tensorParallelSize: $QWEN_TP
+gpuCount: $QWEN_TP
+MV
+  fi
+  if [ -n "$QWEN_REPLICAS" ]; then
+    cat >> "$mv" <<MV
+replicas: $QWEN_REPLICAS
+MV
+  fi
   # YaRN only when the window asked for is longer than the model's own. Below native it
   # buys nothing and is not free: rope scaling trades short-context accuracy for reach, so
   # applying it at 131072 on a model whose native window is 262144 would pay that price

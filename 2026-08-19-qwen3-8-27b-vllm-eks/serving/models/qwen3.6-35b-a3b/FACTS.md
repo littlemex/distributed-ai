@@ -92,6 +92,66 @@ the ten layers this architecture concentrates all of its long-range attention in
 configuration change to the numerical one, and if fp8 KV is tried anyway, validate it on long-context
 retrieval (needle / RULER) and not only on short tasks.
 
+### Two TP=2 replicas beat one TP=4 replica on the same four GPUs
+
+`num_kv_heads` is 2, so TP=2 divides it and the replication disappears. Measured by redeploying at
+`--tp 2` and reading the engine's own report:
+
+| | 1 replica, TP=4, 4 GPUs | 1 replica, TP=2, 2 GPUs | 2 replicas, TP=2, 4 GPUs |
+| --- | --- | --- | --- |
+| KV per token | 40 KiB | **20.3 KiB** | 20.3 KiB |
+| KV cache | 3,092,774 tok | 2,173,090 tok | **4,346,180 tok** |
+| prefill, TTFT slope at c=1 | 7,676 tok/s | 7,252 tok/s | — |
+| prefill, aggregate at 16 in flight | not measured this way | — | **17,947 tok/s** |
+| input $/Mtok at that point | $0.551 (slope, c=1) | $0.583 (slope, c=1) | **$0.236** |
+| decode aggregate at c=16 | 1,025 tok/s | 842 tok/s | not measured |
+
+The load-bearing comparison is the second column: **TP=2 on half the GPUs reaches 94% of the prefill
+and 82% of the decode of TP=4 on all four**, so per GPU it is nearly twice as productive. Two of them
+therefore use the node better than one four-way replica, and the KV they hold between them is 1.41x.
+
+Aggregate prefill for the two-replica configuration, 37,792-token prompts, `max_tokens=1`:
+
+| In flight | Aggregate prefill tok/s | TTFT p50 | Input $/Mtok |
+| --- | --- | --- | --- |
+| 1 | 8,991 | 4.30 s | 0.470 |
+| 2 | 13,557 | 4.50 s | 0.312 |
+| 4 | 15,732 | 8.14 s | 0.269 |
+| 8 | 16,603 | 15.11 s | 0.255 |
+| 16 | 17,947 | 31.26 s | **0.236** |
+
+Reading is therefore about **half the price it was** — $0.236 against $0.551 — with no quantisation
+and no quality risk, purely from the tensor-parallel width. It is also the honest place to note what
+is not matched: the TP=4 column was measured by the TTFT-slope method at one request in flight and the
+two-replica column by aggregate throughput under load, so the ratio mixes two instruments. Re-running
+the aggregate probe against TP=4 is the one measurement left to close this comparison.
+
+The TTFT column is the cost of the throughput: a 37,792-token prompt waits 31 seconds at sixteen in
+flight. That is prefill queueing, and it is the reason admission needs a threshold rather than a
+policy of accepting everything the box can eventually finish.
+
+### Measuring this properly: SGLang's benchmark, and why it did not run here
+
+`sglang.benchmark.serving` (formerly `sglang.bench_serving`) is the right instrument for this and
+should be what the harness uses. It drives **any** OpenAI-compatible server — `--backend vllm-chat`
+against this box works — and it already has what a hand-rolled probe does not:
+
+- datasets that match the shapes this project cares about: `generated-shared-prefix` (the prefix-cache
+  test), `agentic-trace` (multi-turn), `mmmu` and `image` (the vision path), `mooncake` and
+  `longbench_v2` (long context), plus `random` with `--random-input-len/--random-output-len`
+- `--max-concurrency` and `--request-rate` for closed and open loop, `--output-file` JSONL
+- TTFT, TPOT and ITL with p90/p95/p99, request and token throughput, peak output tokens a second
+- `--cache-report`, which reports the hit rate with a device/host/storage breakdown
+
+`sglang.test.run_eval` covers part of the quality side too (mmlu, gsm8k, math, gpqa, humaneval,
+mgsm, aime25, mmmu, mmmu_pro, longbench_v2) against an arbitrary `--base-url`.
+
+It is not standalone any more: the module imports `sglang.benchmark.datasets`, `sglang.benchmark.utils`
+and `sglang.srt.*`, so it needs the package rather than one file. The obvious route — run
+`lmsysorg/sglang:latest` as a Job — was **evicted for ephemeral storage** on the CPU node while
+pulling the image. Whatever runs it needs a node with disk to spare, requested explicitly as
+`ephemeral-storage`, and it must not share a node with the server whose latency it is measuring.
+
 ## What this means for routing
 
 Per token, at the c=16 operating point, this box is cheaper than every API in the roster on both
