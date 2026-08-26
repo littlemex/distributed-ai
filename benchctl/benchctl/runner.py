@@ -121,7 +121,7 @@ def compare(box_dir: Path, baseline_dir: Path, *, margin_pp: float, confidence: 
 
 def _verdicts(directory: Path, version: str) -> dict[str, bool | None]:
     out: dict[str, bool | None] = {}
-    for line in (directory / f"score.{version}.jsonl").read_text().splitlines():
+    for line in (directory / f"score.{version}.jsonl").read_text().split("\n"):
         if not line.strip():
             continue
         row = json.loads(line)

@@ -47,7 +47,10 @@ class ClassificationEnum:
 
     def load(self, limit: int | None = None) -> list[Item]:
         out: list[Item] = []
-        for line in self.items_path.read_text().splitlines():
+        # split("\n") and not splitlines(): JSON escapes real newlines, but str.splitlines() also
+        # breaks on U+2028, U+2029, \x0b and friends, which json.dumps leaves raw with
+        # ensure_ascii=False. A long document containing one of those split a record in half.
+        for line in self.items_path.read_text().split("\n"):
             if not line.strip():
                 continue
             raw = json.loads(line)

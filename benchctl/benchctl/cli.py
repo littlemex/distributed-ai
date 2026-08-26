@@ -49,6 +49,9 @@ def cmd_run_local(args) -> int:
     """
     from . import runner
     from .tasks.classification_enum import ClassificationEnum
+    from .tasks.longctx_mc import LongContextChoice
+
+    PLUGINS = {ClassificationEnum.name: ClassificationEnum, LongContextChoice.name: LongContextChoice}
 
     run = spec.load_run(args.run)
     cells = [c for c in run.cells if c.id in args.cells] if args.cells else list(run.cells)
@@ -62,14 +65,14 @@ def cmd_run_local(args) -> int:
             print(f"[SKIP] {cell.id}: a {cell.kind} cell measures behaviour under load and has to run "
                   "in the cluster", file=sys.stderr)
             continue
-        if cell.suite.task_plugin != ClassificationEnum.name:
+        plugin = PLUGINS.get(cell.suite.task_plugin)
+        if plugin is None:
             print(f"[SKIP] {cell.id}: no plugin for {cell.suite.task_plugin} yet", file=sys.stderr)
             continue
-        task = ClassificationEnum(
-            items_path=args.spec_root / cell.suite.items if not Path(cell.suite.items).is_absolute()
-            else Path(cell.suite.items),
-            labels=tuple(args.labels.split(",")),
-        )
+        items_path = (args.spec_root / cell.suite.items if not Path(cell.suite.items).is_absolute()
+                      else Path(cell.suite.items))
+        task = (plugin(items_path=items_path, labels=tuple(args.labels.split(",")))
+                if plugin is ClassificationEnum else plugin(items_path=items_path))
         print(f"[RUN] {cell.id} on {cell.layer.id} ({cell.layer.endpoint})")
         summary = runner.run_quality_cell(cell, task, root / cell.id, limit=args.limit)
         summaries[cell.id] = summary
