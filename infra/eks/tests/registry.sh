@@ -16,6 +16,10 @@ register_test() {
 }
 
 register_all_tests() {
+  register_test registry-matches-state          test_registry_matches_state              baseline static "$TIMEOUT_STATIC" terraform
+  register_test registry-default-layer-attached test_registry_default_data_layer_is_attached baseline static "$TIMEOUT_STATIC"
+  register_test registry-preamble-contract      test_registry_preamble_contract          baseline static "$TIMEOUT_STATIC"
+  register_test registry-unknown-cluster-fails  test_registry_unknown_cluster_fails      baseline static "$TIMEOUT_STATIC"
   register_test static-terraform-validate test_static_terraform_validate baseline static "$TIMEOUT_STATIC" terraform
 
   register_test image-build-ddp-sample-golden test_image_build_ddp_sample_golden baseline static "$TIMEOUT_STATIC" helm

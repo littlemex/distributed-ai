@@ -92,6 +92,7 @@ done
 valid_suite "$SUITE" || { echo "Unknown suite: $SUITE" >&2; exit 1; }
 
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/registry.sh"
 source "$SCRIPT_DIR/cases/static.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/chart-contract.sh"
@@ -148,7 +149,17 @@ ensure_context() {
     log_fail "current kubectl context ($ctx) does not target $CLUSTER_NAME (got: $cluster)"
     exit 1
   fi
-  log_info "kubectl context: $ctx (cluster: $CLUSTER_NAME)"
+  # The cluster name alone does not pin a target: the region does too, and it can arrive from an
+  # ambient AWS_REGION that has nothing to do with this cluster. An EKS context ARN carries the
+  # region, so it is the one place where the two can be compared — a mismatch would otherwise send
+  # every aws call in the suite to a region the cluster is not in, and report absence as failure.
+  local ctx_region
+  ctx_region=$(printf '%s' "$ctx" | sed -n 's|^arn:aws[a-z-]*:eks:\([a-z0-9-]*\):.*|\1|p')
+  if [ -n "$ctx_region" ] && [ "$ctx_region" != "$AWS_REGION_OPT" ]; then
+    log_fail "region mismatch: the kubectl context is in $ctx_region but this run uses $AWS_REGION_OPT (pass --region $ctx_region, or unset AWS_REGION)"
+    exit 1
+  fi
+  log_info "kubectl context: $ctx (cluster: $CLUSTER_NAME, region: $AWS_REGION_OPT)"
 }
 
 selected_layer_present() {

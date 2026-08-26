@@ -21,6 +21,13 @@ resolve_region() {
     return 0
   fi
   AWS_REGION_OPT="$(tf_out region)"
+  # The kubectl context is asked before AWS_DEFAULT_REGION because it names the cluster under test:
+  # terraform output can come back empty (no credentials in the environment, since the profile is
+  # carried as a flag), and an ambient default region then silently points every aws call in the suite
+  # at a region the cluster is not in.
+  if [ -z "$AWS_REGION_OPT" ]; then
+    AWS_REGION_OPT="$(kubectl config current-context 2>/dev/null | sed -n 's|^arn:aws[a-z-]*:eks:\([a-z0-9-]*\):.*|\1|p')"
+  fi
   if [ -z "$AWS_REGION_OPT" ]; then
     AWS_REGION_OPT="${AWS_DEFAULT_REGION:-}"
   fi
