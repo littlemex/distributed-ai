@@ -4,9 +4,12 @@
 # EXISTING cluster (cluster creation is out of scope). Default engine is vLLM (verified); SGLang is
 # an opt-in faster engine that needs a prebuilt image (see serving/sglang/README.md).
 #
-#   ./scripts/deploy.sh [--engine vllm|sglang] [--context 131k|262k|1m] [--only pool|serving|agents]
+#   ./scripts/deploy.sh [--model NAME] [--engine vllm|sglang] [--context 131k|262k|1m]
+#                       [--only pool|serving|agents]
 #                       [--skip-pool] [--websearch] [--yes] [--skip-smoke]
 #
+# --model picks which directory under serving/models supplies the model's facts, its
+# context/concurrency table and its engine tuning. `ls serving/models` lists what is available.
 # --context picks the window and, with it, how many sequences fit: 131k/16, 262k/9 (default,
 # the model's native window and so no rope scaling), 1m/2 (YaRN). --tune picks what to
 # optimise: latency (MTP speculative decoding, the default) or throughput (MTP off, a large
@@ -32,8 +35,13 @@ export AWS_PAGER=""   # keep aws CLI from paginating / injecting output that wou
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
 ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; PURGE_POOL=0; SKIP_POOL=0; WEBSEARCH="${QWEN_WEBSEARCH:-0}"
+# Which model to serve. Everything that differs between models -- the id, the native window, the
+# KV geometry, the context/concurrency table, the engine tuning -- lives in one directory per
+# model under serving/models, so swapping one in is a flag and not an edit.
+QWEN_MODEL="${QWEN_MODEL:-qwen3.8-27b}"
 while [ $# -gt 0 ]; do case "$1" in
   --engine) ENGINE="${2:?}"; shift 2;;
+  --model) QWEN_MODEL="${2:?}"; shift 2;;
   --context) QWEN_CONTEXT="${2:?}"; shift 2;;
   --tune) QWEN_TUNE="${2:?}"; shift 2;;
   --only) ONLY="${2:?}"; shift 2;;
@@ -65,9 +73,12 @@ QWEN_REGION="${QWEN_REGION:-$(printf '%s' "$CTX_CLUSTER" | sed -n 's#^arn:aws:ek
 QWEN_REGION="${QWEN_REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || true)}}}"
 QWEN_BEDROCK_REGION="${QWEN_BEDROCK_REGION:-us-east-1}"   # Bedrock web_search: us-east-1|us-east-2|us-west-2
 CLUSTER_NAME="${CLUSTER_NAME:-$(printf '%s' "$CTX_CLUSTER" | sed 's#.*/##')}"
+MODEL_DIR="serving/models/${QWEN_MODEL}"
+[ -d "$MODEL_DIR" ] || { printf 'unknown --model %s; have: %s\n' "$QWEN_MODEL" \
+  "$(ls serving/models 2>/dev/null | tr '\n' ' ')" >&2; exit 2; }
 # shellcheck source=/dev/null
-. serving/common/model.env
-. serving/common/context-profiles.env
+. "$MODEL_DIR/model.env"
+. "$MODEL_DIR/profiles.env"
 
 log(){ printf '\n\033[1;32m[deploy]\033[0m %s\n' "$*"; }
 die(){ printf '\033[1;31m[deploy][FAIL]\033[0m %s\n' "$*" >&2; exit 1; }
@@ -109,6 +120,7 @@ confirm_target(){
   echo "  cluster : ${CTX_CLUSTER:-?}"
   echo "  account : $acct"
   echo "  namespace: $NS   engine: $ENGINE   web_search: $([ "$WEBSEARCH" = 1 ] && echo on || echo off)"
+  echo "  model   : ${QWEN_MODEL} ($MODEL_ID)"
   echo "  context : ${QWEN_CONTEXT:-262k} (window $MAX_CONTEXT, up to $MAX_NUM_SEQS concurrent)"
   echo "  tune    : ${QWEN_TUNE:-latency} (step budget ${MAX_BATCHED_TOKENS:-auto}, mtp $([ -n "$SPEC_CONFIG" ] && echo on || echo off))"
   read -r -p "Proceed against this target? [y/N] " a
@@ -136,11 +148,18 @@ hfOverrides: '{"rope_scaling":{"rope_type":"yarn","factor":${YARN_FACTOR}.0,"ori
 MV
   fi
   helm template x serving/charts/vllm-serving \
-    -f serving/values/qwen3.8-27b.values.yaml -f "$mv" -n "$NS"
+    -f "$MODEL_DIR/values.yaml" -f "$mv" -n "$NS"
   rm -f "$mv"
 }
+# The stable Service the agents target. Its selector is the engine's Deployment, which changes
+# with the model, so it is rendered rather than applied from a file with a name baked in.
+render_alias_vllm(){
+  sed "s#app.kubernetes.io/instance: .*#app.kubernetes.io/instance: $(vllm_deploy_name)#" \
+    serving/alias-vllm.yaml
+}
 render_sglang(){
-  [ -f serving/sglang/manifests/qwen3.8-27b.sglang.yaml ] || die "sglang manifest missing"
+  local m="$MODEL_DIR/sglang.yaml"
+  [ -f "$m" ] || die "no sglang manifest for ${QWEN_MODEL} (expected $m)"
   # shellcheck source=/dev/null
   . serving/sglang/image/image.env
   local acct sgimg; acct="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)"
@@ -149,11 +168,17 @@ render_sglang(){
   MODEL_ID="$MODEL_ID" SERVED_MODEL_NAME="$SERVED_MODEL_NAME" MAX_CONTEXT="$MAX_CONTEXT" \
   YARN_FACTOR="$YARN_FACTOR" NATIVE_CONTEXT="$NATIVE_CONTEXT" SGLANG_IMAGE="$sgimg" \
     envsubst '${MODEL_ID} ${SERVED_MODEL_NAME} ${MAX_CONTEXT} ${YARN_FACTOR} ${NATIVE_CONTEXT} ${SGLANG_IMAGE}' \
-    < serving/sglang/manifests/qwen3.8-27b.sglang.yaml
+    < "$m"
 }
 render_engine(){ if [ "$ENGINE" = vllm ]; then render_vllm; else render_sglang; fi; }
 other_engine(){ [ "$ENGINE" = vllm ] && echo sglang || echo vllm; }
-engine_deploy(){ [ "$1" = vllm ] && echo vllm-qwen-qwen3-8-27b || echo sglang-qwen; }
+# The same normalisation the chart's _helpers.tpl applies, so the script and the chart cannot
+# disagree about what the Deployment is called. Derived rather than written down: a hard-coded
+# name is what makes swapping a model an edit in three places instead of one flag.
+vllm_deploy_name(){
+  printf 'vllm-%s' "$(printf '%s' "$MODEL_ID" | tr 'A-Z' 'a-z' | tr './_' '---' | cut -c1-50 | sed 's/-*$//')"
+}
+engine_deploy(){ [ "$1" = vllm ] && vllm_deploy_name || echo sglang-qwen; }
 
 # NodePool is cluster-scoped; -n is irrelevant, so apply with the plain context.
 phase_pool(){ log "pool"; retry kubectl --context "$CTX" apply -f serving/pool/nodepool-gpu-l40s.yaml; }
@@ -172,12 +197,20 @@ phase_serving(){
   # bring the new engine up, then free the GPU by removing the other engine (one engine per node).
   render_engine | kapply_stdin
   "${K[@]}" delete "deploy/$other" --ignore-not-found >/dev/null 2>&1 || true
+  # And any vLLM Deployment for a DIFFERENT model: the node has four GPUs and one engine fits, so
+  # `--model` is a swap. Left behind, the old one holds the GPUs and the new one never schedules.
+  for stale in $("${K[@]}" get deploy -l app.kubernetes.io/name=vllm-serving \
+                   -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+    [ "$stale" = "$dname" ] || { log "removing $stale (a different model held the GPUs)"; \
+      "${K[@]}" delete "deploy/$stale" --ignore-not-found >/dev/null 2>&1 || true; }
+  done
   log "waiting for $ENGINE Ready (first run 10-15 min: node + image + weights + warmup)"
   "${K[@]}" rollout status "deploy/$dname" --timeout=45m || {
     "${K[@]}" get pods 2>/dev/null; kubectl --context "$CTX" get nodeclaims 2>/dev/null | tail -5
     die "serving not Ready — check GPU quota and Karpenter NodeClaims"; }
-  log "alias qwen-serving -> $ENGINE"
-  retry "${K[@]}" apply -f "serving/alias-$ENGINE.yaml"
+  log "alias qwen-serving -> $ENGINE ($dname)"
+  if [ "$ENGINE" = vllm ]; then render_alias_vllm | kapply_stdin
+  else retry "${K[@]}" apply -f serving/alias-sglang.yaml; fi
 }
 
 ensure_websearch_role(){

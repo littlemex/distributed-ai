@@ -1,0 +1,47 @@
+# vLLM tuning overlay for Qwen/Qwen3.6-35B-A3B-FP8.
+# Layered on charts/vllm-serving/values.yaml with `helm template -f`. Model facts live in
+# model.env and FACTS.md; the window and concurrency come from profiles.env.
+#
+# Why these values:
+#  - 256-expert MoE, 8 experts per token, so ~3B active of 35B stored. Prefill is compute-bound
+#    and this workload is 99.5% prompt tokens, which is why this model is worth trying at all.
+#  - Hybrid attention again: 40 layers, three linear-attention layers then one full, ten times
+#    over. Prefix caching on the recurrent layers is the same problem it was on Qwen3.8-27B, so
+#    enablePrefixCaching stays false until a probe says otherwise. Do NOT advertise cheap
+#    repeated prompts for this model before that probe.
+#  - Vision tower present (27 blocks, hidden 1152), so this one box can serve the OCR family too
+#    and no separate VL deployment is needed. limitMmPerPrompt caps the memory that costs.
+#  - fp8 weights ~35 GiB do not fit one 48 GiB L40S once KV and activations are counted, so
+#    tensorParallelSize 4 on g6e.12xlarge. num_kv_heads is 2, which does NOT divide 4 -- vLLM
+#    replicates KV heads across ranks in that case, which is correct but means KV is stored four
+#    times. That is affordable here only because the geometry is 20 KiB per token; it is the first
+#    thing to check if the KV cache comes out smaller than expected.
+#  - The checkpoint is already fp8, so no online `quantization` flag: setting one on top would
+#    ask vLLM to quantise weights that are quantised.
+
+image: vllm/vllm-openai:v0.27.1
+nodeRole: gpu-l40s
+gpuCount: 4
+tensorParallelSize: 4
+gpuMemoryUtilization: 0.92
+
+# Multimodal memory guard: this model reads images natively. Two per request is enough for the
+# OCR family (a page and a crop) and bounds the vision tower's activation memory.
+limitMmPerPrompt: '{"image": 2, "video": 1}'
+
+extraEnv:
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"   # allow max_model_len > native; YaRN handles the extension
+
+# Unsupported on the linear-attention layers, as on the dense sibling. Flipped only by measurement:
+# send the same 40k prompt twice and compare TTFT.
+enablePrefixCaching: false
+
+# tool calling: Qwen3 chat templates emit XML (<tool_call><function=..><parameter=..>), so the
+# matching vLLM parser is qwen3_coder. hermes expects JSON and would fail to parse.
+enableAutoToolChoice: true
+toolCallParser: qwen3_coder
+
+# Serve in non-thinking mode by default: an agent backend does not want a reasoning preamble every
+# turn, and thinking with greedy decoding has been observed to repeat endlessly on this family.
+# Per-request chat_template_kwargs can re-enable it.
+chatTemplateKwargs: '{"enable_thinking": false}'

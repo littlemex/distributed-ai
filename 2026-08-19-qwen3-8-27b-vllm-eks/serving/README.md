@@ -43,9 +43,9 @@ SGLang stays experimental until all four are met (currently 0/4):
 
 - `charts/vllm-serving/` — Helm chart. `strategy: Recreate`, since a GPU node holds fixed devices and
   a rolling update cannot stand up a second pod. Rendered with `helm template | kubectl apply`.
-- `values/qwen3.8-27b.values.yaml` — the tuning: FP8, MTP, `limit-mm`, and YaRN. Tuning, not facts.
+- `models/<name>/values.yaml` — the tuning for one model: FP8, MTP, `limit-mm`, YaRN. Tuning, not facts.
 - `sglang/` — manifests, the custom-image build (`image/`), and its own README.
-- `common/model.env` — the four values shared by both engines (model id, served name, YaRN factor,
+- `models/<name>/model.env` — the values shared by both engines (model id, served name, YaRN factor,
   max context), injected at deploy so the two definitions cannot drift.
 - `pool/nodepool-gpu-l40s.yaml` — the production on-demand pool (L40S x4). Experiment pools live under
   `../experiments/`.
