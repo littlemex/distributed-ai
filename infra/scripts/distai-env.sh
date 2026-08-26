@@ -12,6 +12,22 @@
 #   DISTAI_CREATED_RELEASE     release tag it was created with
 #   DISTAI_DATA_LAYER          the cluster's default data layer, if one is attached
 #   DISTAI_DATA_LAYERS         every data layer attached to it
+#   DISTAI_CONTEXT             the kubectl context for this cluster
+#   DISTAI_NAMESPACE           the namespace chapters work in. Default distai. Set it before sourcing
+#                              to override, and it stays overridden for the rest of the shell.
+#   KUBECONFIG                 a kubeconfig for this cluster and namespace alone, rewritten each time
+#
+# It also leaves `k` as a shorthand for kubectl, and points kubectl at this cluster and at the working
+# namespace, so that no chapter has to spell out update-kubeconfig, use-context and set-context again.
+# Doing that here is the reason it is sourced: a shell function and an exported KUBECONFIG only survive
+# if the shell itself runs the file. `k` is a function rather than an alias because an alias is not
+# expanded in a non-interactive shell, so a script that sourced this would find `k` missing.
+#
+# The kubeconfig it writes is a file of its own (~/.kube/distai/<cluster>.<namespace>.yaml), not an
+# entry in the default one. Sourcing this for one cluster would otherwise repoint every terminal and
+# every tool that reads ~/.kube/config at whatever cluster was resolved last, which is a bad thing to
+# do to someone who has another cluster open next door. The only shell this changes is this one; the
+# only file it touches is its own.
 #
 # Only the first four come from the registry because only they cannot come from Terraform: the state
 # cannot record its own address, and a fresh checkout has no backend.hcl to read it from. Everything
@@ -22,8 +38,8 @@
 # That has consequences it must respect: no `set -e`, no `exit`, and nothing on stdout, so that a
 # chapter's own command substitution is never polluted. Failures return non-zero and say what to fix.
 #
-# Read-only. It creates nothing in AWS and applies nothing. The one file it may write is backend.hcl,
-# and only when missing.
+# Nothing in AWS is created or applied; every AWS call it makes is a read. Locally it writes two files:
+# backend.hcl when it is missing, and the kubeconfig above. DISTAI_DEFINE_K=0 skips defining `k`.
 
 _distai_say() { printf 'distai-env: %s\n' "$*" >&2; }
 _distai_warn() { printf 'distai-env: warning: %s\n' "$*" >&2; }
@@ -31,6 +47,14 @@ _distai_fail() { printf 'distai-env: error: %s\n' "$*" >&2; }
 
 _distai_resolve() {
   local cluster region prefix params eks_dir
+  # Whatever a previous source of this file left behind is dropped up front, before any path that can
+  # return early. A resolution that fails must not leave `k` quietly pointed at the cluster resolved
+  # last: a mistyped CLUSTER_NAME would then keep working, against the wrong cluster. Dropping our own
+  # KUBECONFIG (and only ours) puts the shell back where it was before this file was ever sourced.
+  if [ -n "${DISTAI_CONTEXT:-}" ]; then
+    unset DISTAI_CONTEXT
+    case "${KUBECONFIG:-}" in "${HOME}/.kube/distai/"*) unset KUBECONFIG ;; esac
+  fi
   cluster="${CLUSTER_NAME:-}"
   if [ -z "${cluster}" ]; then
     _distai_fail "CLUSTER_NAME is not set. Set it to the cluster this chapter works with, e.g. export CLUSTER_NAME=distai-eks"
@@ -145,12 +169,82 @@ HCL
       local field expected actual
       for field in bucket:"${DISTAI_STATE_BUCKET}" key:"${DISTAI_STATE_KEY}" region:"${AWS_REGION}"; do
         expected="${field#*:}"
-        actual="$(awk -F'"' -v k="${field%%:*}" '$0 ~ "^[[:space:]]*"k"[[:space:]]*=" {print $2; exit}' "${eks_dir}/backend.hcl")"
+        actual="$(awk -F'"' -v k="${field%%:*}" '$0 ~ "^[[:space:]]*"k"[[:space:]]*=" {print $2; exit}' \
+          "${eks_dir}/backend.hcl" 2>/dev/null || true)"
         if [ -n "${actual}" ] && [ "${actual}" != "${expected}" ]; then
           _distai_warn "backend.hcl ${field%%:*} is '${actual}' but the registry says '${expected}'. terraform uses backend.hcl."
         fi
       done
     fi
+  fi
+
+  # ── kubectl, pointed at this cluster and at nothing else ──────────────────────────────────────
+  #
+  # The kubeconfig is per cluster and per namespace. Per cluster is obvious; per namespace is because
+  # the namespace is stored in the file, so two shells on the same cluster with different namespaces
+  # — the profiling chapter's team-a next to a window on distai — would otherwise rewrite each other's
+  # default behind their backs, and the bare kubectl in one of them would start acting elsewhere.
+  local namespace="${DISTAI_NAMESPACE:-distai}"
+  local kubeconfig="${DISTAI_KUBECONFIG:-${HOME}/.kube/distai/${cluster}.${namespace}.yaml}"
+  if ! command -v kubectl >/dev/null 2>&1; then
+    _distai_warn "kubectl is not installed; the k commands in the chapters will not work"
+  elif ! mkdir -p "$(dirname "${kubeconfig}")" 2>/dev/null; then
+    _distai_warn "cannot create $(dirname "${kubeconfig}"); kubectl is left as it was"
+  else
+    local kube_err="" kube_rc=0
+    # Rewritten on every source rather than only when absent: a cluster rebuilt under the same name
+    # gets a new endpoint and a new CA, and a stale entry then fails in a way that reads like a broken
+    # cluster. The call is a read against EKS and is idempotent. Written in two branches, with no
+    # array, because an empty array under `set -u` is an error in the bash that ships with macOS.
+    # `|| kube_rc=$?` on every capture, here and below: this file is sourced, so an assignment whose
+    # command fails would abort the caller's shell outright under its own `set -e`, and the caller would
+    # see one of bash's internal messages instead of ours.
+    if [ -n "${AWS_PROFILE:-}" ]; then
+      kube_err="$( { KUBECONFIG="${kubeconfig}" aws eks update-kubeconfig --name "${cluster}" \
+        --region "${AWS_REGION}" --alias "${cluster}" --profile "${AWS_PROFILE}" >/dev/null; } 2>&1 )" ||
+        kube_rc=$?
+    else
+      kube_err="$( { KUBECONFIG="${kubeconfig}" aws eks update-kubeconfig --name "${cluster}" \
+        --region "${AWS_REGION}" --alias "${cluster}" >/dev/null; } 2>&1 )" || kube_rc=$?
+    fi
+    if [ "${kube_rc}" -eq 0 ]; then
+      export KUBECONFIG="${kubeconfig}"
+      # The namespace goes on the context, not into the k wrapper, so that a bare kubectl in this shell
+      # — including the ones terraform's kubernetes and helm providers run — agrees with what k does.
+      if kubectl config use-context "${cluster}" >/dev/null 2>&1 &&
+        kubectl config set-context --current --namespace="${namespace}" >/dev/null 2>&1; then
+        export DISTAI_CONTEXT="${cluster}"
+        export DISTAI_NAMESPACE="${namespace}"
+      else
+        _distai_warn "wrote ${kubeconfig} but could not select the context in it"
+      fi
+    else
+      # The reason is kept rather than discarded. "no such cluster", "expired credentials" and "this
+      # profile cannot describe it" need different answers, and only the message distinguishes them.
+      _distai_warn "aws eks update-kubeconfig failed for ${cluster} in ${AWS_REGION}: $(printf '%s' "${kube_err:-exit ${kube_rc}}" | tail -1)"
+      _distai_warn "kubectl is left as it was; nothing in the chapters that uses k will work yet"
+    fi
+  fi
+
+  # k names the context on every call. With a kubeconfig of its own that is already unambiguous, so
+  # this is for the case that is not: a shell where something else has since changed the current
+  # context, or a chapter that sets KUBECONFIG for a moment. Which cluster a command lands on should
+  # not depend on what ran before it.
+  #
+  # A function, not an alias, because an alias is not expanded in a non-interactive shell and a script
+  # that sourced this would then find k missing. It is defined through eval so that the definition is
+  # parsed after the unalias below: a reader who already has `alias k=kubectl` in their rc file would
+  # otherwise have this file's `k() { ... }` alias-expanded while the file is being read, which in bash
+  # silently defines kubectl() instead, and in zsh is a parse error that abandons the rest of the file.
+  if [ "${DISTAI_DEFINE_K:-1}" = "1" ]; then
+    unalias k 2>/dev/null || true
+    eval 'k() {
+      if [ -n "${DISTAI_CONTEXT:-}" ]; then
+        command kubectl --context "${DISTAI_CONTEXT}" "$@"
+      else
+        command kubectl "$@"
+      fi
+    }'
   fi
 
   # A chapter written against one release can say so; a cluster built from another is then a warning
@@ -161,6 +255,25 @@ HCL
   fi
 
   _distai_say "${cluster} in ${AWS_REGION} (account ${DISTAI_ACCOUNT_ID}, release ${DISTAI_RELEASE:-unrecorded}, data layer ${DISTAI_DATA_LAYER:-none})"
+  # Which cluster and which namespace kubectl will now act on, in the same breath. "Am I pointed at the
+  # right thing" is the question worth answering before it is asked. One read of the namespace itself
+  # answers three of them at once: whether the endpoint is reachable at all, whether the credentials
+  # are accepted, and whether the namespace the chapters use exists yet.
+  if [ -n "${DISTAI_CONTEXT:-}" ]; then
+    local server probe note=""
+    server="$(kubectl config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null || true)"
+    probe="$( { kubectl --request-timeout=10s get --raw "/api/v1/namespaces/${DISTAI_NAMESPACE}" \
+      >/dev/null; } 2>&1 )" || true
+    case "${probe}" in
+      "") ;;
+      *NotFound* | *"not found"*) note=" (the namespace does not exist yet)" ;;
+      *) note=" (unreachable: $(printf '%s' "${probe}" | tail -1))" ;;
+    esac
+    _distai_say "kubectl: context ${DISTAI_CONTEXT}, namespace ${DISTAI_NAMESPACE} at ${server:-an unknown endpoint}${note}"
+    _distai_say "k is kubectl --context ${DISTAI_CONTEXT}; KUBECONFIG is ${KUBECONFIG}"
+  else
+    _distai_warn "kubectl is not pointed at ${cluster}; nothing in the chapters that uses k will work yet"
+  fi
 }
 
 _distai_resolve

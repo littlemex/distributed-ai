@@ -94,3 +94,74 @@ test_registry_unknown_cluster_fails() {
     return 1
   fi
 }
+
+# The kubectl side of the preamble, which is the part with side effects. Three of these assertions are
+# bugs that were found in review rather than hypotheticals: a reader who already has `alias k=kubectl`
+# in their rc file had this file's own `k() { ... }` alias-expanded while it was being read, which in
+# bash silently redefined kubectl and in zsh was a parse error that abandoned the rest of the file; and
+# the default kubeconfig must come out byte-identical, because repointing every terminal at whatever
+# cluster was sourced last is not something a chapter preamble may do.
+test_registry_preamble_configures_kubectl() {
+  local helper="$SCRIPT_DIR/../../scripts/distai-env.sh"
+  [ -f "$helper" ] || return 2
+  command -v kubectl >/dev/null || return 2
+  local before="" after=""
+  [ -f "$HOME/.kube/config" ] && before="$(shasum "$HOME/.kube/config" | awk '{print $1}')"
+  local shell out
+  for shell in bash zsh; do
+    command -v "$shell" >/dev/null || continue
+    # An alias is planted first, so the shell is the one the bug needed.
+    out="$("$shell" -c "shopt -s expand_aliases 2>/dev/null; alias k=kubectl
+      cd '$SCRIPT_DIR/../..' && CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' \
+        AWS_PROFILE='${AWS_PROFILE_OPT:-}' source scripts/distai-env.sh >/dev/null 2>&1
+      printf '%s|%s|%s|%s' \"\$(type k 2>&1 | head -1)\" \"\$(type kubectl 2>&1 | head -1)\" \
+        \"\$DISTAI_CONTEXT\" \"\$KUBECONFIG\"")"
+    case "$out" in
+      *"k is a function"* | *"k is a shell function"*) ;;
+      *) printf '%s: k is not a function after sourcing: %s\n' "$shell" "$out" >&2; return 1 ;;
+    esac
+    case "$out" in
+      *"kubectl is a function"* | *"kubectl is a shell function"*)
+        printf '%s: sourcing redefined kubectl itself: %s\n' "$shell" "$out" >&2; return 1 ;;
+    esac
+    case "$out" in
+      *"|${CLUSTER_NAME}|"*) ;;
+      *) printf '%s: DISTAI_CONTEXT is not %s: %s\n' "$shell" "$CLUSTER_NAME" "$out" >&2; return 1 ;;
+    esac
+    case "$out" in
+      *".kube/distai/${CLUSTER_NAME}."*) ;;
+      *) printf '%s: KUBECONFIG is not this cluster and namespace: %s\n' "$shell" "$out" >&2; return 1 ;;
+    esac
+  done
+  if [ -n "$before" ]; then
+    after="$(shasum "$HOME/.kube/config" | awk '{print $1}')"
+    [ "$before" = "$after" ] || {
+      printf 'sourcing modified the default kubeconfig\n' >&2
+      return 1
+    }
+  fi
+  # And it must survive a caller that runs with set -eu, since chapters may source it from a script.
+  bash -c "set -eu; cd '$SCRIPT_DIR/../..' && CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' \
+    AWS_PROFILE='${AWS_PROFILE_OPT:-}' source scripts/distai-env.sh >/dev/null 2>&1" || {
+    printf 'sourcing under set -eu failed\n' >&2
+    return 1
+  }
+}
+
+# A resolution that fails must not leave kubectl pointed at the cluster resolved before it. Otherwise a
+# mistyped CLUSTER_NAME keeps working, against the wrong cluster, after a single warning.
+test_registry_failed_resolve_drops_context() {
+  local helper="$SCRIPT_DIR/../../scripts/distai-env.sh"
+  [ -f "$helper" ] || return 2
+  local out
+  out="$(bash -c "cd '$SCRIPT_DIR/../..'
+    CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' AWS_PROFILE='${AWS_PROFILE_OPT:-}' \
+      source scripts/distai-env.sh >/dev/null 2>&1
+    CLUSTER_NAME=no-such-cluster-\$\$ AWS_REGION='$(registry_region)' AWS_PROFILE='${AWS_PROFILE_OPT:-}' \
+      source scripts/distai-env.sh >/dev/null 2>&1
+    printf '%s|%s' \"\$DISTAI_CONTEXT\" \"\$KUBECONFIG\"")"
+  [ "$out" = "|" ] || {
+    printf 'a failed resolve left kubectl pointed somewhere: %s\n' "$out" >&2
+    return 1
+  }
+}
