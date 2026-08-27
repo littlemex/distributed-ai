@@ -74,6 +74,12 @@ class Layer:
     # Text-only families ignore both fields entirely.
     image_style: str = "openai"        # "openai" | "anthropic"
     messages_endpoint: str | None = None   # required when image_style is "anthropic"
+    # Whether this layer accepts `temperature`. claude-sonnet-5 and claude-opus-5 reject it —
+    # "`temperature` is deprecated for this model" — and a quality cell's determinism rests on pinning
+    # it to zero, so a layer that refuses it is not being measured under the same conditions as one
+    # that accepts it. Declared rather than detected, so the difference appears in the spec a reader
+    # reviews instead of only in a retry path.
+    sends_temperature: bool = True
 
     @staticmethod
     def load(raw: dict, where: str) -> "Layer":
@@ -92,6 +98,7 @@ class Layer:
             pricing_status=raw.get("pricing_status", "measured"),
             image_style=raw.get("image_style", "openai"),
             messages_endpoint=raw.get("messages_endpoint"),
+            sends_temperature=bool(raw.get("sends_temperature", True)),
         )
         _require(bool(layer.model) and bool(layer.endpoint), f"{where}: model and endpoint are required")
         _require(layer.pricing_status in ("measured", "list", "placeholder"),

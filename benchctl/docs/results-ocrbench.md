@@ -5,9 +5,13 @@ prefix caching on. API: `claude-haiku-4-5` through the gateway. Items: 278 OCRBe
 source dataset across 25 categories and all ten question types, fixed seed, images capped at a 1,600-pixel
 long edge.
 
-`claude-sonnet-5` and `claude-opus-5` cells are still running and are not in this page. The project's
-roster also named gemma4, grok4.6 and the gpt-5.6 family; the gateway's `/v1/models` returns 23 Anthropic
-models and none of those, so they are absent rather than substituted.
+Four layers: the box, `claude-haiku-4-5`, `claude-sonnet-5`, `claude-opus-5`. The project's roster also
+named gemma4, grok4.6 and the gpt-5.6 family; the gateway's `/v1/models` returns 23 Anthropic models and
+none of those, so they are absent rather than substituted.
+
+**No frontier claim on this page is final.** Two measurement defects, both mine or the gateway's rather
+than the models', removed different items from different layers, and they are described below because they
+matter more than the scores.
 
 ## The result
 
@@ -30,16 +34,46 @@ Fifty-nine discordant pairs is worth stating next to the long-context result, wh
 difference over 24 items. This one is comfortably past the twenty-five-to-thirty pairs a ten-point claim
 needs, and the p-value is not close to the line.
 
-## The success sets cross, and that changes which routing policy is allowed
+## All four layers, on the 200 items all four answered
+
+Each layer's own rate is over a different subset, so the four numbers as reported are **not comparable**:
+
+| layer | as reported | excluded | $/1k items |
+| --- | --- | --- | --- |
+| box | 235/278 = 0.845 | **0** | **$0.117** |
+| haiku | 168/239 = 0.703 | 39 | $0.311 |
+| sonnet-5 | 212/234 = 0.906 | 44 | $1.047 |
+| opus-5 | 194/201 = 0.965 | 77 | $7.733 |
+
+The rate rises with price and so does the exclusion count, which is the whole problem: a layer that was
+handed fewer items was handed the easier ones. On the 200 items every layer answered:
+
+| layer | passed | rate | $/1k items | vs box, paired |
+| --- | --- | --- | --- | --- |
+| **sonnet-5** | 196/200 | **0.980** | $1.047 | box-only 3, sonnet-only 16, p = 0.004 |
+| opus-5 | 194/200 | 0.970 | $7.733 | box-only 4, opus-only 15, p = 0.019 |
+| **box** | 183/200 | **0.915** | **$0.117** | — |
+| haiku | 159/200 | 0.795 | $0.311 | box-only 34, haiku-only 10, p < 0.001 |
+
+Two layers are on the frontier and two are not. **haiku is dominated outright** — worse than the box and
+2.7 times the cost. **opus-5 is dominated by sonnet-5** on this set: one point lower at 7.4 times the price,
+though see the caveat below before reading much into that ordering. What remains is a genuine choice:
+**sonnet-5 for 6.5 points more accuracy at nine times the cost, or the box.**
+
+## The success sets cross everywhere, and that changes which routing policy is allowed
 
 On SWE-bench the cheap layer's successes were a strict subset of the premium layer's — zero reversals in
 twenty pairs — which is what makes cheap-then-escalate safe there: escalating can only recover, never lose.
 
-Here **haiku won ten items the box lost.** The sets intersect rather than nest, so a policy that tries cheap
-first and escalates on a detected failure cannot reach the union: whichever layer runs first, some of the
-other's wins are unreachable. This family needs a **predictive** router — choose per item — or it needs to
-accept losing one side's wins. That is a structural fact about the family, not a preference, and it is one
-bit that decides the policy.
+Here **every pair crosses.** haiku won 10 items the box lost; the box won 3 that sonnet-5 lost and 4 that
+opus-5 lost. Nothing nests, in either direction, at any price point. So a policy that tries one layer and
+escalates on a detected failure cannot reach the union — whichever layer runs first, some of the other's
+wins are unreachable. This family needs a **predictive** router, choosing per item, or it has to accept
+losing one side's wins. That is a structural fact about the family rather than a preference, and it is the
+one bit that decides the policy.
+
+It is also the opposite of SWE-bench, where nesting made escalation safe. So the policy is a property of
+the family, not of the gateway: **the same router cannot use one strategy everywhere.**
 
 Where each layer wins says why:
 
@@ -92,6 +126,27 @@ Anthropic's `source: {type: base64, ...}` shape, and the spec **refuses** `image
 an endpoint. A multimodal family costs a second wire format that a text family never sees, and the
 asymmetry belongs in the client rather than the task.
 
+## The second defect: a token cap silently removed a premium model's hardest third
+
+`max_tokens=48` was chosen so the containment metric could not be gamed by verbosity. **It removed 38 of
+opus-5's items**, and it did it invisibly: every one hit `finish_reason: max_tokens` at exactly 48 tokens
+having emitted **no text at all**. opus-5 spends the budget before it says anything, so a cap that a
+short-answer model never notices truncated a reasoning model to silence. Those 38 replies carried no error,
+so they were excluded as unusable rather than counted wrong — correct behaviour hiding a design fault.
+
+Which means opus-5's 0.965 is over a **doubly** filtered subset: the gateway dropped 39 large images, and
+the cap dropped 38 more where the model wanted to think longer, and wanting to think longer correlates with
+difficulty. It is the easiest 72% of the sample, and it is why the "opus-5 below sonnet-5" ordering above
+must not be quoted.
+
+The fix is not a bigger cap for its own sake. The metric's honesty already has a guard — `match_budget`
+truncates the *prediction before matching*, so verbosity cannot buy a hit — and `max_tokens` was doing that
+job a second time and worse. Raise the cap, keep the guard.
+
+Both defects share a shape worth naming: **a constraint chosen for one layer silently re-sampled the items
+for another.** The exclusion counts, 0 / 39 / 44 / 77, were the visible symptom and were sitting in the
+summary the whole time.
+
 ## What this does not say
 
 * **The box's cost figure here is derived from text-measured token rates**, and they are the wrong rates for
@@ -103,6 +158,11 @@ asymmetry belongs in the client rather than the task.
   shared prefixes, is unmeasured.
 * **278 items over 25 categories is thin per category** — five wins in a category is five items. The
   aggregate difference is solid; the per-category breakdown is a hypothesis about where to look next.
-* **Two layers, not four.** The mid and premium cells are still running, and the interesting question they
-  answer is whether premium recovers the chart-reasoning items the box loses, which would make a predictive
-  router worth building rather than merely necessary.
+* **Neither frontier is final until a re-run** with images small enough for the gateway and a cap large
+  enough for a reasoning model, sending identical inputs to every layer. The direction — box and sonnet-5 on
+  the frontier, haiku dominated, every pair crossing — is unlikely to reverse, but the numbers will move and
+  the opus-5 ordering may.
+* **`sends_temperature` is a real difference, not bookkeeping.** sonnet-5 and opus-5 reject the parameter
+  ("`temperature` is deprecated for this model"), so their answers are not pinned the way the box's and
+  haiku's are. A quality cell that cannot fix temperature is measuring a distribution rather than a point,
+  and a rate from it deserves a wider interval than the arithmetic suggests.

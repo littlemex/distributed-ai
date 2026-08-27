@@ -132,16 +132,16 @@ class LayerClient:
                 "model": self.layer.model,
                 "messages": [{"role": "user", "content": _to_anthropic(prompt)}],
                 "max_tokens": max_tokens,
-                "temperature": temperature,
             }
             if anthropic else
             {
                 "model": self.layer.model,
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
-                "temperature": temperature,
             }
         )
+        if self.layer.sends_temperature:
+            payload_out["temperature"] = temperature
         body = json.dumps(payload_out).encode()
         headers = {"content-type": "application/json"}
         if self.api_key:
@@ -157,6 +157,19 @@ class LayerClient:
                     status = response.status
             except urllib.error.HTTPError as exc:
                 detail = exc.read(1200).decode("utf-8", "replace")
+                # A 5xx that wraps a validation error is permanent, and retrying it is pure waste.
+                # The gateway returns 502 for a Bedrock ValidationException, so sending `temperature`
+                # to a model that rejects it cost four attempts and fourteen seconds of backoff on
+                # every one of 278 items — forty minutes of a run spent re-asking a settled question,
+                # with the cause hidden behind the retries.
+                permanent = any(m in detail for m in
+                                ("ValidationException", "is deprecated", "invalid_request_error",
+                                 "unsupported_content"))
+                if permanent:
+                    return Reply(text="", error=f"http {exc.code} (not retried, permanent): "
+                                               f"{detail[:400]}",
+                                 http_status=exc.code, attempts=attempt,
+                                 latency_s=time.perf_counter() - started)
                 if exc.code in self.RETRYABLE and attempt < self.max_attempts:
                     time.sleep(backoff)
                     backoff *= 2

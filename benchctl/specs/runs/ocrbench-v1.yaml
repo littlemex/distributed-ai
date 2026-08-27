@@ -39,6 +39,9 @@ layers:
     kind: api
     model: claude-sonnet-5
     endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    # Rejects the parameter outright: "`temperature` is deprecated for this model". So this layer's
+    # answers are not pinned the way the box's and haiku's are, and its rate carries that caveat.
+    sends_temperature: false
     # The gateway's OpenAI shim rejects image_url parts outright, so images go to the Anthropic
     # endpoint instead. Found by having all 278 items come back as transport failures.
     image_style: anthropic
@@ -51,6 +54,9 @@ layers:
     kind: api
     model: claude-opus-5
     endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    # Rejects the parameter outright: "`temperature` is deprecated for this model". So this layer's
+    # answers are not pinned the way the box's and haiku's are, and its rate carries that caveat.
+    sends_temperature: false
     # The gateway's OpenAI shim rejects image_url parts outright, so images go to the Anthropic
     # endpoint instead. Found by having all 278 items come back as transport failures.
     image_style: anthropic
