@@ -242,12 +242,17 @@ platform_image() {
   printf '%s' "${image}"
 }
 
+# Where the recordings can be read in a browser. The URL is published in the contract, not assembled
+# here: the two shapes of SageMaker MLflow are served from different hosts and one of those hosts
+# carries the app's id, so reassembling it in the client would put AWS's hostname layout in the place
+# furthest from the data layer that knows which MLflow this is. Older contracts have no such key, and a
+# link is not worth failing over, so its absence is silent.
 mlflow_experiment_url() {
-  local ns="$1" region arn
-  region="$(k get configmap accelprof-config -n "${ns}" -o jsonpath='{.data.ACCELPROF_REGION}' 2>/dev/null || true)"
+  local ns="$1" url arn
+  url="$(k get configmap accelprof-config -n "${ns}" -o jsonpath='{.data.ACCELPROF_MLFLOW_UI_URL}' 2>/dev/null || true)"
+  [ -n "${url}" ] || return 0
   arn="$(k get configmap accelprof-config -n "${ns}" -o jsonpath='{.data.ACCELPROF_TRACKING_URI}' 2>/dev/null || true)"
-  [ -n "${region}" ] && [ -n "${arn}" ] || return 0
-  printf 'https://%s.experiments.sagemaker.aws/  (tracking server %s)\n' "${region}" "${arn##*/}"
+  printf '%s  (%s)\n' "${url}" "${arn##*:}"
 }
 
 cmd_run() {

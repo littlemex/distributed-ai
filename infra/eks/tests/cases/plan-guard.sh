@@ -99,6 +99,13 @@ test_plan_guard_table() {
     'aws_s3_bucket.traces["us-east-2"]=delete' || fails=$((fails + 1))
   _pg_expect refused "delete is refused even with ALLOW_UNRELATED" data-layer 1 0 \
     'aws_sagemaker_mlflow_tracking_server.this[0]=delete' || fails=$((fails + 1))
+  # Both shapes of MLflow, because whichever one a data layer created is the one holding its run
+  # metadata, and a backend switch arrives as exactly this plan.
+  _pg_expect refused "deleting the MLflow app is refused" data-layer 1 0 \
+    'aws_sagemaker_mlflow_app.this[0]=delete' || fails=$((fails + 1))
+  _pg_expect refused "swapping an app for a tracking server is refused" data-layer 1 1 \
+    'aws_sagemaker_mlflow_app.this[0]=delete' 'aws_sagemaker_mlflow_tracking_server.this[0]=create' ||
+    fails=$((fails + 1))
   _pg_expect refused "a replacement is a delete" data-layer 0 0 \
     'aws_kms_key.data=delete,create' || fails=$((fails + 1))
 
@@ -214,4 +221,97 @@ EOF2
     printf 'these prevent_destroy resources are not in protected_addresses:%s\n' "$missing" >&2
     return 1
   }
+}
+
+# Runs the installer's own decide_mlflow_backend against a set of inputs and reports its answer, or
+# "die". The function is pure, so this needs no cluster, no AWS and no Terraform; it is extracted from
+# the installer rather than copied here so it cannot drift from what runs.
+_pg_backend_decision() {
+  local script
+  script="$(mktemp)"
+  {
+    printf 'die() { printf "die\\n"; exit 9; }\n'
+    # Sourced from a file rather than spliced into a -c string: the function's own error messages
+    # contain apostrophes, and quoting them through an inline script is how a test starts testing its
+    # own quoting instead of the code.
+    sed -n '/^decide_mlflow_backend()/,/^}/p' "$(_pg_installer)"
+    printf 'decide_mlflow_backend "$@"\n'
+  } >"$script"
+  grep -q '^decide_mlflow_backend()' "$script" || {
+    printf 'could not extract decide_mlflow_backend\n' >&2
+    rm -f "$script"
+    return 2
+  }
+  bash "$script" "$1" "$2" "$3" "$4" 2>/dev/null || true
+  rm -f "$script"
+}
+
+# Switching backends destroys the MLflow that holds the run metadata, so what a data layer already
+# records to has to beat both the variable default and the environment. The rows that matter most are
+# the ones where the state has lost the ARN: what is live in AWS decides then, and the mlflow_backend
+# output — which only echoes a variable from the last apply — must not, or a torn-down data layer would
+# resurrect the backend it used to have for someone who asked for the other one.
+#
+# What this does NOT cover: how the live_server / live_app arguments are discovered. That is an AWS
+# lookup, and its own failure mode — reading "AWS would not answer" as "nothing is there" — is what
+# test_plan_guard_aws_lookup_failure_is_not_absence below is for.
+test_plan_guard_mlflow_backend_never_switches_silently() {
+  local fails=0 got
+  local srv="arn:aws:sagemaker:us-east-2:1:mlflow-tracking-server/profiling-mlflow"
+  local app="arn:aws:sagemaker:us-east-2:1:mlflow-app/app-ABC"
+  _pg_check_backend() { # want state_arn live_server live_app asked label
+    got="$(_pg_backend_decision "$2" "$3" "$4" "$5")"
+    [ "$got" = "$1" ] || { printf 'FAIL %s: wanted %s, got %q\n' "$6" "$1" "$got" >&2; fails=$((fails + 1)); }
+  }
+  _pg_check_backend app    "$app" ""      "$app" ""       "an app data layer keeps app"
+  _pg_check_backend server "$srv" "srv"   ""     ""       "a server data layer keeps server"
+  _pg_check_backend die    "$srv" "srv"   ""     "app"    "asking for app on a server data layer is refused"
+  _pg_check_backend die    "$app" ""      "$app" "server" "asking for server on an app data layer is refused"
+  # State lost the ARN (rebuilt state, or a teardown that emptied it): AWS is the authority.
+  _pg_check_backend server ""     "srv"   ""     ""       "a live tracking server the state forgot decides server"
+  _pg_check_backend app    ""     ""      "$app" ""       "a live app the state forgot decides app"
+  _pg_check_backend die    ""     "srv"   ""     "app"    "asking for app while a tracking server is live is refused"
+  _pg_check_backend die    ""     "srv"   "$app" ""       "two live MLflows and no ARN in the state is refused"
+  # Nothing exists anywhere, so no records are at stake and the caller decides.
+  _pg_check_backend app    ""     ""      ""     ""       "a fresh data layer defaults to app"
+  _pg_check_backend server ""     ""      ""     "server" "a fresh data layer honours the request"
+  unset -f _pg_check_backend
+  [ "$fails" -eq 0 ] || return 1
+}
+
+# A lookup that fails is not a lookup that came back empty. Reading the first as the second is how a
+# re-run creates a second, empty MLflow and points the cluster at it while the one holding the history
+# sits unreferenced — nothing destroyed, nothing logged, and the plan guard never fires because there is
+# no delete in it. So: only the API's own "it does not exist" may pass; everything else stops the run.
+test_plan_guard_aws_lookup_failure_is_not_absence() {
+  local script fails=0 got
+  script="$(mktemp)"
+  {
+    printf 'die() { printf "die\\n"; exit 9; }\n'
+    sed -n '/^aws_absent_or_die()/,/^}/p' "$(_pg_installer)"
+    # The stub stands in for the CLI: it prints what $AWS_OUT says and exits with $AWS_RC.
+    printf 'aws() { printf "%%s" "${AWS_OUT}"; return "${AWS_RC}"; }\n'
+    printf 'aws_absent_or_die "the thing" -- sagemaker describe-something\n'
+  } >"$script"
+  grep -q '^aws_absent_or_die()' "$script" || { rm -f "$script"; printf 'could not extract aws_absent_or_die\n' >&2; return 2; }
+  _pg_check_lookup() { # want out rc label
+    got="$(env AWS_OUT="$2" AWS_RC="$3" bash "$script" 2>/dev/null || true)"
+    [ "$got" = "$1" ] || { printf 'FAIL %s: wanted %q, got %q\n' "$4" "$1" "$got" >&2; fails=$((fails + 1)); }
+  }
+  _pg_check_lookup 'arn:aws:sagemaker:us-east-2:1:mlflow-app/app-A' \
+    'arn:aws:sagemaker:us-east-2:1:mlflow-app/app-A' 0 "a successful lookup is passed through"
+  _pg_check_lookup '' \
+    'An error occurred (ResourceNotFound) when calling the DescribeMlflowTrackingServer operation: ...' 254 \
+    "the API saying it does not exist is absence"
+  _pg_check_lookup die \
+    'An error occurred (AccessDeniedException) when calling the ListMlflowApps operation: ...' 254 \
+    "a denied lookup stops the run"
+  _pg_check_lookup die \
+    'An error occurred (ThrottlingException) when calling the ListMlflowApps operation: ...' 254 \
+    "a throttled lookup stops the run"
+  _pg_check_lookup die "Invalid choice: 'list-mlflow-apps'" 252 \
+    "a CLI too old to know the command stops the run"
+  unset -f _pg_check_lookup
+  rm -f "$script"
+  [ "$fails" -eq 0 ] || return 1
 }

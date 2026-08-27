@@ -29,20 +29,52 @@ variable "trace_expire_after_days" {
 }
 
 variable "mlflow_enabled" {
-  description = "Create the managed SageMaker MLflow tracking server. Paid and always-on while created, so default OFF. Setting this false and applying DESTROYS the server and its run metadata (only the S3 artifacts survive) — that is a teardown, not a pause. To pause cost while idle, use `aws sagemaker stop-mlflow-tracking-server` instead."
+  description = "Create the SageMaker MLflow this data layer records to (which one is var.mlflow_backend). Paid, so default OFF. Setting this false and applying DESTROYS it and its run metadata (only the S3 artifacts survive) — that is a teardown, not a pause. A tracking server can be paused instead with `aws sagemaker stop-mlflow-tracking-server`; an app has nothing to stop (the API has no start/stop for one)."
   type        = bool
   default     = false
 }
 
-variable "mlflow_app_name" {
+variable "mlflow_name" {
   description = <<-EOT
-    Name of the SageMaker MLflow tracking server (when mlflow_enabled). Empty derives it from
-    name_prefix, which is what keeps two data layers in one account and region from colliding: every
-    other resource here is already named after the prefix, and a fixed default made the tracking
-    server the one name a second data layer could not have.
+    Name of the SageMaker MLflow this data layer records to. Empty derives it from name_prefix, which
+    is what keeps two data layers in one account and region from colliding: every other resource here
+    is already named after the prefix, and a fixed default made the MLflow the one name a second data
+    layer could not have. Changing it after the fact REPLACES the MLflow, destroying its run metadata.
   EOT
   type        = string
   default     = ""
+}
+
+variable "mlflow_backend" {
+  description = <<-EOT
+    Which SageMaker MLflow to create: "app" (serverless) or "server" (a managed tracking server,
+    billed for every hour it exists and stoppable to pause that). Both speak the same MLflow REST API
+    and both are addressed by their ARN as MLFLOW_TRACKING_URI, so nothing above this layer changes;
+    the sagemaker-mlflow plugin reads the resource type out of the ARN to pick the endpoint and the
+    signing service.
+
+    THIS IS THE ONE DECISION THAT CANNOT BE REVISITED. Changing it on a live data layer destroys the
+    MLflow that exists along with every run's metadata (the S3 artifacts survive, but not what
+    experiment they belonged to). There is deliberately no usable default for that reason: creating an
+    MLflow requires saying which one, enforced by a precondition in mlflow.tf, so a bare
+    `terraform apply` that forgot the flag stops instead of deciding. To change backends, create a new
+    data layer.
+
+    What else differs is how tightly a caller can be scoped. A tracking server exposes granular
+    sagemaker-mlflow:* actions, so a policy can allow logging while forbidding deletion. An app
+    exposes exactly one action, sagemaker:CallMlflowAppApi, covering its whole REST API — so on "app"
+    every role that can read MLflow can also delete from it. The analysis reader needs that access to
+    resolve a run, and accepts it; the janitor does not get it at all, because a delete-capable
+    garbage collector holding delete on unrecoverable metadata is the one combination worth refusing
+    (it degrades to keeping every trace prefix — see iam.tf).
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["app", "server", ""], var.mlflow_backend)
+    error_message = "mlflow_backend must be \"app\" or \"server\" (or \"\" when mlflow_enabled is false, since then neither is created)."
+  }
 }
 
 variable "mlflow_tracking_server_size" {
@@ -61,13 +93,32 @@ variable "mlflow_version" {
   default     = "3.0"
 }
 
-variable "mlflow_app_arn" {
-  description = "MLflow tracking server ARN to scope producer/reader MLflow IAM to. Empty = wildcard (single-account dev). Set to aws_sagemaker_mlflow_tracking_server.this[0].arn to remove the wildcard. Must be an mlflow-tracking-server ARN: the sagemaker-mlflow:* actions do not authorize an mlflow-app ARN."
+variable "mlflow_tracking_server_arn" {
+  description = <<-EOT
+    An EXTERNAL mlflow-tracking-server ARN to scope the MLflow IAM to, for the case where the records
+    live on a tracking server this layer did not create. Leave empty otherwise: the policies are then
+    scoped to the MLflow this layer does create, whose ARN it knows. Nothing is ever scoped to a
+    wildcard — a policy with no MLflow to name simply carries no MLflow statement.
+  EOT
   type        = string
   default     = ""
   validation {
-    condition     = var.mlflow_app_arn == "" || !can(regex(":mlflow-app/", var.mlflow_app_arn))
-    error_message = "mlflow_app_arn must be an mlflow-tracking-server ARN, not a serverless mlflow-app ARN (the latter does not authorize sagemaker-mlflow:* actions)."
+    condition     = var.mlflow_tracking_server_arn == "" || !can(regex(":mlflow-app/", var.mlflow_tracking_server_arn))
+    error_message = "mlflow_tracking_server_arn scopes the sagemaker-mlflow:* actions, which only a tracking server exposes. An app is addressed by sagemaker:CallMlflowAppApi on its own ARN, which this layer only knows for an app it created itself."
+  }
+}
+
+# REMOVED, kept only to fail loudly. A stale name in a .tfvars file is a warning, not an error, so
+# without this declaration an operator who still sets the old name would see their MLflow scoping
+# silently drop out — and since the policies no longer fall back to a wildcard, every data-plane call
+# would start returning 403 with nothing to point at.
+variable "mlflow_app_arn" {
+  description = "REMOVED: renamed to mlflow_tracking_server_arn, because it never named an app. Setting it stops the run."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.mlflow_app_arn == ""
+    error_message = "mlflow_app_arn was renamed to mlflow_tracking_server_arn (it scopes an external tracking server, and never named an app). Pass the new name."
   }
 }
 

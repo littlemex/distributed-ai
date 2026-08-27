@@ -28,9 +28,31 @@ output "janitor_role_arn" {
   description = "Delete-capable IAM role for the GC janitor (the only role with s3:DeleteObject on the trace buckets). Assumed via Pod Identity by a CronJob, or swap the trust for a Lambda."
 }
 
+output "mlflow_arn" {
+  description = "ARN of the MLflow this data layer records to, whichever backend it is (MLFLOW_TRACKING_URI for clients). Empty when mlflow_enabled=false."
+  value       = local.mlflow_arn
+}
+
+# DEPRECATED, kept for one generation: the installer reads this from a state written before the rename,
+# where it is the only place the ARN can be found. New callers read mlflow_arn.
 output "mlflow_app_arn" {
-  description = "MLflow tracking server ARN (MLFLOW_TRACKING_URI for clients). Empty when mlflow_enabled=false."
-  value       = try(aws_sagemaker_mlflow_tracking_server.this[0].arn, "")
+  description = "Deprecated alias of mlflow_arn. The name predates this layer offering two backends, and named only one of them."
+  value       = local.mlflow_arn
+}
+
+output "mlflow_backend" {
+  description = "Which MLflow this data layer records to: app (serverless) or server (managed tracking server). Empty when mlflow_enabled=false, since then neither exists."
+  value       = var.mlflow_backend
+}
+
+output "mlflow_name" {
+  description = "Name of the MLflow this data layer records to. The installer looks a live one up by this when the state has lost it, so the naming rule stays in one place."
+  value       = local.mlflow_name
+}
+
+output "mlflow_ui_url" {
+  description = "Where the recordings are read in a browser. Derived here because the two backends are served from different hosts and an app's host carries its id. Empty when mlflow_enabled=false."
+  value       = local.mlflow_ui_url
 }
 
 output "s3files_file_system_id" {

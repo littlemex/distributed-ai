@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # One-command, re-runnable installer for the profiling platform on an EXISTING infra/eks cluster.
 #
-# It wires the whole platform end to end: the shared data layer (trace bucket, S3 Files, managed
-# MLflow tracking server, IAM roles), the cluster-side mount and ServiceAccounts, the Pod Identity
+# It wires the whole platform end to end: the shared data layer (trace bucket, S3 Files, the managed
+# SageMaker MLflow, IAM roles), the cluster-side mount and ServiceAccounts, the Pod Identity
 # associations for every namespace allowed to collect profiles, and the analysis/knowledge MCP
 # servers. Terraform outputs are read by this script, never by the operator.
 #
@@ -23,9 +23,16 @@
 #                         creating one needs CREATE_DATA_LAYER=1. A successful install attaches it to
 #                         this cluster in the registry.
 #   CREATE_DATA_LAYER=1   allow creating a data layer that does not exist yet (first install)
+#   MLFLOW_BACKEND        which SageMaker MLflow a NEW data layer records to: app (serverless, the
+#                         default) or server (a managed tracking server, billed for every hour it
+#                         exists, and the only one whose IAM can say "log but never delete"). A data
+#                         layer that already has one keeps it, and asking for the other one stops the
+#                         run: switching destroys the MLflow that exists with every run's metadata
 #   ANALYSIS_DIGEST       digest of the analysis MCP image (default: resolve tag v1-nsys)
 #   KNOWLEDGE_DIGEST      digest of the knowledge MCP image (default: resolve tag v1)
-#   DEV_BUILD=1           build both images in-cluster instead of using published digests
+#   DEV_BUILD=1           build both images in-cluster instead of using published digests. A tag that
+#                         already exists in ECR is REUSED, so a changed Dockerfile needs FORCE_REBUILD=1
+#   FORCE_REBUILD=1       rebuild even when the tag is already published (passed to the build script)
 #   ALLOW_UNRELATED=1     apply cluster changes unrelated to profiling (default: stop and report)
 #   ALLOW_RECORD_UPDATES=1  apply an UPDATE to the record of record (the trace bucket, the tracking
 #                         server, the KMS key, the S3 Files filesystem, or the versioning, lifecycle
@@ -90,13 +97,15 @@ profiling_addresses() {
 }
 
 # Resources whose destruction loses the record of record. A plan that deletes or replaces one of
-# these is refused outright: the trace bucket and the tracking server hold the profiling history,
-# and losing run metadata makes every stored prefix look orphaned to a garbage collector.
+# these is refused outright: the trace bucket and the MLflow hold the profiling history, and losing
+# run metadata makes every stored prefix look orphaned to a garbage collector. Both MLflow backends
+# are listed because whichever one a data layer created is the one holding its run metadata.
 protected_addresses() {
   cat <<'ADDR'
 aws_s3_bucket.traces
 aws_s3_bucket.mlflow_artifacts
 aws_sagemaker_mlflow_tracking_server.this
+aws_sagemaker_mlflow_app.this
 aws_kms_key.data
 aws_cloudcontrolapi_resource.s3files_fs
 aws_cloudcontrolapi_resource.s3files_ap
@@ -379,18 +388,157 @@ adopt_bucket() {
     fi
   done
 }
-# The tracking server's name is derived from the data layer's name now, so that two data layers in one
-# account and region do not collide on it. A data layer created before that carries whatever name the
-# old fixed default gave it, and re-deriving would ask Terraform to REPLACE the server — destroying
-# every run's metadata. Its current name is therefore read from the state and passed back in.
+# An output a state simply does not have is not the same thing as terraform failing to answer. The
+# first is a data layer older than that output; the second is no init, a held lock or expired
+# credentials — and reading that as "absent" is exactly how a re-run decides a backend for a data layer
+# whose real one it could not read. So one is a value and the other stops the run.
+dl_out_opt() {
+  local name="$1" out rc=0
+  out="$(terraform -chdir="${data_dir}" output -raw "${name}" 2>&1)" || rc=$?
+  if [ "${rc}" -eq 0 ]; then printf '%s' "${out}"; return 0; fi
+  # Anchored on the output's own name, not on a bare "not found": that substring also appears in
+  # "terraform: command not found" and in backend errors about a missing workspace, which would put the
+  # failures right back in the bucket this function exists to keep them out of. Measured 2026-08-28:
+  # terraform prints 'Error: Output "NAME" not found', and 'Warning: No outputs found' for an empty state.
+  case "${out}" in
+    *"Output \"${name}\" not found"* | *"No outputs found"*) return 0 ;;
+    *) die "could not read the data layer's ${name} output (terraform exited ${rc}): ${out}" ;;
+  esac
+}
+
+# ── which MLflow this data layer records to ─────────────────────────────────────────────────────
+# Answered in this order: what the state says it created, what exists in AWS under this data layer's
+# name, and only then what the caller asked for. That order is the whole protection — the caller only
+# gets to decide when there is nothing to lose. Note what is NOT consulted: the mlflow_backend output.
+# It records the value of a variable at the last apply, not what exists, so a torn-down data layer
+# still reports the backend it used to have; pinning that would resurrect an empty tracking server for
+# someone who asked for serverless.
+state_mlflow=""
+state_mlflow_name=""
 if [ "${new_data_layer}" = "0" ]; then
-  existing_mlflow="$(terraform -chdir="${data_dir}" output -raw mlflow_app_arn 2>/dev/null || true)"
-  case "${existing_mlflow}" in
-    *:mlflow-tracking-server/*)
-      data_vars+=(-var "mlflow_app_name=${existing_mlflow##*/}")
-      say "keeping the existing tracking server name '${existing_mlflow##*/}'"
+  state_mlflow="$(dl_out_opt mlflow_arn)"
+  # mlflow_arn replaced an output named after one of the two backends. A state written before the
+  # rename only has the old name, and it is the only place the ARN can be found there.
+  [ -n "${state_mlflow}" ] || state_mlflow="$(dl_out_opt mlflow_app_arn)"
+  state_mlflow_name="$(dl_out_opt mlflow_name)"
+fi
+
+# "It is not there" and "AWS would not tell me" are different answers, and only the first is safe to act
+# on: a denied, throttled, or too-old-CLI lookup read as absent is how a re-run stands up a second, empty
+# MLflow and points the cluster at it, leaving the one holding the history referenced by nothing. Nothing
+# is destroyed and nothing complains, which is what makes it worth this much care.
+# Usage: aws_absent_or_die <what> -- <aws args...>; prints the output, or empty when genuinely absent.
+aws_absent_or_die() {
+  local what="$1" out rc=0
+  shift 2 # drop the -- separator
+  out="$(aws "$@" 2>&1)" || rc=$?
+  if [ "${rc}" -eq 0 ]; then printf '%s' "${out}"; return 0; fi
+  case "${out}" in
+    *ResourceNotFound* | *NotFoundException*) return 0 ;;
+    *) die "could not tell whether ${what} exists (aws exited ${rc}): ${out}. Treating that as 'it does not exist' would create a second MLflow and leave the one holding the records unreferenced, so this stops instead." ;;
+  esac
+}
+
+# What is live in AWS, which is the authority whenever the state has lost the ARN: after a teardown, or
+# when the state itself was rebuilt. They are found by the artifact store they write to, NOT by their own
+# name — the same reason the KMS key is found through its alias and the S3 Files filesystem through the
+# bucket it fronts. The rule that derives an MLflow's name has already changed once, so a name search
+# would miss anything created under the old one and report "nothing here"; the artifact bucket is derived
+# from the data layer's name, which is the one thing that cannot have changed.
+#
+# Each answer is captured into a variable in a statement of its own, never inside a test or a pipeline:
+# those run the lookup in a subshell, where die's exit ends the subshell and the script sails on with an
+# empty answer — the exact misreading aws_absent_or_die exists to prevent.
+mlflow_store_uri="s3://${DATA_LAYER_NAME}-mlflow-artifacts-${account_id}/mlflow"
+
+live_server=""
+server_names="$(aws_absent_or_die "this data layer's MLflow tracking server" -- \
+  sagemaker list-mlflow-tracking-servers --region "${AWS_REGION}" \
+  --query 'TrackingServerSummaries[].TrackingServerName' --output text)"
+for name in ${server_names}; do
+  [ "${name}" != "None" ] || continue
+  uri="$(aws_absent_or_die "the artifact store of tracking server ${name}" -- \
+    sagemaker describe-mlflow-tracking-server --tracking-server-name "${name}" \
+    --region "${AWS_REGION}" --query ArtifactStoreUri --output text)"
+  [ "${uri}" = "${mlflow_store_uri}" ] || continue
+  [ -z "${live_server}" ] ||
+    die "two MLflow tracking servers (${live_server}, ${name}) record to ${mlflow_store_uri}, so this cannot tell which one holds this data layer's records. Adopt the right one by hand (terraform -chdir=${data_dir} import 'aws_sagemaker_mlflow_tracking_server.this[0]' <name>) and re-run."
+  live_server="${name}"
+done
+
+# An app is addressed by the ARN AWS assigned it, so the state's ARN is preferred when it has one.
+live_app=""
+case "${state_mlflow}" in
+  *:mlflow-app/*) live_app="${state_mlflow}" ;;
+  *)
+    app_arns="$(aws_absent_or_die "this data layer's MLflow app" -- \
+      sagemaker list-mlflow-apps --region "${AWS_REGION}" \
+      --query 'Summaries[].Arn' --output text)"
+    for arn in ${app_arns}; do
+      case "${arn}" in arn:*:mlflow-app/*) ;; *) continue ;; esac
+      uri="$(aws_absent_or_die "the artifact store of MLflow app ${arn}" -- \
+        sagemaker describe-mlflow-app --arn "${arn}" \
+        --region "${AWS_REGION}" --query ArtifactStoreUri --output text)"
+      [ "${uri}" = "${mlflow_store_uri}" ] || continue
+      [ -z "${live_app}" ] ||
+        die "two MLflow apps (${live_app}, ${arn}) record to ${mlflow_store_uri}, so this cannot tell which one holds this data layer's records. Adopt the right one by hand (terraform -chdir=${data_dir} import 'aws_sagemaker_mlflow_app.this[0]' <arn>) and re-run."
+      live_app="${arn}"
+    done
+    ;;
+esac
+
+# Pure on purpose — no AWS, no terraform, no globals — so the whole truth table is testable, and so the
+# test does not have to reproduce the environment that reaches it.
+# Usage: decide_mlflow_backend <state_arn> <live_server_name> <live_app_arn> <asked>
+decide_mlflow_backend() {
+  local state_arn="$1" server="$2" app="$3" asked="$4" have=""
+  case "${state_arn}" in
+    *:mlflow-tracking-server/*) have="server" ;;
+    *:mlflow-app/*) have="app" ;;
+  esac
+  if [ -z "${have}" ]; then
+    [ -z "${server}" ] || [ -z "${app}" ] ||
+      die "an MLflow tracking server (${server}) and an MLflow app (${app}) both exist under this data layer's name, and the state names neither, so this cannot tell which one holds the records. Adopt the right one by hand and re-run."
+    [ -z "${server}" ] || have="server"
+    [ -z "${app}" ] || have="app"
+  fi
+  # Nothing exists, so no records are at stake and the caller decides.
+  if [ -z "${have}" ]; then
+    printf '%s' "${asked:-app}"
+    return 0
+  fi
+  [ -z "${asked}" ] || [ "${asked}" = "${have}" ] ||
+    die "this data layer records to an MLflow ${have}, but MLFLOW_BACKEND asks for ${asked}. Switching destroys the one that exists along with every run's metadata; create a new data layer instead."
+  printf '%s' "${have}"
+}
+
+# The `|| exit` is not redundant with set -e: die runs inside the command substitution, so its exit ends
+# only that subshell, and the refusal has to be turned back into the script's own exit here.
+mlflow_backend="$(decide_mlflow_backend "${state_mlflow}" "${live_server}" "${live_app}" "${MLFLOW_BACKEND:-}")" ||
+  exit 1
+data_vars+=(-var "mlflow_backend=${mlflow_backend}")
+
+# Renaming an MLflow REPLACES it, destroying every run's metadata, so the name of one that already
+# exists is passed back in rather than re-derived. A tracking server's name is the tail of its ARN; an
+# app's is not (that tail is the id AWS assigned), so it is read from the app itself.
+if [ -z "${state_mlflow_name}" ]; then
+  case "${mlflow_backend}" in
+    server) [ -z "${live_server}" ] || state_mlflow_name="${live_server}" ;;
+    app)
+      if [ -n "${live_app}" ]; then
+        # Not tolerant of a failure here: the name is what stops Terraform from replacing this app, so
+        # not knowing it has to stop the run rather than fall through to the derived default.
+        state_mlflow_name="$(aws sagemaker describe-mlflow-app --arn "${live_app}" \
+          --region "${AWS_REGION}" --query Name --output text)"
+        [ -n "${state_mlflow_name}" ] && [ "${state_mlflow_name}" != "None" ] ||
+          die "the MLflow app ${live_app} exists but would not report its name, and passing the derived name instead would REPLACE it, destroying every run's metadata."
+      fi
       ;;
   esac
+fi
+if [ -n "${state_mlflow_name}" ]; then
+  data_vars+=(-var "mlflow_name=${state_mlflow_name}")
+  say "keeping the existing MLflow ${mlflow_backend} named '${state_mlflow_name}'"
 fi
 
 adopt_bucket "${DATA_LAYER_NAME}-mlflow-artifacts-${account_id}" "mlflow_artifacts"
@@ -409,15 +557,24 @@ if [ -n "${kms_key_id}" ] && [ "${kms_key_id}" != "None" ]; then
       "aws_kms_alias.data" "${kms_alias}" >/dev/null 2>&1 || true
 fi
 
-# The tracking server, found by the name this data layer would give it. A create collides loudly rather
-# than duplicating, but adopting turns a dead end into a resumable run.
-mlflow_name="${DATA_LAYER_NAME}-mlflow"
-case "${existing_mlflow:-}" in *:mlflow-tracking-server/*) mlflow_name="${existing_mlflow##*/}" ;; esac
-if aws sagemaker describe-mlflow-tracking-server --tracking-server-name "${mlflow_name}" \
-  --region "${AWS_REGION}" >/dev/null 2>&1; then
-  adopt_or_stop "aws_sagemaker_mlflow_tracking_server.this[0]" "${mlflow_name}" \
-    "MLflow tracking server ${mlflow_name}"
-fi
+# The MLflow found above, brought into the state before the plan is made. Only the one matching the
+# decided backend is adopted: the other backend's address has count 0, and importing into that is an
+# error, so looking for both here would turn a stray leftover into a dead end.
+# The import ids differ, and not in the way the addresses suggest: a tracking server imports by NAME,
+# an app by its FULL ARN (measured 2026-08-28 — the app id alone is rejected with "arn: invalid
+# prefix", which would have made adopt fail exactly when it is needed).
+case "${mlflow_backend}" in
+  server)
+    [ -z "${live_server}" ] ||
+      adopt_or_stop "aws_sagemaker_mlflow_tracking_server.this[0]" "${live_server}" \
+        "MLflow tracking server ${live_server}"
+    ;;
+  app)
+    [ -z "${live_app}" ] ||
+      adopt_or_stop "aws_sagemaker_mlflow_app.this[0]" "${live_app}" \
+        "MLflow app ${state_mlflow_name}"
+    ;;
+esac
 
 # The S3 Files filesystem and its access point, matched by the trace bucket they front. This is the
 # quiet one: a filesystem has no name, so a create makes a NEW EMPTY filesystem, the volume handle
@@ -439,7 +596,8 @@ guard_plan "${data_dir}" "data-layer" "${data_vars[@]}"
 terraform -chdir="${data_dir}" apply -input=false -auto-approve -lock-timeout=5m "${guarded_plan}"
 
 dl_out() { terraform -chdir="${data_dir}" output -raw "$1"; }
-mlflow_arn="$(dl_out mlflow_app_arn)"
+mlflow_arn="$(dl_out mlflow_arn)"
+mlflow_ui_url="$(dl_out mlflow_ui_url)"
 reader_role="$(dl_out mcp_reader_role_arn)"
 producer_role="$(dl_out producer_role_arn)"
 s3files_fs="$(dl_out s3files_file_system_id)"
@@ -447,17 +605,20 @@ volume_handle="$(dl_out s3files_volume_handle)"
 trace_bucket="$(terraform -chdir="${data_dir}" output -json trace_buckets |
   python3 -c "import json,os,sys; print(json.load(sys.stdin)[os.environ['AWS_REGION']])")"
 
-for pair in "mlflow_app_arn=${mlflow_arn}" "mcp_reader_role_arn=${reader_role}" \
+for pair in "mlflow_arn=${mlflow_arn}" "mlflow_ui_url=${mlflow_ui_url}" \
+  "mcp_reader_role_arn=${reader_role}" \
   "producer_role_arn=${producer_role}" "s3files_file_system_id=${s3files_fs}" \
   "s3files_volume_handle=${volume_handle}" "trace_bucket=${trace_bucket}"; do
   [ -n "${pair#*=}" ] || die "data layer output ${pair%%=*} came back empty"
 done
 
-# The scoped producer and reader roles authorize sagemaker-mlflow:* against an mlflow-tracking-server
-# resource. A serverless MLflow App ARN would leave every data-plane call at 403.
+# Either backend is reachable by the scoped roles, and the data layer writes the matching policy for
+# whichever it created: sagemaker-mlflow:* on a tracking server, sagemaker:CallMlflowAppApi on an app.
+# Measured both ways against an app on 2026-08-28: a role holding that one action on the app's ARN can
+# log runs and read them back, and the same role is refused (403) against another app's ARN.
 case "${mlflow_arn}" in
-  *:mlflow-tracking-server/*) : ;;
-  *) die "MLflow ARN ${mlflow_arn} is not a tracking server ARN; scoped roles cannot reach an mlflow-app data plane" ;;
+  *:mlflow-tracking-server/* | *:mlflow-app/*) : ;;
+  *) die "MLflow ARN ${mlflow_arn} is neither a tracking server nor an app; the data layer output is not something clients can use as MLFLOW_TRACKING_URI" ;;
 esac
 
 # ── phase 3: cluster wiring ────────────────────────────────────────────────────────────────────
@@ -598,6 +759,7 @@ for ns in "${ns_array[@]}"; do
     --from-literal="ACCELPROF_REGION=${AWS_REGION}" \
     --from-literal="ACCELPROF_TRACE_BUCKET=${trace_bucket}" \
     --from-literal="ACCELPROF_TRACKING_URI=${mlflow_arn}" \
+    --from-literal="ACCELPROF_MLFLOW_UI_URL=${mlflow_ui_url}" \
     --from-literal="ACCELPROF_PLATFORM_IMAGE=${ecr_registry}/accelprof@${analysis_digest}" \
     --dry-run=client -o yaml | kubectl --context "${KCTX}" apply -f - >/dev/null
   cat <<RBAC | kubectl --context "${KCTX}" apply -f - >/dev/null
@@ -800,7 +962,9 @@ cat <<SUMMARY
 
 Profiling platform ready on ${CLUSTER_NAME}.
 
-  MLflow tracking server : ${mlflow_arn}
+  MLflow (${mlflow_backend})
+    records to           : ${mlflow_arn}
+    read them at         : ${mlflow_ui_url}
   Trace bucket           : ${trace_bucket}
   Mount zone             : ${mount_zone}
   Producer namespaces    : ${PRODUCER_NAMESPACES}

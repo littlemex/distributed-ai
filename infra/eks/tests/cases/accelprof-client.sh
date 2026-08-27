@@ -295,3 +295,46 @@ test_accelprof_client_alias_narrows_the_latest() {
     *) printf 'FAIL --alias was not honoured: %s\n' "$got" >&2; return 1 ;;
   esac
 }
+
+# The link to the recordings comes from the contract the platform published, and an older contract that
+# has no such key must not turn a missing link into a failure — or into a guess, which is what the
+# client used to make by reassembling AWS's hostnames from the ARN. Where the URL comes FROM is the data
+# layer's business, and mlflow.tf carries the measurement that pins it.
+test_accelprof_client_mlflow_url_comes_from_the_contract() {
+  local client
+  client="$(_ac_client)"
+  [ -x "$client" ] || return 2
+  local dir out fails=0
+  dir="$(mktemp -d)"
+  mkdir -p "$dir/bin"
+  cat >"$dir/bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  *ACCELPROF_MLFLOW_UI_URL*) printf '%s\n' "${UI_URL}" ;;
+  *ACCELPROF_TRACKING_URI*) printf '%s\n' "${TRACKING_ARN}" ;;
+  *go-template*) ;;
+  *) ;;
+esac
+STUB
+  chmod +x "$dir/bin/kubectl"
+  # get with nothing recorded falls through to the "where the recordings live" hint, which is the one
+  # place this URL is printed.
+  run_get() {
+    UI_URL="$1" TRACKING_ARN="$2" PATH="$dir/bin:$PATH" KUBE_CONTEXT="" "$client" get -n ns 2>&1 || true
+  }
+  out="$(run_get "https://app-ABC.mlflow.sagemaker.us-east-2.app.aws/" \
+    "arn:aws:sagemaker:us-east-2:1:mlflow-app/app-ABC")"
+  case "$out" in
+    *"https://app-ABC.mlflow.sagemaker.us-east-2.app.aws/"*) ;;
+    *) printf 'FAIL the published URL was not shown: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+  # No key in the contract: no link, and no crash either.
+  out="$(run_get "" "arn:aws:sagemaker:us-east-2:1:mlflow-tracking-server/srv")"
+  case "$out" in
+    *https://*) printf 'FAIL a URL was invented with none published: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+    *) ;;
+  esac
+  rm -rf "$dir"
+  [ "$fails" -eq 0 ] || return 1
+}
