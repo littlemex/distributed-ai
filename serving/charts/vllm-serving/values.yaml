@@ -37,7 +37,15 @@ quantization: ""
 # Cap multimodal items per request (vLLM --limit-mm-per-prompt, JSON). Guards GPU memory against a
 # runaway number of images/video frames. Example: '{"image": 2, "video": 1}'. Empty = vLLM default.
 limitMmPerPrompt: ""
-enablePrefixCaching: false  # hybrid (linear-attention) models: prefix caching is unsupported
+# Whether to reuse the KV of a shared prompt prefix across requests. Both branches are rendered as an
+# explicit flag, and that is the fix for a bug that cost this project a wrong published conclusion: the
+# template used to emit `--no-enable-prefix-caching` when false and NOTHING when true, and vLLM's
+# `enable_prefix_caching` argument defaults to None meaning "take the model's default". For a hybrid
+# attention model that default is off — vLLM's own comment is "Hybrid models support prefix caching but
+# keep it opt-in for now while the feature matures" — so setting this to true changed nothing, the engine
+# kept reporting False, and that was written up as the architecture being incapable. It is not; it is
+# opt-in, and an opt-in needs the flag.
+enablePrefixCaching: false
 enforceEager: false         # set true if cudagraph capture fails on a new architecture
 extraArgs: []               # escape hatch; keep empty and justified in the overlay
 

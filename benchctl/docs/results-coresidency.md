@@ -1,7 +1,9 @@
 # Co-residency: which knob actually protects a short family
 
 Measured 2026-08-27 on the same box (Qwen3.6-35B-A3B-FP8, g6e.12xlarge, $15.2174/h, vLLM 0.27.1,
-TP=2 x 2 replicas, `max_num_seqs=256`, `enable_prefix_caching=False`). Short family: 300 input / 8
+TP=2 x 2 replicas, `max_num_seqs=256`, `enable_prefix_caching=False` — off for every arm here, and later
+found to have been a missing flag rather than an unsupported feature; see `results-agentx.md`).
+Short family: 300 input / 8
 output at 64 in flight. Long family: 20,000-token prefills, a fixed number of them resident.
 
 `results-shape-surface.md` established that a short family loses 0.35x of its throughput and 5.85x of
@@ -178,9 +180,11 @@ Two further cautions to carry into it:
   pure-short tail already at 0.73 s against a 1 s target, there is almost no headroom left to spend on
   co-residency, and any θ derived from it will look impossible. The back-calculation has to start from
   the real arrival rate, where the headroom is.
-* **Preemption plus `enable_prefix_caching=False` is a hazard.** V1 preempts by recompute, so a
-  preempted 20,000-token prefill is computed again from nothing. That is box time burned outright, and
-  it would corrupt exactly the accounting the next measurement is trying to establish.
+* **Preemption is a hazard, and caching changes its shape rather than removing it.** V1 preempts by
+  recompute, so with caching off a preempted 20,000-token prefill is computed again from nothing. With
+  caching on it can come back from cached blocks instead — provided they have not been evicted, and
+  cached blocks compete with live sequences for the same 2.0M-token pool. Either way it is box time the
+  accounting has to see.
 
 ## Below saturation: the answer inverts, and the cap is what makes it invert
 

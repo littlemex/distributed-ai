@@ -6,9 +6,10 @@
 #  - 256-expert MoE, 8 experts per token, so ~3B active of 35B stored. Prefill is compute-bound
 #    and this workload is 99.5% prompt tokens, which is why this model is worth trying at all.
 #  - Hybrid attention again: 40 layers, three linear-attention layers then one full, ten times
-#    over. Prefix caching on the recurrent layers is the same problem it was on Qwen3.8-27B, so
-#    enablePrefixCaching stays false until a probe says otherwise. Do NOT advertise cheap
-#    repeated prompts for this model before that probe.
+#    over. Unlike the dense sibling, prefix caching WORKS here — vLLM snapshots the recurrent state
+#    alongside the paged KV. It is opt-in for hybrid models, so it needs the flag on the command
+#    line; a missing flag means the model's default, which is off. Measured on AgentX's real traces
+#    at 84.96% hit and 11.5x faster time to first token. See FACTS.md.
 #  - Vision tower present (27 blocks, hidden 1152), so this one box can serve the OCR family too
 #    and no separate VL deployment is needed. limitMmPerPrompt caps the memory that costs.
 #  - fp8 weights ~35 GiB do not fit one 48 GiB L40S once KV and activations are counted, so
@@ -34,10 +35,11 @@ extraEnv:
 
 # ON, and this is the measurement that matters most for this box. 94.9% of the prompt tokens in a
 # measured agent episode were a re-read of the previous turn, which is 58% of the machine's time, so
-# whether vLLM can keep the full-attention layers' KV across turns for a hybrid model decides
-# whether the agent families belong here at all. The dense sibling could not; that was inherited as
-# an assumption into this file and then "measured" with the flag still off, which measured nothing.
-# If the engine refuses the combination it says so at startup, and that refusal is the answer.
+# whether vLLM can keep the prefix across turns for a hybrid model decides whether the agent families
+# belong here at all. It can. Getting to that answer took three attempts: the dense sibling's
+# assumption was inherited into this file, then "measured" with the flag still off, then measured
+# again with the overlay set to true but the chart emitting no flag at all. Read the engine's own
+# config line every time, and treat a value in this file as a request rather than a fact.
 enablePrefixCaching: true
 
 # tool calling: Qwen3 chat templates emit XML (<tool_call><function=..><parameter=..>), so the

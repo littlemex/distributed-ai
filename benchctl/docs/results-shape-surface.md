@@ -91,9 +91,13 @@ partly the measuring instrument's fixed cost per request, not the box's.
 
 ## And the engine's own seat count was the rest of it
 
-Reading the engine's startup line to check whether prefix caching was on — it is not,
+Reading the engine's startup line to check whether prefix caching was on — it was not,
 `enable_prefix_caching=False`, so the identical synthetic prefixes could not have been reused — turned up
-the number that mattered more: `max_num_seqs=27`. Every measurement above offered 128 to 384 requests to an
+the number that mattered more: `max_num_seqs=27`. (Later work found that the `False` was a missing flag
+rather than an unsupported feature; see `results-agentx.md`. It was genuinely off for every number on this
+page, so nothing here is affected — but **a re-run must salt each prompt with a unique prefix**, because
+with caching on the identical padding would be served from the cache and the box's side would be
+inflated, exactly as both advisors warned.) Every measurement above offered 128 to 384 requests to an
 engine configured to admit 27 per replica. Everything past 54 in flight was queueing outside the engine and
 being reported as the box's ceiling.
 
@@ -153,9 +157,10 @@ Settled:
 * **The 20,000-token corner agrees between synthetic and real documents** — $31.6 here against $28.9 on
   LongBench-v2's actual text, a 9% gap. Length is doing the work, so the surface is usable as the economic
   prior for a family once that family's own shape is known.
-* **Prefix caching is not silently helping the synthetic prompts.** Both advisors flagged that identical
-  padding could be reused across requests and inflate the box's side; the engine reports
-  `enable_prefix_caching=False`, so it cannot be.
+* **Prefix caching was not silently helping these synthetic prompts.** Both advisors flagged that
+  identical padding could be reused and inflate the box's side; the engine reported
+  `enable_prefix_caching=False` throughout, so it could not be. That protection is now gone: the flag was
+  missing rather than the feature, caching is on, and a re-run must salt each prompt.
 * **Chunk size does not fix co-residency.** Cutting the step budget from 16,384 to 2,048 — which turns a
   20,000-token prefill from two engine steps into ten, and should bound how long a short request waits
   behind it — recovers about a third of the damage (TTFT p95 5.85x becomes 3.61x) and costs the pure-short

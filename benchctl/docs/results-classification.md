@@ -1,7 +1,8 @@
 # Classification, first family measured
 
 Measured 2026-08-27. Box: Qwen3.6-35B-A3B-FP8 on g6e.12xlarge (4x L40S, $15.2174/h), vLLM 0.27.1,
-TP=2 x 2 replicas, 262k window, prefix caching declined by the engine. Baseline: `claude-haiku-4-5`
+TP=2 x 2 replicas, 262k window, prefix caching off (believed at the time to be declined by the engine;
+it was a missing flag, see `results-agentx.md` — it was genuinely off for these numbers). Baseline: `claude-haiku-4-5`
 through the gateway, list price $1.00 / $5.00 per Mtok.
 
 **The items are a public dataset, not held-out production traffic.** `p_i` is defined on the traffic the

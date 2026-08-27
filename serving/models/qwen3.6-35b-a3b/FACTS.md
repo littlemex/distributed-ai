@@ -48,28 +48,51 @@ Short prompt, 256 output tokens, aggregate over the requests in flight.
 The knee is around 16 to 32. Past 32 aggregate throughput gains 5% while TTFT jumps from 0.24 s to
 5.6 s, which is queueing rather than work.
 
-### Prefix caching: the engine refuses it, and that is the answer
+### Prefix caching: it works, and it took three attempts to find out
 
-Measured twice, and the first measurement was worthless. With `--no-enable-prefix-caching`
-inherited from the dense sibling the same 37,792-token prompt took 4.33 / 4.34 / 4.34 s to first
-token — which measured a disabled flag, not an architecture. With the flag removed it took
-4.31 / 4.32 / 4.32 s, and the engine's own config line says why:
+Measured three times, and only the third measured the thing.
 
-```
-enable_prefix_caching=False        # with no --no-enable-prefix-caching passed
-```
+1. With `--no-enable-prefix-caching` inherited from the dense sibling, the same 37,792-token prompt
+   took 4.33 / 4.34 / 4.34 s to first token. That measured a disabled flag, not an architecture.
+2. With `enablePrefixCaching: true` in the overlay it took 4.31 / 4.32 / 4.32 s and the engine still
+   reported `enable_prefix_caching=False`, which was written up as the engine refusing it. **That was
+   wrong.** The chart rendered `--no-enable-prefix-caching` when false and *nothing* when true, and
+   vLLM's `enable_prefix_caching` argument is tri-state: `None` means "take the model's default". For
+   a hybrid attention model that default is off, in vLLM's own words at
+   `engine/arg_utils.py:2604` — *"Hybrid models support prefix caching but keep it opt-in for now
+   while the feature matures"*:
 
-vLLM v0.27.1 falls back to off for this architecture without saying so on the command line. So the
-answer is the engine's, not the configuration's: **1.00x, no re-use, on a model where caching was
-asked for.**
+   ```python
+   default_prefix_caching = (
+       model_config.is_prefix_caching_supported and not model_config.is_hybrid
+   )
+   ```
 
-Why it is all or nothing rather than "10 of 40 layers work". Rebuilding a linear-attention layer's
-recurrent state requires forwarding the prefix from layer one, because layer n's input is layer
-n−1's output — so re-using only the full-attention KV saves the KV writes and nothing else. A
-working implementation has to snapshot the recurrent state alongside the paged KV, and then the
-saving is nearly the whole prefix rather than a quarter of it. That is what makes this worth
-re-testing on every vLLM upgrade: the payoff is large, and 94.9% of an agent episode's prompt
-tokens are a re-read.
+   For this model those two properties are `True` and `True`. So the capability was there the whole
+   time and the flag was never passed. An opt-in needs the flag.
+3. With `--enable-prefix-caching` actually on the command line, the engine reports
+   `enable_prefix_caching=True`, the KV pool is unchanged at 2,042,667 tokens, and on AgentX's 393
+   real Claude Code traces:
+
+| | caching off | caching on |
+| --- | --- | --- |
+| time to first token, p50 | 6,932 ms | **603 ms** — 11.5x faster |
+| time to first token, p90 | 13,369 ms | 3,905 ms |
+| request latency, p50 | 11,500 ms | 2,250 ms |
+| prompt tokens actually computed, per request | 55,038 | **9,654** — 5.7x fewer |
+| cache read tokens | 0 | **3,543,936 of 4,171,465 = 84.96%** |
+| box cost per request | $0.0302 | $0.0211 |
+
+84.96% actual against AgentX's 94.14% theoretical is 90.2% of the available reuse. The shortfall is
+routing, not the engine: with two replicas behind one Service, a conversation's later turns can land
+on the replica that does not hold its prefix, and the live per-replica rates during the run were
+86.2% and 66.1%.
+
+The earlier reasoning about *why* it would be all-or-nothing rather than "10 of 40 layers work" was
+right, and is the reason the payoff is this large. Rebuilding a linear-attention layer's recurrent
+state requires forwarding the prefix from layer one, because layer n's input is layer n−1's output,
+so re-using only the full-attention KV would save the KV writes and nothing else. vLLM snapshots the
+recurrent state alongside the paged KV, which is why the saving is nearly the whole prefix.
 
 Two consequences for routing. Single-shot short work belongs on this box (its input is
 $0.551/Mtok against $1.00 for `claude-haiku-4-5` and $2.20 for `gpt-5.6-terra`). Multi-turn agent
