@@ -95,7 +95,11 @@ the box is *better* here, and it is still not *worth it* here.
 * ~~The output-heavy corner~~ — measured. Output length barely moves the ranking, and the "18% advantage"
   figure was arithmetic on prices without the denominator: at the operating point the box writes at about
   $2.09 per Mtok, not $4.12.
-* Whether this family's verdict survives priority scheduling. The +$10.52 per box-hour here is charged the
-  full opportunity cost of the box time it uses. If long work only ever filled slack the short families
-  left behind, its marginal box cost would be near zero and the same +$10.52 would be free upside. That is
-  a scheduler question, not a quality one, and it is open.
+* ~~Whether this family's verdict survives priority scheduling~~ — it does not, and the reason is in
+  `results-coresidency.md`. vLLM's priority policy orders admission and picks the preemption victim but
+  does not reserve step budget, so it cannot confine long work to slack; measured, it is
+  indistinguishable from fcfs. With the short queue saturated, one resident long request costs about a
+  hundred short on-time requests and the box drops from $54.76 to $33.75 per box-hour. The +$10.52 is
+  charged the full opportunity cost because at saturation that is what it costs. It becomes free upside
+  only in hours when short demand does not fill the machine, and reaching that needs a gate in the
+  router rather than a field on the request.

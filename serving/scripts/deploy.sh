@@ -148,6 +148,7 @@ confirm_target(){
   # The fallback here has to be the same one profiles.env uses, or the plan line describes a deploy
   # that is not the one about to happen. It said "latency" while the profile defaulted to throughput.
   echo "  tune    : ${QWEN_TUNE:-throughput} (step budget ${MAX_BATCHED_TOKENS:-auto}, mtp $([ -n "$SPEC_CONFIG" ] && echo on || echo off))"
+  echo "  sched   : per-request prefill cap $([ "$LONG_PREFILL_THRESHOLD" = 0 ] && echo none || echo "$LONG_PREFILL_THRESHOLD"), policy ${SCHEDULING_POLICY:-fcfs}"
   read -r -p "Proceed against this target? [y/N] " a
   [ "$a" = y ] || [ "$a" = Y ] || die "aborted by user"
 }
@@ -161,6 +162,8 @@ servedModelName: $SERVED_MODEL_NAME
 maxModelLen: $MAX_CONTEXT
 maxNumSeqs: $MAX_NUM_SEQS
 maxNumBatchedTokens: "$MAX_BATCHED_TOKENS"
+longPrefillTokenThreshold: $LONG_PREFILL_THRESHOLD
+schedulingPolicy: "$SCHEDULING_POLICY"
 speculativeConfig: '$SPEC_CONFIG'
 MV
   if [ -n "$QWEN_TP" ]; then

@@ -66,6 +66,12 @@ spec:
             {{- if .Values.maxNumBatchedTokens }}
             - --max-num-batched-tokens={{ int64 .Values.maxNumBatchedTokens }}
             {{- end }}
+            {{- if .Values.longPrefillTokenThreshold }}
+            - --long-prefill-token-threshold={{ int64 .Values.longPrefillTokenThreshold }}
+            {{- end }}
+            {{- if .Values.schedulingPolicy }}
+            - --scheduling-policy={{ .Values.schedulingPolicy }}
+            {{- end }}
             {{- if .Values.speculativeConfig }}
             - {{ printf "--speculative-config=%s" .Values.speculativeConfig | quote }}
             {{- end }}

@@ -24,15 +24,21 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
-def _one(url: str, model: str, prompt: str, max_tokens: int) -> dict:
-    body = json.dumps({
+def _one(url: str, model: str, prompt: str, max_tokens: int, priority: int | None = None) -> dict:
+    payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": 0.0,
         "stream": True,
         "stream_options": {"include_usage": True},
-    }).encode()
+    }
+    # Sent only when asked. vLLM rejects a non-zero priority on an fcfs engine rather than ignoring
+    # it, so an unconditional field would make the priority arm fail against the control's engine and
+    # look like a latency result.
+    if priority is not None:
+        payload["priority"] = priority
+    body = json.dumps(payload).encode()
     request = urllib.request.Request(url, data=body, headers={"content-type": "application/json"})
     started = time.perf_counter()
     ttft = None
@@ -71,7 +77,8 @@ def _worker(share: tuple[int, int]) -> list[dict]:
     threads, count = share
     with ThreadPoolExecutor(max_workers=threads) as pool:
         return list(pool.map(lambda _: _one(_JOB["url"], _JOB["model"], _JOB["prompt"],
-                                            _JOB["out_tokens"]), range(count)))
+                                            _JOB["out_tokens"], _JOB.get("priority")),
+                             range(count)))
 
 
 def _init(job: dict) -> None:
@@ -79,12 +86,13 @@ def _init(job: dict) -> None:
 
 
 def offer(url: str, model: str, prompt: str, out_tokens: int, *, concurrency: int, count: int,
-          workers: int) -> tuple[list[dict], float]:
+          workers: int, priority: int | None = None) -> tuple[list[dict], float]:
     """Offer `count` requests with `concurrency` in flight, spread over `workers` processes."""
     workers = max(1, min(workers, concurrency))
     per = [(concurrency // workers + (1 if i < concurrency % workers else 0)) for i in range(workers)]
     shares = [(threads, count * threads // concurrency) for threads in per]
-    job = {"url": url, "model": model, "prompt": prompt, "out_tokens": out_tokens}
+    job = {"url": url, "model": model, "prompt": prompt, "out_tokens": out_tokens,
+           "priority": priority}
     started = time.perf_counter()
     if workers == 1:
         _init(job)
@@ -227,25 +235,41 @@ def run_mix(out_dir: Path) -> dict:
     short, long_ = prompt_of(300), prompt_of(20000)
 
     workers = int(os.environ.get("LOAD_WORKERS", "1"))
+    # The service level the short family is held to. Average throughput and average value density are
+    # both conserved when box time is reallocated between families, so neither can decide how much
+    # long work to admit. What decides it is how many short requests still came back inside their
+    # deadline -- goodput, not throughput.
+    slo = float(os.environ.get("SLO_TTFT_S", "1.0"))
+    # None means "send no priority field at all", which is required against an fcfs engine.
+    prio_short = os.environ.get("MIX_SHORT_PRIORITY")
+    prio_long = os.environ.get("MIX_LONG_PRIORITY")
+    prio_short = int(prio_short) if prio_short not in (None, "") else None
+    prio_long = int(prio_long) if prio_long not in (None, "") else None
 
     def short_load() -> dict:
         rows, wall = offer(url, model, short, 8, concurrency=short_c,
-                           count=short_c * rounds, workers=workers)
+                           count=short_c * rounds, workers=workers, priority=prio_short)
         ttfts = sorted(r["ttft_s"] for r in rows)
+        within = sum(1 for v in ttfts if v <= slo)
         return {"requests": len(rows), "wall_s": wall, "requests_per_hour": len(rows) / wall * 3600,
                 "ttft_p50": statistics.median(ttfts),
                 "ttft_p95": ttfts[min(len(ttfts) - 1, int(0.95 * (len(ttfts) - 1)))],
-                "ttft_max": ttfts[-1]}
+                "ttft_max": ttfts[-1],
+                # Goodput, which is the only one of these that can decide how much long work to admit:
+                # throughput and value density are both conserved when box time moves between families.
+                "slo_s": slo, "within_slo": within, "within_slo_frac": within / len(rows),
+                "slo_goodput_per_hour": within / wall * 3600}
 
     alone = short_load()
-    print(f"[alone]  {alone['requests_per_hour']:.0f} req/h, ttft p50 {alone['ttft_p50']:.2f}s "
-          f"p95 {alone['ttft_p95']:.2f}s max {alone['ttft_max']:.2f}s", flush=True)
+    print(f"[alone]  {alone['requests_per_hour']:.0f} req/h, goodput "
+          f"{alone['slo_goodput_per_hour']:.0f}/h ({alone['within_slo_frac']*100:.1f}% within "
+          f"{slo:.1f}s), ttft p50 {alone['ttft_p50']:.2f}s p95 {alone['ttft_p95']:.2f}s", flush=True)
 
     stop = False
     def long_stream():
         n = 0
         while not stop:
-            _one(url, model, long_, 8)
+            _one(url, model, long_, 8, prio_long)
             n += 1
         return n
     with ThreadPoolExecutor(max_workers=long_c) as bg:
@@ -254,16 +278,25 @@ def run_mix(out_dir: Path) -> dict:
         mixed = short_load()
         stop = True
         long_done = sum(f.result() for f in futures)
-    print(f"[mixed]  {mixed['requests_per_hour']:.0f} req/h, ttft p50 {mixed['ttft_p50']:.2f}s "
-          f"p95 {mixed['ttft_p95']:.2f}s max {mixed['ttft_max']:.2f}s "
+    print(f"[mixed]  {mixed['requests_per_hour']:.0f} req/h, goodput "
+          f"{mixed['slo_goodput_per_hour']:.0f}/h ({mixed['within_slo_frac']*100:.1f}% within "
+          f"{slo:.1f}s), ttft p50 {mixed['ttft_p50']:.2f}s p95 {mixed['ttft_p95']:.2f}s "
           f"({long_done} long requests alongside)", flush=True)
 
     summary = {"model": model, "short_concurrency": short_c, "long_concurrency": long_c,
+               "short_priority": prio_short, "long_priority": prio_long,
                "alone": alone, "mixed": mixed, "long_requests_completed": long_done,
                "short_throughput_ratio": mixed["requests_per_hour"] / alone["requests_per_hour"],
-               "short_ttft_p95_ratio": mixed["ttft_p95"] / alone["ttft_p95"]}
+               "short_ttft_p95_ratio": mixed["ttft_p95"] / alone["ttft_p95"],
+               "long_completions_per_hour": long_done / mixed["wall_s"] * 3600,
+               # The frontier's two coordinates: what the short family still delivered on time, and
+               # what the long family got served while it did.
+               "slo_goodput_ratio": (mixed["slo_goodput_per_hour"] / alone["slo_goodput_per_hour"]
+                                     if alone["slo_goodput_per_hour"] else None)}
     print(f"[cost of sharing] short throughput x{summary['short_throughput_ratio']:.2f}, "
-          f"short ttft p95 x{summary['short_ttft_p95_ratio']:.2f}", flush=True)
+          f"goodput x{summary['slo_goodput_ratio']:.2f}, ttft p95 "
+          f"x{summary['short_ttft_p95_ratio']:.2f}, long {summary['long_completions_per_hour']:.0f}/h",
+          flush=True)
     (out_dir / "mix.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     return summary
 

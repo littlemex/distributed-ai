@@ -168,12 +168,13 @@ Not settled:
   real traffic has requests that short.
 * Whether 256 seats is itself the ceiling. It is the largest tried, and the 33% gain at 60 tokens says the
   seat count was binding, not that it has stopped binding.
-* Whether the replica split is the right answer or whether `--max-num-partial-prefills` and priority
-  scheduling would do it inside one engine. Both advisors argued for trying the scheduler first, and one
-  made the sharper point that under priority scheduling long work filling only slack has a marginal box
-  cost near zero — which would change the long-context family's verdict from "below its own cost" to
-  "free upside". Neither flag is plumbed through the chart yet, and plumbing them on the strength of one
-  synthetic mix would be widening the asset's interface ahead of the evidence.
+* ~~Whether the replica split is the right answer or whether the scheduler would do it inside one
+  engine~~ — measured, in `results-coresidency.md`. `long_prefill_token_threshold` cuts the co-resident
+  short tail from 5.60 s to about 2.0 s; `--scheduling-policy priority` is indistinguishable from fcfs;
+  `--max-num-partial-prefills` does not exist in vLLM V1. And the "free upside" hope fails: at
+  saturation one long request costs about a hundred short on-time requests and the box drops from
+  $54.76 to $33.75 per box-hour. What remains open is the same frontier at realistic arrival rates,
+  where there is genuine slack for long work to fill.
 * The latency cost of the replica split. Splitting halves each family's available concurrency, and the
   short family's density is strongly concurrency-dependent — at one request in flight the box is more
   expensive than the API. The split's loss is unmeasured.

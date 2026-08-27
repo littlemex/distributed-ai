@@ -71,6 +71,19 @@ hfOverrides: ""
 # a startup warning, and that becomes the throughput ceiling long before the KV cache does.
 maxNumBatchedTokens: ""
 
+# How much of ONE request may enter a single scheduler step. This is not the same knob as
+# maxNumBatchedTokens, and the difference is the whole reason it is here: that one is the step's
+# total budget, so shrinking it shrinks the step for every request including decodes, while this one
+# caps a single long prefill's share and leaves the rest of the budget for everyone else
+# (vllm/v1/core/sched/scheduler.py: `if 0 < long_prefill_token_threshold < num_new_tokens`).
+# 0 disables it, which is vLLM's default and the behaviour every measurement so far was taken under.
+longPrefillTokenThreshold: 0
+
+# fcfs or priority. With priority, a request's `priority` field orders admission and preemption
+# (lower runs first), which is what lets one family run only in the slack another leaves. Requires
+# clients to set it: any non-zero priority against an fcfs engine is an error, not a hint.
+schedulingPolicy: ""
+
 speculativeConfig: ""
 
 # --- extra container env (e.g. VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 for YaRN-extended context) ---
