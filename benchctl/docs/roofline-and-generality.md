@@ -13,10 +13,31 @@ that last one matters because every tensor-parallel all-reduce on this box cross
 Measured: prefill up to 18,520 tokens/s aggregate, decode 1,263 tokens/s aggregate at 64 in flight, model
 Qwen3.6-35B-A3B-FP8 with ~3B active of 35B stored.
 
-**Prefill.** 18,520 × 2 FLOP × 3e9 active parameters = 111 TFLOP/s aggregate, **27.8 TFLOP/s per GPU**.
-Against 733 that is 3.8%; against 362 it is 7.7%, and 362 is the more honest denominator because vLLM's
-Ada FP8 MoE path may dequantise before the matmul. Attention FLOPs are not counted and would add 15–25%
-at these lengths, which does not move a single-digit conclusion.
+**Prefill, by hand first.** 18,520 × 2 FLOP × 3e9 active parameters = 111 TFLOP/s aggregate,
+**27.8 TFLOP/s per GPU** — 3.8% against 733, 7.7% against 362, with 362 the more honest denominator
+because vLLM's Ada FP8 MoE path may dequantise before the matmul.
+
+**Prefill, by the engine, which is 2.2x higher.** `--enable-mfu-metrics` is now on, so the engine accounts
+for its own FLOPs and bytes and there is no need to guess. Over one 57.8-second arm on fresh pods (so the
+cumulative counters are that arm), 747,510 prompt tokens produced:
+
+| | engine-reported |
+| --- | --- |
+| FLOP/s | 248.2 TFLOP/s aggregate, **62.0 TFLOP/s per GPU** |
+| MFU vs dense FP8 733 | **8.5%** |
+| MFU vs dense BF16 362 | **17.1%** |
+| Bytes read | 319 GB/s aggregate, 80 GB/s per GPU → **MBU 9.2%** |
+| FLOP per prompt token | **19.2 GFLOP**, against the 6.0 a 2 × 3e9 estimate gives |
+
+The engine counts 3.2x more FLOPs per token than "two per active parameter", because that formula omits
+attention entirely and this arm ran 40,000-token prompts through ten full-attention layers. So the honest
+figure is **8.5 to 17.1% MFU, not 3.8 to 7.7%** — still low, still a software ceiling rather than a hardware
+one, but a third of the way up rather than a twentieth.
+
+Two hand estimates, two corrections, both upward and both from the same cause: a mental model of the
+model's cost that was simpler than the model. Worth stating as a rule — **read the engine's own counters
+before drawing a roofline**, and note that they are off by default and read a flat 0.0 until enabled, which
+is indistinguishable from an idle engine.
 
 **Decode, and here my arithmetic was wrong in a way worth keeping.** I computed 3 GB of active weights
 read per step, giving ~3.5% memory-bandwidth utilisation. That model is only correct at one request in
@@ -51,7 +72,11 @@ being measured):
 | --- | --- | --- | --- | --- |
 | 16,384 | off | 12,320 | 949 | 10.03 s |
 | 16,384 | 2,048 | **13,474** | 1,038 | 12.32 s |
+| 16,384 | 2,048 (repeat) | 13,238 / 12,939 | 1,020 / 997 | 12.31 / 12.40 s |
 | 2,048 | off | 13,238 | 1,020 | 12.31 s |
+
+Three runs of the same configuration came out at 13,474 / 13,238 / 12,939 tokens/s, so the run-to-run
+spread is about 4% and the 8x step-budget change sits inside twice that.
 
 **An eight-fold change in step budget moves prefill throughput by under 10%. The granularity hypothesis is
 refuted for this shape**, and by the advisors' own criterion the remaining suspects are communication
@@ -115,7 +140,7 @@ be a quarter.
 * **SM-active against DRAM-active during prefill.** Both low would mean the time goes to gaps — launches,
   synchronisation, communication — rather than to either roof. Attempted here and not captured; it is the
   cheapest remaining discriminator.
-* **The engine's own MFU accounting.** `--enable-mfu-metrics` is now on by default in the chart, because
-  the FLOP and byte counters read a flat 0.0 without it, which is indistinguishable from an idle engine.
-  Its numbers should replace the estimates above.
+* ~~The engine's own MFU accounting~~ — done, and it moved the answer: 62.0 TFLOP/s per GPU rather than
+  27.8, so 8.5–17.1% MFU. Scraping it needs the pod IPs, not the Service: a Service-level scrape answers
+  from one replica of two and reported a flat zero from the one that had served nothing.
 * **The same survival sweep on SGLang**, which is the falsifiable half of the all-or-nothing finding.
