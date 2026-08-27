@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import random
 import statistics
 import time
 import urllib.request
@@ -213,6 +214,134 @@ def run_perf_cell(out_dir: Path) -> dict:
     return summary
 
 
+def arrivals(url: str, model: str, prompt: str, out_tokens: int, *, rate_per_s: float,
+             duration_s: float, seed: int, priority: int | None = None,
+             max_inflight: int = 4096) -> dict:
+    """Open-loop Poisson arrivals: submit at a fixed rate whatever the server is doing.
+
+    Every measurement in this repository until now was closed loop — N requests in flight, a new one
+    only when an old one returns — which measures capacity and cannot measure a service level. A closed
+    loop is self-limiting: when the server slows, the offered load slows with it, so queueing never
+    appears and latency looks like a constant. Real traffic arrives on its own schedule, and the whole
+    question of whether there is slack for a second family to fill only exists below saturation.
+
+    The generator's own honesty is reported rather than assumed: `achieved_rate_per_s` against the rate
+    asked for, and `submit_lag_s`, the worst delay between when a request should have been sent and when
+    it was. If either drifts, the number describes this loop and not the server.
+    """
+    rng = random.Random(seed)
+    results: list[dict] = []
+    lag = 0.0
+    sent = 0
+    started = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=max_inflight) as pool:
+        futures = []
+        due = started
+        while True:
+            due += rng.expovariate(rate_per_s)
+            if due - started >= duration_s:
+                break
+            now = time.perf_counter()
+            if due > now:
+                time.sleep(due - now)
+            else:
+                lag = max(lag, now - due)
+            futures.append(pool.submit(_one, url, model, prompt, out_tokens, priority))
+            sent += 1
+        window = time.perf_counter() - started
+        for f in futures:
+            try:
+                results.append(f.result())
+            except Exception:
+                pass
+    wall = time.perf_counter() - started
+    return {"sent": sent, "completed": len(results), "window_s": window, "wall_s": wall,
+            "asked_rate_per_s": rate_per_s, "achieved_rate_per_s": sent / window if window else 0.0,
+            "submit_lag_s": lag, "rows": results}
+
+
+def _service_level(rows: list[dict], window_s: float, slo: float) -> dict:
+    if not rows:
+        return {"completed": 0, "within_slo": 0, "within_slo_frac": None,
+                "slo_goodput_per_hour": 0.0, "ttft_p50": None, "ttft_p95": None, "ttft_p99": None}
+    ttfts = sorted(r["ttft_s"] for r in rows)
+    within = sum(1 for v in ttfts if v <= slo)
+    at = lambda q: ttfts[min(len(ttfts) - 1, int(q * (len(ttfts) - 1)))]
+    return {"completed": len(rows), "within_slo": within, "within_slo_frac": within / len(rows),
+            "slo_goodput_per_hour": within / window_s * 3600,
+            "completed_per_hour": len(rows) / window_s * 3600,
+            "ttft_p50": statistics.median(ttfts), "ttft_p95": at(0.95), "ttft_p99": at(0.99)}
+
+
+def run_arrival(out_dir: Path) -> dict:
+    """The frontier below saturation: what long work costs when the short family is not filling the box.
+
+    The closed-loop frontier answered a question about a full machine, where the answer is that a
+    resident long request costs about a hundred short requests that would have met their deadline. That
+    is the saturated end of the curve. This measures the other end, one arrival rate at a time, because
+    the whole case for admitting a second family rests on box time nobody else wanted.
+    """
+    url, model = os.environ["PERF_URL"], os.environ["PERF_MODEL"]
+    hourly = float(os.environ.get("HOURLY_USD", "15.2174"))
+    slo = float(os.environ.get("SLO_TTFT_S", "1.0"))
+    duration = float(os.environ.get("ARRIVAL_DURATION_S", "60"))
+    seed = int(os.environ.get("SEED", "20260827"))
+    rates = [float(x) for x in os.environ.get("ARRIVAL_RATES_PER_S", "6,18,30,42,54").split(",")]
+    longs = [int(x) for x in os.environ.get("ARRIVAL_LONG_COUNTS", "0,1,2").split(",")]
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    words = [f"item{i}" for i in range(4096)]
+    def prompt_of(n):
+        return ("次の文章を読み、質問に答えてください。\n\n"
+                + " ".join(words[i % len(words)] for i in range(max(1, n // 4)))
+                + "\n\n質問: この文章の分類は A / B のどちらですか。")
+    short, long_ = prompt_of(300), prompt_of(20000)
+
+    cells = []
+    for rate in rates:
+        for L in longs:
+            stop = False
+
+            # Each thread returns its own count rather than incrementing a shared one: `x += 1` from
+            # several threads can lose increments, and this number is reported.
+            def long_stream() -> int:
+                n = 0
+                while not stop:
+                    _one(url, model, long_, 8)
+                    n += 1
+                return n
+
+            bg = ThreadPoolExecutor(max_workers=max(1, L)) if L else None
+            futures = []
+            if bg:
+                futures = [bg.submit(long_stream) for _ in range(L)]
+                time.sleep(5)          # let the long work reach steady state before the clock starts
+            a = arrivals(url, model, short, 8, rate_per_s=rate, duration_s=duration, seed=seed)
+            stop = True
+            long_done = 0
+            if bg:
+                long_done = sum(f.result() for f in futures)
+                bg.shutdown(wait=True)
+            sl = _service_level(a["rows"], a["window_s"], slo)
+            long_per_hour = long_done / a["window_s"] * 3600 if a["window_s"] else 0.0
+            cells.append({"asked_rate_per_s": rate, "long_resident": L,
+                          "achieved_rate_per_s": a["achieved_rate_per_s"],
+                          "submit_lag_s": a["submit_lag_s"], "sent": a["sent"],
+                          "long_completions_per_hour": long_per_hour, **sl})
+            print(f"  lambda={rate:>5.1f}/s L={L}: offered {a['achieved_rate_per_s']:5.1f}/s "
+                  f"(lag {a['submit_lag_s']*1000:5.1f}ms)  goodput "
+                  f"{sl['slo_goodput_per_hour']:>8,.0f}/h ({(sl['within_slo_frac'] or 0)*100:5.1f}% "
+                  f"within {slo:.1f}s)  ttft p50 {sl['ttft_p50']:.2f}s p95 {sl['ttft_p95']:.2f}s "
+                  f"p99 {sl['ttft_p99']:.2f}s  long {long_per_hour:>6.0f}/h", flush=True)
+
+    summary = {"model": model, "hourly_usd": hourly, "slo_s": slo, "duration_s": duration,
+               "seed": seed, "cells": cells,
+               "instrument": "benchctl.perf_cell open-loop Poisson arrivals"}
+    (out_dir / "arrival.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+    print(f"[OK] wrote {out_dir}/arrival.json")
+    return summary
+
+
 def run_mix(out_dir: Path) -> dict:
     """What one long prefill does to the short requests sharing the machine with it.
 
@@ -357,5 +486,7 @@ if __name__ == "__main__":
         run_grid(target)
     elif mode == "mix":
         run_mix(target)
+    elif mode == "arrival":
+        run_arrival(target)
     else:
         run_perf_cell(target)

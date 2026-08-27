@@ -158,7 +158,7 @@ So the earlier claim is corrected twice over. L is not "a service-level dial and
 it is both, and the economic cost was hidden by comparing mixed arms only with each other. On a box
 whose short queue is full, **the right number of resident long requests is zero.**
 
-### The caveat that keeps this from being the whole rule
+### The caveat that keeps this from being the whole rule — and it turns out to invert the answer
 
 The short load offered throughout is 225,730 requests an hour, which is what saturates this box. It is
 not an arrival rate. In hours when short demand does not fill the machine, the box time long work uses
@@ -168,10 +168,9 @@ work"; the answer at the other end is "as much as fits".
 
 That is precisely the gate both advisors described, and the table gives it a threshold to key on: admit
 long work only while short on-time goodput stays above what the short arrival rate demands, and stop as
-soon as it does not. What is still unmeasured is the same frontier at realistic arrival rates, where
-the headroom lives — and it is the measurement that would decide between one pool with a router-side
-cap and a replica split by shape, since at saturation neither is better than simply refusing the long
-work.
+soon as it does not. The same frontier at realistic arrival rates is the next section, and it reverses the
+conclusion: below saturation, with the per-request cap set, long work is nearly free and is the only
+thing that makes the box pay for itself at all.
 
 Two further cautions to carry into it:
 
@@ -182,3 +181,91 @@ Two further cautions to carry into it:
 * **Preemption plus `enable_prefix_caching=False` is a hazard.** V1 preempts by recompute, so a
   preempted 20,000-token prefill is computed again from nothing. That is box time burned outright, and
   it would corrupt exactly the accounting the next measurement is trying to establish.
+
+## Below saturation: the answer inverts, and the cap is what makes it invert
+
+Everything above is closed loop — N requests in flight, a new one only when an old one returns. That
+measures capacity and cannot measure a service level, because it is self-limiting: when the server slows
+the offered load slows with it, so queueing never appears. Real traffic arrives on its own schedule, and
+the entire question of whether there is slack for a second family only exists below saturation.
+
+So: open-loop Poisson arrivals for the short family at a fixed rate, a fixed number of long requests
+resident, a one-second deadline, sixty seconds per cell, seed fixed. The generator reports its own
+honesty — offered rate against the rate asked for, and the worst submit lag — and across all thirty
+cells it delivered within 0.4% of the asked rate with a worst lag of 12.9 ms, so these numbers describe
+the server.
+
+### Short work alone does not pay for this box
+
+| λ (req/s) | short on time/h | within 1 s | net $/box-hour |
+| --- | --- | --- | --- |
+| 6 | 21,241 | 98–100% | **−8.63** |
+| 18 | 64,347 | 100% | +4.73 |
+| 31 | 110,584 | 100% | +19.06 |
+| 44 | 158,056 | 100% | +33.78 |
+| 56 | 200,896 | 100% | +47.06 |
+
+The box holds a one-second deadline at every rate up to 56 requests a second, which is 200,896 an hour
+— close to the closed-loop saturated figure, so nothing here is in a degraded regime. But **at a tenth
+of capacity the box loses $8.63 an hour**: 21,241 short requests avoid $6.58 of API spend against a
+$15.22 bill. Occupancy was always the whole argument; this is what the other end of it looks like.
+
+### With the cap set, long work fills the gap for free
+
+Same sweep, `long_prefill_token_threshold=2048`, against the same sweep with it off:
+
+| λ | L | θ off: within 1 s | θ off: net | θ=2,048: within 1 s | θ=2,048: net | θ recovers |
+| --- | --- | --- | --- | --- | --- | --- |
+| 6 | 0 | 100.0% | −8.50 | 98.0% | −8.63 | |
+| 6 | 1 | 71.8% | +18.20 | **98.0%** | **+18.88** | **+26.2 pp** |
+| 6 | 2 | 54.2% | +29.13 | 87.4% | +30.27 | +33.2 pp |
+| 18 | 1 | 71.7% | +24.21 | **99.8%** | **+27.64** | +28.1 pp |
+| 18 | 2 | 50.0% | +27.51 | 85.2% | +34.53 | +35.2 pp |
+| 31 | 1 | 70.0% | +28.44 | **97.1%** | **+36.62** | +27.1 pp |
+| 31 | 2 | 47.3% | +29.37 | 67.6% | +31.97 | +20.3 pp |
+| 44 | 1 | 58.7% | +27.70 | 79.2% | +37.75 | +20.5 pp |
+| 44 | 2 | 30.8% | +21.69 | 53.3% | +28.33 | +22.5 pp |
+| 56 | 1 | 44.9% | +23.63 | 63.0% | +33.81 | +18.1 pp |
+| 56 | 2 | 25.6% | +18.16 | 19.6% | +11.15 | −6.0 pp |
+
+**At a tenth of capacity, one resident long request costs the short family nothing** — 98.0% on time
+with it and 98.0% without — and takes the box from −$8.63 to **+$18.88 an hour**. Two take it to
++$30.27 for 10.6 points of on-time delivery. The saturated frontier said the right number of resident
+long requests was zero; below saturation the right number is as many as the deadline can absorb, and
+long work is what makes the box pay for itself at all.
+
+Both statements are true, and the variable that switches between them is short load. The gate:
+
+* **λ below about 70% of capacity: admit long work.** It is nearly free at L=1 and cheap at L=2.
+* **λ above it: stop.** At λ=56 the box earns +$47.06 on short work alone and +$33.81 with one long
+  request resident, so the long work now costs money as well as latency.
+
+### The mechanism, and why the cap is not optional
+
+With the cap off, the fraction of short requests inside the deadline is **almost independent of the
+arrival rate** — 71.8%, 71.7%, 70.0% at λ=6, 18, 31. That is not a capacity effect. It is the
+probability that a short request arrives while a long prefill is monopolising a scheduler step: with a
+16,384-token step budget and no per-request cap, a 20,000-token prefill claims an entire step, and
+everything that arrives during it waits. The miss fraction is the long stream's duty cycle of doing
+exactly that, and duty cycle does not care how often short requests arrive.
+
+Which is why the cap fixes it and why nothing else does. Cutting the step's total budget shrinks the
+step for decodes too. Priority orders the queue but does not stop a running prefill from taking the
+budget. Only bounding one request's share of a step leaves room in the same step for the short work.
+
+**"There is idle capacity, so background work is free" is false as stated.** Averaged over an hour the
+box at λ=6 is ninety percent idle, and one resident long request still destroyed 28 points of on-time
+delivery until the cap was set. Idle capacity is not the same as being idle at the instant a request
+arrives, and the gap between those two is a scheduler setting.
+
+### What is still open
+
+* Long arrivals as a rate rather than a resident count. `L` here is a continuously-resident stream — at
+  L=1 there is always a long prefill in progress. Poisson long arrivals would spend most of the time
+  with none, which is a different and probably kinder regime.
+* The replica split, still unmeasured. It is now clearly second choice: one pool with the cap and a
+  router-side gate on short load holds the deadline at 97 to 100% for λ up to 31 while serving over a
+  thousand long requests an hour, and a split would give up that pooling for isolation it does not need
+  at those rates.
+* Real arrival traces. λ here is Poisson and stationary; real traffic is bursty, and a burst is exactly
+  when a gate keyed on average load would be wrong.
