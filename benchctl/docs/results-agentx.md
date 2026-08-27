@@ -117,6 +117,29 @@ disappointment — at concurrency 1 the replay is latency-bound, waiting for eac
 next. The 5.7x reduction in computed tokens shows up as time to first token, not as requests per second.
 Seeing it as throughput needs a concurrency sweep, which is now the obvious next arm.
 
+## Correctness first: a cache hit gives the same answer
+
+vLLM keeps this opt-in "while the feature matures", and the reason it is hard is the reason it needed
+checking before anything was built on the 11.5x: reusing a prefix on a hybrid model means restoring a
+linear-attention layer's **recurrent state** at a block boundary, not just re-reading paged KV. A wrong
+restore is silent — the request succeeds and the answer changes.
+
+`benchctl/cache_equivalence.py` grows a conversation one turn at a time so every turn after the first is
+a partial-prefix restore, sends each prompt twice at temperature 0, and compares the continuations
+character by character. Bitwise determinism is not guaranteed even without caching, so the arm where both
+calls miss is the control.
+
+**22 of 22 cache-hit pairs identical, 24 of 24 pairs identical overall**, across prefixes of 2,000, 8,000
+and 30,000 tokens and four turns each — including a turn with 35,904 of 36,493 prompt tokens served from
+cache. Nothing to report, which is the result worth having.
+
+The same run showed the latency effect on a single pair without any averaging: **3.49 s on the miss,
+0.18 s on the hit.**
+
+It also showed the routing loss directly, at concurrency 1. The cached-token count for consecutive
+identical calls oscillated 35,904 → 9,504 → 35,904: a call that lands on the other replica finds only the
+short common prefix. That is the two-replica split visible without any load at all.
+
 ## The price
 
 | | per agentic request |
