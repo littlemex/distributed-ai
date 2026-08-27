@@ -292,6 +292,19 @@ cmd_run() {
   printf '%s' "${alias_name}" | grep -Eq '^[a-z0-9][a-z0-9-]{1,62}$' ||
     die "--alias must match ^[a-z0-9][a-z0-9-]{1,62}$ (it becomes an S3 prefix and an MLflow experiment name)"
 
+  # Validated before anything is submitted. Checked after the Job exists, a typo in -o both starts a
+  # run and reports failure: the caller's variable is empty while the cluster is busy with work nobody
+  # is waiting for.
+  case "${out}" in
+    "" | id) ;;
+    run-id) wait_for="true" ;;
+    *) die "-o takes id or run-id, not '${out}'" ;;
+  esac
+  # -o id answers as soon as the Job exists, so it cannot also be a request to wait for the recording.
+  if [ "${out}" = "id" ] && [ "${wait_for}" = "true" ]; then
+    die "--wait and -o id ask for different things: -o id answers as soon as the run is submitted. Use -o run-id to wait for the recording."
+  fi
+
   namespace="$(resolve_namespace "${namespace}")"
 
   # The chip a run is filed under is the one it asked for. It is a label the reader searches with
@@ -427,12 +440,7 @@ cmd_run() {
     printf '    run id:      %s get %s%s\n' "$(invocation)" "${workload_id}" "$(namespace_opt "${namespace}")"
   } >&"${prose}"
 
-  case "${out}" in
-    id) printf '%s\n' "${workload_id}"; exit 0 ;;
-    run-id) wait_for="true" ;;
-    "") ;;
-    *) die "-o takes id or run-id, not '${out}'" ;;
-  esac
+  [ "${out}" != "id" ] || { printf '%s\n' "${workload_id}"; exit 0; }
 
   [ "${wait_for}" = "true" ] || exit 0
   say "waiting for the run" >&"${prose}"

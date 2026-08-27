@@ -229,12 +229,14 @@ STUB
 }
 
 # -o is checked before anything is submitted. A typo used to start a run and then report failure, so
-# the caller's variable was empty while the cluster was busy with a job nobody was waiting for.
+# the caller's variable was empty while the cluster was busy with a job nobody was waiting for. The
+# stub records every apply in a file, so "was anything submitted" is asked of the record and not of the
+# script's own output, which it swallows.
 test_accelprof_client_rejects_bad_output_before_submitting() {
   local client
   client="$(_ac_client)"
   [ -x "$client" ] || return 2
-  local dir out rc
+  local dir out rc fails=0
   dir="$(mktemp -d)"
   mkdir -p "$dir/bin"
   cat >"$dir/bin/kubectl" <<'STUB'
@@ -242,23 +244,41 @@ test_accelprof_client_rejects_bad_output_before_submitting() {
 args="$*"
 case "$args" in
   *configmap*) printf 'image.example/accelprof@sha256:aaa\n' ;;
-  *"apply -f"*) cat >/dev/null; printf 'SUBMITTED\n' ;;
+  *"apply -f"*) cat >/dev/null; printf 'submitted\n' >>"${SUBMIT_LOG:?}" ;;
   *"config view"*) printf 'ns\n' ;;
+  *conditions*) printf 'Complete \n' ;;
+  *run-id*) printf 'RUNID\n' ;;
+  *"-l accelprof.io/workload-id="*) printf 'profile-x\n' ;;
 esac
 STUB
   chmod +x "$dir/bin/kubectl"
-  out="$(ACCELPROF_PLATFORM_IMAGE="image.example/accelprof@sha256:aaa" PATH="$dir/bin:$PATH" \
-    KUBE_CONTEXT="" "$client" run --alias t-s --namespace ns --image image.example/w:t \
-    -o runid -- true 2>&1)" && rc=0 || rc=$?
+  run_client() {
+    SUBMIT_LOG="$dir/submits" ACCELPROF_PLATFORM_IMAGE="image.example/accelprof@sha256:aaa" \
+      PATH="$dir/bin:$PATH" KUBE_CONTEXT="" "$client" run --alias t-s --namespace ns \
+      --image image.example/w:t "$@" -- true 2>&1
+  }
+
+  : >"$dir/submits"
+  out="$(run_client -o runid)" && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || { printf 'FAIL a bad -o was accepted\n' >&2; fails=$((fails + 1)); }
+  case "$out" in *"-o takes id or run-id"*) ;; *) printf 'FAIL bad -o message: %s\n' "$out" >&2; fails=$((fails + 1)) ;; esac
+  [ ! -s "$dir/submits" ] || { printf 'FAIL a bad -o submitted the run before failing\n' >&2; fails=$((fails + 1)); }
+
+  # --wait with -o id is refused too, and refused before submitting.
+  : >"$dir/submits"
+  out="$(run_client --wait -o id)" && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || { printf 'FAIL --wait with -o id was accepted: %s\n' "$out" >&2; fails=$((fails + 1)); }
+  case "$out" in *"ask for different things"*) ;; *) printf 'FAIL --wait -o id message: %s\n' "$out" >&2; fails=$((fails + 1)) ;; esac
+  [ ! -s "$dir/submits" ] || { printf 'FAIL --wait with -o id submitted the run before failing\n' >&2; fails=$((fails + 1)); }
+
+  # And the accepted forms still submit exactly once.
+  : >"$dir/submits"
+  out="$(run_client -o id)" && rc=0 || rc=$?
+  [ "$rc" -eq 0 ] || { printf 'FAIL -o id was rejected: %s\n' "$out" >&2; fails=$((fails + 1)); }
+  [ "$(grep -c . "$dir/submits")" -eq 1 ] || { printf 'FAIL -o id did not submit once\n' >&2; fails=$((fails + 1)); }
+
   rm -rf "$dir"
-  [ "$rc" -ne 0 ] || { printf 'FAIL a bad -o was accepted\n' >&2; return 1; }
-  case "$out" in
-    *SUBMITTED*) printf 'FAIL a bad -o submitted the run before failing: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; return 1 ;;
-  esac
-  # And --wait with -o id is refused, since -o id answers before there is anything to wait for.
-  out="$(ACCELPROF_PLATFORM_IMAGE="image.example/accelprof@sha256:aaa" PATH="$PATH" KUBE_CONTEXT="" \
-    "$client" run --alias t-s --namespace ns --image image.example/w:t --wait -o id -- true 2>&1)" && rc=0 || rc=$?
-  [ "$rc" -ne 0 ] || { printf 'FAIL --wait with -o id was accepted\n' >&2; return 1; }
+  [ "$fails" -eq 0 ] || return 1
 }
 
 # get --alias must not answer with a run from another campaign, since the alias is what a reader uses
