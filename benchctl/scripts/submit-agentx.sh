@@ -4,12 +4,17 @@
 #
 #   ./scripts/submit-agentx.sh <name> <concurrency> <duration_s>
 #
+# AGENTX_URL overrides the endpoint, which is how the routing A/B is run: the plain Service spreads a
+# conversation's turns across replicas, and the affinity router keeps them together. Same corpus, same
+# flags, same duration — one endpoint.
+#
 # The per-replica Prometheus URLs are resolved here rather than in the pod, because scraping them
 # needs pod IPs and the alternative is giving the benchmark client RBAC on the cluster to look up the
 # server it is measuring. Both replicas are scraped: the Service would give one of two, and KV-cache
 # hit rate averaged over half a box is not the box's.
 set -euo pipefail
 NAME="${1:?usage: submit-agentx.sh <name> <concurrency> <duration_s>}"
+URL_OVERRIDE="${AGENTX_URL:-}"
 CONC="${2:?}"
 DURATION="${3:?}"
 CTX="${BENCHCTL_KUBE_CONTEXT:-distai-eks}"
@@ -30,9 +35,9 @@ kubectl --context "$CTX" -n "$NS" create configmap agentx-code \
 
 kubectl --context "$CTX" -n "$NS" delete job "agentx-$NAME" --ignore-not-found >/dev/null 2>&1 || true
 sleep 2
-python3 - "$NAME" "$CONC" "$DURATION" "$metrics" <<'PY' | kubectl --context "$CTX" -n "$NS" apply -f - >/dev/null
+python3 - "$NAME" "$CONC" "$DURATION" "$metrics" "$URL_OVERRIDE" <<'PY' | kubectl --context "$CTX" -n "$NS" apply -f - >/dev/null
 import sys, pathlib
-name, conc, duration, metrics = sys.argv[1:5]
+name, conc, duration, metrics, url = (sys.argv[1:6] + [""])[:5]
 y = pathlib.Path("jobs/agentx.yaml").read_text()
 y = y.replace("name: agentx\n", f"name: agentx-{name}\n", 1)
 y = y.replace('value: "/artifacts/agentx/PLACEHOLDER"', f'value: "/artifacts/agentx/{name}"')
@@ -40,6 +45,9 @@ y = y.replace('{name: CONC, value: "1"}', f'{{name: CONC, value: "{conc}"}}')
 y = y.replace('{name: DURATION, value: "300"}', f'{{name: DURATION, value: "{duration}"}}')
 y = y.replace('{name: SERVER_METRICS_URLS, value: ""}',
               f'{{name: SERVER_METRICS_URLS, value: "{metrics}"}}')
+if url:
+    y = y.replace('value: "http://qwen-serving.qwen-trial.svc.cluster.local:8000"',
+                  f'value: "{url}"')
 print(y)
 PY
 echo "[submit] agentx-$NAME (conc=$CONC duration=${DURATION}s) -> /artifacts/agentx/$NAME"

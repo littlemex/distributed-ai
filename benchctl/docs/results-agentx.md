@@ -140,6 +140,49 @@ It also showed the routing loss directly, at concurrency 1. The cached-token cou
 identical calls oscillated 35,904 → 9,504 → 35,904: a call that lands on the other replica finds only the
 short common prefix. That is the two-replica split visible without any load at all.
 
+## Conversation affinity: 82% of the missing tenth was routing
+
+The 84.96% actual against 94.14% theoretical was attributed to routing, and both advisors warned against
+assuming that — eviction, warm-up, block boundaries and non-canonical prompt text all live in the same
+gap. So it was tested rather than assumed.
+
+AIPerf sends `X-Correlation-ID` and it is stable across every turn of one conversation; InferenceX's own
+recipes use it as a hash key. `instruments/affinity/render.py` puts nginx with `hash $http_x_correlation_id
+consistent` in front of the two replicas. Deliberately nginx rather than vllm-router or Envoy: this exists
+to answer one question with the fewest new moving parts, and promoting it to the router the benchmark's own
+recipes use is a follow-up rather than this.
+
+Two ways that test could have faked a pass, and both were checked first. **SSE must stream** —
+`proxy_buffering off`, or every time to first token becomes a time to last token. And **the hash key must
+arrive** — nginx hashes an empty string to a single upstream, which reads as perfect affinity while proving
+nothing, so the key is logged per request. The first distribution check sent five single-character keys and
+all five landed on one replica; forty UUID-shaped keys, which is what AIPerf actually sends, split 21/19.
+Five samples of a short key was the wrong test, not a broken router.
+
+Same corpus, same 65 requests, same 4,171,xxx prompt tokens, same 94.14% theoretical — one endpoint changed:
+
+| | plain Service | affinity router |
+| --- | --- | --- |
+| Cache hit | 84.96% | **92.53%** |
+| Share of the theoretical maximum | 90.2% | **98.3%** |
+| Prompt tokens computed, per request | 9,654 | **4,794** — 2.0x fewer again |
+| Time to first token, p50 | 603 ms | **393 ms** |
+| Time to first token, p90 | 3,905 ms | **2,078 ms** |
+| Time to first token, max | 38,733 ms | **6,849 ms** — **5.7x** |
+| Request latency, p50 | 2,250 ms | **1,694 ms** |
+
+**Routing was 7.57 of the 9.18 missing points — 82% of the gap.** The remaining 1.61 points are the
+things the advisors named, and they are now the whole of what is left rather than a confound.
+
+The tail is where it shows most. A 200,000-token prompt landing on the replica that does not hold its
+prefix was a 38-second first token; with affinity that case is gone and the worst is 6.8 s.
+
+Per-request cost did not move — 0.20 requests/s either way — for the same reason as before: at one
+trajectory lane the replay waits for each turn, so the saving lands on latency and not on throughput.
+
+End to end from where this started, one flag and one router: **time to first token p50 6,932 ms → 393 ms,
+17.6x.**
+
 ## Four lanes: the hit rate holds, but this is not a throughput dial
 
 | | 1 lane | 4 lanes |
