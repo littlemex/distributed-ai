@@ -79,8 +79,56 @@ Three runs of the same configuration came out at 13,474 / 13,238 / 12,939 tokens
 spread is about 4% and the 8x step-budget change sits inside twice that.
 
 **An eight-fold change in step budget moves prefill throughput by under 10%. The granularity hypothesis is
-refuted for this shape**, and by the advisors' own criterion the remaining suspects are communication
-(PCIe all-reduce, no NVLink) and kernel launch or the Gated DeltaNet layers that make up 30 of 40.
+refuted for this shape**, and by the advisors' own criterion that leaves communication (PCIe all-reduce, no
+NVLink), kernel launch gaps, or the Gated DeltaNet layers that make up 30 of 40.
+
+## Two more discriminators: one impossible, one conclusive
+
+**TP=1 against TP=2 per GPU cannot be run on this hardware**, which is itself worth recording. The proposal
+was that if per-GPU throughput at TP=1 exceeds TP=2's by more than about 1.3x, the PCIe all-reduce is the
+constraint. Deploying it, all four replicas crash-looped, and the engine said exactly why:
+
+```
+ValueError: To serve at least one request with the model's max seq len (262144), 5.14 GiB KV cache is
+needed, which is larger than the available KV cache memory (2.9 GiB). Based on the available memory, the
+estimated maximum model length is 145728.
+```
+
+35 GB of FP8 weights on one 48 GB card leaves **2.9 GiB of KV**, against 39.0 GiB per replica at TP=2. At
+20 KiB/token that is 152,044 tokens, so the four concurrent 40,000-token prompts this comparison uses would
+not fit at all. Running it would mean changing the window, the pool and the achievable concurrency at the
+same time, which stops being a controlled comparison. **TP=2 is not merely the faster choice on this box;
+TP=1 is not a configuration.**
+
+**SM against DRAM activity settles it instead.** Sampled on a serving pod while the same prefill load ran,
+using 350 W as the L40S board power:
+
+| | during prefill | idle |
+| --- | --- | --- |
+| `utilization.gpu` | **100%** | 0% |
+| `utilization.memory` | **19–23%** | 0% |
+| power draw | **141–228 W** (40–65% of 350 W) | 113–124 W |
+| SM clock | 2,520 MHz (full boost) | 2,520 MHz |
+
+Read carefully, because `utilization.gpu` is the fraction of time at least one kernel was resident, not
+occupancy and not efficiency. So 100% does not contradict 8.5–17% MFU; it says the opposite of what a naive
+reading suggests.
+
+Put together — **kernels always resident, memory interface a fifth busy, power at half the board's limit,
+clocks unthrottled, and MFU under a fifth** — none of the advisors' two cases fit. It is not gaps between
+kernels (SM-busy would dip). It is not bandwidth (DRAM would be high). It is a third case: **kernels that
+are running continuously while doing little work per unit time.** A card genuinely saturated on Tensor Core
+math sits at its power limit; this one is at 60% with clocks at full boost, which means it is waiting inside
+kernels rather than between them.
+
+That also explains why the step-budget sweep was flat. If the limiter is per-kernel efficiency in the 30
+linear-attention layers, the number of tokens in a step does not change it — those layers cost roughly
+linearly in tokens at a fixed low efficiency either way.
+
+So the ceiling is **kernel efficiency in the hybrid attention path**, not communication, not launch
+overhead, not GEMM granularity, not bandwidth. The remaining test is the advisors' second suggestion: run a
+dense model of similar active size on the same box. If dense reaches 30–40% MFU, the gap is the MoE and
+DeltaNet kernels, and it is a software problem with a known owner rather than a property of the hardware.
 
 A second result falls out that matters operationally. `long_prefill_token_threshold=2048`, adopted to
 protect a short family's latency, is **9% faster than not having it** at this shape — the co-residency fix
@@ -135,11 +183,12 @@ be a quarter.
 
 ## What is not done
 
-* **TP=1 versus TP=2 per GPU**, the next discriminator: 35 GB of FP8 weights fit in 48 GB with a smaller
-  pool, and if per-GPU throughput rises more than ~1.3x then the PCIe all-reduce is the constraint.
-* **SM-active against DRAM-active during prefill.** Both low would mean the time goes to gaps — launches,
-  synchronisation, communication — rather than to either roof. Attempted here and not captured; it is the
-  cheapest remaining discriminator.
+* **A dense control of similar active size on this box.** The one remaining cheap discriminator, and now
+  the only one that matters: if a dense 3–4B FP8 model reaches 30–40% MFU here, the gap is the MoE and
+  DeltaNet kernels rather than the box or the engine.
+* **NCCL-level or profiler evidence for the communication share.** The TP sweep cannot supply it, so
+  isolating PCIe now needs `VLLM_TORCH_PROFILER_DIR` or NCCL instrumentation rather than a configuration
+  change.
 * ~~The engine's own MFU accounting~~ — done, and it moved the answer: 62.0 TFLOP/s per GPU rather than
   27.8, so 8.5–17.1% MFU. Scraping it needs the pod IPs, not the Service: a Service-level scrape answers
   from one replica of two and reported a flat zero from the one that had served nothing.
