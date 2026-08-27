@@ -79,6 +79,13 @@ maxNumBatchedTokens: ""
 # 0 disables it, which is vLLM's default and the behaviour every measurement so far was taken under.
 longPrefillTokenThreshold: 0
 
+# Report per-request cached prompt tokens in the OpenAI usage block
+# (`usage.prompt_tokens_details.cached_tokens`). Off by default in vLLM, and a benchmark that cannot
+# see it has to fall back to saying "no cache reporting" — which is indistinguishable from "no cache".
+# AgentX prints exactly that complaint when it is missing, and on this box the answer happens to be
+# zero either way, so the flag is what makes the zero a measurement.
+promptTokensDetails: true
+
 # fcfs or priority. With priority, a request's `priority` field orders admission and preemption
 # (lower runs first), which is what lets one family run only in the slack another leaves. Requires
 # clients to set it: any non-zero priority against an fcfs engine is an error, not a hint.

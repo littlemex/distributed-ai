@@ -1,0 +1,62 @@
+# AgentX against the box. Submit with scripts/submit-agentx.sh, which fills in the pod IPs for the
+# per-replica Prometheus scrape and the concurrency.
+#
+# ephemeral-storage is requested explicitly and generously, and that is not boilerplate: the trace
+# corpus is 0.57 GB compressed but AIPerf reconstructs every turn's full prompt and mmaps the result,
+# and an earlier benchmark image on this cluster filled a node's disk and got its own Job evicted.
+# The client must also not share a node with the server whose latency it measures.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agentx
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 14400
+  template:
+    metadata:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"   # a replica or client vanishing mid-run voids the run
+    spec:
+      restartPolicy: Never
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values: ["vllm-serving"]
+      containers:
+        - name: agentx
+          image: public.ecr.aws/docker/library/python:3.11-slim
+          command: ["bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              apt-get update -qq && apt-get install -y -qq git curl ca-certificates >/dev/null
+              exec bash /code/run.sh
+          env:
+            - {name: WORK, value: "/scratch/agentx"}
+            - {name: OUT, value: "/artifacts/agentx/PLACEHOLDER"}
+            - {name: MODEL, value: "Qwen/Qwen3.6-35B-A3B-FP8"}
+            - {name: SERVED_MODEL_NAME, value: "Qwen/Qwen3.6-35B-A3B"}
+            - {name: URL, value: "http://qwen-serving.qwen-trial.svc.cluster.local:8000"}
+            - {name: CONC, value: "1"}
+            - {name: DURATION, value: "300"}
+            - {name: MAX_MODEL_LEN, value: "262144"}
+            - {name: WARMUP_PER_LANE, value: "1"}
+            - {name: SERVER_METRICS_URLS, value: ""}
+            - {name: HF_HUB_ENABLE_HF_TRANSFER, value: "0"}
+          volumeMounts:
+            - {name: code, mountPath: /code}
+            - {name: results, mountPath: /artifacts}
+            - {name: scratch, mountPath: /scratch}
+          resources:
+            requests: {cpu: "8", memory: 32Gi, ephemeral-storage: 60Gi}
+            limits: {cpu: "12", memory: 60Gi, ephemeral-storage: 120Gi}
+      volumes:
+        - {name: code, configMap: {name: agentx-code, defaultMode: 0755}}
+        - {name: results, persistentVolumeClaim: {claimName: episode-results}}
+        - {name: scratch, emptyDir: {sizeLimit: 110Gi}}

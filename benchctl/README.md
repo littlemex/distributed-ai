@@ -36,7 +36,15 @@ A run is **two cells**, and the split is deliberate rather than hidden.
 | Cell | What it runs | Concurrency | Produces |
 | --- | --- | --- | --- |
 | `quality` | this harness's task plugins against one layer | low, deterministic (temperature 0) | `request`, `response`, `score` |
-| `perf` | `sglang.benchmark.serving` against the same layer | the operating point (c=16, …) | `trace`, `cost` |
+| `perf` | a load generator against the same layer | the operating point (c=16, …) | `trace`, `cost` |
+
+For the perf cell there are two instruments, and which one applies depends on whether the family's
+prompts can be synthesised. `benchctl/perf_cell.py` sweeps controlled shapes — a stated input and output
+length, closed loop for capacity and open-loop Poisson for service level — which no trace corpus can
+give, because a corpus has the lengths it has. [`instruments/agentx`](instruments/agentx/) borrows
+SemiAnalysis AgentX for the agentic family, where the shape that matters is a real multi-turn
+conversation and the property that matters is prefix reuse. Its numbers are taken with their flags and
+their aggregator so they sit on the same axis as numbers published for other hardware.
 
 They are joined on `(family, operation_point_id, serving_manifest_digest)` — **not** per request. The
 quantity the objective needs, `S_box_i`, is the box time a family's requests consume *at the operating
