@@ -253,6 +253,9 @@ arrival-rate work showed is the optimistic end.
 * **Conversation-affinity routing.** 86% and 66% on two replicas is a routing loss, and the fix is known.
 * **The 1M-context corpus.** The harness selected the 256k-capped variant, right for a 262k window, but
   it means AgentX's hardest traces were excluded.
-* **Whether caching survives KV pressure.** At concurrency 1 the pool peaked under 15%. Cached blocks
-  compete with live sequences for the same 2.0M tokens, so the hit rate at real concurrency is a
-  different measurement from the hit rate here.
+* ~~Whether caching survives KV pressure~~ — measured, in `results-prefix-survival.md`, and it does not
+  survive much of it. The hit rate holds at 99% while resident conversations stay under about 30% of the
+  per-replica pool, goes bimodal at 51% and reaches zero by 81%. For the corpus's median main turn of
+  158,944 tokens that is roughly six conversations a replica. The `vllm:kv_cache_usage_perc` reading of
+  "under 15%" quoted here cannot see the cache at all: it counts running sequences' KV and not
+  cached-but-idle blocks.
