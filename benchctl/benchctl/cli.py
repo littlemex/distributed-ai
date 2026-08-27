@@ -50,8 +50,11 @@ def cmd_run_local(args) -> int:
     from . import runner
     from .tasks.classification_enum import ClassificationEnum
     from .tasks.longctx_mc import LongContextChoice
+    from .tasks.ocr_vqa import OcrVqa
 
-    PLUGINS = {ClassificationEnum.name: ClassificationEnum, LongContextChoice.name: LongContextChoice}
+    PLUGINS = {ClassificationEnum.name: ClassificationEnum,
+               LongContextChoice.name: LongContextChoice,
+               OcrVqa.name: OcrVqa}
 
     run = spec.load_run(args.run)
     cells = [c for c in run.cells if c.id in args.cells] if args.cells else list(run.cells)
@@ -71,8 +74,14 @@ def cmd_run_local(args) -> int:
             continue
         items_path = (args.spec_root / cell.suite.items if not Path(cell.suite.items).is_absolute()
                       else Path(cell.suite.items))
-        task = (plugin(items_path=items_path, labels=tuple(args.labels.split(",")))
-                if plugin is ClassificationEnum else plugin(items_path=items_path))
+        if plugin is ClassificationEnum:
+            task = plugin(items_path=items_path, labels=tuple(args.labels.split(",")))
+        elif plugin is OcrVqa:
+            # Images live beside the manifest on the artifact volume, never in git: a few hundred
+            # JPEGs in history would make every spec review a binary diff.
+            task = plugin(manifest_path=items_path)
+        else:
+            task = plugin(items_path=items_path)
         print(f"[RUN] {cell.id} on {cell.layer.id} ({cell.layer.endpoint})")
         summary = runner.run_quality_cell(cell, task, root / cell.id, limit=args.limit)
         summaries[cell.id] = summary
@@ -87,9 +96,19 @@ def cmd_run_local(args) -> int:
     base = next((c for c in cells if c.layer.id == c.suite.baseline_layer and c.id in summaries), None)
     if box and base:
         floor = box.suite.floor
-        result = runner.compare(root / box.id, root / base.id,
-                                margin_pp=float(floor.get("margin_pp", 2.0)),
-                                confidence=float(floor.get("confidence", 0.80)))
+        # A failed comparison must not discard a finished run. Every cell's artifacts are already on
+        # disk by this point, and the first OCR run exited non-zero here — the baseline had scored
+        # nothing because the gateway rejected every image — which made a successful 278-item box cell
+        # look like a crashed job.
+        try:
+            result = runner.compare(root / box.id, root / base.id,
+                                    margin_pp=float(floor.get("margin_pp", 2.0)),
+                                    confidence=float(floor.get("confidence", 0.80)))
+        except ValueError as exc:
+            print(f"\n[PAIRED] not computable: {exc}. Cell artifacts are written; "
+                  f"check each cell's excluded_transport before reading anything into this.",
+                  file=sys.stderr)
+            return 0
         print(f"\n[PAIRED] {box.layer.id} vs {base.layer.id} on {result.n} shared items")
         print(f"  box {result.box_passed}/{result.n}, baseline {result.baseline_passed}/{result.n}")
         print(f"  only baseline {result.only_baseline}, only box {result.only_box}, "

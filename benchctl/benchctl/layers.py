@@ -60,6 +60,50 @@ class Cost:
     detail: dict = field(default_factory=dict)
 
 
+def _to_anthropic(prompt: "str | list[dict]") -> "str | list[dict]":
+    """Translate OpenAI content parts into Anthropic's, because the gateway's shim refuses images.
+
+    The gateway says so in as many words on a 400: "image_url content parts are not supported; use the
+    Anthropic /v1/messages endpoint with base64 images". The box, serving the same OpenAI protocol,
+    accepts them. So the two layers are not symmetric for a multimodal family, and the asymmetry lives
+    here rather than in the task, which should not have to know who it is talking to.
+    """
+    if isinstance(prompt, str):
+        return prompt
+    out: list[dict] = []
+    for part in prompt:
+        if part.get("type") == "text":
+            out.append({"type": "text", "text": part.get("text", "")})
+            continue
+        url = (part.get("image_url") or {}).get("url", "")
+        if not url.startswith("data:"):
+            raise ValueError("anthropic image parts need an inline data URI, not a remote URL")
+        head, _, data = url.partition(",")
+        media_type = head[len("data:"):].split(";", 1)[0] or "image/jpeg"
+        out.append({"type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": data}})
+    return out
+
+
+def _from_anthropic(payload: dict, status: int | None, attempt: int, latency_s: float) -> Reply:
+    """Anthropic's reply shape, mapped onto the same Reply the rest of the harness reads."""
+    blocks = payload.get("content") or []
+    text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    usage = payload.get("usage") or {}
+    return Reply(
+        text=text,
+        prompt_tokens=int(usage.get("input_tokens") or 0),
+        completion_tokens=int(usage.get("output_tokens") or 0),
+        # Anthropic reports cache reads separately; both names have appeared in the wild.
+        cached_prompt_tokens=int(usage.get("cache_read_input_tokens")
+                                 or usage.get("cache_read_tokens") or 0),
+        latency_s=latency_s,
+        finish_reason=payload.get("stop_reason"),
+        http_status=status,
+        attempts=attempt,
+    )
+
+
 class LayerClient:
     """One layer, callable. Retries only what is worth retrying, and says when it gave up."""
 
@@ -71,15 +115,34 @@ class LayerClient:
         self.max_attempts = max_attempts
         self.api_key = os.environ.get(layer_api_key_env(layer)) if layer.kind == "api" else None
 
-    def complete(self, prompt: str, *, max_tokens: int, temperature: float = 0.0) -> Reply:
-        body = json.dumps(
+    def complete(self, prompt: "str | list[dict]", *, max_tokens: int,
+                 temperature: float = 0.0) -> Reply:
+        """`prompt` is text, or a list of OpenAI content parts for a multimodal family.
+
+        Passing the list straight through is what keeps the image path from becoming a second client:
+        a text-only task still hands over a string and never learns that images exist, and an OCR task
+        builds the parts itself because only it knows how its images should be attached.
+        """
+        has_image = isinstance(prompt, list) and any(
+            part.get("type") != "text" for part in prompt)
+        anthropic = has_image and self.layer.image_style == "anthropic"
+        url = self.layer.messages_endpoint if anthropic else self.layer.endpoint
+        payload_out = (
+            {
+                "model": self.layer.model,
+                "messages": [{"role": "user", "content": _to_anthropic(prompt)}],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            if anthropic else
             {
                 "model": self.layer.model,
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
                 "temperature": temperature,
             }
-        ).encode()
+        )
+        body = json.dumps(payload_out).encode()
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
@@ -87,7 +150,7 @@ class LayerClient:
         backoff = 2.0
         for attempt in range(1, self.max_attempts + 1):
             started = time.perf_counter()
-            request = urllib.request.Request(self.layer.endpoint, data=body, headers=headers)
+            request = urllib.request.Request(url, data=body, headers=headers)
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
                     payload = json.load(response)
@@ -109,6 +172,8 @@ class LayerClient:
                 return Reply(text="", error=f"{type(exc).__name__}: {exc}", attempts=attempt,
                              latency_s=time.perf_counter() - started)
 
+            if anthropic:
+                return _from_anthropic(payload, status, attempt, time.perf_counter() - started)
             choice = (payload.get("choices") or [{}])[0]
             usage = payload.get("usage") or {}
             details = usage.get("prompt_tokens_details") or {}

@@ -48,8 +48,16 @@ def run_quality_cell(
         box_usd += cost.box_usd_at_full_utilisation
         box_seconds += cost.box_seconds
 
+        # A multimodal prompt is a list of parts, so "characters" is the text in it plus a count of
+        # attachments. Recording len() of the list would silently log 2 for every OCR item.
+        if isinstance(prompt, str):
+            prompt_chars, attachments = len(prompt), 0
+        else:
+            prompt_chars = sum(len(part.get("text", "")) for part in prompt)
+            attachments = sum(1 for part in prompt if part.get("type") != "text")
         requests.append({"item_id": item.id, "cell_id": cell.id, "layer": cell.layer.id,
-                         "length_bin": item.length_bin, "prompt_chars": len(prompt)})
+                         "length_bin": getattr(item, "length_bin", None),
+                         "prompt_chars": prompt_chars, "attachments": attachments})
         responses.append({"item_id": item.id, "cell_id": cell.id, "layer": cell.layer.id,
                           "text": reply.text, "prompt_tokens": reply.prompt_tokens,
                           "completion_tokens": reply.completion_tokens,

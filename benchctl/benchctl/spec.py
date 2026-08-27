@@ -67,6 +67,13 @@ class Layer:
     hourly_usd: float | None = None
     serving_ref: str | None = None
     pricing_status: str = "measured"   # "measured" | "list" | "placeholder"
+    # Which wire format this layer speaks for images, and where. The box accepts OpenAI
+    # `image_url` content parts on its chat endpoint; the gateway's OpenAI shim rejects them outright
+    # ("image_url content parts are not supported; use the Anthropic /v1/messages endpoint with base64
+    # images"), so a multimodal family needs a second protocol path that a text family never sees.
+    # Text-only families ignore both fields entirely.
+    image_style: str = "openai"        # "openai" | "anthropic"
+    messages_endpoint: str | None = None   # required when image_style is "anthropic"
 
     @staticmethod
     def load(raw: dict, where: str) -> "Layer":
@@ -83,10 +90,19 @@ class Layer:
             hourly_usd=raw.get("hourly_usd"),
             serving_ref=raw.get("serving_ref"),
             pricing_status=raw.get("pricing_status", "measured"),
+            image_style=raw.get("image_style", "openai"),
+            messages_endpoint=raw.get("messages_endpoint"),
         )
         _require(bool(layer.model) and bool(layer.endpoint), f"{where}: model and endpoint are required")
         _require(layer.pricing_status in ("measured", "list", "placeholder"),
                  f"{where}: pricing_status must be measured, list or placeholder")
+        _require(layer.image_style in ("openai", "anthropic"),
+                 f"{where}: image_style must be openai or anthropic")
+        # A refusal rather than a fallback: declaring the anthropic style without saying where to POST
+        # would send images to an endpoint that rejects them and record 278 transport failures as a
+        # quality result, which is exactly how this was found out.
+        _require(layer.image_style != "anthropic" or bool(layer.messages_endpoint),
+                 f"{where}: image_style anthropic needs messages_endpoint")
         if layer.kind == "self_hosted":
             # The box bills wall clock. Without the hourly rate nothing about its cost can be said,
             # and without the serving manifest the numbers cannot be attributed to a configuration.
