@@ -613,6 +613,27 @@ Sample/reference code provided as-is under the repository's license. Not an
 official AWS project; no support or SLA is implied. Review and harden before any
 production use.
 
+## Starting from a cluster name
+
+A cluster built by this module is registered in AWS Systems Manager under
+`/distai/v1/clusters/<cluster>`, which holds what Terraform cannot: where its state lives, the release
+it was created and last applied with, and which data layers are attached. Four scripts use that
+record, and between them they are the whole path from nothing to a working checkout.
+
+| Script | What it is for |
+| --- | --- |
+| [`../scripts/distai-install.sh`](../scripts/distai-install.sh) | The `curl ... \| bash` entry point. Clones this repository at one release and creates nothing in AWS |
+| [`../scripts/distai-up.sh`](../scripts/distai-up.sh) | Creates a cluster: preflight, a consent gate that asks for the cluster's name, the remote state, the registry entry, the tfvars, then plan and apply |
+| [`../scripts/distai-env.sh`](../scripts/distai-env.sh) | Sourced at the start of every chapter. Resolves the cluster from `CLUSTER_NAME` and `AWS_REGION`, writes `backend.hcl` if it is missing, and points kubectl at that cluster in a kubeconfig of its own |
+| [`../scripts/distai-attach-data-layer.sh`](../scripts/distai-attach-data-layer.sh) | Records, lists and removes the relationship between a cluster and a data layer, and which one is its default |
+
+```bash
+cd ~/distributed-ai-<release>
+export CLUSTER_NAME=my-cluster
+export AWS_REGION=us-east-2
+source infra/scripts/distai-env.sh
+```
+
 ## Profiling a workload
 
 The profiling platform is installed by [`../scripts/install-profiling.sh`](../scripts/install-profiling.sh),

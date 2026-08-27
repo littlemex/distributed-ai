@@ -27,6 +27,10 @@
 #   KNOWLEDGE_DIGEST      digest of the knowledge MCP image (default: resolve tag v1)
 #   DEV_BUILD=1           build both images in-cluster instead of using published digests
 #   ALLOW_UNRELATED=1     apply cluster changes unrelated to profiling (default: stop and report)
+#   ALLOW_RECORD_UPDATES=1  apply an UPDATE to the record of record (the trace bucket, the tracking
+#                         server, the KMS key, the S3 Files filesystem, or the versioning, lifecycle
+#                         and encryption that decide whether they survive). Deletes are never allowed
+#                         by this or any other flag
 #   PROFILING_ONLY=1      apply ONLY the profiling addresses, leaving unrelated drift untouched
 #   SKIP_ACCEPTANCE=1     skip the final MCP round-trip check
 #   TF_STATE_BUCKET       state bucket, region, object key and lock table of the cluster state.
@@ -230,7 +234,7 @@ if [ -z "${DATA_LAYER_NAME:-}" ]; then
     --name "/distai/v1/clusters/${CLUSTER_NAME}/defaults/data-layer" \
     --query Parameter.Value --output text 2>/dev/null || true)"
   [ -n "${DATA_LAYER_NAME}" ] && [ "${DATA_LAYER_NAME}" != "None" ] ||
-    die "no data layer is attached to ${CLUSTER_NAME}. Pass DATA_LAYER_NAME=<name> to use or create one; it is then recorded as this cluster's default."
+    die "no data layer is attached to ${CLUSTER_NAME}. Pass DATA_LAYER_NAME=<name> to use or create one; the attachment is recorded, and it becomes this cluster's default because it is the first."
 fi
 
 for tool in terraform kubectl helm aws python3 curl; do
@@ -504,9 +508,9 @@ if [ "${PROFILING_ONLY:-0}" = "1" ]; then
   # The narrowed plan is a different plan, so it is inspected in its own right before being applied.
   guard_plan "${eks_dir}" "cluster-targeted" "${targets[@]}" "${eks_vars[@]}"
 fi
-# The apply is the longest thing this script does — a tracking server takes tens of minutes, and
-# an S3 Files filesystem minutes more — so its output is NOT swallowed. Sending it to /dev/null
-# made a normal wait indistinguishable from a hang, which is its own kind of failure.
+# Output is NOT swallowed here either. This apply is usually quick — an ECR repository, IAM, a mount —
+# but the S3 Files filesystem and its access point are minutes on their own, and a silent wait is
+# indistinguishable from a hang.
 terraform -chdir="${eks_dir}" apply -input=false -auto-approve -lock-timeout=5m "${guarded_plan}"
 mount_zone="$(terraform -chdir="${eks_dir}" output -raw s3files_mount_target_az)"
 [ -n "${mount_zone}" ] || die "s3files_mount_target_az output came back empty"

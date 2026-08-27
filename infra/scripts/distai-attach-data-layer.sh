@@ -30,6 +30,9 @@
 set -euo pipefail
 
 usage() { sed -n '2,${/^[^#]/q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# Where the checkout is, for the closing hint. Taken from this file's own location rather than from the
+# caller's cwd, because the hint has to name a directory the reader can cd into.
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
@@ -90,7 +93,15 @@ if [ "${detach}" = true ]; then
   say "detaching ${layer} from ${cluster}"
   # The attachment is removed; the data layer itself and its recorded runs are untouched. Deleting a
   # data layer is a separate, deliberate act against its own Terraform state.
-  aws ssm delete-parameter --name "${prefix}/data-layers/${layer}/manifest" --region "${region}" >/dev/null
+  # Detaching something already detached is the state being asked for, not an error: ParameterNotFound
+  # here means the relationship is gone, which is exactly what this command wants to be true.
+  if ! aws ssm delete-parameter --name "${prefix}/data-layers/${layer}/manifest" \
+    --region "${region}" >/dev/null 2>&1; then
+    aws ssm get-parameter --name "${prefix}/data-layers/${layer}/manifest" --region "${region}" \
+      >/dev/null 2>&1 &&
+      die "could not remove the attachment of '${layer}' from ${cluster}; check ssm:DeleteParameter"
+    printf '    it was not attached\n'
+  fi
   printf '    the data layer itself was not touched\n'
   exit 0
 fi
@@ -127,5 +138,5 @@ elif [ -z "$(current_default)" ]; then
     --value "${layer}" --region "${region}" >/dev/null
 fi
 
-printf '\n    resolve it from any chapter with:\n\n      export CLUSTER_NAME=%s\n      export AWS_REGION=%s\n      source "$(git rev-parse --show-toplevel)/infra/scripts/distai-env.sh"\n\n' \
-  "${cluster}" "${region}"
+printf '\n    resolve it from any chapter with:\n\n      cd %s\n      export CLUSTER_NAME=%s\n      export AWS_REGION=%s\n      source infra/scripts/distai-env.sh\n\n' \
+  "${repo_root}" "${cluster}" "${region}"

@@ -66,7 +66,7 @@ done
 [ -z "${missing}" ] || die "missing required commands:${missing}"
 
 account="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" ||
-  die "no usable AWS credentials. Sign in first, or pass -p <profile>."
+  die "no usable AWS credentials. Sign in, or set AWS_PROFILE, before running this."
 caller_arn="$(aws sts get-caller-identity --query Arn --output text)"
 
 # The registry answers "does this name already belong to someone?" before anything is created.
@@ -131,7 +131,7 @@ if [ -f "${eks_dir}/backend.hcl" ]; then
     die "${eks_dir}/backend.hcl points at key '$(backend_val key)', not this cluster's state. Use a separate checkout per cluster."
   [ "$(backend_val region)" = "${region}" ] ||
     die "${eks_dir}/backend.hcl is in region '$(backend_val region)', but this run targets '${region}'."
-  say "backend.hcl exists and matches; the bootstrap run will backfill the registry and leave it alone"
+  say "backend.hcl exists and matches; it is left alone and the registry is written from it below"
 fi
 "${eks_dir}/scripts/bootstrap-remote-state.sh" "${bootstrap_args[@]}"
 
@@ -149,7 +149,10 @@ hcl_val() { awk -F\" -v k="$1" '$0 ~ "^[[:space:]]*"k"[[:space:]]*=" {print $2; 
 put state/bucket "${state_bucket}"
 put state/key "eks/${cluster}/terraform.tfstate"
 put state/lock-table "$(hcl_val dynamodb_table)"
-put state/kms-key-id "$(hcl_val kms_key_id)"
+# A backend.hcl written by hand may omit the key; SSM rejects an empty value, which would leave the
+# registry half written. The default is the one the bootstrap module itself falls back to.
+kms_key_id="$(hcl_val kms_key_id)"
+put state/kms-key-id "${kms_key_id:-alias/aws/s3}"
 put meta/account-id "${account}"
 printf '    %s/state/{bucket,key,lock-table,kms-key-id}\n' "${prefix}"
 
@@ -222,7 +225,9 @@ aws ssm get-parameter --name "${prefix}/meta/created-release" --region "${region
   aws ssm put-parameter --name "${prefix}/meta/created-release" --type String \
     --value "${release}" --region "${region}" >/dev/null
 
-aws eks update-kubeconfig --name "${cluster}" --region "${region}" >/dev/null
+# Deliberately not calling aws eks update-kubeconfig here. It would write ~/.kube/config and move its
+# current-context, which is exactly what distai-env.sh refuses to do to someone with another cluster
+# open next door. The four lines below wire kubectl into a kubeconfig of this cluster's own.
 
 cat <<EOF
 

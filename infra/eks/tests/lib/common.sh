@@ -124,3 +124,16 @@ wait_for_job() {
     sleep 5
   done
 }
+
+# The region an EKS kubeconfig points at, or empty. Read from the cluster entry rather than the context
+# name: `aws eks update-kubeconfig --alias <name>` renames the context to something short (the workshop
+# preamble names it after the cluster), and only the cluster entry keeps the ARN that carries the
+# region. The context name is still tried, for a kubeconfig written without an alias.
+eks_region_from_kubeconfig() {
+  local from_arn
+  from_arn="$(kubectl config view --minify -o jsonpath='{.clusters[0].name}' 2>/dev/null |
+    sed -n 's|^arn:aws[a-z-]*:eks:\([a-z0-9-]*\):.*|\1|p')"
+  [ -n "$from_arn" ] || from_arn="$(kubectl config current-context 2>/dev/null |
+    sed -n 's|^arn:aws[a-z-]*:eks:\([a-z0-9-]*\):.*|\1|p')"
+  printf '%s' "$from_arn"
+}

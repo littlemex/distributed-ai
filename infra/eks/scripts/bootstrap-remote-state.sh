@@ -72,7 +72,12 @@ terraform "${tf_args[@]}" init -input=false
 # this command safe to run against a foundation someone else bootstrapped.
 adopt() {
   local address="$1" id="$2"
-  terraform "${tf_args[@]}" state list 2>/dev/null | grep -qx "$address" && return 0
+  # The list is captured before it is searched. Piping into grep -q closes the pipe on the first
+  # match, terraform dies of SIGPIPE, and under pipefail a successful match is reported as a failed
+  # command — which here would mean "not in state" for something already in it, and a second import.
+  local in_state
+  in_state="$(terraform "${tf_args[@]}" state list 2>/dev/null || true)"
+  printf '%s\n' "$in_state" | grep -qx "$address" && return 0
   echo "==> Adopting the existing ${address} (${id})"
   terraform "${tf_args[@]}" import -input=false "${var_args[@]}" "$address" "$id" >/dev/null
 }

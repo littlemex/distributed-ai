@@ -26,7 +26,17 @@ empty S3 backend block as a real remote backend and fails a plain
 
 ## Opt-in flow
 
-1. Create the state bucket and lock table with [`bootstrap/`](../bootstrap/README.md). The bootstrap module itself uses local state by design.
+The workshop path does all of this in one command: `infra/scripts/distai-up.sh` runs the bootstrap,
+records where the state lives in the registry, and later runs of the chapter preamble
+(`infra/scripts/distai-env.sh`) write `backend.hcl` from that record, so a fresh clone needs none of
+the steps below. They are the manual equivalent, for adopting a bucket that already exists or
+repairing a checkout.
+
+1. Create the state bucket and lock table with [`bootstrap/`](../bootstrap/README.md), or with
+   `scripts/bootstrap-remote-state.sh -c <cluster> -b <bucket> -r <region>`. The cluster name is
+   required because the state key is derived from it (`eks/<cluster>/terraform.tfstate`), so one
+   bucket holds every cluster in the account without two of them colliding. The bootstrap module
+   itself uses local state by design.
 2. In `infra/eks/`, copy `backend.tf.example` to `backend.tf`.
 3. Fill in `backend.hcl` from `backend.hcl.example`, or generate it during the bootstrap step with `terraform output -raw backend_hcl > ../backend.hcl` from `infra/eks/bootstrap/`.
 4. Run `terraform init -backend-config=backend.hcl -migrate-state`.

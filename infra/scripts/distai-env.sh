@@ -1,9 +1,13 @@
 # distai-env.sh — resolve a cluster's execution context from its name. MEANT TO BE SOURCED.
 #
 #   export CLUSTER_NAME=my-cluster
+#   export AWS_REGION=us-east-2
 #   source "$(git rev-parse --show-toplevel)/infra/scripts/distai-env.sh"
 #
-# Every workshop chapter starts with those two lines and needs nothing else. What it resolves:
+# Every workshop chapter starts with those lines and needs nothing else. The region is one of them
+# because a cluster is (account, region, name): with AWS_REGION unset the AWS CLI's own default region
+# decides where to look, and a default that differs from the cluster's is a lookup that fails. What it
+# resolves:
 #
 #   AWS_REGION                 from the environment, else the AWS CLI's configured region
 #   DISTAI_ACCOUNT_ID          the account the cluster belongs to, per the registry
@@ -29,17 +33,21 @@
 # do to someone who has another cluster open next door. The only shell this changes is this one; the
 # only file it touches is its own.
 #
-# Only the first four come from the registry because only they cannot come from Terraform: the state
-# cannot record its own address, and a fresh checkout has no backend.hcl to read it from. Everything
-# else about the cluster stays behind `terraform output`, which this makes possible by writing
-# backend.hcl when it is absent.
+# What the registry holds is what Terraform cannot: the state's own address (a state cannot record
+# where it lives, and a fresh checkout has no backend.hcl to read it from), the release a cluster was
+# created and last applied with, and which data layers are attached to it. Everything else about the
+# cluster stays behind `terraform output`, which this makes possible by writing backend.hcl when it is
+# absent. Nothing here is a copy of something Terraform already knows.
 #
 # It is sourced rather than run because its job is to leave variables behind in the caller's shell.
 # That has consequences it must respect: no `set -e`, no `exit`, and nothing on stdout, so that a
 # chapter's own command substitution is never polluted. Failures return non-zero and say what to fix.
 #
-# Nothing in AWS is created or applied; every AWS call it makes is a read. Locally it writes two files:
-# backend.hcl when it is missing, and the kubeconfig above. DISTAI_DEFINE_K=0 skips defining `k`.
+# Nothing in AWS is created or applied; every AWS call it makes is a read. Locally it writes backend.hcl
+# when it is missing (and copies backend.tf from its example if that is missing too, since a backend
+# block is what makes the file mean anything), and the kubeconfig above. DISTAI_DEFINE_K=0 skips
+# defining `k`; DISTAI_KUBECONFIG overrides where the kubeconfig goes; DISTAI_EXPECT_RELEASE warns
+# when the cluster was last applied with another release.
 
 _distai_say() { printf 'distai-env: %s\n' "$*" >&2; }
 _distai_warn() { printf 'distai-env: warning: %s\n' "$*" >&2; }
@@ -51,6 +59,12 @@ _distai_resolve() {
   # return early. A resolution that fails must not leave `k` quietly pointed at the cluster resolved
   # last: a mistyped CLUSTER_NAME would then keep working, against the wrong cluster. Dropping our own
   # KUBECONFIG (and only ours) puts the shell back where it was before this file was ever sourced.
+  # Everything this file exports goes, not just the kubectl pointer. A resolve that stops early would
+  # otherwise leave the previous cluster's state bucket, release and data layer in the environment,
+  # and the next command in the chapter would use them as if they belonged to the cluster just named.
+  unset DISTAI_CLUSTER DISTAI_ACCOUNT_ID DISTAI_STATE_BUCKET DISTAI_STATE_KEY \
+    DISTAI_STATE_LOCK_TABLE DISTAI_STATE_KMS_KEY_ID DISTAI_RELEASE DISTAI_CREATED_RELEASE \
+    DISTAI_DATA_LAYER DISTAI_DATA_LAYERS
   if [ -n "${DISTAI_CONTEXT:-}" ]; then
     unset DISTAI_CONTEXT
     case "${KUBECONFIG:-}" in "${HOME}/.kube/distai/"*) unset KUBECONFIG ;; esac
@@ -280,7 +294,10 @@ HCL
   fi
 }
 
-_distai_resolve
-_distai_status=$?
+# `|| _distai_status=$?` rather than a bare call: this file is sourced, and a bare command that fails
+# would trip the caller's own `set -e` before the status could be captured and returned — killing the
+# shell of a reader whose only mistake was a mistyped cluster name.
+_distai_status=0
+_distai_resolve || _distai_status=$?
 unset -f _distai_resolve _distai_say _distai_warn _distai_fail
 return ${_distai_status} 2>/dev/null || true

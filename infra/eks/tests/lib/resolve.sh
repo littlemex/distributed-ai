@@ -26,7 +26,7 @@ resolve_region() {
   # carried as a flag), and an ambient default region then silently points every aws call in the suite
   # at a region the cluster is not in.
   if [ -z "$AWS_REGION_OPT" ]; then
-    AWS_REGION_OPT="$(kubectl config current-context 2>/dev/null | sed -n 's|^arn:aws[a-z-]*:eks:\([a-z0-9-]*\):.*|\1|p')"
+    AWS_REGION_OPT="$(eks_region_from_kubeconfig)"
   fi
   if [ -z "$AWS_REGION_OPT" ]; then
     AWS_REGION_OPT="${AWS_DEFAULT_REGION:-}"

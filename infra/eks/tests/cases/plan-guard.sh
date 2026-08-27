@@ -172,3 +172,46 @@ test_plan_guard_no_platform_resources_elsewhere() {
     return 1
   }
 }
+
+# Everything in the data layer that cannot be recreated has to be in the protected list. The owned
+# list is derived from the Terraform sources; this one is still a literal, because "what must never be
+# deleted" is a judgement rather than a pattern — so the tripwire is that every resource the data layer
+# itself marks prevent_destroy, and every configuration that decides whether those survive, is named.
+test_plan_guard_protected_covers_prevent_destroy() {
+  local data_dir="$SCRIPT_DIR/../../data-layer"
+  [ -d "$data_dir" ] || return 2
+  local protected missing=""
+  protected="$(sed -n '/^protected_addresses()/,/^ADDR/p' "$(_pg_installer)" | sed '1,2d;$d')"
+  # The resources carrying prevent_destroy, read out of the data layer's own files.
+  local addr
+  while IFS= read -r addr; do
+    [ -n "$addr" ] || continue
+    printf '%s\n' "$protected" | grep -qxF "$addr" || missing="${missing} ${addr}"
+  done <<EOF2
+$(python3 - "$data_dir" <<'PY'
+import glob, os, re, sys
+out = []
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.tf"))):
+    src = open(path).read()
+    # Walk resource blocks and keep the ones whose lifecycle says prevent_destroy = true.
+    for m in re.finditer(r'^resource\s+"([^"]+)"\s+"([^"]+)"\s*\{', src, re.M):
+        start = m.end()
+        depth, i = 1, start
+        while i < len(src) and depth:
+            if src[i] == "{":
+                depth += 1
+            elif src[i] == "}":
+                depth -= 1
+            i += 1
+        body = src[start:i]
+        if re.search(r'prevent_destroy\s*=\s*true', body):
+            out.append(f"{m.group(1)}.{m.group(2)}")
+print("\n".join(out))
+PY
+)
+EOF2
+  [ -z "$missing" ] || {
+    printf 'these prevent_destroy resources are not in protected_addresses:%s\n' "$missing" >&2
+    return 1
+  }
+}

@@ -19,16 +19,21 @@ register_all_tests() {
   register_test plan-guard-owned-complete       test_plan_guard_owned_list_is_complete   baseline static "$TIMEOUT_STATIC"
   register_test plan-guard-no-stray-platform    test_plan_guard_no_platform_resources_elsewhere baseline static "$TIMEOUT_STATIC"
   register_test plan-guard-table                test_plan_guard_table                    baseline static "$TIMEOUT_STATIC"
+  register_test plan-guard-protected-complete   test_plan_guard_protected_covers_prevent_destroy baseline static "$TIMEOUT_STATIC"
   register_test registry-matches-state          test_registry_matches_state              baseline static "$TIMEOUT_STATIC" terraform
   register_test registry-default-layer-attached test_registry_default_data_layer_is_attached baseline static "$TIMEOUT_STATIC"
   register_test registry-preamble-contract      test_registry_preamble_contract          baseline static "$TIMEOUT_STATIC"
   register_test registry-unknown-cluster-fails  test_registry_unknown_cluster_fails      baseline static "$TIMEOUT_STATIC"
+  register_test registry-layout-agrees         test_registry_layout_is_stated_once       baseline static "$TIMEOUT_STATIC"
   register_test registry-preamble-kubectl       test_registry_preamble_configures_kubectl baseline static "$TIMEOUT_STATIC" kubectl
   register_test registry-stale-context-dropped  test_registry_failed_resolve_drops_context baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-latest        test_accelprof_client_resolves_newest_run baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-hints         test_accelprof_client_hints_are_plugin_form baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-chip          test_accelprof_client_chip_follows_the_request baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-wait          test_accelprof_client_wait_waits_for_the_recording baseline static "$TIMEOUT_STATIC"
+  register_test accelprof-client-wait-timeout  test_accelprof_client_wait_fails_when_nothing_is_recorded baseline static "$TIMEOUT_STATIC"
+  register_test accelprof-client-output-guard  test_accelprof_client_rejects_bad_output_before_submitting baseline static "$TIMEOUT_STATIC"
+  register_test accelprof-client-alias         test_accelprof_client_alias_narrows_the_latest baseline static "$TIMEOUT_STATIC"
   register_test static-terraform-validate test_static_terraform_validate baseline static "$TIMEOUT_STATIC" terraform
 
   register_test image-build-ddp-sample-golden test_image_build_ddp_sample_golden baseline static "$TIMEOUT_STATIC" helm

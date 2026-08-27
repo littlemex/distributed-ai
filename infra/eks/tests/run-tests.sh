@@ -152,11 +152,12 @@ ensure_context() {
     exit 1
   fi
   # The cluster name alone does not pin a target: the region does too, and it can arrive from an
-  # ambient AWS_REGION that has nothing to do with this cluster. An EKS context ARN carries the
-  # region, so it is the one place where the two can be compared — a mismatch would otherwise send
-  # every aws call in the suite to a region the cluster is not in, and report absence as failure.
+  # ambient AWS_REGION that has nothing to do with this cluster. The kubeconfig's cluster entry carries
+  # an ARN with the region in it, so it is the one place where the two can be compared — a mismatch
+  # would otherwise send every aws call in the suite to a region the cluster is not in, and report
+  # absence as failure.
   local ctx_region
-  ctx_region=$(printf '%s' "$ctx" | sed -n 's|^arn:aws[a-z-]*:eks:\([a-z0-9-]*\):.*|\1|p')
+  ctx_region="$(eks_region_from_kubeconfig)"
   if [ -n "$ctx_region" ] && [ "$ctx_region" != "$AWS_REGION_OPT" ]; then
     log_fail "region mismatch: the kubectl context is in $ctx_region but this run uses $AWS_REGION_OPT (pass --region $ctx_region, or unset AWS_REGION)"
     exit 1

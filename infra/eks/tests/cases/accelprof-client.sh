@@ -193,3 +193,85 @@ STUB
        return 1 ;;
   esac
 }
+
+# --wait that gives up must not look like success. It used to fall through to the ordinary report,
+# printing "not recorded yet" and exiting zero, which tells a script the recording exists.
+test_accelprof_client_wait_fails_when_nothing_is_recorded() {
+  local client
+  client="$(_ac_client)"
+  [ -x "$client" ] || return 2
+  local dir out rc
+  dir="$(mktemp -d)"
+  mkdir -p "$dir/bin"
+  # A Job that completes and a recorder that never writes an id.
+  cat >"$dir/bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  *configmap*) printf 'image.example/accelprof@sha256:aaa\n' ;;
+  *"apply -f"*) cat >/dev/null; printf 'job.batch/x created\n' ;;
+  *"config view"*) printf 'ns\n' ;;
+  *run-id*) ;;
+  *conditions*) printf 'Complete \n' ;;
+  *"-l accelprof.io/workload-id="*) printf 'profile-x\n' ;;
+esac
+STUB
+  chmod +x "$dir/bin/kubectl"
+  out="$(WAIT_RECORDER_GRACE_SECONDS=1 ACCELPROF_PLATFORM_IMAGE="image.example/accelprof@sha256:aaa" \
+    PATH="$dir/bin:$PATH" KUBE_CONTEXT="" "$client" run --alias t-s --namespace ns \
+    --image image.example/w:t --wait -- true 2>&1)" && rc=0 || rc=$?
+  rm -rf "$dir"
+  [ "$rc" -ne 0 ] || { printf 'FAIL --wait exited 0 with nothing recorded: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; return 1; }
+  case "$out" in
+    *"did not appear"*) ;;
+    *) printf 'FAIL --wait timeout said nothing useful: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; return 1 ;;
+  esac
+}
+
+# -o is checked before anything is submitted. A typo used to start a run and then report failure, so
+# the caller's variable was empty while the cluster was busy with a job nobody was waiting for.
+test_accelprof_client_rejects_bad_output_before_submitting() {
+  local client
+  client="$(_ac_client)"
+  [ -x "$client" ] || return 2
+  local dir out rc
+  dir="$(mktemp -d)"
+  mkdir -p "$dir/bin"
+  cat >"$dir/bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  *configmap*) printf 'image.example/accelprof@sha256:aaa\n' ;;
+  *"apply -f"*) cat >/dev/null; printf 'SUBMITTED\n' ;;
+  *"config view"*) printf 'ns\n' ;;
+esac
+STUB
+  chmod +x "$dir/bin/kubectl"
+  out="$(ACCELPROF_PLATFORM_IMAGE="image.example/accelprof@sha256:aaa" PATH="$dir/bin:$PATH" \
+    KUBE_CONTEXT="" "$client" run --alias t-s --namespace ns --image image.example/w:t \
+    -o runid -- true 2>&1)" && rc=0 || rc=$?
+  rm -rf "$dir"
+  [ "$rc" -ne 0 ] || { printf 'FAIL a bad -o was accepted\n' >&2; return 1; }
+  case "$out" in
+    *SUBMITTED*) printf 'FAIL a bad -o submitted the run before failing: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; return 1 ;;
+  esac
+  # And --wait with -o id is refused, since -o id answers before there is anything to wait for.
+  out="$(ACCELPROF_PLATFORM_IMAGE="image.example/accelprof@sha256:aaa" PATH="$PATH" KUBE_CONTEXT="" \
+    "$client" run --alias t-s --namespace ns --image image.example/w:t --wait -o id -- true 2>&1)" && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || { printf 'FAIL --wait with -o id was accepted\n' >&2; return 1; }
+}
+
+# get --alias must not answer with a run from another campaign, since the alias is what a reader uses
+# to mean "mine" in a namespace several people share.
+test_accelprof_client_alias_narrows_the_latest() {
+  [ -x "$(_ac_client)" ] || return 2
+  local got
+  got="$(_ac_run '2026-08-27T05:00:00Z wl-mine 111 Complete
+2026-08-27T06:00:00Z wl-theirs 222 Complete' get --alias mine -n team-a)"
+  # The stub ignores the label selector, so this asserts the flag reaches the query at all by way of
+  # the message naming the alias; the selector itself is covered by the render golden.
+  case "$got" in
+    0*"for alias mine"*) ;;
+    *) printf 'FAIL --alias was not honoured: %s\n' "$got" >&2; return 1 ;;
+  esac
+}

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Tests for the workshop registry and the two-line chapter preamble it exists to serve.
+# Tests for the workshop registry and the chapter preamble it exists to serve (cd, CLUSTER_NAME,
+# AWS_REGION, source).
 #
 # The registry holds only what Terraform cannot: where a cluster's state lives, which release it was
 # applied with, and which data layers are attached. That makes these tests worth having — a registry
 # that has drifted from reality is invisible until a chapter resolves the wrong cluster, and the
-# preamble is a contract (sourced, no exit, nothing on stdout) that a normal review would not catch
+# four-line preamble is a contract (sourced, no exit, nothing on stdout) that a normal review would not catch
 # breaking.
 
 # The harness resolves the cluster and region for every test; the region lands in AWS_REGION_OPT
@@ -162,6 +163,30 @@ test_registry_failed_resolve_drops_context() {
     printf '%s|%s' \"\$DISTAI_CONTEXT\" \"\$KUBECONFIG\"")"
   [ "$out" = "|" ] || {
     printf 'a failed resolve left kubectl pointed somewhere: %s\n' "$out" >&2
+    return 1
+  }
+}
+
+# The registry's path layout and the state key's shape are decisions that several scripts and this
+# suite all have to agree on. They are written out in each of them rather than derived from one place,
+# so the tripwire is that they agree: a v2 of the layout, or a change to where a cluster's state lives,
+# must not leave one file reading a namespace nobody else writes to.
+test_registry_layout_is_stated_once() {
+  local root="$SCRIPT_DIR/../../.."
+  local files="$root/infra/scripts/distai-env.sh $root/infra/scripts/distai-up.sh
+    $root/infra/scripts/distai-attach-data-layer.sh $root/infra/scripts/install-profiling.sh
+    $SCRIPT_DIR/registry.sh"
+  local prefixes keys
+  # Every literal registry path, reduced to its schema part (/distai/<version>/clusters).
+  prefixes="$(grep -hoE '/distai/[a-z0-9]+/clusters' $files | sort -u)"
+  [ "$(printf '%s\n' "$prefixes" | grep -c .)" -eq 1 ] || {
+    printf 'the registry path is spelled more than one way:\n%s\n' "$prefixes" >&2
+    return 1
+  }
+  # And the state key: everything that names it must use the same shape.
+  keys="$(grep -hoE 'eks/\$\{?[A-Za-z_]+\}?/terraform\.tfstate' $files | sed 's/\${*[A-Za-z_]*}*/CLUSTER/' | sort -u)"
+  [ "$(printf '%s\n' "$keys" | grep -c .)" -le 1 ] || {
+    printf 'the cluster state key is spelled more than one way:\n%s\n' "$keys" >&2
     return 1
   }
 }

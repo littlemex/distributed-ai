@@ -52,7 +52,8 @@
 #                         (WAIT_RECORDER_GRACE_SECONDS, default 120) before reporting without one.
 #   -o id | run-id        print only that value on stdout, for use in a shell variable. Everything
 #                         else goes to stderr. "run-id" implies --wait, since a run id does not
-#                         exist until the recorder has written it.
+#                         exist until the recorder has written it; "id" answers as soon as the run is
+#                         submitted and therefore cannot be combined with --wait.
 #   --dry-run             print the manifest and exit. With ACCELPROF_PLATFORM_IMAGE set, this
 #                         needs no cluster at all, which is how the golden manifest is produced.
 #
@@ -296,8 +297,8 @@ cmd_run() {
   # The chip a run is filed under is the one it asked for. It is a label the reader searches with
   # (alias + chip resolves a run when the id is not at hand) and reads in the output, so it has to
   # match what they typed, not where the scheduler happened to put the Pod: a CPU job that lands on
-  # a GPU node borrowed for the day is still a CPU run. Neuron is decided by the device request too;
-  # the profiler mode follows from the chip rather than the other way round.
+  # a GPU node borrowed for the day is still a CPU run. Asking for the neuron profiler counts as asking
+  # for neuron, because a profiler mode that only exists for one chip is itself a request for it.
   local chip="cpu"
   [ -z "${gpus}" ] || chip="gpu"
   [ -z "${neurons}" ] || chip="neuron"
@@ -420,9 +421,10 @@ cmd_run() {
     say "submitted ${job_name} in ${namespace} (alias ${alias_name}, profile ${profile})"
     printf '    workload_id: %s\n' "${workload_id}"
     printf '    logs:        kubectl -n %s logs -f job/%s -c workload\n' "${namespace}" "${job_name}"
-    # The hint is the shortest form that works: the plugin name, and the namespace only when it is
-    # not the one this command would resolve on its own. Nothing to copy by hand in the common case.
-    printf '    run id:      %s get%s\n' "$(invocation)" "$(namespace_opt "${namespace}")"
+    # The id is named even though `get` alone would usually resolve to this same run: usually is not
+    # always. Another submission in this namespace — a colleague's, or this shell's twin — becomes the
+    # newest, and a hint that reads someone else's status as yours is worse than a longer line.
+    printf '    run id:      %s get %s%s\n' "$(invocation)" "${workload_id}" "$(namespace_opt "${namespace}")"
   } >&"${prose}"
 
   case "${out}" in
@@ -443,12 +445,12 @@ cmd_run() {
   # fails before the recorder runs at all would otherwise be waited on until the timeout. Once the Job
   # has finished, the recorder is given a grace period to catch up before the answer is reported
   # without an id.
-  local deadline conditions run_id grace_deadline=""
+  local deadline conditions run_id grace_deadline="" timed_out="true"
   deadline=$(( $(date +%s) + ${WAIT_TIMEOUT_SECONDS:-86400} ))
   while [ "$(date +%s)" -lt "${deadline}" ]; do
     run_id="$(k get job "${job_name}" -n "${namespace}" \
       -o jsonpath='{.metadata.annotations.accelprof\.io/run-id}' 2>/dev/null || true)"
-    [ -z "${run_id}" ] || break
+    [ -z "${run_id}" ] || { timed_out="false"; break; }
     conditions="$(k get job "${job_name}" -n "${namespace}" \
       -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)"
     case "${conditions}" in
@@ -460,6 +462,15 @@ cmd_run() {
     esac
     sleep 5
   done
+  # A wait that gave up is a failure, not a report. Exiting zero would tell a script the recording
+  # exists when the whole reason for waiting was that it did not.
+  if [ "${timed_out}" = "true" ]; then
+    if [ "${out}" != "run-id" ]; then
+      cmd_get "${workload_id}" -n "${namespace}" || true
+    fi
+    die "the recording for ${workload_id} did not appear before this gave up. Look at the recorder: kubectl -n ${namespace} logs job/${job_name} -c recorder"
+  fi
+
   if [ "${out}" = "run-id" ]; then
     cmd_get "${workload_id}" -n "${namespace}" -o run-id
   else
