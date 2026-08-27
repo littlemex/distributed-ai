@@ -190,3 +190,30 @@ test_registry_layout_is_stated_once() {
     return 1
   }
 }
+
+# The one-liner installers pin the release twice over on purpose: the URL a reader curls is from a tag,
+# and the PIN inside the script it fetches is that same tag, so the tree that gets checked out is the
+# tree the script was published with. That only holds if every copy of the release name agrees — and
+# the name is written out in five places across two scripts and a doc, so a bump that misses one leaves
+# a reader following the book against a tree the book was never written against. There is nothing at
+# runtime that would notice, so it is asserted here.
+test_registry_release_pin_is_stated_once() {
+  local root="$SCRIPT_DIR/../.."
+  local found
+  found="$(grep -rhoE 'release/eks-distributed-ai/v[0-9]+\.[0-9]+\.[0-9]+' \
+    "$root/scripts/get-profiling.sh" "$root/scripts/distai-install.sh" \
+    "$root/docs/profiling-install.md" 2>/dev/null | sort -u)"
+  [ -n "$found" ] || { printf 'no release pin found at all; the greps are looking in the wrong place\n' >&2; return 1; }
+  local n
+  n="$(printf '%s\n' "$found" | grep -c .)"
+  [ "$n" -eq 1 ] || {
+    printf 'the release pin disagrees between the installers and the doc: %s\n' "$(printf '%s' "$found" | tr '\n' ' ')" >&2
+    return 1
+  }
+  # The directory the installers clone into is derived from the pin, so the doc's `cd` has to follow it.
+  local ver="${found##*/}"
+  grep -qF "cd ~/distributed-ai-${ver}" "$root/docs/profiling-install.md" || {
+    printf 'docs/profiling-install.md still cds into a directory from another release (pin is %s)\n' "$ver" >&2
+    return 1
+  }
+}
