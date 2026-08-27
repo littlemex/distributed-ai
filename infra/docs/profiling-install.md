@@ -22,17 +22,23 @@ that release's URL, so the one-liner and the tree it installs cannot drift apart
 export CLUSTER_NAME=my-cluster
 export AWS_REGION=us-east-2
 export PRODUCER_NAMESPACES=team-a,team-b
-export TF_STATE_BUCKET=my-terraform-state
-export TF_STATE_REGION=ap-northeast-1
-export TF_STATE_KEY=eks/my-cluster/terraform.tfstate
-export TF_STATE_LOCK_TABLE=my-terraform-locks
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/refs/tags/release/eks-distributed-ai/v0.0.2/infra/scripts/get-profiling.sh | bash
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/refs/tags/release/eks-distributed-ai/v0.1.0/infra/scripts/get-profiling.sh | bash
 ```
 
-The `TF_STATE_*` variables are required on this path and optional on the other one. `backend.hcl` is
-environment-specific and untracked, so a fresh clone does not have one to read the state's location
-from; from a checkout that has been through `bootstrap-remote-state.sh`, they are read from it. The
-region is the state bucket's region, which is not necessarily the cluster's.
+That installs the client and stops there. Running the installer from this path as well needs the
+state's location too (`TF_STATE_BUCKET`, `TF_STATE_REGION`, `TF_STATE_KEY` and `EKS_TFVARS`), because
+`backend.hcl` and `terraform.tfvars` are environment-specific and untracked, so a fresh clone has
+neither, and a plan without the cluster's variables is a destructive one. From a checkout there is a
+shorter way: the four-line preamble resolves the state's location from the registry, and the installer
+is then one command with no state variables at all.
+
+```bash
+cd ~/distributed-ai-v0.1.0
+export CLUSTER_NAME=my-cluster
+export AWS_REGION=us-east-2
+source infra/scripts/distai-env.sh
+PRODUCER_NAMESPACES=team-a,team-b ./infra/scripts/install-profiling.sh
+```
 
 The checkout lands in `~/distributed-ai-<release>` (`PROFILING_DIR`) and the plugin in
 `~/.local/bin` (`PROFILING_BIN_DIR`). `RUN_INSTALL=0` stops after fetching, for a look at the plan
@@ -60,15 +66,15 @@ accelerators that produced them.
 | `CLUSTER_NAME` | yes | The existing EKS cluster to wire |
 | `AWS_REGION` | yes | Region of the cluster and of its trace bucket |
 | `PRODUCER_NAMESPACES` | yes | Comma-separated namespaces whose workloads may collect profiles. This list is the allow-list for writing traces and logging runs |
-| `DATA_LAYER_NAME` | no | Which data layer to use, default `mcp`. Reuse is the default |
+| `DATA_LAYER_NAME` | no | Which data layer to record to. Unset, it is read from the registry's default for this cluster; with no default recorded, the run stops rather than guessing, because the wrong data layer is the wrong record of record. Reuse is the default: creating one needs `CREATE_DATA_LAYER=1` |
 | `CREATE_DATA_LAYER` | no | Set to `1` to allow creating a data layer that does not exist yet |
 | `ANALYSIS_DIGEST`, `KNOWLEDGE_DIGEST` | no | Image digests to deploy. Default: resolve the published `v1-nsys` and `v1` tags |
 | `DEV_BUILD` | no | Set to `1` to build both images with the in-cluster BuildKit instead of consuming published digests |
 | `PROFILING_ONLY` | no | Apply only the platform's own resources, leaving unrelated cluster drift untouched |
 | `ALLOW_UNRELATED` | no | Apply unrelated cluster changes as well |
+| `ALLOW_RECORD_UPDATES` | no | Apply an update to the record of record (the trace bucket, the tracking server, the KMS key, the S3 Files filesystem, or the versioning, lifecycle and encryption that decide whether they survive). Deletes are refused with or without it |
 | `SKIP_ACCEPTANCE` | no | Skip the closing MCP round trip |
-| `TF_STATE_BUCKET`, `TF_STATE_REGION`, `TF_STATE_KEY`, `TF_STATE_LOCK_TABLE` | from `backend.hcl` | Where the cluster's Terraform state lives. Required when `infra/eks/backend.hcl` is absent, which is the case in a fresh clone |
-| `TF_STATE_BUCKET`, `TF_STATE_REGION`, `TF_STATE_LOCK_TABLE` | no | Where both states live. Read from `infra/eks/backend.hcl` when unset, which suits an operator working from a checkout; a pipeline should pass them explicitly rather than rely on another module's backend file |
+| `TF_STATE_BUCKET`, `TF_STATE_REGION`, `TF_STATE_KEY`, `TF_STATE_LOCK_TABLE` | from the registry or `backend.hcl` | Where the cluster's Terraform state lives. The four-line preamble writes `backend.hcl` from the registry, so a checkout that has been through it needs none of these; a fresh clone with no preamble, or a pipeline that would rather not depend on another module's backend file, passes at least the first three |
 | `DATA_LAYER_STATE_KEY` | no | The data layer's state key, when it is not `data-layer/<name>/terraform.tfstate` |
 
 Everything else is fixed or derived, including the `mcp` namespace, the `mcp-reader` and

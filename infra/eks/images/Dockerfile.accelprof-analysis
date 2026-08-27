@@ -11,7 +11,7 @@
 # Build (context = infra/eks/images):
 #   finch build --platform linux/amd64 -f Dockerfile.accelprof-analysis -t $ECR/accelprof:v1 .
 FROM python:3.12-slim
-RUN pip install --no-cache-dir "accelprof[mcp,sagemaker]==0.1.0"
+RUN pip install --no-cache-dir "accelprof[mcp,sagemaker]==0.1.2"
 # The producer side of the platform travels with this image, not with the workload's: the shim that
 # wraps a command under the profiler, and the recorder that turns the files it leaves behind into one
 # MLflow run. They live here rather than in a per-run ConfigMap so that the code and the accelprof

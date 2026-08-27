@@ -8,11 +8,22 @@ kubectl accelprof run --alias team1-lora-sweep --image "$MY_IMAGE" -- python tra
 ```
 
 It returns as soon as the run is submitted. The recording happens in the cluster, so nothing on your
-machine has to stay alive. When it finishes, ask for the run:
+machine has to stay alive. When it finishes, ask for the run. With no argument, `get` means the newest
+run in the namespace and says which one it resolved; in a namespace several people share, name your
+campaign with `--alias` so that "newest" cannot mean someone else's run.
 
 ```bash
-kubectl accelprof get "$WORKLOAD_ID"
+kubectl accelprof get --alias team1-lora-sweep
 kubectl accelprof runs --alias team1-lora-sweep
+```
+
+A specific run is named by its workload id (`kubectl accelprof get wl-...`). To fill a shell variable,
+ask for one value: `-o id` right after submitting, or `-o run-id` for the recording's id, which waits
+for it to exist. A short run can do both at once, with `--wait`, which returns when the recording is
+there rather than when the Job ends, and fails if it never appears.
+
+```bash
+RUN_ID=$(kubectl accelprof get --alias team1-lora-sweep -o run-id)
 ```
 
 You need nothing but `kubectl`: no repository checkout, no Helm, no Python. Everything about the

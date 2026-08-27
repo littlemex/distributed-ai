@@ -7,11 +7,17 @@
 # read from the accelprof-config ConfigMap that the installer publishes into each namespace.
 #
 #   kubectl accelprof run --alias team1-lora-sweep --image <your image> -- python train.py --lr 3e-4
+#   kubectl accelprof get                      the run submitted last, and its run id
 #   kubectl accelprof runs --alias team1-lora-sweep
-#   kubectl accelprof get <workload-id>
 #
 # run submits and returns immediately. Recording happens in the cluster, so nothing local needs to
 # stay alive; --wait is available when watching one short run is more convenient.
+#
+# get with no workload id means "the newest run here", resolved from the cluster's own record of it
+# rather than from anything this machine remembers: a file of last-run-id would be a lie the moment
+# you open another terminal, switch context, or come back tomorrow. It always prints which run it
+# resolved. That convenience is deliberately limited to the commands that only read, so that a
+# future destructive subcommand cannot ever act on a run you did not name.
 #
 # run options:
 #   --alias NAME          required. The experiment campaign, named {tenant}-{series}. It is the unit
@@ -40,9 +46,27 @@
 #                         (volumes, affinity, imagePullSecrets, sidecars).
 #   --discard-on-fail     do not record a failed run. It is recorded by default, tagged status=failed,
 #                         because a slow or crashing run is usually the one worth profiling.
-#   --wait                wait for the run to finish and print its run id.
+#   --wait                wait for the recording to exist and print its run id. The Job reaching
+#                         Complete is not the end: the recorder writes the id onto it afterwards, so
+#                         this waits for the id, with a grace period after the Job finishes
+#                         (WAIT_RECORDER_GRACE_SECONDS, default 120) before reporting without one.
+#   -o id | run-id        print only that value on stdout, for use in a shell variable. Everything
+#                         else goes to stderr. "run-id" implies --wait, since a run id does not
+#                         exist until the recorder has written it; "id" answers as soon as the run is
+#                         submitted and therefore cannot be combined with --wait.
 #   --dry-run             print the manifest and exit. With ACCELPROF_PLATFORM_IMAGE set, this
 #                         needs no cluster at all, which is how the golden manifest is produced.
+#
+# get options:
+#   <workload-id>         optional. Without it, the newest run in the namespace is used.
+#   --last                what leaving the id out already does, said out loud.
+#   --alias NAME          restrict "newest" to one campaign, for when several run side by side.
+#   --namespace NS        default: the current context's namespace.
+#   -o id | run-id        print only that value on stdout.
+#
+# runs options:
+#   --alias NAME          restrict the listing to one campaign.
+#   --namespace NS        default: the current context's namespace.
 set -euo pipefail
 
 self="$(basename "$0")"
@@ -159,6 +183,22 @@ json_string() {
 
 k() { kubectl ${KUBE_CONTEXT:+--context "${KUBE_CONTEXT}"} "$@"; }
 
+# How to tell the reader to run this again. The file is installed as kubectl-accelprof and the
+# documented interface is the plugin form, so the hint has to be the plugin form — printing the
+# file name would hand out a command that only works if the file happens to be on PATH under it.
+invocation() {
+  case "${self}" in
+    kubectl-*) printf 'kubectl %s' "${self#kubectl-}" ;;
+    *) printf '%s' "${self}" ;;
+  esac
+}
+
+# The namespace only needs naming in a hint when it is not the one the command would pick anyway.
+namespace_opt() {
+  local ns="$1"
+  [ "${ns}" = "$(resolve_namespace "")" ] || printf ' -n %s' "${ns}"
+}
+
 resolve_namespace() {
   local ns="$1"
   if [ -z "${ns}" ]; then
@@ -166,6 +206,25 @@ resolve_namespace() {
     ns="${ns:-default}"
   fi
   printf '%s' "${ns}"
+}
+
+# The newest run in a namespace, decided by the API server's clock rather than by the timestamp the
+# client baked into the workload id: two people submitting from two laptops have two clocks, and the
+# one that matters is the cluster's.
+#
+# Every workload sharing the newest timestamp is printed, not just one of them. creationTimestamp has
+# a resolution of one second, so two submissions can tie, and picking one of them by name would be
+# deterministic without being right. The caller refuses to guess and asks for a name instead.
+latest_workloads() {
+  local namespace="$1" alias_name="$2" selector="app.kubernetes.io/name=profiling-producer"
+  local rows="" newest=""
+  [ -n "${alias_name}" ] && selector="${selector},accelprof.io/alias=${alias_name}"
+  rows="$(k get jobs -n "${namespace}" -l "${selector}" -o go-template='{{range .items}}{{.metadata.creationTimestamp}} {{index .metadata.labels "accelprof.io/workload-id"}}{{"\n"}}{{end}}' 2>/dev/null || true)"
+  # awk rather than grep for dropping blank lines: with no runs at all, grep finds nothing, exits 1,
+  # and under pipefail that would abort the caller before it can say "there are no runs here".
+  newest="$(printf '%s\n' "${rows}" | awk 'NF == 2 { print $1 }' | sort | tail -1)"
+  [ -n "${newest}" ] || return 0
+  printf '%s\n' "${rows}" | awk -v t="${newest}" 'NF == 2 && $1 == t { print $2 }' | sort
 }
 
 platform_image() {
@@ -194,7 +253,7 @@ mlflow_experiment_url() {
 cmd_run() {
   local alias_name="" image="" namespace="" profile="nsys" ranks="0" nsys_args="-t cuda,nvtx,osrt"
   local gpus="" neurons="" ttl="172800" patch_file="" inject="true" record_on_fail="true"
-  local wait_for="false" dry_run="false" recorder_timeout="86400"
+  local wait_for="false" dry_run="false" recorder_timeout="86400" out=""
   local -a envs=() params=() tags=() command=()
 
   while [ $# -gt 0 ]; do
@@ -216,6 +275,7 @@ cmd_run() {
       --patch) patch_file="$2"; shift 2 ;;
       --discard-on-fail) record_on_fail="false"; shift ;;
       --wait) wait_for="true"; shift ;;
+      -o|--output) out="$2"; shift 2 ;;
       --dry-run) dry_run="true"; shift ;;
       -h|--help) usage 0 ;;
       --) shift; command=("$@"); break ;;
@@ -232,7 +292,31 @@ cmd_run() {
   printf '%s' "${alias_name}" | grep -Eq '^[a-z0-9][a-z0-9-]{1,62}$' ||
     die "--alias must match ^[a-z0-9][a-z0-9-]{1,62}$ (it becomes an S3 prefix and an MLflow experiment name)"
 
+  # Validated before anything is submitted. Checked after the Job exists, a typo in -o both starts a
+  # run and reports failure: the caller's variable is empty while the cluster is busy with work nobody
+  # is waiting for.
+  case "${out}" in
+    "" | id) ;;
+    run-id) wait_for="true" ;;
+    *) die "-o takes id or run-id, not '${out}'" ;;
+  esac
+  # -o id answers as soon as the Job exists, so it cannot also be a request to wait for the recording.
+  if [ "${out}" = "id" ] && [ "${wait_for}" = "true" ]; then
+    die "--wait and -o id ask for different things: -o id answers as soon as the run is submitted. Use -o run-id to wait for the recording."
+  fi
+
   namespace="$(resolve_namespace "${namespace}")"
+
+  # The chip a run is filed under is the one it asked for. It is a label the reader searches with
+  # (alias + chip resolves a run when the id is not at hand) and reads in the output, so it has to
+  # match what they typed, not where the scheduler happened to put the Pod: a CPU job that lands on
+  # a GPU node borrowed for the day is still a CPU run. Asking for the neuron profiler counts as asking
+  # for neuron, because a profiler mode that only exists for one chip is itself a request for it.
+  local chip="cpu"
+  [ -z "${gpus}" ] || chip="gpu"
+  [ -z "${neurons}" ] || chip="neuron"
+  [ "${profile}" != "neuron" ] || chip="neuron"
+
   local platform workload_id job_name
   platform="$(platform_image "${namespace}")"
   workload_id="wl-$(date +%y%m%d%H%M%S)-$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -262,7 +346,7 @@ cmd_run() {
     "WORKLOAD_ID=${workload_id}" "TTL_SECONDS=${ttl}" "SERVICE_ACCOUNT=mcp-producer" \
     "PLATFORM_IMAGE=${platform}" "WORKLOAD_IMAGE=${image}" "TOOLS_SCRIPT=${tools_script}" \
     "PROFILE_MODE=${profile}" "PROFILE_RANKS=${ranks}" "NSYS_ARGS=${nsys_args}" \
-    "CHIP=$([ "${profile}" = "neuron" ] && echo neuron || echo gpu)" \
+    "CHIP=${chip}" \
     "RECORD_ON_FAILURE=${record_on_fail}" "RECORDER_TIMEOUT=${recorder_timeout}"; do
     key="${kv%%=*}"; value="$(escape_replacement "${kv#*=}")"
     manifest="${manifest//@${key}@/${value}}"
@@ -342,49 +426,138 @@ cmd_run() {
   fi
 
   printf '%s' "${manifest}" | k apply -f - >/dev/null
-  say "submitted ${job_name} in ${namespace} (alias ${alias_name}, profile ${profile})"
-  printf '    workload_id: %s\n' "${workload_id}"
-  printf '    logs:        kubectl -n %s logs -f job/%s -c workload\n' "${namespace}" "${job_name}"
-  printf '    run id:      %s get %s -n %s\n' "${self}" "${workload_id}" "${namespace}"
+  # In machine-readable mode the prose moves to stderr, so that the reader still sees what happened
+  # while stdout carries exactly the one value a shell variable is being filled with.
+  local prose=1
+  [ -z "${out}" ] || prose=2
+  {
+    say "submitted ${job_name} in ${namespace} (alias ${alias_name}, profile ${profile})"
+    printf '    workload_id: %s\n' "${workload_id}"
+    printf '    logs:        kubectl -n %s logs -f job/%s -c workload\n' "${namespace}" "${job_name}"
+    # The id is named even though `get` alone would usually resolve to this same run: usually is not
+    # always. Another submission in this namespace — a colleague's, or this shell's twin — becomes the
+    # newest, and a hint that reads someone else's status as yours is worse than a longer line.
+    printf '    run id:      %s get %s%s\n' "$(invocation)" "${workload_id}" "$(namespace_opt "${namespace}")"
+  } >&"${prose}"
+
+  [ "${out}" != "id" ] || { printf '%s\n' "${workload_id}"; exit 0; }
 
   [ "${wait_for}" = "true" ] || exit 0
-  say "waiting for the run"
-  local deadline conditions
+  say "waiting for the run" >&"${prose}"
+  # What --wait is for is the run id, so that is what it waits for. Waiting only for the Job to reach
+  # Complete returns too early: the recorder writes the id onto the Job as its last act, and the Job
+  # is already Complete by the time it does. Reporting "not recorded yet" from a command whose whole
+  # purpose was to hand back the id is a promise the flag does not keep.
+  #
+  # The id is therefore the condition, with the Job's own terminal state as the fallback: a run that
+  # fails before the recorder runs at all would otherwise be waited on until the timeout. Once the Job
+  # has finished, the recorder is given a grace period to catch up before the answer is reported
+  # without an id.
+  local deadline conditions run_id grace_deadline="" timed_out="true"
   deadline=$(( $(date +%s) + ${WAIT_TIMEOUT_SECONDS:-86400} ))
   while [ "$(date +%s)" -lt "${deadline}" ]; do
+    run_id="$(k get job "${job_name}" -n "${namespace}" \
+      -o jsonpath='{.metadata.annotations.accelprof\.io/run-id}' 2>/dev/null || true)"
+    [ -z "${run_id}" ] || { timed_out="false"; break; }
     conditions="$(k get job "${job_name}" -n "${namespace}" \
       -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)"
-    case "${conditions}" in *Complete*|*SuccessCriteriaMet*|*Failed*) break ;; esac
+    case "${conditions}" in
+      *Complete* | *SuccessCriteriaMet* | *Failed*)
+        [ -n "${grace_deadline}" ] ||
+          grace_deadline=$(( $(date +%s) + ${WAIT_RECORDER_GRACE_SECONDS:-120} ))
+        [ "$(date +%s)" -lt "${grace_deadline}" ] || break
+        ;;
+    esac
     sleep 5
   done
-  cmd_get "${workload_id}" -n "${namespace}"
+  # A wait that gave up is a failure, not a report. Exiting zero would tell a script the recording
+  # exists when the whole reason for waiting was that it did not.
+  if [ "${timed_out}" = "true" ]; then
+    if [ "${out}" != "run-id" ]; then
+      cmd_get "${workload_id}" -n "${namespace}" || true
+    fi
+    die "the recording for ${workload_id} did not appear before this gave up. Look at the recorder: kubectl -n ${namespace} logs job/${job_name} -c recorder"
+  fi
+
+  if [ "${out}" = "run-id" ]; then
+    cmd_get "${workload_id}" -n "${namespace}" -o run-id
+  else
+    cmd_get "${workload_id}" -n "${namespace}"
+  fi
 }
 
 cmd_get() {
-  local workload_id="" namespace=""
+  local workload_id="" namespace="" alias_name="" out="" asked_last="false"
   while [ $# -gt 0 ]; do
     case "$1" in
       --namespace|-n) namespace="$2"; shift 2 ;;
+      --alias) alias_name="$2"; shift 2 ;;
+      # --last is what leaving the id out already does. It exists so that a script, or a page in a
+      # book, can say out loud which run it means instead of relying on an absence.
+      --last) asked_last="true"; shift ;;
+      -o|--output) out="$2"; shift 2 ;;
       -h|--help) usage 0 ;;
+      -*) die "unknown option: $1" ;;
       *) workload_id="$1"; shift ;;
     esac
   done
-  [ -n "${workload_id}" ] || die "usage: ${self} get <workload-id> [-n namespace]"
+  case "${out}" in ""|id|run-id) ;; *) die "-o takes id or run-id, not '${out}'" ;; esac
+  [ "${asked_last}" = "false" ] || [ -z "${workload_id}" ] ||
+    die "--last and an explicit workload id ask for different runs; drop one"
   namespace="$(resolve_namespace "${namespace}")"
-  local job
+
+  # Resolved here rather than defaulted anywhere else, and announced, so that the answer to "which
+  # run am I looking at" is never left to the reader's memory of what they submitted.
+  local resolved_latest="false"
+  if [ -z "${workload_id}" ]; then
+    local candidates count
+    candidates="$(latest_workloads "${namespace}" "${alias_name}")"
+    count="$(printf '%s\n' "${candidates}" | awk 'NF { n++ } END { print n + 0 }')"
+    if [ "${count}" -gt 1 ]; then
+      say "more than one run in ${namespace}${alias_name:+ for alias ${alias_name}} was created in the same second, so there is no newest one. Name the one you mean:" >&2
+      printf '%s\n' "${candidates}" | awk -v cmd="$(invocation)" -v ns="$(namespace_opt "${namespace}")" \
+        'NF { printf "      %s get %s%s\n", cmd, $1, ns }' >&2
+      exit 1
+    fi
+    workload_id="${candidates}"
+    if [ -z "${workload_id}" ]; then
+      say "no runs in ${namespace}${alias_name:+ for alias ${alias_name}}. Jobs are kept only until their TTL expires (two days by default), so a run from earlier may be gone from the cluster while its recording is permanent." >&2
+      printf '    list what is left:  %s runs%s\n' "$(invocation)" "$(namespace_opt "${namespace}")" >&2
+      mlflow_experiment_url "${namespace}" >&2
+      exit 1
+    fi
+    resolved_latest="true"
+  fi
+
+  local job run_id status
   job="$(k get jobs -n "${namespace}" -l "accelprof.io/workload-id=${workload_id}" \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
   if [ -z "${job}" ]; then
+    [ -z "${out}" ] || die "no Job for workload ${workload_id} in ${namespace}"
     say "no Job for workload ${workload_id} in ${namespace}; it may have been cleaned up after its TTL"
     say "the recording is permanent — find it in MLflow by alias and workload id"
     mlflow_experiment_url "${namespace}"
     exit 0
   fi
-  local run_id status
   run_id="$(k get job "${job}" -n "${namespace}" \
     -o jsonpath='{.metadata.annotations.accelprof\.io/run-id}' 2>/dev/null || true)"
   status="$(k get job "${job}" -n "${namespace}" \
     -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)"
+
+  # Machine-readable mode prints one value and nothing else, so that a shell variable can be filled
+  # without the caller having to cut a field out of prose that may change.
+  case "${out}" in
+    id) printf '%s\n' "${workload_id}"; exit 0 ;;
+    run-id)
+      [ -n "${run_id}" ] || die "workload ${workload_id} has no run id yet (status ${status:-running})"
+      printf '%s\n' "${run_id}"; exit 0 ;;
+  esac
+
+  if [ "${resolved_latest}" = "true" ]; then
+    say "newest run in ${namespace}${alias_name:+ for alias ${alias_name}}: ${workload_id}"
+  else
+    say "workload ${workload_id} in ${namespace}"
+  fi
   printf '    job:         %s\n' "${job}"
   printf '    status:      %s\n' "${status:-running}"
   if [ -n "${run_id}" ]; then

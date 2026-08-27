@@ -51,7 +51,7 @@ spec:
           env:
             - { name: ACCELPROF_OUT, value: "/accelprof/out" }
             - { name: ACCELPROF_ALIAS, value: "tenant-series" }
-            - { name: ACCELPROF_CHIP, value: "gpu" }
+            - { name: ACCELPROF_CHIP, value: "cpu" }
             - { name: ACCELPROF_WORKLOAD_ID, value: "wl-000000000000-00000000" }
             - { name: ACCELPROF_JOB_NAME, value: "profile-wl-000000000000-00000000" }
             - { name: ACCELPROF_PROFILE_MODE, value: "nsys" }

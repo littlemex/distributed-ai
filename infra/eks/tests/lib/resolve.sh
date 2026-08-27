@@ -21,6 +21,13 @@ resolve_region() {
     return 0
   fi
   AWS_REGION_OPT="$(tf_out region)"
+  # The kubectl context is asked before AWS_DEFAULT_REGION because it names the cluster under test:
+  # terraform output can come back empty (no credentials in the environment, since the profile is
+  # carried as a flag), and an ambient default region then silently points every aws call in the suite
+  # at a region the cluster is not in.
+  if [ -z "$AWS_REGION_OPT" ]; then
+    AWS_REGION_OPT="$(eks_region_from_kubeconfig)"
+  fi
   if [ -z "$AWS_REGION_OPT" ]; then
     AWS_REGION_OPT="${AWS_DEFAULT_REGION:-}"
   fi
@@ -98,7 +105,9 @@ resolve_storage_vars() {
   fsx_pv="$(resolve_clone_source_pv_by_driver fsx.csi.aws.com)"
   openzfs_pv="$(resolve_clone_source_pv_by_driver fsx.openzfs.csi.aws.com)"
   if [ -z "$fsx_pv" ] || [ -z "$openzfs_pv" ]; then
-    log_fail "source FSx and OpenZFS PVs not found"
+    # A skip, not a failure: a cluster built without shared storage has no source PVs to clone, and
+    # log_fail here printed [NG] immediately before the SKIP line, which reads as a broken cluster.
+    log_info "source FSx and OpenZFS PVs not found; shared storage is not enabled on this cluster"
     return 2
   fi
 
