@@ -13,7 +13,76 @@ data "aws_iam_policy_document" "pod_identity_trust" {
   }
 }
 
-# --- MLflow App role: lets the managed App read/write the artifact bucket ----------------------
+# --- MLflow data plane: one statement per role, written once for both backends -------------------
+# Two axes, not six cases: the backend decides the action vocabulary, the role decides what it may do.
+#
+# A tracking server exposes granular sagemaker-mlflow:* actions, so a policy can say "log, never
+# delete" and a reader can be genuinely read-only. An app exposes exactly one action,
+# sagemaker:CallMlflowAppApi, covering its whole REST API — so on that backend the three roles below
+# collapse to the same grant, and anything that can read MLflow can also delete from it. The reader
+# accepts that (it cannot resolve a run without reading MLflow); the janitor does not get it, because a
+# component whose job is deletion, holding delete on metadata that no versioning can restore, is the
+# one combination worth refusing. What that costs is in the janitor's own comment below.
+#
+# Nothing here is ever scoped to a wildcard. The MLflow this layer creates is known by ARN, and an
+# external tracking server is named by var.mlflow_tracking_server_arn; with neither, the role simply
+# carries no MLflow statement rather than account-wide access it would silently acquire when a data
+# layer is torn down.
+locals {
+  # The ARN follows the backend rather than outranking it. An external tracking server can only be named
+  # on the "server" backend, because the action vocabulary below is chosen by the backend too: allowing
+  # the app's single action against a tracking server ARN would compile cleanly and then 403 on every
+  # call. coalesce raises when every argument is empty, which is exactly the "no MLflow anywhere" case.
+  mlflow_policy_arn = var.mlflow_backend == "app" ? local.mlflow_arn : try(coalesce(var.mlflow_tracking_server_arn, local.mlflow_arn), "")
+
+  mlflow_actions = var.mlflow_backend == "app" ? {
+    reader   = ["sagemaker:CallMlflowAppApi", "sagemaker:CreatePresignedMlflowAppUrl"]
+    lookup   = []
+    producer = ["sagemaker:CallMlflowAppApi"]
+    } : {
+    reader = [
+      "sagemaker-mlflow:AccessUI",
+      "sagemaker-mlflow:GetExperiment",
+      "sagemaker-mlflow:GetRun",
+      "sagemaker-mlflow:SearchRuns",
+      "sagemaker-mlflow:SearchExperiments",
+      "sagemaker-mlflow:ListArtifacts",
+      "sagemaker:CreatePresignedMlflowTrackingServerUrl",
+    ]
+    lookup = [
+      "sagemaker-mlflow:GetExperiment",
+      "sagemaker-mlflow:GetRun",
+      "sagemaker-mlflow:SearchRuns",
+    ]
+    # Write-only. Deliberately NO Delete* — the run history is a record of record; a compromised
+    # producer must not be able to erase experiments.
+    producer = [
+      "sagemaker-mlflow:CreateExperiment",
+      "sagemaker-mlflow:GetExperimentByName",
+      "sagemaker-mlflow:GetExperiment",
+      "sagemaker-mlflow:CreateRun",
+      "sagemaker-mlflow:GetRun",
+      "sagemaker-mlflow:UpdateRun",
+      "sagemaker-mlflow:LogMetric",
+      "sagemaker-mlflow:LogParam",
+      "sagemaker-mlflow:LogBatch",
+      "sagemaker-mlflow:SetTag",
+      "sagemaker-mlflow:SearchRuns",
+      "sagemaker-mlflow:LogModel",
+    ]
+  }
+
+  # A role with no actions on this backend, or a layer with no MLflow to name, contributes no
+  # statement at all. Each is a list so the policies below can concat it away to nothing.
+  mlflow_statements = { for role, actions in local.mlflow_actions :
+    role => local.mlflow_policy_arn == "" || length(actions) == 0 ? [] : [{
+      Effect   = "Allow"
+      Action   = actions
+      Resource = [local.mlflow_policy_arn]
+    }]
+  }
+}
+
 data "aws_iam_policy_document" "mlflow_app_assume" {
   statement {
     effect  = "Allow"
@@ -63,7 +132,7 @@ resource "aws_iam_role_policy" "producer" {
   role = aws_iam_role.producer.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         # PutObject to upload; GetObject because upload_finalized verifies via HeadObject
         # (HeadObject requires s3:GetObject) — without this every verified upload 403s in prod.
@@ -81,31 +150,11 @@ resource "aws_iam_role_policy" "producer" {
         Resource = [aws_s3_bucket.mlflow_artifacts.arn, "${aws_s3_bucket.mlflow_artifacts.arn}/*"]
       },
       {
-        # Write-only MLflow data plane. Deliberately NO Delete* — the run history is a record of
-        # record; a compromised producer must not be able to erase experiments.
-        Effect = "Allow"
-        Action = [
-          "sagemaker-mlflow:CreateExperiment",
-          "sagemaker-mlflow:GetExperimentByName",
-          "sagemaker-mlflow:GetExperiment",
-          "sagemaker-mlflow:CreateRun",
-          "sagemaker-mlflow:GetRun",
-          "sagemaker-mlflow:UpdateRun",
-          "sagemaker-mlflow:LogMetric",
-          "sagemaker-mlflow:LogParam",
-          "sagemaker-mlflow:LogBatch",
-          "sagemaker-mlflow:SetTag",
-          "sagemaker-mlflow:SearchRuns",
-          "sagemaker-mlflow:LogModel",
-        ]
-        Resource = var.mlflow_app_arn != "" ? [var.mlflow_app_arn] : ["*"]
-      },
-      {
         Effect   = "Allow"
         Action   = ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"]
         Resource = [aws_kms_key.data.arn]
       },
-    ]
+    ], local.mlflow_statements.producer)
   })
 }
 
@@ -121,7 +170,7 @@ resource "aws_iam_role_policy" "mcp_reader" {
   role = aws_iam_role.mcp_reader.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Effect = "Allow"
         Action = ["s3:GetObject", "s3:ListBucket"]
@@ -137,24 +186,11 @@ resource "aws_iam_role_policy" "mcp_reader" {
         Resource = ["${aws_s3_bucket.mlflow_artifacts.arn}/scratch/*"] # async MCP job results only
       },
       {
-        Effect = "Allow"
-        Action = [
-          "sagemaker-mlflow:AccessUI",
-          "sagemaker-mlflow:GetExperiment",
-          "sagemaker-mlflow:GetRun",
-          "sagemaker-mlflow:SearchRuns",
-          "sagemaker-mlflow:SearchExperiments",
-          "sagemaker-mlflow:ListArtifacts",
-          "sagemaker:CreatePresignedMlflowTrackingServerUrl",
-        ]
-        Resource = var.mlflow_app_arn != "" ? [var.mlflow_app_arn] : ["*"]
-      },
-      {
         Effect   = "Allow"
         Action   = ["kms:Decrypt"]
         Resource = [aws_kms_key.data.arn]
       },
-    ]
+    ], local.mlflow_statements.reader)
   })
 }
 
@@ -164,6 +200,13 @@ resource "aws_iam_role_policy" "mcp_reader" {
 # so a CronJob can assume it; a Lambda placement would swap this principal for lambda.amazonaws.com.
 # It reads MLflow authoritatively (GetRun/SearchRuns) to decide orphans and lists/deletes S3 —
 # deliberately NOT mcp-reader (readers must stay Delete-less) and NOT the producer (write-only).
+#
+# On the "app" backend it gets NO MLflow access, because the only action an app offers covers the whole
+# REST API: granting the lookup would also grant DeleteRun and DeleteExperiment to the one component
+# whose job is deletion, on metadata that no bucket versioning can restore. What that costs is stated
+# plainly: with no authoritative run lookup the janitor cannot classify an orphan, so it fails closed
+# and keeps every trace prefix. Automatic trace GC therefore needs the "server" backend; on "app",
+# retention is the bucket lifecycle rule and deleting a finished campaign is a deliberate act.
 resource "aws_iam_role" "janitor" {
   name               = "${var.name_prefix}-janitor"
   assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
@@ -175,7 +218,7 @@ resource "aws_iam_role_policy" "janitor" {
   role = aws_iam_role.janitor.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         # Scan run prefixes (ListBucket), read the retention marker (HeadObject needs GetObject),
         # and delete orphan blobs. Scoped to the trace buckets only.
@@ -186,16 +229,8 @@ resource "aws_iam_role_policy" "janitor" {
           [for b in aws_s3_bucket.traces : "${b.arn}/*"],
         )
       },
-      {
-        # Authoritative run lookups to classify orphans (fail-closed on any other MLflow error).
-        Effect = "Allow"
-        Action = [
-          "sagemaker-mlflow:GetExperiment",
-          "sagemaker-mlflow:GetRun",
-          "sagemaker-mlflow:SearchRuns",
-        ]
-        Resource = var.mlflow_app_arn != "" ? [var.mlflow_app_arn] : ["*"]
-      },
-    ]
+      # Authoritative run lookups to classify orphans (fail-closed on any other MLflow error). Empty on
+      # the "app" backend, for the reason in this role's header.
+    ], local.mlflow_statements.lookup)
   })
 }

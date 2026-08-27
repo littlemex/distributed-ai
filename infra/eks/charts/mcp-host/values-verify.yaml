@@ -19,7 +19,7 @@ mcps:
     command: ["accelprof-analysis-mcp"]
     serviceAccountName: mcp-reader          # infra/eks iam-mcp: Pod Identity -> data-layer mcp_reader role
     env:
-      MCP_MLFLOW_TRACKING_URI: "<mlflow-app-arn>"   # data-layer: terraform output -raw mlflow_app_arn
+      MCP_MLFLOW_TRACKING_URI: "<mlflow-arn>"   # data-layer: terraform output -raw mlflow_arn
       MCP_AWS_REGION: "<region>"
       MCP_TRACE_BUCKET: "<trace-bucket>"            # data-layer: pick your region's bucket from the trace_buckets map output
       MCP_MOUNT_BASE: "/traces"

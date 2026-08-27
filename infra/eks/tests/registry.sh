@@ -20,6 +20,8 @@ register_all_tests() {
   register_test plan-guard-no-stray-platform    test_plan_guard_no_platform_resources_elsewhere baseline static "$TIMEOUT_STATIC"
   register_test plan-guard-table                test_plan_guard_table                    baseline static "$TIMEOUT_STATIC"
   register_test plan-guard-protected-complete   test_plan_guard_protected_covers_prevent_destroy baseline static "$TIMEOUT_STATIC"
+  register_test plan-guard-mlflow-backend       test_plan_guard_mlflow_backend_never_switches_silently baseline static "$TIMEOUT_STATIC"
+  register_test plan-guard-aws-lookup          test_plan_guard_aws_lookup_failure_is_not_absence baseline static "$TIMEOUT_STATIC"
   register_test registry-matches-state          test_registry_matches_state              baseline static "$TIMEOUT_STATIC" terraform
   register_test registry-default-layer-attached test_registry_default_data_layer_is_attached baseline static "$TIMEOUT_STATIC"
   register_test registry-preamble-contract      test_registry_preamble_contract          baseline static "$TIMEOUT_STATIC"
@@ -34,6 +36,7 @@ register_all_tests() {
   register_test accelprof-client-wait-timeout  test_accelprof_client_wait_fails_when_nothing_is_recorded baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-output-guard  test_accelprof_client_rejects_bad_output_before_submitting baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-alias         test_accelprof_client_alias_narrows_the_latest baseline static "$TIMEOUT_STATIC"
+  register_test accelprof-client-mlflow-url    test_accelprof_client_mlflow_url_comes_from_the_contract baseline static "$TIMEOUT_STATIC"
   register_test static-terraform-validate test_static_terraform_validate baseline static "$TIMEOUT_STATIC" terraform
 
   register_test image-build-ddp-sample-golden test_image_build_ddp_sample_golden baseline static "$TIMEOUT_STATIC" helm
