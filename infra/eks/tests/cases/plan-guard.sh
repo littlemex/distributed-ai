@@ -315,3 +315,69 @@ test_plan_guard_aws_lookup_failure_is_not_absence() {
   rm -f "$script"
   [ "$fails" -eq 0 ] || return 1
 }
+
+# Renaming a data layer variable is a silent upgrade hazard: a stale name in a .tfvars file is only a
+# warning, so the old value is ignored and the default takes over. For the MLflow name that means a
+# re-derived name, and renaming an MLflow REPLACES it — an upgrade would destroy the run metadata of
+# anyone who had named theirs. The convention that fixes it is that a removed variable stays declared
+# and refuses to be set; this asserts the convention is actually followed, so the next rename cannot
+# quietly skip it.
+test_plan_guard_removed_variables_refuse_to_be_set() {
+  local data_dir="$SCRIPT_DIR/../../data-layer"
+  [ -d "$data_dir" ] || return 2
+  local bad
+  bad="$(python3 - "$data_dir/variables.tf" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+bad = []
+for m in re.finditer(r'^variable\s+"([^"]+)"\s*\{', src, re.M):
+    start = m.end()
+    depth, i = 1, start
+    while i < len(src) and depth:
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+        i += 1
+    body = src[start:i]
+    if "REMOVED" not in body:
+        continue
+    name = m.group(1)
+    # It has to be impossible to set: a validation that only passes on the empty string.
+    if not re.search(r'condition\s*=\s*var\.%s\s*==\s*""' % re.escape(name), body):
+        bad.append(name)
+print(" ".join(bad))
+PY
+)"
+  [ -z "$bad" ] || {
+    printf 'these variables say REMOVED but can still be set silently: %s\n' "$bad" >&2
+    return 1
+  }
+}
+
+# The other half of the same drift: the installer passes -var by name, and a name the data layer no
+# longer declares is an error the moment anyone runs it. Catching it here rather than in an install.
+test_plan_guard_installer_vars_are_declared() {
+  local data_dir="$SCRIPT_DIR/../../data-layer"
+  [ -d "$data_dir" ] || return 2
+  local declared passed missing=""
+  declared="$(grep -oE '^variable "[a-z_]+"' "$data_dir/variables.tf" | sed 's/^variable "//; s/"$//' | sort -u)"
+  # -var "name=..." as the installer writes them, data layer and cluster alike; the cluster's own
+  # variables live elsewhere, so only the ones this file declares are checked against it.
+  passed="$(grep -oE '\-var "[a-z_]+=' "$SCRIPT_DIR/../../scripts/install-profiling.sh" |
+    sed 's/^-var "//; s/=$//' | sort -u)"
+  local name
+  for name in ${passed}; do
+    printf '%s\n' "$declared" | grep -qxF "$name" || missing="${missing} ${name}"
+  done
+  # A name the data layer does not declare may legitimately belong to infra/eks, whose variables are
+  # declared next to the resources that use them rather than in one file, so every .tf there is checked.
+  local gone=""
+  for name in ${missing}; do
+    grep -qhE "^variable \"${name}\"" "$SCRIPT_DIR/.."/*.tf 2>/dev/null || gone="${gone} ${name}"
+  done
+  [ -z "$gone" ] || {
+    printf 'the installer passes -var names that neither layer declares:%s\n' "$gone" >&2
+    return 1
+  }
+}
