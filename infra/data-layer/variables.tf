@@ -108,10 +108,11 @@ variable "mlflow_tracking_server_arn" {
   }
 }
 
-# REMOVED, kept only to fail loudly. A stale name in a .tfvars file is a warning, not an error, so
-# without this declaration an operator who still sets the old name would see their MLflow scoping
-# silently drop out — and since the policies no longer fall back to a wildcard, every data-plane call
-# would start returning 403 with nothing to point at.
+# REMOVED, both kept only to fail loudly. A stale name in a .tfvars file is a warning, not an error
+# (measured: -var on an undeclared variable errors, a .tfvars entry only warns), so without these
+# declarations an upgrade would take the old value, ignore it, and carry on with the default.
+#
+# What that costs differs per variable, and neither is something to find out from a plan nobody read.
 variable "mlflow_app_arn" {
   description = "REMOVED: renamed to mlflow_tracking_server_arn, because it never named an app. Setting it stops the run."
   type        = string
@@ -119,6 +120,19 @@ variable "mlflow_app_arn" {
   validation {
     condition     = var.mlflow_app_arn == ""
     error_message = "mlflow_app_arn was renamed to mlflow_tracking_server_arn (it scopes an external tracking server, and never named an app). Pass the new name."
+  }
+}
+
+# Ignoring this one is the worse of the two: the name would fall back to the derived default, and
+# renaming an MLflow REPLACES it, so an upgrade that merely kept an old .tfvars would destroy every
+# run's metadata on a tracking server that had any other name.
+variable "mlflow_app_name" {
+  description = "REMOVED: renamed to mlflow_name, because it names either backend. Setting it stops the run."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.mlflow_app_name == ""
+    error_message = "mlflow_app_name was renamed to mlflow_name (it names whichever MLflow this data layer records to). Pass the new name — ignoring it would re-derive the name, and renaming an MLflow destroys its run metadata."
   }
 }
 
