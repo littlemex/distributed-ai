@@ -68,6 +68,9 @@ spec:
             {{- if .Values.maxNumBatchedTokens }}
             - --max-num-batched-tokens={{ int64 .Values.maxNumBatchedTokens }}
             {{- end }}
+            {{- if .Values.enableMfuMetrics }}
+            - --enable-mfu-metrics
+            {{- end }}
             {{- if .Values.promptTokensDetails }}
             - --enable-prompt-tokens-details
             {{- end }}

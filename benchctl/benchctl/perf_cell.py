@@ -14,6 +14,7 @@ reports what it measures and nothing more.
 
 from __future__ import annotations
 
+import itertools
 import json
 import multiprocessing
 import os
@@ -23,6 +24,20 @@ import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+
+_SALT = itertools.count()
+
+
+def salted(prompt: str) -> str:
+    """A unique prefix per request, at the FRONT.
+
+    Prefix caching is enabled now, and every synthetic shape in this file is identical padding. Without a
+    salt these cells would measure the cache rather than the box — the hazard both advisors flagged back
+    when it could not yet happen. It has to go at the front: a unique tail leaves everything before it
+    cacheable, which is the same bug wearing a disguise.
+    """
+    return f"[run {os.getpid()}-{next(_SALT)}] {prompt}"
 
 
 def _one(url: str, model: str, prompt: str, max_tokens: int, priority: int | None = None) -> dict:
@@ -77,7 +92,7 @@ def _worker(share: tuple[int, int]) -> list[dict]:
     """
     threads, count = share
     with ThreadPoolExecutor(max_workers=threads) as pool:
-        return list(pool.map(lambda _: _one(_JOB["url"], _JOB["model"], _JOB["prompt"],
+        return list(pool.map(lambda _: _one(_JOB["url"], _JOB["model"], salted(_JOB["prompt"]),
                                             _JOB["out_tokens"], _JOB.get("priority")),
                              range(count)))
 
@@ -168,7 +183,8 @@ def run_perf_cell(out_dir: Path) -> dict:
     for c in levels:
         started = time.perf_counter()
         with ThreadPoolExecutor(max_workers=c) as pool:
-            rows = list(pool.map(lambda _: _one(url, model, prompt, out_tokens), range(c * rounds)))
+            rows = list(pool.map(lambda _: _one(url, model, salted(prompt), out_tokens),
+                                 range(c * rounds)))
         wall = time.perf_counter() - started
         for row in rows:
             trace.append({**row, "concurrency_at_send": c, "source": "benchctl.perf_cell"})
@@ -307,7 +323,7 @@ def run_arrival(out_dir: Path) -> dict:
             def long_stream() -> int:
                 n = 0
                 while not stop:
-                    _one(url, model, long_, 8)
+                    _one(url, model, salted(long_), 8)
                     n += 1
                 return n
 
@@ -398,7 +414,7 @@ def run_mix(out_dir: Path) -> dict:
     def long_stream():
         n = 0
         while not stop:
-            _one(url, model, long_, 8, prio_long)
+            _one(url, model, salted(long_), 8, prio_long)
             n += 1
         return n
     with ThreadPoolExecutor(max_workers=long_c) as bg:

@@ -87,6 +87,13 @@ maxNumBatchedTokens: ""
 # 0 disables it, which is vLLM's default and the behaviour every measurement so far was taken under.
 longPrefillTokenThreshold: 0
 
+# Let the engine account for its own model-FLOP and memory-bandwidth utilisation
+# (`vllm:estimated_flops_per_gpu`, `estimated_read_bytes_per_gpu`, `estimated_write_bytes_per_gpu`).
+# Off by default in vLLM, and the counters read a flat 0.0 until it is on, which is indistinguishable from
+# an idle engine. Worth having permanently: a throughput number is only a hardware limit if MFU or MBU is
+# near the roof, and without these it takes a back-of-envelope guess at active parameters to find out.
+enableMfuMetrics: true
+
 # Report per-request cached prompt tokens in the OpenAI usage block
 # (`usage.prompt_tokens_details.cached_tokens`). Off by default in vLLM, and a benchmark that cannot
 # see it has to fall back to saying "no cache reporting" — which is indistinguishable from "no cache".
