@@ -140,6 +140,29 @@ It also showed the routing loss directly, at concurrency 1. The cached-token cou
 identical calls oscillated 35,904 → 9,504 → 35,904: a call that lands on the other replica finds only the
 short common prefix. That is the two-replica split visible without any load at all.
 
+## Four lanes: the hit rate holds, but this is not a throughput dial
+
+| | 1 lane | 4 lanes |
+| --- | --- | --- |
+| Cache hit | 84.96% | **85.56%** (2,760,384 / 3,226,178) |
+| Time to first token, p50 | 603 ms | **584 ms** |
+| Request latency, p50 | 2,250 ms | 2,887 ms |
+| Requests completed | 65 | 57 |
+| Request throughput | 0.20/s | 0.17/s |
+| Input sequence length, avg | 64,176 | 56,600 |
+
+The hit rate and the time to first token held at four conversations in flight, which is the thing worth
+knowing: caching did not degrade under four times the working set.
+
+Throughput went *down*, and that is a property of the instrument rather than the box. AgentX's
+`--concurrency` sets the number of trajectory lanes, and each lane replays a conversation **at the
+conversation's own recorded pace** with an idle cap. So the request rate is set by the traces, not by the
+load generator, and a different sample of traces gives a different rate — the average input length differs
+by 12% between these two arms for the same reason. **AgentX's concurrency is not a saturation dial.**
+
+Which means the box's ceiling under caching is still unmeasured. Finding it needs far more lanes than
+four, and the KV pressure that would eventually break the hit rate is nowhere in sight at this scale.
+
 ## The price
 
 | | per agentic request |
