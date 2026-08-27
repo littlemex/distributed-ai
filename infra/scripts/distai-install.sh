@@ -51,6 +51,12 @@ else
   die "${dir} exists but is not a git checkout. Remove it or point DISTAI_DIR elsewhere."
 fi
 
+# The next steps are printed with the values this run already has, so that a caller who exported them
+# before piping this script sees their own cluster and region rather than an example they then have to
+# remember to change. Only what is still unset falls back to a placeholder.
+cluster_hint="${CLUSTER_NAME:-my-cluster}"
+region_hint="${AWS_REGION:-us-east-2}"
+
 cat <<EOF
 
 Ready in ${dir}.
@@ -58,13 +64,17 @@ Ready in ${dir}.
 Create a cluster (this is the command that asks before it spends money):
 
   cd ${dir}
-  export CLUSTER_NAME=my-cluster
-  export AWS_REGION=us-east-2
+  export CLUSTER_NAME=${cluster_hint}
+  export AWS_REGION=${region_hint}
   ./infra/scripts/distai-up.sh
 
-Then every chapter starts with these three lines, and needs nothing else:
+Then every chapter starts with these four lines, and needs nothing else. The region is one of them
+because a cluster is identified by account, region and name: with it unset, the AWS CLI's own default
+region decides where the cluster is looked for, and a default that differs from the cluster's is a
+lookup that fails.
 
   cd ${dir}
-  export CLUSTER_NAME=my-cluster
+  export CLUSTER_NAME=${cluster_hint}
+  export AWS_REGION=${region_hint}
   source infra/scripts/distai-env.sh
 EOF

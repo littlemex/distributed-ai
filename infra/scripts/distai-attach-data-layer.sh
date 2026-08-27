@@ -127,4 +127,5 @@ elif [ -z "$(current_default)" ]; then
     --value "${layer}" --region "${region}" >/dev/null
 fi
 
-printf '\n    resolve it from any chapter with:\n\n      export CLUSTER_NAME=%s\n      source "$(git rev-parse --show-toplevel)/infra/scripts/distai-env.sh"\n\n' "${cluster}"
+printf '\n    resolve it from any chapter with:\n\n      export CLUSTER_NAME=%s\n      export AWS_REGION=%s\n      source "$(git rev-parse --show-toplevel)/infra/scripts/distai-env.sh"\n\n' \
+  "${cluster}" "${region}"

@@ -18,7 +18,11 @@
 #
 # Usage (from infra/eks/):
 #   scripts/bootstrap-remote-state.sh -c my-cluster \
-#     -b my-tf-state-bucket -r ap-southeast-4 [-t my-tf-locks] [-k alias/my-key] [-p my-profile]
+#     -b my-tf-state-bucket -r us-east-2 [-t my-tf-locks] [-k alias/my-key] [-p my-profile]
+#
+# Every value above is an example. -r is the region the state bucket lives in, which is normally the
+# cluster's own region; distai-up.sh derives all of them and calls this, so a hand-run is the
+# exception (adopting a bucket that already exists, or repairing a checkout).
 #
 # Re-runnable: bootstrap apply is idempotent, and it will not overwrite an
 # existing backend.hcl unless -f is given.

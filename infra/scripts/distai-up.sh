@@ -228,12 +228,15 @@ cat <<EOF
 
 Cluster ${cluster} is applied and registered.
 
-Every chapter from here starts with these three lines:
+Every chapter from here starts with these four lines:
 
   cd ${infra_dir%/infra}
   export CLUSTER_NAME=${cluster}
+  export AWS_REGION=${region}
   source infra/scripts/distai-env.sh
 
-That resolves the region, the account, the state's location and the attached data layers from the
-registry, so no chapter needs a bucket name or a state key again.
+That resolves the account, the state's location and the attached data layers from the registry, so no
+chapter needs a bucket name or a state key again. The region is given rather than resolved because a
+cluster is identified by account, region and name: left unset, the AWS CLI's own default region
+decides where to look, and a default that differs from this cluster's is a lookup that fails.
 EOF
