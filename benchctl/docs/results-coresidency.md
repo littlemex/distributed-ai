@@ -183,7 +183,7 @@ Two further cautions to carry into it:
 * **Preemption is a hazard, and caching changes its shape rather than removing it.** V1 preempts by
   recompute, so with caching off a preempted 20,000-token prefill is computed again from nothing. With
   caching on it can come back from cached blocks instead — provided they have not been evicted, and
-  cached blocks compete with live sequences for the same 2.0M-token pool. Either way it is box time the
+  cached blocks compete with live sequences for the same per-replica pool, and `vllm:kv_cache_usage_perc` does not show the cached ones. Either way it is box time the
   accounting has to see.
 
 ## Below saturation: the answer inverts, and the cap is what makes it invert
