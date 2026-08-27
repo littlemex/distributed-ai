@@ -88,8 +88,14 @@ the box is *better* here, and it is still not *worth it* here.
 ## What is still missing
 
 * Held-out production traffic for both families.
-* A middle shape. Two points do not describe a curve, and the crossover — where saving per box-second stops
-  favouring shorter prompts — is unmeasured. Somewhere between 300 and 20,000 input tokens is the shape
-  worth admitting first.
-* The output-heavy corner. Both families here write almost nothing; a family that writes a lot would price
-  differently, and the box's output advantage over haiku is only 18%.
+* ~~A middle shape~~ — measured, in `results-shape-surface.md`. There is no crossover: with the load
+  generator and the engine's seat count both taken out of the way, saving per box-second falls
+  monotonically with input length from $76.83 per box-hour at 60 tokens to $24 to $32 at 20,000. Shorter is
+  better everywhere in the measured range.
+* ~~The output-heavy corner~~ — measured. Output length barely moves the ranking, and the "18% advantage"
+  figure was arithmetic on prices without the denominator: at the operating point the box writes at about
+  $2.09 per Mtok, not $4.12.
+* Whether this family's verdict survives priority scheduling. The +$10.52 per box-hour here is charged the
+  full opportunity cost of the box time it uses. If long work only ever filled slack the short families
+  left behind, its marginal box cost would be near zero and the same +$10.52 would be free upside. That is
+  a scheduler question, not a quality one, and it is open.

@@ -93,7 +93,11 @@ they assume, or not at all.
 * Held-out production traffic. Everything above is a public dataset.
 * A suite with resolution. This one is saturated; comparing layers needs harder items or a stricter output
   contract.
-* The long-input extraction family, which is where the money is: the box's advantage comes from input
-  tokens, and this family's inputs are 300 tokens long.
+* ~~The long-input extraction family, which is where the money is~~ — **wrong, and measured wrong.** The
+  saving per request does scale with input length, but the objective divides by box time and box time grows
+  faster. This family's 300-token shape turns out to be near the best shape the box has; see
+  `results-shape-surface.md`.
+* Everything above was taken with `max_num_seqs=27`, which was binding. At 256 seats this family's shape
+  reaches 265,792 requests/hour rather than 264,194, and the 60-token corner gains 33%.
 * `sglang.benchmark.serving` as the perf instrument. The stand-in used here reports what it measures, but
   the real tool ships the datasets and the percentiles, and needs a node pool with disk requested for it.

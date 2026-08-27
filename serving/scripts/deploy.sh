@@ -9,16 +9,18 @@
 # an opt-in faster engine that needs a prebuilt image (see sglang/README.md).
 #
 #   ./scripts/deploy.sh [--model NAME] [--tp N] [--replicas N] [--engine vllm|sglang]
-#                       [--context 131k|262k|1m]
+#                       [--context 131k|262k|1m] [--shape short|mixed|long]
 #                       [--only pool|serving|agents]
 #                       [--skip-pool] [--websearch] [--yes] [--skip-smoke]
 #
 # --model picks which directory under models/ supplies the model's facts, its
 # context/concurrency table and its engine tuning. `ls models` lists what is available.
-# --context picks the window and, with it, how many sequences fit: 131k/16, 262k/9 (default,
-# the model's native window and so no rope scaling), 1m/2 (YaRN). --tune picks what to
-# optimise: latency (MTP speculative decoding, the default) or throughput (MTP off, a large
-# scheduler budget, more sequences). See models/<name>/profiles.env.
+# --context picks the window: 131k, 262k (default, the model's native window and so no rope
+# scaling) or 1m (YaRN). --shape picks how many sequences the engine admits at once, which is a
+# separate decision from the window because vLLM allocates KV per block on demand rather than
+# reserving max-model-len per sequence: short (256), mixed (128, default) or long (32). --tune picks
+# what to optimise: latency (MTP speculative decoding) or throughput (MTP off, a large scheduler
+# budget). See models/<name>/profiles.env for the measurements behind each.
 #   ./scripts/deploy.sh --down [--purge-pool] [--yes]
 #
 # --skip-pool (alias --skip-gpu): run the full flow WITHOUT the GPU NodePool phase, for a cluster that
@@ -43,7 +45,9 @@ ENGINE=vllm; ONLY=""; ASSUME_YES=0; SKIP_SMOKE=0; DOWN=0; PURGE_POOL=0; SKIP_POO
 # Which model to serve. Everything that differs between models -- the id, the native window, the
 # KV geometry, the context/concurrency table, the engine tuning -- lives in one directory per
 # model under models/, so swapping one in is a flag and not an edit.
-QWEN_MODEL="${QWEN_MODEL:-qwen3.8-27b}"
+# Default is the MoE, which measured better than the dense model on every axis taken: 3.6x the
+# prefill, 3.3x the decode, a third of the KV per token, and tool-calling verified by the smoke gate.
+QWEN_MODEL="${QWEN_MODEL:-qwen3.6-35b-a3b}"
 # Tensor-parallel width, and with it how many GPUs one replica takes. A deployment shape rather than
 # a model fact, so it is a flag and not in the model's directory. It matters for more than speed:
 # vLLM replicates KV heads across ranks when num_kv_heads does not divide the width, so a model with
@@ -60,6 +64,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --tp) QWEN_TP="${2:?}"; shift 2;;
   --replicas) QWEN_REPLICAS="${2:?}"; shift 2;;
   --context) QWEN_CONTEXT="${2:?}"; shift 2;;
+  --shape) QWEN_SHAPE="${2:?}"; shift 2;;
   --tune) QWEN_TUNE="${2:?}"; shift 2;;
   --only) ONLY="${2:?}"; shift 2;;
   --yes) ASSUME_YES=1; shift;;
@@ -138,8 +143,11 @@ confirm_target(){
   echo "  account : $acct"
   echo "  namespace: $NS   engine: $ENGINE   web_search: $([ "$WEBSEARCH" = 1 ] && echo on || echo off)"
   echo "  model   : ${QWEN_MODEL} ($MODEL_ID)${QWEN_TP:+ at TP=$QWEN_TP}${QWEN_REPLICAS:+ x$QWEN_REPLICAS replicas}"
-  echo "  context : ${QWEN_CONTEXT:-262k} (window $MAX_CONTEXT, up to $MAX_NUM_SEQS concurrent)"
-  echo "  tune    : ${QWEN_TUNE:-latency} (step budget ${MAX_BATCHED_TOKENS:-auto}, mtp $([ -n "$SPEC_CONFIG" ] && echo on || echo off))"
+  echo "  context : ${QWEN_CONTEXT:-262k} (window $MAX_CONTEXT)"
+  echo "  shape   : ${QWEN_SHAPE:-mixed} (up to $MAX_NUM_SEQS concurrent sequences)"
+  # The fallback here has to be the same one profiles.env uses, or the plan line describes a deploy
+  # that is not the one about to happen. It said "latency" while the profile defaulted to throughput.
+  echo "  tune    : ${QWEN_TUNE:-throughput} (step budget ${MAX_BATCHED_TOKENS:-auto}, mtp $([ -n "$SPEC_CONFIG" ] && echo on || echo off))"
   read -r -p "Proceed against this target? [y/N] " a
   [ "$a" = y ] || [ "$a" = Y ] || die "aborted by user"
 }
@@ -348,8 +356,13 @@ disassociate_pod_identity(){
     --association-id "$id" >/dev/null 2>&1 || true
 }
 
+# The model name and the tune's intent both come from here, so the check cannot disagree with the
+# deploy about what was deployed. Both were previously baked into smoke.py, which is how it ended up
+# checking for the model this box served before the swap.
 do_smoke(){ [ "$SKIP_SMOKE" = 1 ] && { log "smoke skipped"; return 0; }
   log "smoke"; python3 scripts/smoke.py --context "$CTX" --namespace "$NS" --engine "$ENGINE" \
+    --model "$SERVED_MODEL_NAME" \
+    --expect-speculative "$([ -n "$SPEC_CONFIG" ] && echo yes || echo no)" \
     "$([ "$ENGINE" = sglang ] && echo --report || echo --gate)"; }
 
 down(){

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Smoke check for the Qwen3.8-27B serving endpoint, run via kubectl exec (no port-forward).
+"""Smoke check for the serving endpoint, run via kubectl exec (no port-forward).
 
 Checks, against the active serving pod's localhost:8000:
   (a) /v1/models returns the expected served-model-name
   (b) a short chat returns non-empty content
   (c) a tool-calling request returns a tool_call
-  (d) the startup log shows the speculative-decode engine active (MTP for vLLM, DFLASH for sglang)
+  (d) the engine's speculative decoding agrees with what the deploy asked for
 
 Modes:
   --gate    (default) all four required; exit 1 if any fails. Used before flipping the alias.
@@ -14,10 +14,17 @@ Modes:
 
 The promotion criterion "tool-calling works" is exactly the (c) line this prints; there is no
 separate definition.
+
+The served-model-name is an argument, not a constant. It was a constant once, left pointing at the
+previous model after the box was swapped, so all three endpoint checks failed against a perfectly
+healthy endpoint. `model.env` is the single source of truth and `deploy.sh` passes it in.
+
+(d) checks agreement rather than presence, because the `throughput` tune turns speculative decoding
+off on purpose. A check that requires MTP can never pass on that profile, and a gate that always
+fails is worse than no gate: it teaches everyone to ignore the gate.
 """
 import argparse, json, subprocess, sys
 
-MODEL = "Qwen/Qwen3.8-27B"
 
 def sh(args):
     return subprocess.run(args, capture_output=True, text=True)
@@ -56,13 +63,20 @@ try:
     out["c"]=bool(r["choices"][0]["message"].get("tool_calls"))
 except Exception as e: out["c"]=False
 print(json.dumps(out))
-''' % {"model": MODEL}
+'''
+
+
+def check_py(model: str) -> str:
+    return CHECK_PY % {"model": model}
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--context", required=True)
     ap.add_argument("--namespace", required=True)
     ap.add_argument("--engine", choices=["vllm", "sglang"], default="vllm")
+    ap.add_argument("--model", required=True, help="served-model-name, from model.env")
+    ap.add_argument("--expect-speculative", choices=["yes", "no"], default="yes",
+                    help="what the deploy's tune asked for; (d) checks the engine agrees")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--gate", action="store_true")
     g.add_argument("--report", action="store_true")
@@ -73,19 +87,22 @@ def main():
     if not pod:
         print("[smoke][FAIL] no running serving pod"); sys.exit(1)
 
-    r = in_pod(a.context, a.namespace, pod, CHECK_PY)
+    r = in_pod(a.context, a.namespace, pod, check_py(a.model))
     try:
         res = json.loads(r.stdout.strip().splitlines()[-1])
     except Exception:
         print("[smoke][FAIL] could not run checks in pod:\n" + r.stderr[-400:]); sys.exit(1)
 
-    # (d) speculative decoding active. "Detected MTP"/"DFLASH" only appear once at startup and can
-    # scroll out of a bounded tail on a long-running pod, so check the recurring per-step metrics
-    # line instead ("SpecDecoding metrics: ..."), falling back to the one-time startup message for
-    # a pod that has not served a request yet.
+    # (d) "Detected MTP"/"DFLASH" appear once at startup and can scroll out of a bounded tail on a
+    # long-running pod, so the recurring per-step metrics line is checked too.
     logs = sh(["kubectl", "--context", a.context, "-n", a.namespace, "logs", pod, "--tail=2000"])
     needle = "Detected MTP" if a.engine == "vllm" else "DFLASH"
-    res["d"] = "specdecoding metrics" in logs.stdout.lower() or needle.lower() in logs.stdout.lower()
+    active = ("specdecoding metrics" in logs.stdout.lower()
+              or needle.lower() in logs.stdout.lower())
+    res["d"] = active == (a.expect_speculative == "yes")
+    if not res["d"]:
+        print(f"  (d) engine speculative={active}, deploy asked for "
+              f"{a.expect_speculative == 'yes'}")
 
     for k in ("a", "b", "c", "d"):
         print(f"  ({k}) {'PASS' if res.get(k) else 'FAIL'}")
