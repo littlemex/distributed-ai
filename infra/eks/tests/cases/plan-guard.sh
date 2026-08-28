@@ -57,7 +57,8 @@ _pg_verdict() {
   sed -n '/^protected_addresses()/,/^ADDR/p' "$(_pg_installer)" | sed '1,2d;$d' >"$dir/protected.txt"
   _pg_plan "$@" >"$dir/plan.json"
   out=$(LABEL="$label" ALLOW_UNRELATED="$allow" PROFILING_ONLY="$only" \
-    ALLOW_RECORD_UPDATES="$records" python3 "$dir/guard.py" "$dir/plan.json" "$dir/owned.txt" "$dir/protected.txt" 2>&1)
+    ALLOW_RECORD_UPDATES="$records" PLAN_IS_PREVIEW="${PG_PLAN_IS_PREVIEW:-0}" \
+    python3 "$dir/guard.py" "$dir/plan.json" "$dir/owned.txt" "$dir/protected.txt" 2>&1)
   rc=$?
   rm -rf "$dir"
   if [ $rc -eq 0 ]; then printf 'ok'; else printf 'refused'; fi
@@ -152,6 +153,36 @@ test_plan_guard_table() {
 # The owned list is derived from the files that define the platform's cluster-side resources. This
 # asserts the derivation actually covers them — the omission it replaces (three IAM resources the S3
 # Files mount needs) stopped an install with "unrelated drift" that was the platform itself.
+# The escape hatch the guard recommends has to be reachable. PROFILING_ONLY=1 is only ever wanted when
+# unrelated drift exists, and the installer plans wide BEFORE it narrows — so if the wide plan refuses
+# on that drift, the narrowed plan is never made and the advice in the error message is a dead end.
+# That is exactly what happened. The wide plan is now inspected in preview mode when narrowing, where
+# unrelated changes are reported and the run continues; the narrowed plan (the one that gets applied)
+# is still guarded normally, because Terraform can pull a dependency of a target into it.
+test_plan_guard_profiling_only_escape_hatch_is_reachable() {
+  command -v python3 >/dev/null || return 2
+  local fails=0 drift='aws_eks_addon.unrelated=update'
+
+  # Without preview, unrelated drift refuses — and points at PROFILING_ONLY=1.
+  _pg_expect refused "unrelated drift refuses on the plan that gets applied" cluster 0 0 \
+    "$drift" || fails=$((fails + 1))
+
+  # The wide plan under PROFILING_ONLY is a report: it lists the drift and lets the run reach the
+  # narrowed plan. Without this the recommended re-run fails the same way as the first attempt.
+  PG_PLAN_IS_PREVIEW=1 _pg_expect ok "the wide plan is a report when narrowing" cluster 0 1 \
+    "$drift" || fails=$((fails + 1))
+
+  # A preview is not a blanket pass. A plan that would destroy or modify the record of record means
+  # something narrowing does not fix, so those stay fatal.
+  PG_PLAN_IS_PREVIEW=1 _pg_expect refused "a preview still refuses a delete of the record of record" \
+    data-layer 0 1 'aws_s3_bucket.traces["us-east-2"]=delete' || fails=$((fails + 1))
+  PG_PLAN_IS_PREVIEW=1 PG_ALLOW_RECORD_UPDATES=0 _pg_expect refused \
+    "a preview still refuses an update to the record of record" data-layer 0 1 \
+    'aws_s3_bucket_lifecycle_configuration.traces["us-east-2"]=update' || fails=$((fails + 1))
+
+  [ "$fails" -eq 0 ]
+}
+
 test_plan_guard_owned_list_is_complete() {
   local installer missing=""
   installer="$(_pg_installer)"
