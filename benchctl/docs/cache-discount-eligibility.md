@@ -8,36 +8,47 @@ The discount is the largest single term in this project's arithmetic and it had 
 It should have been. It is not uniform, it is not what "the API caches and the box does not" describes, and
 one documented conclusion rests on a hit rate this gateway does not deliver.
 
-## The distinction that decides everything: shared prefix, or identical request
+## The request's shape decides who gets a discount, and it took three shapes to find that out
 
 The first version of this page reported that `claude-sonnet-5` and `claude-opus-5` cache at 99.9% and drew
 routing conclusions from it. The probe behind that number sent **the same request twice**, which cannot tell
-two very different capabilities apart:
+apart three capabilities that turn out to be quite different:
 
 * **Identical-request caching** — the whole request repeats, byte for byte. Nearly useless: traffic that
   repeats a request identically should cache the *answer* and not pay for a cached prefill at all.
-* **Shared-prefix caching** — many requests share a long preamble and differ after it. This is what agentic
-  traffic, few-shot prompting and system prompts actually look like, and it is the only kind that routes
-  anything.
+* **A shared prefix inside one message** — one long preamble, a different question appended to it. This is how
+  few-shot prompting and a stuffed system prompt are often built.
+* **A growing conversation** — turn N carries every earlier turn verbatim and appends to it. This is what
+  agentic traffic is, and it is the one the family whose verdict is at stake actually sends.
 
-Sending one preamble with three different questions after it separates them, and they come apart completely:
+They come apart completely, and the second version of this page was wrong too, because it had the first two
+columns and not the third:
 
-| layer | identical request repeated | **shared prefix, different tail** |
-| --- | --- | --- |
-| gpt-5.6-sol | 99.9% | **99.9%** at 3.5k tokens |
-| gpt-5.6-terra | 99.9% | **99.9%** at 3.5k tokens |
-| gpt-5.5 | 97.3% | **0%** at 3.5k, **97.8%** at 15k |
-| claude-sonnet-5 | 100.0% | **0%** at 5.6k |
-| claude-opus-5 | 100.0% | **0%** at 5.6k and at 24k |
-| claude-haiku-4-5 | **0%** at 3.5k and 15k | **0%** |
-| gemma-4 | **0%** at 3.5k and 15k | **0%** |
-| the box (vLLM prefix caching) | — | **72.5%**, measured on a real run below |
+| layer | identical request repeated | shared prefix inside one message | **growing conversation** |
+| --- | --- | --- | --- |
+| claude-sonnet-5 | 100.0% | 0% at 5.6k | **99.9%** |
+| claude-opus-5 | 100.0% | 0% at 5.6k and 24k | **99.8%** |
+| gpt-5.6-sol | 99.9% | 99.9% at 3.5k | **99.7%** |
+| gpt-5.6-terra | 99.9% | 99.9% at 3.5k | not probed |
+| gpt-5.5 | 97.3% | 0% at 3.5k, 97.8% at 15k | 55%-99.6%, erratic |
+| **claude-haiku-4-5** | **0%** at 3.5k and 15k | **0%** | **0% on every turn** |
+| **gemma-4** | **0%** at 3.5k and 15k | **0%** | **0% on every turn** |
+| the box (vLLM prefix caching) | — | — | **72.5%**, measured on a real run below |
 
-**On this gateway, no Claude model gets a shared-prefix discount.** `claude-sonnet-5` and `claude-opus-5`
-cache only a byte-identical repeat. `claude-haiku-4-5` does not cache even that, at any length tried, asked
-or unasked, through either route the gateway offers. The GPT models do get a genuine shared-prefix discount,
-from about 1k tokens for `gpt-5.6-sol` and somewhere between 3.5k and 15k for `gpt-5.5`. And the box's own
-prefix cache works, which is the capability the APIs were assumed to have and mostly do not.
+**The shape decides it, and the boundary is a turn rather than a character.** A Claude layer given a
+5,600-token preamble inside one user message and a different question after it caches nothing. The same layer
+given a conversation that grows — user, assistant, user — caches 99.9% of every turn after the first. The
+plausible mechanism is a cache breakpoint placed at the last complete turn, so reuse is available across turns
+and never mid-message. A probe that only sends long single messages therefore reports the opposite of the truth
+for agentic traffic, and the first version of this page did exactly that.
+
+**What survives every shape: `claude-haiku-4-5` and `gemma-4` never cache at all.** Identical repeats, shared
+prefixes, growing conversations, 3.5k tokens through 24k, asked and unasked, on both routes the gateway offers.
+Zero on every attempt. So on this gateway the discount belongs to the **premium tier only** — sonnet-5, opus-5
+and the gpt-5.6 pair — and the cheap layers the box competes with on price pay full price on every request
+forever.
+
+The box's own prefix cache works, at 72.5% on a real run below.
 
 A discount also cannot be *requested*: every layer that caches does so automatically with no `cache_control`
 breakpoint, and every layer that does not stays at zero when given one. So this harness is not leaving
@@ -61,18 +72,27 @@ sends a request, which is what its cost ledger has to be right about.
 
 The 94% is AgentX's theoretical hit rate, and the page says so. What was not known when that table was
 written is that **`claude-haiku-4-5` returns zero cached tokens on this gateway under every condition probed**
-— identical repeats, shared prefixes, 3.5k tokens and 15k, with and without a breakpoint, on both routes. So
-the 1.76x row is a hypothetical, and the row that describes measured gateway behaviour is the one below it:
-**the box is 3.0x cheaper on agentic traffic.**
+— identical repeats, shared prefixes, growing conversations, 3.5k tokens through 15k, with and without a
+breakpoint, on both routes, including the multi-turn shape that gets sonnet-5 to 99.9%. So the 1.76x row is a
+hypothetical, and the row that describes measured gateway behaviour is the one below it: **the box is 3.0x
+cheaper than the cheapest API on agentic traffic.**
+
+That does not mean no API gets the discount on this family. sonnet-5 and opus-5 plainly do, at 99.8% on the
+shape agentic traffic actually sends. It means the discount and the low price do not arrive together on this
+gateway: an API beats the box here only if it both caches and is cheap, and every layer that caches costs two
+to three times more per token before any discount, with a 1.60x tokeniser penalty on top for the two Claude
+ones. What that nets out to is arithmetic nobody should trust from this page — computing it is how the 1.76x
+figure got its authority in the first place. **It needs a measured arm**, which is the next thing to run.
 
 That is a sign flip on the family this project was built to serve, and it favours the box, so the residual
 uncertainty belongs next to it:
 
 * A gateway could apply a discount in billing without reporting it in `usage`. If so this harness cannot see
   it and neither ledger is right — but then the 94% row is unverifiable rather than correct.
-* The agentic runs went through the same `/v1/chat/completions` path probed here, so the paths agree, but the
-  agent harness builds longer and more varied prompts than these probes and something in that shape could
-  behave differently.
+* The agentic runs went through the same `/v1/chat/completions` path probed here, and now the same *shape*
+  as well, a growing conversation rather than a long single message. That was the gap that made the previous
+  version of this page wrong, so it is worth saying it is closed. What is still not matched is length: the
+  agent's conversations run far past 12k tokens, and eviction at that size is unmeasured here.
 * The 3.0x row still assumes the box at 100% utilisation, which the arrival-rate work showed is the
   optimistic end. That caveat was always on it and still is.
 

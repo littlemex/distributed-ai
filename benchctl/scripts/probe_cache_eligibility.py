@@ -99,6 +99,44 @@ def probe_pair(url: str, model: str, preamble: str, key: str, *, marked: bool,
             "first_cached": first_cached, "first_input_tokens": first_total}
 
 
+def probe_multiturn(url: str, model: str, key: str, *, prefix_tokens: int = 8000,
+                    turns: int = 5) -> list[dict]:
+    """Grow a conversation, the way agentic traffic does, and read the discount on every turn.
+
+    The single-message probes answer a question about a long text body. Agentic traffic is not that shape: it
+    is a `messages` array that grows, where turn N carries every turn before it verbatim and appends to it. A
+    gateway could plausibly cache on that prefix while ignoring a long single message, and the family whose
+    verdict turns on this is the agentic one, so the shape it actually sends is the shape that has to be
+    measured.
+
+    Turn 1 establishes the prefix and cannot hit. Every turn after it is the measurement.
+    """
+    clauses = max(1, round((prefix_tokens - 20) / 5))
+    opening = (LEAD + CLAUSE * clauses
+               + "\n\nAcknowledge in one word that you have read the reference material.")
+    messages = [{"role": "user", "content": opening}]
+    out: list[dict] = []
+    for turn in range(1, turns + 1):
+        body = {"model": model, "max_tokens": 24, "messages": messages}
+        payload, error = _post(url, body, key)
+        if error:
+            out.append({"turn": turn, "error": error})
+            break
+        total, cached = _usage(payload)
+        text = ""
+        if payload.get("choices"):
+            text = (payload["choices"][0].get("message") or {}).get("content") or ""
+        elif payload.get("content"):
+            text = "".join(b.get("text", "") for b in payload["content"] if b.get("type") == "text")
+        out.append({"turn": turn, "input_tokens": total, "cached": cached,
+                    "cached_share": (cached / total) if total else 0.0})
+        # The assistant's own reply goes back in verbatim, so turn N+1's prefix is turn N's whole exchange.
+        messages = messages + [{"role": "assistant", "content": text or "OK"},
+                               {"role": "user", "content": f"Question {turn + 1}: reply with one word."}]
+        time.sleep(1.0)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--endpoint", default="https://d8b03j8erit4k.cloudfront.net/v1/chat/completions")
@@ -107,6 +145,10 @@ def main() -> int:
                    help="preamble lengths, in repetitions of one clause")
     ap.add_argument("--ladder", action="store_true",
                    help="sweep the lengths to find the shortest prefix that is discounted")
+    ap.add_argument("--multiturn", action="store_true",
+                   help="grow a conversation instead of repeating one message, which is the agentic shape")
+    ap.add_argument("--prefix-tokens", type=int, default=8000)
+    ap.add_argument("--turns", type=int, default=5)
     ap.add_argument("--json-out", type=Path, default=None)
     args = ap.parse_args()
 
@@ -117,6 +159,30 @@ def main() -> int:
 
     longest = max(args.clauses)
     results: dict[str, dict] = {}
+
+    if args.multiturn:
+        print(f"a conversation growing from a {args.prefix_tokens}-token opening, {args.turns} turns.\n"
+              f"turn 1 establishes the prefix and cannot hit; every turn after it is the measurement.\n")
+        for model in args.models:
+            print(f"{model}")
+            rows = probe_multiturn(args.endpoint, model, key, prefix_tokens=args.prefix_tokens,
+                                   turns=args.turns)
+            results[model] = {"multiturn": rows}
+            for row in rows:
+                if "error" in row:
+                    print(f"    turn {row['turn']}: {row['error']}")
+                    continue
+                print(f"    turn {row['turn']}  input {row['input_tokens']:7d}  "
+                      f"cached {row['cached']:7d}  {row['cached_share']:6.1%}")
+            later = [r for r in rows if r.get("turn", 0) > 1 and "error" not in r]
+            if later:
+                best = max(r["cached_share"] for r in later)
+                print(f"    -> best hit after the first turn: {best:.1%}  "
+                      f"{'discounted' if best > 0.5 else 'NO DISCOUNT on agentic-shaped traffic'}\n")
+        if args.json_out:
+            args.json_out.write_text(json.dumps(results, indent=2))
+            print(f"[OK] wrote {args.json_out}")
+        return 0
 
     print(f"{'model':22} {'asked?':>8} {'input':>7} {'cached':>7} {'share':>7}  verdict")
     for model in args.models:

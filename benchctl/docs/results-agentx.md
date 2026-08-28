@@ -216,11 +216,16 @@ four, and the KV pressure that would eventually break the hit rate is nowhere in
 | `claude-haiku-4-5`, no cache at all | $0.0642 — the box is 3.0x cheaper |
 
 **Correction, 2026-08-28: the 94% row is a hypothesis this gateway does not deliver.** `claude-haiku-4-5`
-returns zero cached tokens here under every condition probed — identical repeats and shared prefixes, 3.5k
-tokens and 15k, with and without a `cache_control` breakpoint, on both the chat and messages routes. No Claude
-model on this gateway does shared-prefix caching at all; sonnet-5 and opus-5 cache only byte-identical repeats,
-which agentic traffic does not produce. So the row that describes measured behaviour is the one below it, and
-**the box is 3.0x cheaper on this family rather than 1.76x more expensive.** The sign of this project's
+returns zero cached tokens here under every condition probed — identical repeats, shared prefixes and, most to
+the point, a **growing multi-turn conversation**, which is the shape this family sends. 3.5k tokens through 15k,
+with and without a `cache_control` breakpoint, on both the chat and messages routes. Zero on every attempt,
+while the same multi-turn probe gets `claude-sonnet-5` to 99.9% and `claude-opus-5` to 99.8%, so the shape is
+not the reason. So the row that describes measured behaviour is the one below it, and **the box is 3.0x cheaper
+than the cheapest API on this family rather than 1.76x more expensive.**
+
+The layers that *do* cache this traffic are the premium ones, and what the box costs against a cached sonnet-5
+is deliberately not computed here: computing an API price from token counts and an assumed hit rate is exactly
+how the 1.76x row got its authority. It needs an arm that sends the traffic and reads the bill. The sign of this project's
 headline comparison turns on an API capability that was assumed rather than measured, and the measurement is in
 `cache-discount-eligibility.md`. Two things temper it: a gateway could discount in billing without reporting it
 in `usage`, in which case the 94% row is unverifiable rather than right; and the box figure still assumes 100%
