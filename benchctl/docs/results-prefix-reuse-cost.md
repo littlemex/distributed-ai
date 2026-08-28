@@ -1,4 +1,10 @@
-# Prefix reuse is the box's whole advantage, and it needs 71% of it to hold
+# Prefix reuse is the box's whole advantage, and 71% of it is the smaller of two conditions
+
+> **Superseded in part by `results-arrival-sweep.md`.** The break-even hit rate below is correct and the box
+> clears it. What this page got wrong is the framing: it treated eviction as the binding constraint, and the
+> arrival sweep shows the binding constraint is volume — the box needs about 8,000 prefix-reusing requests an
+> hour before it is cheaper than `gemma-4` at all, priced without the occupancy assumption every number here
+> carries.
 
 Measured 2026-08-29 by `benchctl/prefix_reuse_cost.py`. Box: Qwen3.6-35B-A3B-FP8, TP=2 x 2 replicas,
 $15.2174/h, prefix caching on. APIs through the gateway, priced from `specs/model-rates.json`. Traffic:
@@ -102,14 +108,24 @@ concurrent conversations evict each other's prefixes. Putting the break-even on 
 | 50% | **never** | 91.9% | |
 | 25% | **never** | **never** | |
 
-At 63:1 the box needs 71.4% at full occupancy, and the pool delivers 71.0% once 20 conversations are competing
-— so the winning region at that ratio is approximately the zero-contention corner this run measured in. Only the
-more prefill-skewed 117:1 shape has visible room: 58.8% needed against 99% held at twelve conversations.
+At 63:1 the box needs 71.4% at full occupancy, and the pool delivers 71.0% once 20 conversations are competing,
+so this looked like a vice with the winning region squeezed to nothing between the two jaws.
 
-That is the honest form of the box's side of the rule: **it wins at low contention on very prefill-skewed
-traffic**, not "on agentic traffic". Which arrival rates, if any, are simultaneously busy enough to amortise the
-hourly cost and quiet enough to stay above the break-even is a single sweep that has not been run, and it is the
-next measurement rather than a caveat.
+**That sweep has now been run and the second jaw does not close** — see `results-arrival-sweep.md`. The hit rate
+*rises* with load rather than collapsing, 88.4% at one request in flight to 94.3% at thirty-four, because more
+traffic against a shared preamble means the preamble is more often already resident. The survival experiment's
+cliff is real but it is a function of resident *tokens*, and its prefixes were 60,000 where these are 13,000, so
+eviction never starts here.
+
+What the sweep found instead is a harder threshold in the other direction. Priced with no occupancy assumption
+at all — an hourly rate over what actually completed — the box needs about **8,000 prefix-reusing requests an
+hour** before it is cheaper than `gemma-4` at all, and it is 25x more expensive at 313. Above the threshold it
+improves monotonically to 3.0x cheaper. So the box's constraint is volume, not eviction, and the "thin margin"
+framing this section originally carried was wrong in both directions: there is nothing thin about 3.0x, and
+nothing cheap about the box below the threshold.
+
+The 1.20x above should be read as the figure at roughly the crossing point, because the published token rates it
+uses embed the occupancy this project had been assuming. The sweep supersedes it.
 
 ### As a principle, and as something a router could actually evaluate
 

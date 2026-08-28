@@ -116,12 +116,18 @@ class LayerClient:
         self.api_key = os.environ.get(layer_api_key_env(layer)) if layer.kind == "api" else None
 
     def complete(self, prompt: "str | list[dict] | None" = None, *, max_tokens: int,
-                 temperature: float = 0.0, messages: "list[dict] | None" = None) -> Reply:
+                 temperature: float = 0.0, messages: "list[dict] | None" = None,
+                 correlation_id: "str | None" = None) -> Reply:
         """`prompt` is text, or a list of OpenAI content parts for a multimodal family.
 
         Passing the list straight through is what keeps the image path from becoming a second client:
         a text-only task still hands over a string and never learns that images exist, and an OCR task
         builds the parts itself because only it knows how its images should be attached.
+
+        `correlation_id` is sent as `X-Correlation-ID` and is what the conversation-affinity router in front
+        of the box hashes on, so a conversation's turns reach the replica holding its prefix. Without it the
+        plain Service round-robins and every prefix ends up cached on both replicas, which halves the KV a
+        session can occupy before eviction. AIPerf sends the same header for the same reason.
 
         `messages` is the alternative for traffic that is a conversation rather than a question, and it is
         not a convenience. Prompt caching on this gateway attaches to a *turn boundary*: the same 5,600-token
@@ -158,6 +164,8 @@ class LayerClient:
             payload_out["temperature"] = temperature
         body = json.dumps(payload_out).encode()
         headers = {"content-type": "application/json"}
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
 
