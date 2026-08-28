@@ -1,0 +1,110 @@
+# Long-document summarisation: the family an advisor named as the box's second candidate to win.
+#
+# The reasoning is structural. A single-shot summary of a long report has a long prefill and no prefix
+# reuse, so the API's cache discount does not apply — and that discount is the entire reason the box came
+# out 1.76x more expensive on agentic traffic. Against the same API with caching off, the box measured 3.0x
+# cheaper. This family is that regime by construction, so it is the test of a prediction rather than a
+# fishing trip.
+#
+# Four layers: the box, the two that came out on the OCR frontier, and the cheap baseline the objective is
+# defined against. Not the whole roster — measure a new family with representatives and widen only where
+# the frontier actually swaps.
+id: 2026-08-28-summarise-v1
+serving_ref: sha256:PLACEHOLDER-set-by-deploy
+
+layers:
+  - id: box-qwen36-tp2x2
+    kind: self_hosted
+    model: Qwen/Qwen3.6-35B-A3B
+    endpoint: http://qwen-serving.qwen-trial.svc.cluster.local:8000/v1/chat/completions
+    hourly_usd: 15.2174
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+    input_usd_per_mtok: 0.236
+    output_usd_per_mtok: 4.12
+    pricing_status: measured
+  - id: api-haiku-4-5
+    kind: api
+    model: claude-haiku-4-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    input_usd_per_mtok: 1.00
+    output_usd_per_mtok: 5.00
+    cache_read_usd_per_mtok: 0.10
+    pricing_status: list
+  - id: api-sonnet-5
+    kind: api
+    model: claude-sonnet-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    input_usd_per_mtok: 3.00
+    output_usd_per_mtok: 15.00
+    cache_read_usd_per_mtok: 0.30
+    pricing_status: list
+    sends_temperature: false
+    answer_token_budget: 2048     # it spends output tokens before it speaks; 700 would truncate it
+  - id: api-gemma-4
+    kind: api
+    model: gemma-4
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    input_usd_per_mtok: 0.30
+    output_usd_per_mtok: 1.20
+    pricing_status: placeholder
+
+suites:
+  - id: govreport-stratified-80
+    family: summarisation_long
+    items_provenance: public-dataset
+    # Stratified by document length across four bins, because the question is how the comparison moves
+    # with input length and a random draw from a heavy tail returns the mode.
+    items: /artifacts/govreport-2026-08-28/items.jsonl
+    task_plugin: tasks.summarise_facts
+    scorer: scorers.exact_label
+    baseline_layer: api-haiku-4-5
+    floor:
+      kind: paired_non_inferiority
+      metric: exact_label
+      # Frozen with the scorer, not after seeing it: a margin chosen once the layers are on screen is not a
+      # margin. 80 paired items at this confidence can certify a margin down to 2.50-3.75 pp depending on
+      # how much the layers disagree, so 5.0 is inside what the design could have refused. It would not be
+      # at 95%, where the same 80 items cannot resolve better than 6-9 pp.
+      margin_pp: 5.0
+      confidence: 0.80
+    length_bins: [20000, 40000, 80000]
+
+policies:
+  - id: direct
+    steps:
+      - layer_ref: box-qwen36-tp2x2
+
+operation_points:
+  - id: quality-c1
+    cell_kind: quality
+    concurrency: 1
+    input_tokens: 16384
+    output_tokens: 700
+    ephemeral_storage: 8Gi
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+
+cells:
+  - id: sum-box-quality
+    suite: govreport-stratified-80
+    layer: box-qwen36-tp2x2
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: sum-haiku-quality
+    suite: govreport-stratified-80
+    layer: api-haiku-4-5
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: sum-gemma4-quality
+    suite: govreport-stratified-80
+    layer: api-gemma-4
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: sum-sonnet5-quality
+    suite: govreport-stratified-80
+    layer: api-sonnet-5
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828

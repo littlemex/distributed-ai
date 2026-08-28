@@ -155,3 +155,37 @@ def paired_non_inferiority(
         margin_pp=margin_pp,
         mcnemar_p=mcnemar_exact(b, c),
     )
+
+
+def minimum_detectable_margin_pp(
+    n: int,
+    discordant: int,
+    *,
+    confidence: float = 0.80,
+    draws: int = 20_000,
+    seed: int = 20260828,
+) -> float:
+    """The tightest margin a run of this size and this discordance could ever certify.
+
+    Non-inferiority at a 5-point margin is a claim about resolution, and resolution comes from the
+    discordant pairs rather than from the item count: concordant items contribute nothing to the
+    difference. So this asks the best case directly — a box exactly as good as the baseline, disagreeing on
+    the same number of items, half each way — and reports how far below zero the bound still falls. A margin
+    tighter than that cannot be certified by this run no matter what the layers do, and quoting one anyway
+    is a claim the design could not have refused.
+    """
+    if n <= 0:
+        raise ValueError("no paired items")
+    b = discordant // 2
+    c = discordant - b
+    if b != c:                      # an odd count cannot split evenly, so give the box the disadvantage
+        b, c = c, b
+    pairs = ([(False, True)] * b + [(True, False)] * c
+             + [(True, True)] * max(0, n - b - c))
+    rng = random.Random(seed)
+    diffs = []
+    for _ in range(draws):
+        sample = [pairs[rng.randrange(len(pairs))] for _ in range(n)]
+        diffs.append((sum(1 for x, _ in sample if x) - sum(1 for _, y in sample if y)) / n * 100)
+    diffs.sort()
+    return -diffs[int((1 - confidence) * (draws - 1))]

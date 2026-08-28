@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 from . import spec
@@ -40,6 +41,38 @@ def cmd_manifest(args) -> int:
     return 0
 
 
+def _plugins() -> dict:
+    """The families that exist. One registry, because `run-local` and `score` must agree on it."""
+    from .tasks.classification_enum import ClassificationEnum
+    from .tasks.longctx_mc import LongContextChoice
+    from .tasks.ocr_vqa import OcrVqa
+    from .tasks.summarise_facts import SummariseFacts
+
+    return {ClassificationEnum.name: ClassificationEnum,
+            LongContextChoice.name: LongContextChoice,
+            OcrVqa.name: OcrVqa,
+            SummariseFacts.name: SummariseFacts}
+
+
+def _build_task(plugin, items_path: Path, args):
+    """Instantiate a family's task, which differ in what they need pointed at."""
+    from .tasks.classification_enum import ClassificationEnum
+    from .tasks.ocr_vqa import OcrVqa
+
+    if plugin is ClassificationEnum:
+        return plugin(items_path=items_path, labels=tuple(args.labels.split(",")))
+    if plugin is OcrVqa:
+        # Images live beside the manifest on the artifact volume, never in git: a few hundred JPEGs in
+        # history would make every spec review a binary diff.
+        return plugin(manifest_path=items_path)
+    return plugin(items_path=items_path)
+
+
+def _items_path(cell, args) -> Path:
+    return (args.spec_root / cell.suite.items if not Path(cell.suite.items).is_absolute()
+            else Path(cell.suite.items))
+
+
 def cmd_run_local(args) -> int:
     """Run a quality cell from here rather than as a Job.
 
@@ -48,14 +81,8 @@ def cmd_run_local(args) -> int:
     cluster, next to nothing else — which is why this refuses one.
     """
     from . import runner
-    from .tasks.classification_enum import ClassificationEnum
-    from .tasks.longctx_mc import LongContextChoice
-    from .tasks.ocr_vqa import OcrVqa
 
-    PLUGINS = {ClassificationEnum.name: ClassificationEnum,
-               LongContextChoice.name: LongContextChoice,
-               OcrVqa.name: OcrVqa}
-
+    PLUGINS = _plugins()
     run = spec.load_run(args.run)
     cells = [c for c in run.cells if c.id in args.cells] if args.cells else list(run.cells)
     root = args.artifact_root / "runs" / run.id
@@ -72,16 +99,7 @@ def cmd_run_local(args) -> int:
         if plugin is None:
             print(f"[SKIP] {cell.id}: no plugin for {cell.suite.task_plugin} yet", file=sys.stderr)
             continue
-        items_path = (args.spec_root / cell.suite.items if not Path(cell.suite.items).is_absolute()
-                      else Path(cell.suite.items))
-        if plugin is ClassificationEnum:
-            task = plugin(items_path=items_path, labels=tuple(args.labels.split(",")))
-        elif plugin is OcrVqa:
-            # Images live beside the manifest on the artifact volume, never in git: a few hundred
-            # JPEGs in history would make every spec review a binary diff.
-            task = plugin(manifest_path=items_path)
-        else:
-            task = plugin(items_path=items_path)
+        task = _build_task(plugin, _items_path(cell, args), args)
         print(f"[RUN] {cell.id} on {cell.layer.id} ({cell.layer.endpoint})")
         summary = runner.run_quality_cell(cell, task, root / cell.id, limit=args.limit)
         summaries[cell.id] = summary
@@ -122,6 +140,151 @@ def cmd_run_local(args) -> int:
         (root / "paired.json").write_text(json.dumps(
             {k: v for k, v in result.__dict__.items()} | {"non_inferior": result.non_inferior},
             indent=2))
+    return 0
+
+
+def cmd_score(args) -> int:
+    """Re-run a scorer over responses already on disk, at a new score version.
+
+    The artifacts were split into `response` and `score` precisely so this could exist: what happened never
+    changes, and what it is worth is an opinion that can be corrected without spending a GPU or an API
+    again. The summarisation family needed it on its first run — its v1 thresholds turned out to rank the
+    document's own opening above the human reference summary — and re-scoring stored replies is the honest
+    repair, because the replies are not a function of the scorer.
+
+    That last claim is load-bearing, so it is worth saying where it comes from rather than asserting it:
+    nothing in `runner.run_quality_cell` branches on a verdict. There is one request per item, no retry on
+    a failed score, no sampling and selecting, and the excluded set is decided by whether the transport
+    returned text — not by whether the answer was any good. So a corrected scorer sees exactly the replies
+    the layers gave.
+
+    Two things this prints that a single run does not. A **band**: when a family declares the region of its
+    threshold grid where every calibration control still holds, the admission decision is reported at every
+    cell of it, because a decision that flips inside the region the calibration could not distinguish is
+    not a decision. And the **resolution**: the tightest margin this many paired items could certify at
+    all, so a margin the design could never have refused is not quoted as if it had been tested.
+    """
+    from . import runner, scorers
+
+    PLUGINS = _plugins()
+    run = spec.load_run(args.run)
+    cells = [c for c in run.cells if c.id in args.cells] if args.cells else list(run.cells)
+    version = args.score_version
+
+    scored_cells: dict[str, dict] = {}
+    for cell in cells:
+        if cell.kind != "quality":
+            continue
+        plugin = PLUGINS.get(cell.suite.task_plugin)
+        if plugin is None:
+            print(f"[SKIP] {cell.id}: no plugin for {cell.suite.task_plugin}", file=sys.stderr)
+            continue
+        out_dir = args.run_dir / cell.id
+        replies_path = out_dir / "response.jsonl"
+        if not replies_path.exists():
+            print(f"[SKIP] {cell.id}: no response.jsonl to re-score", file=sys.stderr)
+            continue
+
+        task = _build_task(plugin, _items_path(cell, args), args)
+        replies = {}
+        for line in replies_path.read_text().split("\n"):
+            if line.strip():
+                row = json.loads(line)
+                replies[row["item_id"]] = row
+
+        measures: dict[str, dict | None] = {}
+        verdicts, missing = [], 0
+        for item in task.load(limit=args.limit):
+            reply = replies.get(item.id)
+            if reply is None:
+                missing += 1
+                continue
+            # The same rule the run used: text present and no transport error. Re-deriving it here rather
+            # than trusting a stored verdict keeps the excluded set independent of any scorer.
+            if not reply.get("text") or reply.get("error"):
+                measures[item.id] = None
+                verdicts.append({"item_id": item.id, "cell_id": cell.id, "layer": cell.layer.id,
+                                 "passed": None, "excluded": "transport",
+                                 "detail": reply.get("error") or "no answer"})
+                continue
+            verdict = task.score(item, reply["text"])
+            measures[item.id] = (task.measure(item, reply["text"])
+                                 if hasattr(task, "measure") else None)
+            verdicts.append({"item_id": item.id, "cell_id": cell.id, "layer": cell.layer.id,
+                             **{k: v for k, v in asdict(verdict).items() if k != "item_id"},
+                             "excluded": None})
+
+        (out_dir / f"score.{version}.jsonl").write_text(
+            "".join(json.dumps(v, ensure_ascii=False) + "\n" for v in verdicts))
+        graded = [v for v in verdicts if v["excluded"] is None]
+        passed = sum(1 for v in graded if v["passed"])
+        summary = {"cell_id": cell.id, "layer": cell.layer.id, "family": cell.suite.family,
+                   "score_version": version, "items": len(verdicts), "scored": len(graded),
+                   "excluded_transport": len(verdicts) - len(graded), "missing_responses": missing,
+                   "passed": passed,
+                   "rate": passed / len(graded) if graded else None,
+                   "wilson_lower_80": (scorers.wilson_lower(passed, len(graded), 0.80)
+                                       if graded else None)}
+        (out_dir / f"summary.{version}.json").write_text(json.dumps(summary, indent=2))
+        scored_cells[cell.id] = {"cell": cell, "measures": measures, "task": task,
+                                 "summary": summary}
+        rate = f"{summary['rate']:.3f}" if summary["rate"] is not None else "n/a"
+        print(f"[{version}] {cell.id:<22} {passed}/{len(graded)} = {rate}"
+              f"  (excluded {summary['excluded_transport']}, missing {missing})")
+
+    box = next((v for v in scored_cells.values() if v["cell"].layer.kind == "self_hosted"), None)
+    base = next((v for v in scored_cells.values()
+                 if v["cell"].layer.id == v["cell"].suite.baseline_layer), None)
+    if not (box and base):
+        return 0
+
+    floor = box["cell"].suite.floor
+    margin = float(floor.get("margin_pp", 2.0))
+    confidence = float(floor.get("confidence", 0.80))
+    result = runner.compare(args.run_dir / box["cell"].id, args.run_dir / base["cell"].id,
+                            margin_pp=margin, confidence=confidence, score_version=version)
+    print(f"\n[PAIRED] {box['cell'].layer.id} vs {base['cell'].layer.id} on {result.n} shared items")
+    print(f"  box {result.box_passed}/{result.n}, baseline {result.baseline_passed}/{result.n}, "
+          f"discordant {result.only_baseline + result.only_box}")
+    print(f"  difference {result.difference_pp:+.1f} pp, one-sided {confidence:.0%} lower bound "
+          f"{result.lcb_pp:+.1f} pp against a margin of -{margin:.1f} pp")
+    print(f"  -> {'non-inferior' if result.non_inferior else 'NOT non-inferior'} at this margin")
+
+    resolution = scorers.minimum_detectable_margin_pp(
+        result.n, result.only_baseline + result.only_box, confidence=confidence)
+    note = ("which the quoted margin clears" if margin >= resolution
+            else "so the quoted margin is finer than this run can resolve")
+    print(f"  resolution: {result.n} paired items at {confidence:.0%} could certify no margin tighter "
+          f"than {resolution:.2f} pp, {note}")
+
+    region = getattr(box["task"], "admissible_thresholds", ())
+    if region and all(v["measures"] for v in (box, base)):
+        print(f"\n[BAND] the same decision at every threshold the calibration could not distinguish")
+        verdicts = []
+        for thresholds in region:
+            for target in (box, base):
+                for name, value in thresholds.items():
+                    setattr(target["task"], name, value)
+            shared = [k for k in box["measures"]
+                      if box["measures"].get(k) and base["measures"].get(k)]
+            pair = [(not box["task"].verdict_reasons(box["measures"][k]),
+                     not base["task"].verdict_reasons(base["measures"][k])) for k in shared]
+            band = scorers.paired_non_inferiority([p[0] for p in pair], [p[1] for p in pair],
+                                                  margin_pp=margin, confidence=confidence)
+            verdicts.append(band.non_inferior)
+            shown = " ".join(f"{k}={v}" for k, v in thresholds.items())
+            print(f"  {shown:<52} box {band.box_passed}/{band.n} base {band.baseline_passed}/{band.n} "
+                  f"diff {band.difference_pp:+5.1f} lcb {band.lcb_pp:+5.1f} "
+                  f"-> {'non-inferior' if band.non_inferior else 'NOT'}")
+        for target in (box, base):
+            for name in region[0]:
+                setattr(target["task"], name, getattr(type(target["task"]), name))
+        stable = len(set(verdicts)) == 1
+        if stable:
+            print("  -> the decision is stable across the whole region")
+        else:
+            print("  -> the decision FLIPS inside the region, so this run does not decide: the "
+                  "verdict is an artefact of where the threshold was put")
     return 0
 
 
@@ -203,10 +366,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("run", type=Path)
     p.set_defaults(func=cmd_manifest)
 
+    p = sub.add_parser("score", help="re-run a scorer over existing responses, without a GPU")
+    p.add_argument("run", type=Path)
+    p.add_argument("--run-dir", type=Path, required=True)
+    p.add_argument("--score-version", default="v2")
+    p.add_argument("--cells", nargs="*", default=None)
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--spec-root", type=Path, default=Path("."))
+    p.add_argument("--labels", default="ポジティブ,ニュートラル,ネガティブ")
+    p.set_defaults(func=cmd_score)
+
     for name, help_text in (
         ("submit", "create one Job per cell"),
         ("collect", "copy artifacts off the shared volume and summarise"),
-        ("score", "re-run a scorer over existing responses, without a GPU"),
         ("report", "join the quality and perf cells and print the operation-point table"),
     ):
         p = sub.add_parser(name, help=help_text)
