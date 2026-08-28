@@ -70,28 +70,44 @@ Two constraints on that script, learned the hard way today:
 
 ## What the table says today
 
-A snapshot lives at `specs/routing-table.json`: one suite, `ocrbench-stratified-278`, 278 items, and the
-layers merged so far. On the items every merged layer answered:
+`specs/routing-table.json`: one suite, `ocrbench-stratified-278`, **nine layers**, 278 items. On the 195
+every layer answered:
 
 | layer | rate | $/1k items | latency p50 | frontier |
 | --- | --- | --- | --- | --- |
-| api-sonnet-5 | 0.980 | $1.047 | 2.61 s | **yes** |
-| api-opus-5 | 0.970 | $7.733 | 1.99 s | no, dominated by sonnet-5 |
-| box-qwen36-tp2x2 | 0.919 | **$0.117** | **0.11 s** | **yes** |
-| api-gpt-5.6-terra | 0.919 | $1.850 | 1.77 s | no, dominated by the box |
-| api-haiku-4-5 | 0.803 | $0.311 | 1.26 s | no, dominated by the box |
+| api-sonnet-5 | **0.980** | $1.047 | 2.61 s | **yes** — most accurate |
+| api-opus-5 | 0.974 | $7.733 | 1.99 s | no |
+| **api-gemma-4** | **0.974** | **$0.108** | 0.97 s | **yes** — near-top accuracy at the lowest price |
+| api-gpt-5.5 | 0.959 | $2.763 | 1.90 s | no |
+| api-gpt-5.6-sol | 0.949 | $1.992 | 2.20 s | no |
+| api-grok-4.6 | 0.949 | $3.334 | **8.64 s** | no — dominated by four layers |
+| **box-qwen36-tp2x2** | 0.923 | $0.117 | **0.11 s** | **yes** — nine times the fastest API |
+| api-gpt-5.6-terra | 0.923 | $1.850 | 1.77 s | no |
+| api-haiku-4-5 | 0.810 | $0.311 | 1.26 s | no |
 
-Every pair crosses, so **escalation cannot reach the union anywhere in this family** — recorded as
-`escalation_can_reach_union: false` on every pair, which is a fact a router should read rather than a
-preference someone expressed.
+**Three layers on the frontier, one per axis.** sonnet-5 is the most accurate, gemma-4 is within a whisker
+of it at a tenth the price, and the box answers nine times faster than anything else. Six of nine are
+dominated, and grok-4.6 is dominated by four separate layers — least accurate of the expensive group, most
+expensive but one, and eight times slower than the box.
 
-`gpt-5.6-terra` is the clearest argument for the table's existence: it ties the box exactly on the common
-set and is dominated by it anyway, at sixteen times the cost and sixteen times the latency. A table of
-accuracy alone would have called them equivalent; a table of accuracy and price would have missed that the
-box also answers sixteen times faster.
+**Almost nothing here is separable on 278 items.** Nearly every pair returns p > 0.1: gemma-4 against the box
+is 1.4 points with p = 0.597, gemma-4 against sonnet-5 is p = 0.581, gemma-4 against opus-5 is p = 1.000.
+The only significant results are the wins over haiku and gpt-5.6-terra. An advisor's warning that a
+ten-point claim needs 25–50 discordant pairs and 150–300 items is borne out from the other side: the
+differences here are one to three points and need far more items than that.
 
-Merging it also corrected a conclusion the previous page had stated too strongly. The Anthropic layers each
-refused 39 document-heavy images with `request_too_large`, which had been written up as "these cannot be
-served by an API at any price". terra refused **none** of them. The 200,000-character cap belongs to the
-gateway's Anthropic route, not to the gateway, so it is a **per-layer route constraint** — which is why the
-table buckets exclusions by cause on the layer rather than recording a count on the suite.
+## The frontier function was wrong twice, which is worth recording
+
+The first version compared quality and cost, treating any difference as a difference. It reported the box as
+dominated by gemma-4 — on a quality gap of 1.4 points at p = 0.597 and a cost gap of 8% where gemma-4's
+price is a **placeholder**, while the box answers nine times faster. Every leg of that was an artifact.
+
+Domination now requires each leg to be real: an *advantage* on quality must be significant, a
+`pricing_placeholder` price may never displace a measured one, and latency is a third axis rather than
+something the frontier silently discards.
+
+The fix then broke it the other way, and the failure is instructive. Requiring significance for the
+"not worse" direction too meant reading **"not proven worse" as "not worse"**, and a cheap fast layer at
+0.923 was reported as dominating the best layer at 0.980 purely because their difference was not
+significant. So the rule is asymmetric on purpose: **the point estimate must not be worse, and a claimed
+advantage must be significant.**

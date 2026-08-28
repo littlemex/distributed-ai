@@ -217,14 +217,29 @@ def merge(table: dict | None, run, run_dir: Path, cells: Iterable[str] | None = 
     return table
 
 
-def frontier(suite: dict) -> list[dict]:
-    """Layers not dominated on both quality and cost, on the set every layer in the suite answered.
+def frontier(suite: dict, *, alpha: float = 0.05, latency_ratio: float = 1.10) -> list[dict]:
+    """Layers not dominated on quality, cost and latency, where every leg of the domination is real.
 
-    Dominated means another layer is at least as accurate and no more expensive. Nothing here weighs the
-    two against each other: that trade is the caller's, and a table that picked for them would be making a
-    choice it has no standing to make.
+    The first version of this compared quality and cost only, and treated any difference as a difference.
+    On this suite it then reported the box as dominated by gemma-4 — on a quality gap of 1.4 points with
+    p = 0.597 over 278 shared items, and a cost gap of 8% where gemma-4's price is a placeholder, while the
+    box answers nine times faster. Every leg of that was an artifact.
+
+    So domination now requires all three of:
+
+    * **quality**: at least as good, and if better, better *significantly* — the stored pairwise McNemar
+      p must be under `alpha`. An insignificant edge is not an edge.
+    * **cost**: no more expensive, and never using a `pricing_placeholder` layer's price to dominate,
+      because a made-up number cannot displace a measured one.
+    * **latency**: no slower by more than `latency_ratio`. The project asks for three axes and a
+      two-axis frontier silently discards the one the box wins by an order of magnitude.
+
+    The effect is that the frontier gets wider and more honest. Being on it means "nothing here is clearly
+    better on every axis", which is the question a router should ask, rather than "nothing here has a
+    larger number somewhere".
     """
     layers = suite.get("layers", {})
+    pairs = suite.get("pairs", {})
     if not layers:
         return []
     common = [k for k in suite["item_ids"]
@@ -237,14 +252,41 @@ def frontier(suite: dict) -> list[dict]:
         rows.append({"layer": name, "n_common": len(common), "rate": round(rate, 4),
                      "usd_per_item": l["cost"]["usd_per_scored_item"],
                      "cost_basis": l["cost"]["basis"],
+                     "cost_is_placeholder": l.get("pricing_status") == "placeholder",
                      "latency_p50_s": l["latency_s"]["p50"],
                      "caveats": l["caveats"]})
+
+    def pair(a: str, b: str) -> dict:
+        return pairs.get(f"{a}|{b}") or pairs.get(f"{b}|{a}") or {}
+
     for r in rows:
-        r["dominated_by"] = [
-            o["layer"] for o in rows
-            if o["layer"] != r["layer"] and o["rate"] >= r["rate"]
-            and (o["usd_per_item"] or 0) <= (r["usd_per_item"] or 0)
-            and (o["rate"] > r["rate"] or (o["usd_per_item"] or 0) < (r["usd_per_item"] or 0))
-        ]
+        r["dominated_by"] = []
+        for o in rows:
+            if o["layer"] == r["layer"]:
+                continue
+            d = pair(o["layer"], r["layer"])
+            n = d.get("n") or 0
+            # The point estimate must not be worse. Using significance in this direction would be the
+            # error of reading "not proven worse" as "not worse", and it inverted the whole frontier the
+            # first time: a cheap fast layer at 0.923 was reported as dominating the best layer at 0.980
+            # purely because their difference was not significant.
+            if o["rate"] < r["rate"]:
+                continue
+            # An *advantage*, on the other hand, has to be real to count as one.
+            quality_better = (o["rate"] > r["rate"]
+                              and bool(n) and d.get("mcnemar_exact_p", 1.0) < alpha)
+            oc, rc = o["usd_per_item"], r["usd_per_item"]
+            cheaper = oc is not None and rc is not None and oc < rc
+            if cheaper and o["cost_is_placeholder"]:
+                cheaper = False                # a placeholder price may not displace a measured one
+            cost_ok = oc is None or rc is None or oc <= rc or not cheaper
+            if oc is not None and rc is not None and oc > rc:
+                continue                       # o is more expensive: cannot dominate
+            ol, rl = o["latency_p50_s"], r["latency_p50_s"]
+            if ol and rl and ol > rl * latency_ratio:
+                continue                       # o is meaningfully slower: cannot dominate
+            strictly_better = quality_better or cheaper or (ol and rl and ol < rl / latency_ratio)
+            if strictly_better and cost_ok:
+                r["dominated_by"].append(o["layer"])
         r["on_frontier"] = not r["dominated_by"]
     return sorted(rows, key=lambda r: -r["rate"])
