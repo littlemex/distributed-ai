@@ -1,0 +1,31 @@
+# Layers only, for instruments that measure what a layer costs rather than how a family scores. No cells:
+# inventing them to satisfy the run loader would put a suite in a manifest that was never run.
+#
+# Every api rate resolves from specs/model-rates.json, built from the AWS Price List API at each model's own
+# Bedrock region and service tier. The box's rates are its hourly cost divided by measured throughput, fresh
+# and cached separately.
+layers:
+  - id: box-qwen36-tp2x2
+    kind: self_hosted
+    model: Qwen/Qwen3.6-35B-A3B
+    endpoint: http://qwen-serving.qwen-trial.svc.cluster.local:8000/v1/chat/completions
+    hourly_usd: 15.2174
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+    input_usd_per_mtok: 0.236
+    # Measured: benchctl/cached_prefill_rate.py, 224,620 tok/s cached against 18,417 fresh at 16 in flight.
+    cache_read_usd_per_mtok: 0.0188
+    output_usd_per_mtok: 4.12
+    pricing_status: measured
+  - id: api-gemma-4
+    kind: api
+    model: gemma-4
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+  - id: api-haiku-4-5
+    kind: api
+    model: claude-haiku-4-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+  - id: api-sonnet-5
+    kind: api
+    model: claude-sonnet-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    sends_temperature: false

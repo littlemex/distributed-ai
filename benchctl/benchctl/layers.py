@@ -115,28 +115,42 @@ class LayerClient:
         self.max_attempts = max_attempts
         self.api_key = os.environ.get(layer_api_key_env(layer)) if layer.kind == "api" else None
 
-    def complete(self, prompt: "str | list[dict]", *, max_tokens: int,
-                 temperature: float = 0.0) -> Reply:
+    def complete(self, prompt: "str | list[dict] | None" = None, *, max_tokens: int,
+                 temperature: float = 0.0, messages: "list[dict] | None" = None) -> Reply:
         """`prompt` is text, or a list of OpenAI content parts for a multimodal family.
 
         Passing the list straight through is what keeps the image path from becoming a second client:
         a text-only task still hands over a string and never learns that images exist, and an OCR task
         builds the parts itself because only it knows how its images should be attached.
+
+        `messages` is the alternative for traffic that is a conversation rather than a question, and it is
+        not a convenience. Prompt caching on this gateway attaches to a *turn boundary*: the same 5,600-token
+        preamble inside one user message with a varying tail caches nothing on a Claude layer, while the same
+        content as a growing user/assistant array caches 99.9% of every turn after the first. A harness that
+        can only send one user message cannot measure the traffic whose economics turn on that.
         """
+        if messages is not None:
+            if prompt is not None:
+                raise ValueError("pass either prompt or messages, not both")
+        elif prompt is None:
+            raise ValueError("complete() needs a prompt or a messages array")
         has_image = isinstance(prompt, list) and any(
             part.get("type") != "text" for part in prompt)
         anthropic = has_image and self.layer.image_style == "anthropic"
         url = self.layer.messages_endpoint if anthropic else self.layer.endpoint
+        wire_messages = (messages if messages is not None
+                         else [{"role": "user", "content": prompt}])
         payload_out = (
             {
                 "model": self.layer.model,
-                "messages": [{"role": "user", "content": _to_anthropic(prompt)}],
+                "messages": (messages if messages is not None
+                             else [{"role": "user", "content": _to_anthropic(prompt)}]),
                 "max_tokens": max_tokens,
             }
             if anthropic else
             {
                 "model": self.layer.model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": wire_messages,
                 "max_tokens": max_tokens,
             }
         )

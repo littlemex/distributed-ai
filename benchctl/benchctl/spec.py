@@ -381,6 +381,17 @@ def _priced(layers: dict[str, Layer], where: str) -> None:
                  f"or list it under `unpriced` there so it is compared on quality only.")
 
 
+def load_layers(path: Path) -> dict[str, Layer]:
+    """Just the layers from a document, with rates resolved. For instruments that measure layers, not cells.
+
+    A run spec expands into cells because a family needs items, a policy and an operating point. An instrument
+    that measures what a layer *costs* on synthetic traffic needs none of those, and should not have to invent
+    cells to satisfy a loader: inventing them would put a suite in a manifest that was never run.
+    """
+    raw = yaml.safe_load(path.read_text()) or {}
+    return apply_rate_card(_index(raw.get("layers") or (), Layer.load, "layers"), _rate_card())
+
+
 def load_run(path: Path) -> Run:
     """Read a run spec and everything it references, and expand it into cells.
 
