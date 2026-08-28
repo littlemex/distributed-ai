@@ -252,10 +252,25 @@ def cmd_score(args) -> int:
 
     resolution = scorers.minimum_detectable_margin_pp(
         result.n, result.only_baseline + result.only_box, confidence=confidence)
-    note = ("which the quoted margin clears" if margin >= resolution
-            else "so the quoted margin is finer than this run can resolve")
+    if result.lcb_pp >= 0:
+        # The bound is above zero, so the verdict does not rest on the margin at all: any margin would
+        # have given the same answer, and the resolution is a fact about the design rather than a caveat.
+        note = "which this verdict does not lean on, the bound being above zero"
+    elif margin >= resolution:
+        note = "which the quoted margin clears"
+    else:
+        note = ("and the quoted margin is finer than that, so this verdict rests on a margin the design "
+                "could not have refused")
     print(f"  resolution: {result.n} paired items at {confidence:.0%} could certify no margin tighter "
           f"than {resolution:.2f} pp, {note}")
+
+    # Written down rather than printed. A log line lives as long as the node does, and this one did not:
+    # the pod that produced the first v2 comparison was gone before its output could be read.
+    record = {"score_version": version, "box": box["cell"].layer.id, "baseline": base["cell"].layer.id,
+              "margin_pp": margin, "confidence": confidence,
+              "rates": {v["cell"].layer.id: v["summary"]["rate"] for v in scored_cells.values()},
+              "paired": dict(result.__dict__) | {"non_inferior": result.non_inferior},
+              "minimum_detectable_margin_pp": resolution, "band": []}
 
     region = getattr(box["task"], "admissible_thresholds", ())
     if region and all(v["measures"] for v in (box, base)):
@@ -272,6 +287,11 @@ def cmd_score(args) -> int:
             band = scorers.paired_non_inferiority([p[0] for p in pair], [p[1] for p in pair],
                                                   margin_pp=margin, confidence=confidence)
             verdicts.append(band.non_inferior)
+            record["band"].append({"thresholds": dict(thresholds), "n": band.n,
+                                   "box_passed": band.box_passed,
+                                   "baseline_passed": band.baseline_passed,
+                                   "difference_pp": band.difference_pp, "lcb_pp": band.lcb_pp,
+                                   "non_inferior": band.non_inferior})
             shown = " ".join(f"{k}={v}" for k, v in thresholds.items())
             print(f"  {shown:<52} box {band.box_passed}/{band.n} base {band.baseline_passed}/{band.n} "
                   f"diff {band.difference_pp:+5.1f} lcb {band.lcb_pp:+5.1f} "
@@ -285,6 +305,9 @@ def cmd_score(args) -> int:
         else:
             print("  -> the decision FLIPS inside the region, so this run does not decide: the "
                   "verdict is an artefact of where the threshold was put")
+        record["band_stable"] = stable
+    (args.run_dir / f"paired.{version}.json").write_text(json.dumps(record, indent=2))
+    print(f"\n[OK] wrote {args.run_dir / f'paired.{version}.json'}")
     return 0
 
 
@@ -309,7 +332,8 @@ def cmd_table(args) -> int:
 
     run = spec.load_run(args.run)
     existing = json.loads(args.out.read_text()) if args.out.exists() else None
-    table = routing_table.merge(existing, run, args.run_dir, args.cells)
+    table = routing_table.merge(existing, run, args.run_dir, args.cells,
+                                score_version=args.score_version)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(table, indent=2, ensure_ascii=False))
     print(f"[OK] {args.out}  runs={len(table['runs'])}  suites={len(table['suites'])}")
@@ -360,6 +384,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="the run's artifact directory, e.g. /artifacts/runs/<run-id>")
     p.add_argument("--out", type=Path, required=True, help="routing table JSON, created or merged")
     p.add_argument("--cells", nargs="*", default=None)
+    p.add_argument("--score-version", default="v1",
+                   help="which scorer's opinion to merge; a corrected scorer writes a new version")
     p.set_defaults(func=cmd_table)
 
     p = sub.add_parser("manifest", help="print the expanded, immutable run manifest")

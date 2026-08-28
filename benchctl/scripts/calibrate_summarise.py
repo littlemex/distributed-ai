@@ -29,7 +29,11 @@ The controls, and what each one is for:
   ceiling, and differs only in being false. Must mostly fail.
 * `neg_wrong_document` — another report's reference summary. Must fail almost always; if it passes, the
   metric is recognising the genre rather than the document.
-* `neg_atom_soup` — the document's own atoms listed without prose. Tests whether coverage alone passes.
+* `diag_markdown_register` — the reference as a headed, bulleted summary, which is the register the layers
+  actually write in. It is here because its absence let a bad gate ship: see `_markdown_register`.
+* `neg_atom_soup` — the document's own atoms listed without prose. **A measurement, not a gate.** Coverage
+  alone does pass, and the obvious cheap fix does not work: a function-word threshold that rejects this
+  also rejects a real model's terse Markdown, whose rate reaches 0.156 against this control's 0.149.
 * `neg_number_shuffle` — the ceiling with its figures permuted among their slots. Every figure is
   supported, every atom present, and every claim wrong. **This is a measurement, not a gate**: a
   bag-of-atoms metric cannot fail it, and both advisors said so independently. It is here to keep the size
@@ -71,7 +75,7 @@ GATES = {
 # needs it too. This script is what proves the region is admissible; the metric is what carries it.
 ADMISSIBLE = SummariseFacts.admissible_thresholds
 REPORT_ONLY = ("ceiling_gold_full", "diag_gold_last300w", "diag_paraphrase",
-               "neg_atom_soup", "neg_number_shuffle", "neg_random_window",
+               "diag_markdown_register", "neg_atom_soup", "neg_number_shuffle", "neg_random_window",
                "probe_random_numbers", "edge_empty", "edge_terse_50w")
 
 
@@ -167,6 +171,23 @@ def _shuffle_numbers(text: str, rng: random.Random) -> str:
     return _NUM.sub(lambda m: next(it, m.group(0)), text)
 
 
+def _markdown_register(reference: str) -> str:
+    """The reference in the register the layers actually write in: headings and bulleted findings.
+
+    This control exists because it was missing. A gate on the function-word rate was added on the strength
+    of the atom-soup control alone, and it then rejected twelve of one layer's summaries — headed, correct
+    Markdown, whose function words are diluted by the headings. A control that represents the register would
+    have caught that before the gate shipped, so it is here now, and the gate is not.
+    """
+    sentences = _sentences(reference)
+    out = ["# Summary", "## Overview"]
+    for i, sentence in enumerate(sentences):
+        if i and i % 2 == 0:
+            out.append(f"## Section {i // 2}")
+        out.append(f"- **Finding {i + 1}:** {sentence}")
+    return "\n".join(out)
+
+
 def _random_numbers(text: str, rng: random.Random) -> str:
     """Every figure replaced by an unrelated one, at a magnitude drawn independently.
 
@@ -208,6 +229,7 @@ def build_controls(rows: list[dict], rng: random.Random) -> dict[str, list[str]]
                                  for i, _ in enumerate(rows)]
     out["neg_atom_soup"] = [_atom_soup(r["document"]) for r in rows]
     out["neg_number_shuffle"] = [_shuffle_numbers(_words(r["reference"], 300), rng) for r in rows]
+    out["diag_markdown_register"] = [_markdown_register(_words(r["reference"], 300)) for r in rows]
     out["neg_random_window"] = [_mid_window(r["document"]) for r in rows]
     out["probe_random_numbers"] = [_random_numbers(_words(r["reference"], 300), rng) for r in rows]
     out["edge_empty"] = ["" for _ in rows]

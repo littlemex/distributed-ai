@@ -137,15 +137,22 @@ class TestFabricationIsAShareNotACount:
 
 
 class TestAListOfEntitiesIsNotASummary:
-    """Recall cannot tell coverage from a summary. Grammar can, and a control needed it to."""
+    """It is, as far as this metric can tell, and that is the blind spot rather than a bug.
 
-    def test_atom_soup_fails_on_prose_and_not_on_recall(self):
+    A gate on the function-word rate was tried here and withdrawn: a list of entities runs at 0.15 and a
+    real model writing a headed, telegraphic summary reached 0.156, so no threshold separates them. What is
+    left is the measurement, which must keep working, and the honest admission that recall passes coverage.
+    """
+
+    def test_a_list_of_entities_reads_as_a_list(self):
         soup = "; ".join(["Department of Homeland Security", "Government Accountability Office",
                           "Coast Guard", "1432", "2023", "12.5", "1234", "47", "318", "8750",
                           "15500", "9", "7"] * 4)
-        m = measure(soup)
-        assert m["function_word_rate"] < SummariseFacts.min_function_word_rate
-        assert any("function-word" in r for r in task().verdict_reasons(m))
+        assert measure(soup)["function_word_rate"] < measure(REFERENCE)["function_word_rate"]
+
+    def test_and_is_not_failed_for_it(self):
+        soup = "; ".join(["Department of Homeland Security", "1432", "2023", "12.5", "1234"] * 10)
+        assert not any("function-word" in r for r in task().verdict_reasons(measure(soup)))
 
 
 class TestTheRegionIsARegion:

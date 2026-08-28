@@ -32,37 +32,54 @@ extractive non-summary *outscored the human reference*, because the cheapest way
 numbers of your own, which copied prose does by construction. A layer scored 0.887 on that metric and the
 number meant nothing.
 
-So the thresholds here are not chosen. `scripts/calibrate_summarise.py` scores twelve controls and refuses
-any setting that cannot keep five of them where they have to be. What each one is for is written there;
-what they come out at, at the frozen thresholds, is:
+So the thresholds here are not chosen. `scripts/calibrate_summarise.py` scores fifteen controls and
+refuses any setting that cannot keep five of them where they have to be. What each one is for is written
+there; what they come out at, at the frozen thresholds, is:
 
 | control                                        |  rate | what it establishes                        |
 | ---------------------------------------------- | ----: | ------------------------------------------ |
 | best 300-word selection from the reference     |  0.99 | the ceiling: the floor is achievable       |
 | the reference truncated at 300 words           |  0.88 | a plain truncation still mostly passes     |
 | the reference, paraphrased and rescaled        |  0.89 | matching is not brittle to abstraction     |
-| the document's own first 300 words              |  0.16 | an extract is not a summary                |
-| a 300-word window from the document's middle    |  0.12 | and that is not a quirk of the lead        |
-| every figure multiplied by 1.07                 |  0.04 | fabrication is caught                      |
-| another report's reference summary              |  0.00 | the metric is about *this* document        |
-| the document's atoms listed without prose       |  0.10 | coverage alone does not pass               |
-| the reference with its figures permuted         |  0.88 | **the blind spot, measured**               |
+| the reference as headed, bulleted Markdown     |  0.89 | nor to the register the layers write in    |
+| the document's own first 300 words             |  0.16 | an extract is not a summary                |
+| a 300-word window from the document's middle   |  0.12 | and that is not a quirk of the lead        |
+| every figure multiplied by 1.07                |  0.04 | fabrication is caught                      |
+| every figure replaced by a random one          |  0.04 | and the support rule is not vacuous        |
+| another report's reference summary             |  0.00 | the metric is about *this* document        |
+| an empty answer, and a 50-word one             |  0.00 / 0.03 | the edges behave               |
+| the document's atoms listed without prose      |  0.70 | **a blind spot: coverage alone passes**    |
+| the reference with its figures permuted        |  0.88 | **and so does a scrambled summary**        |
 
-That last row is the honest limit of a metric with no judge in it, and both advisors named it independently
-before it was measured: permuting the figures among their slots leaves every atom present and every figure
-supported, so nothing here can see that every claim is now false. It is reported at full size rather than
-mentioned in passing, because a reader who takes `passed` to mean "faithful" is being misled. It means
-carried the atoms, invented no figures, stayed short, and reads as prose.
+The last two rows are the honest limit of a metric with no judge in it. Both advisors named the permuted
+figures before it was measured: permuting them among their slots leaves every atom present and every figure
+supported, so nothing here can see that every claim is now false. A reader who takes `passed` to mean
+"faithful" is being misled. It means carried the atoms, invented no figures, and stayed short.
 
-Two of the gates exist because a control caught something. The prose gate was added when a list of the
-document's own entities passed at 0.71 — recall cannot tell coverage from a summary, but grammar can, since
-prose spends about 0.36 of its words on function words and a list spends 0.15. And the fabrication rule
-became a share of the figures written rather than a flat count once the ceiling's own false-flag rate was
-measured: on the human summaries, where every figure is genuinely the document's, this detector still flags
-a 95th percentile of 0.333 of them, so the flat budget of three was penalising correct dense summaries
-while forgiving a summary that wrote four figures and invented three. The share sits at 0.40 — above that
-0.333, far below the 0.857 the fabrication control flags — and the gap is real rather than lucky, because
-given figures drawn at random magnitudes the support rule still rejects 7 in 8.
+The atom-soup row is a gate that was tried and withdrawn, and the withdrawal is worth more than the gate
+was. Coverage alone passing at 0.70 looked closable, because grammar separates prose from a list where
+recall cannot: a summary spends about 0.36 of its words on function words and a list of entities spends
+0.15. A floor at 0.20 duly cut atom soup from 0.70 to 0.10. It also rejected twelve of one layer's
+summaries — headed, correct Markdown whose function words are diluted by its own headings — and the two
+distributions turn out to touch: that layer's terse minimum is 0.156 against the list's 0.149, so no
+threshold separates them and there was never a gate to have. The rate is still measured on every verdict,
+because it is what disproved the gate, and a control for the register now exists so the next such gate
+cannot ship without meeting it.
+
+That amendment happened after the layers had been scored, which is the one direction this kind of change
+must not be made in, so what licenses it is worth stating: it removes a gate whose discriminative claim was
+disproved by measurement, and it moves every layer that writes tersely *up*. The layers it helps are the
+box's competitors, and the box gains nothing, so it narrows the result rather than producing it.
+
+Two more of the gates exist because a control caught something rather than because they seemed wise. The
+fabrication rule became a share of the figures written rather than a flat count once the ceiling's own
+false-flag rate was measured: on the human summaries, where every figure is genuinely the document's, this
+detector still flags a 95th percentile of 0.333 of them, so a flat budget of three punished correct dense
+summaries while forgiving a summary that wrote four figures and invented three. The share sits at 0.40 —
+above that 0.333, far below the 0.857 the fabrication control flags — and the gap is real rather than lucky,
+because given figures at random magnitudes the support rule still rejects 7 in 8. On real output, though,
+this gate never binds: no layer trips it anywhere in the admissible range, so what decides items here is
+recall.
 
 The frozen thresholds are the centre of a region, not a point, and `admissible_thresholds` carries the rest
 of it. That matters for the same reason the controls do: `recall_floor` at 0.55 and at 0.60 are both
@@ -106,10 +123,11 @@ _SCALES = (1.0, 1e2, 1e-2, 1e3, 1e-3, 1e6, 1e-6, 1e9, 1e-9)
 _ALIAS_DEF = re.compile(r"([A-Z][\w'&.\-]*(?:\s+(?:of|for|and|the|[A-Z][\w'&.\-]*)){0,5})"
                         r"\s*\(([A-Z]{2,})[,)]")
 
-# Recall alone cannot tell a summary from a list of the document's entities, and a control that does
-# exactly that passed at 0.71. What separates them is not content but grammar: prose spends a third of its
-# words on function words and a list spends almost none, so this is the cheapest honest check that the
-# candidate is a summary rather than the coverage that a summary would have had.
+# Measured on every verdict and gated on nowhere. The idea was that grammar separates a summary from a list
+# of the document's entities where recall cannot — prose spends about 0.36 of its words on function words
+# and a list of entities spends 0.15. It does not survive contact with real output: a model writing a
+# headed, telegraphic summary reaches 0.156, which is inside the list's distribution. Kept because it
+# describes a real difference in register, and because the diagnostic is what disproved the gate.
 _FUNCTION_WORDS = frozenset("""
 a an the and or but if while of to in on at by for with from as that which who whom whose this these those
 is are was were be been being has have had do does did not no nor than then so such it its their his her
@@ -223,7 +241,8 @@ class SummariseFacts:
     unsupported_dense_n = 4       # and a share is only computed once the summary wrote this many numbers
     unsupported_share = 0.40      # above the ceiling's own false-flag rate, far below a fabrication's
     max_compression = 0.25        # a "summary" longer than this fraction of the source is not one
-    min_function_word_rate = 0.20  # below this it is a list of the document's atoms, not prose
+    # There is deliberately no threshold on `function_word_rate`. One was tried and withdrawn; the reason
+    # is in this module's header, and the rate is still recorded on every verdict as a diagnostic.
 
     # Every cell of the threshold grid where all five gated controls still hold. The frozen values above
     # are its centre, and they are not special: the calibration cannot tell these cells apart, so an
@@ -338,12 +357,6 @@ class SummariseFacts:
         compression = measured["compression"]
         if compression is not None and compression > self.max_compression:
             reasons.append(f"compression {compression:.2f} above {self.max_compression}")
-        prose = measured["function_word_rate"]
-        if prose is None:
-            reasons.append("too short to be prose")
-        elif prose < self.min_function_word_rate:
-            reasons.append(f"function-word rate {prose:.2f} below {self.min_function_word_rate}: "
-                           f"a list of the document's entities, not a summary")
         return reasons
 
     def score(self, item: Item, answer: str | None) -> scorers.Verdict:

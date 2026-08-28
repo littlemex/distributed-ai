@@ -179,14 +179,21 @@ def pairs_for(layers: dict) -> dict:
     return out
 
 
-def merge(table: dict | None, run, run_dir: Path, cells: Iterable[str] | None = None) -> dict:
-    """Fold one run's quality cells into the table, refusing a mismatched item set."""
+def merge(table: dict | None, run, run_dir: Path, cells: Iterable[str] | None = None,
+          score_version: str = "v1") -> dict:
+    """Fold one run's quality cells into the table, refusing a mismatched item set.
+
+    The score version is a parameter because a scorer can be corrected after the fact, and the table has to
+    be able to hold the corrected opinion rather than the first one. The summarisation family shipped its
+    first run under thresholds that ranked the document's own opening above the human reference summary; the
+    replies were fine and only the verdicts were wrong, so what belongs in the table is `v2`.
+    """
     table = table or {"schema": SCHEMA, "runs": [], "suites": {}}
     wanted = set(cells) if cells else None
     for cell in run.cells:
         if cell.kind != "quality" or (wanted and cell.id not in wanted):
             continue
-        ingested = ingest_cell(run_dir, cell.id)
+        ingested = ingest_cell(run_dir, cell.id, score_version)
         if not ingested["verdicts"]:
             continue
         suite_id = cell.suite.id
@@ -205,6 +212,7 @@ def merge(table: dict | None, run, run_dir: Path, cells: Iterable[str] | None = 
                 f"merged — that is how four incomparable rates get averaged into a ranking.")
         suite["layers"][cell.layer.id] = {
             "model": cell.layer.model,
+            "score_version": score_version,
             "kind": cell.layer.kind,
             "pricing_status": cell.layer.pricing_status,
             "run_id": run.id,
