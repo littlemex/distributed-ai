@@ -56,9 +56,18 @@ summary of a long report has a long prefill and **no prefix reuse**, so the API'
 apply — and that discount is the entire reason the box came out 1.76x *more* expensive on agentic traffic,
 where it was 3.0x cheaper than the same API with caching switched off.
 
-That premise is now measured rather than argued. Across 2.83 million prompt tokens sent to the three API
-layers, the gateway reported **1,008 cached prompt tokens: 0.04%.** There is no reuse to discount here, on
-any layer, and the family is that regime by construction rather than by luck.
+Across 2.83 million prompt tokens sent to the three API layers, the gateway reported **1,008 cached prompt
+tokens: 0.04%.** That number needs a qualifier it did not originally have, because a later probe
+(`cache-discount-eligibility.md`) established that **`claude-haiku-4-5` and `gemma-4` never cache on this
+gateway at all** — not automatically, not when asked with an explicit `cache_control` breakpoint, not through
+either route it offers. For those two layers, zero cached tokens is what any run would report, so it is no
+evidence about this family.
+
+For `claude-sonnet-5` it is evidence, and good evidence: that layer caches automatically, with no flag, on any
+shared prefix past about 2,200 tokens, and it still reported zero here. The premise holds for the layer that
+could have benefited. It holds for the other two as well, but by the structural argument rather than by the
+measurement: each document is unique and the shared instruction preamble is roughly 40 tokens, which is two
+orders of magnitude below any minimum measured on this gateway.
 
 One number in the same table is worth noticing for a different reason: `claude-sonnet-5` consumed 1,222,922
 prompt tokens for the same 80 documents against the box's 784,839, 56% more for identical inputs. Per-token
