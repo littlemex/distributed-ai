@@ -14,7 +14,8 @@ both recorded on every verdict so a score can be recomputed differently without 
   implementation, because substring matching on LaTeX passes almost anything.
 * **A prediction is truncated to a length budget before matching.** Substring matching rewards
   verbosity — a model that lists twenty guesses hits by accident — and the official harness relies on
-  short outputs rather than guarding against it. `max_tokens` is small for the same reason.
+  short outputs rather than guarding against it. This is the only guard; `max_tokens` is not, and using it
+  as one truncated a reasoning model to silence on 38 items.
 """
 
 from __future__ import annotations
@@ -61,9 +62,11 @@ class OcrVqa:
 
     name = "tasks.ocr_vqa"
 
-    # Short on purpose. The scoring rule is containment, so a long answer is a free lottery ticket;
-    # capping the output is what keeps the metric honest rather than generous.
-    max_tokens = 48
+    # The default for a layer that declares no budget of its own. It used to be 48, chosen to stop
+    # containment scoring being gamed by verbosity, and that was the wrong tool: it truncated opus-5 to
+    # empty on 38 of 278 items while `match_budget` below was already doing the job properly. Raised, and
+    # layers that need more say so in the spec.
+    max_tokens = 256
     # Characters of prediction considered when matching, after normalisation.
     match_budget = 200
 

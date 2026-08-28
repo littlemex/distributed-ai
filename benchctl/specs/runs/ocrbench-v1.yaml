@@ -42,6 +42,9 @@ layers:
     # Rejects the parameter outright: "`temperature` is deprecated for this model". So this layer's
     # answers are not pinned the way the box's and haiku's are, and its rate carries that caveat.
     sends_temperature: false
+    # Both of these came back empty on some items at 48 tokens, every one at finish_reason max_tokens:
+    # the model spends the budget before it speaks. opus-5 on 38 of 278, sonnet-5 on 5.
+    answer_token_budget: 1024
     # The gateway's OpenAI shim rejects image_url parts outright, so images go to the Anthropic
     # endpoint instead. Found by having all 278 items come back as transport failures.
     image_style: anthropic
@@ -57,6 +60,9 @@ layers:
     # Rejects the parameter outright: "`temperature` is deprecated for this model". So this layer's
     # answers are not pinned the way the box's and haiku's are, and its rate carries that caveat.
     sends_temperature: false
+    # Both of these came back empty on some items at 48 tokens, every one at finish_reason max_tokens:
+    # the model spends the budget before it speaks. opus-5 on 38 of 278, sonnet-5 on 5.
+    answer_token_budget: 1024
     # The gateway's OpenAI shim rejects image_url parts outright, so images go to the Anthropic
     # endpoint instead. Found by having all 278 items come back as transport failures.
     image_style: anthropic
@@ -65,6 +71,57 @@ layers:
     output_usd_per_mtok: 75.00
     cache_read_usd_per_mtok: 1.50
     pricing_status: list
+
+  # The rest of the project's roster, which `/v1/models` does not list. It returns 23 Anthropic models;
+  # these five answer when addressed by name, so the gateway's enumeration under-reports its own
+  # allowlist and a roster cannot be discovered from the API. Probed one request at a time.
+  #
+  # `answer_token_budget` is per layer because one number cannot serve them: measured on a single OCR
+  # item, gemma-4 and gpt-5.6-terra emit text inside 64 tokens while gpt-5.5 spends 388 on reasoning and
+  # says nothing under 1,024. Prices are placeholders — the gateway publishes no rate card for these —
+  # so they are comparable on quality and latency and NOT on cost.
+  - id: api-gpt-56-terra
+    kind: api
+    model: gpt-5.6-terra
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    input_usd_per_mtok: 2.20
+    output_usd_per_mtok: 13.20
+    pricing_status: placeholder
+    sends_temperature: false      # "temperature does not support 0 with this model"
+    answer_token_budget: 256
+  - id: api-gpt-56-sol
+    kind: api
+    model: gpt-5.6-sol
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    input_usd_per_mtok: 2.20
+    output_usd_per_mtok: 13.20
+    pricing_status: placeholder
+    sends_temperature: false
+    answer_token_budget: 1024     # 54 reasoning tokens on one item; leave room for worse
+  - id: api-gpt-55
+    kind: api
+    model: gpt-5.5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    input_usd_per_mtok: 2.20
+    output_usd_per_mtok: 13.20
+    pricing_status: placeholder
+    answer_token_budget: 2048     # 388 reasoning tokens on one item, and silent under 1,024
+  - id: api-grok-46
+    kind: api
+    model: grok-4.6
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    input_usd_per_mtok: 3.00
+    output_usd_per_mtok: 15.00
+    pricing_status: placeholder
+    answer_token_budget: 2048     # 180 reasoning tokens, silent under 1,024
+  - id: api-gemma-4
+    kind: api
+    model: gemma-4
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    input_usd_per_mtok: 0.30
+    output_usd_per_mtok: 1.20
+    pricing_status: placeholder
+    answer_token_budget: 256
 
 suites:
   - id: ocrbench-stratified-278
@@ -120,6 +177,36 @@ cells:
   - id: ocr-opus5-quality
     suite: ocrbench-stratified-278
     layer: api-opus-5
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-gpt56terra-quality
+    suite: ocrbench-stratified-278
+    layer: api-gpt-56-terra
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-gpt56sol-quality
+    suite: ocrbench-stratified-278
+    layer: api-gpt-56-sol
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-gpt55-quality
+    suite: ocrbench-stratified-278
+    layer: api-gpt-55
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-grok46-quality
+    suite: ocrbench-stratified-278
+    layer: api-grok-46
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-gemma4-quality
+    suite: ocrbench-stratified-278
+    layer: api-gemma-4
     policy: direct
     operation_point: quality-c1
     seed: 20260828

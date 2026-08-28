@@ -42,7 +42,11 @@ def run_quality_cell(
 
     for item in items:
         prompt = task.prompt(item)
-        reply = client.complete(prompt, max_tokens=task.max_tokens, temperature=0.0)
+        # The layer's budget wins when it declares one, because what a model needs to reach an answer is
+        # a property of the model. The metric's protection against verbosity is the scorer's own
+        # truncation, not this number, so raising it does not make scoring more generous.
+        budget = cell.layer.answer_token_budget or task.max_tokens
+        reply = client.complete(prompt, max_tokens=budget, temperature=0.0)
         cost = client.cost(reply)
         api_usd += cost.api_usd
         box_usd += cost.box_usd_at_full_utilisation
@@ -62,6 +66,7 @@ def run_quality_cell(
                           "text": reply.text, "prompt_tokens": reply.prompt_tokens,
                           "completion_tokens": reply.completion_tokens,
                           "cached_prompt_tokens": reply.cached_prompt_tokens,
+                          "answer_token_budget": budget,
                           "latency_s": round(reply.latency_s, 4),
                           "finish_reason": reply.finish_reason, "error": reply.error,
                           "attempts": reply.attempts})

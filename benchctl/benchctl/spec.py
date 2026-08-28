@@ -80,6 +80,13 @@ class Layer:
     # that accepts it. Declared rather than detected, so the difference appears in the spec a reader
     # reviews instead of only in a retry path.
     sends_temperature: bool = True
+    # How many output tokens this layer needs to produce an answer of the size the task asks for. The
+    # task says what the *answer* needs; the layer says what the *model* needs on top of it, and the two
+    # are not the same number: measured on one OCR item, gemma-4 and gpt-5.6-terra emit text within 64
+    # tokens while gpt-5.5 spends 388 on reasoning first and says nothing under 1,024. A single budget
+    # for a roster silently truncates the reasoning models to empty and excludes their hardest items —
+    # which is what happened to opus-5 on 38 of 278. None means "use the task's figure".
+    answer_token_budget: int | None = None
 
     @staticmethod
     def load(raw: dict, where: str) -> "Layer":
@@ -99,6 +106,7 @@ class Layer:
             image_style=raw.get("image_style", "openai"),
             messages_endpoint=raw.get("messages_endpoint"),
             sends_temperature=bool(raw.get("sends_temperature", True)),
+            answer_token_budget=raw.get("answer_token_budget"),
         )
         _require(bool(layer.model) and bool(layer.endpoint), f"{where}: model and endpoint are required")
         _require(layer.pricing_status in ("measured", "list", "placeholder"),
