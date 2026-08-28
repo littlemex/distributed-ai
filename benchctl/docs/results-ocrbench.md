@@ -48,17 +48,36 @@ Each layer's own rate is over a different subset, so the four numbers as reporte
 The rate rises with price and so does the exclusion count, which is the whole problem: a layer that was
 handed fewer items was handed the easier ones. On the 200 items every layer answered:
 
-| layer | passed | rate | $/1k items | vs box, paired |
+| layer | rate | $/1k items | latency p50 | on frontier |
 | --- | --- | --- | --- | --- |
-| **sonnet-5** | 196/200 | **0.980** | $1.047 | box-only 3, sonnet-only 16, p = 0.004 |
-| opus-5 | 194/200 | 0.970 | $7.733 | box-only 4, opus-only 15, p = 0.019 |
-| **box** | 183/200 | **0.915** | **$0.117** | — |
-| haiku | 159/200 | 0.795 | $0.311 | box-only 34, haiku-only 10, p < 0.001 |
+| sonnet-5 | **0.980** | $1.047 | 2.61 s | **yes** |
+| opus-5 | 0.970 | $7.733 | 1.99 s | no — dominated by sonnet-5 |
+| box | 0.915 | **$0.117** | **0.11 s** | **yes** |
+| haiku | 0.795 | $0.311 | 1.26 s | no — dominated by the box |
 
-Two layers are on the frontier and two are not. **haiku is dominated outright** — worse than the box and
-2.7 times the cost. **opus-5 is dominated by sonnet-5** on this set: one point lower at 7.4 times the price,
-though see the caveat below before reading much into that ordering. What remains is a genuine choice:
-**sonnet-5 for 6.5 points more accuracy at nine times the cost, or the box.**
+**The frontier is two layers wide: sonnet-5 and the box.** haiku is dominated outright, worse than the box
+at 2.7 times the cost. opus-5 is dominated by sonnet-5, and the two are statistically indistinguishable
+anyway — 8 discordant pairs, p = 0.73.
+
+**The box wins the latency axis outright**, at 0.11 s per item against 1.26 / 1.99 / 2.61 for the three APIs.
+That is eleven to twenty-four times faster, and it is the axis this page nearly failed to look at.
+
+Each pair is better compared on **its own** intersection than on the four-way one, because the four-way set
+is smaller and selected differently. Doing that changes one conclusion:
+
+| pair | n | difference | discordant | McNemar p | structure |
+| --- | --- | --- | --- | --- | --- |
+| box vs haiku | 239 | **+16.3 pp** | 59 | **< 0.0001** | crossing |
+| box vs sonnet-5 | 234 | −3.9 pp | 27 | **0.122** | crossing |
+| box vs opus-5 | 201 | −5.0 pp | 20 | 0.041 | crossing |
+| sonnet-5 vs opus-5 | 200 | +1.0 pp | 8 | 0.727 | crossing |
+| haiku vs sonnet-5 | 234 | −18.8 pp | 48 | < 0.0001 | crossing |
+| haiku vs opus-5 | 201 | −17.4 pp | 39 | < 0.0001 | crossing |
+
+**Sonnet-5's advantage over the box is not established** — 3.9 points on 234 items with 27 discordant pairs
+gives p = 0.122. What is established is that the box beats haiku by 16 points, and that both frontier layers
+beat haiku decisively. So the honest reading is: the box and sonnet-5 are not separated by this sample, at a
+ninefold cost difference and a twenty-fourfold latency difference in the box's favour.
 
 ## The success sets cross everywhere, and that changes which routing policy is allowed
 

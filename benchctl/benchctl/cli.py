@@ -133,6 +133,45 @@ def _not_yet(name: str):
     return inner
 
 
+def cmd_table(args) -> int:
+    """Merge measurements into the routing table, and print what it now says.
+
+    The table is the artifact a router would actually read, and the reason it stores per-item verdicts
+    rather than rates is written at the top of `routing_table.py`: four layers on OCRBench reported four
+    rates over four different subsets, and only the paired intersections were comparable. Adding a model
+    later means measuring it once against the same items and merging — every comparison against what is
+    already in the table is then arithmetic, not another run.
+    """
+    from . import routing_table
+
+    run = spec.load_run(args.run)
+    existing = json.loads(args.out.read_text()) if args.out.exists() else None
+    table = routing_table.merge(existing, run, args.run_dir, args.cells)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(table, indent=2, ensure_ascii=False))
+    print(f"[OK] {args.out}  runs={len(table['runs'])}  suites={len(table['suites'])}")
+    for suite_id, suite in table["suites"].items():
+        rows = routing_table.frontier(suite)
+        n = rows[0]["n_common"] if rows else 0
+        print(f"\n{suite_id}  family={suite['family']}  layers={len(suite['layers'])}  common items={n}")
+        for r in rows:
+            mark = "*" if r["on_frontier"] else " "
+            cost = f"${r['usd_per_item']*1000:.3f}/1k" if r["usd_per_item"] else "n/a"
+            print(f"  {mark} {r['layer']:<22} {r['rate']:.3f}  {cost:>12}  "
+                  f"p50 {r['latency_p50_s'] or 0:.2f}s"
+                  + (f"  dominated by {', '.join(r['dominated_by'])}" if r["dominated_by"] else ""))
+        for pair, d in (suite.get("pairs") or {}).items():
+            if not d.get("n"):
+                continue
+            print(f"    {pair}: n={d['n']} diff {d['difference_pp']:+.1f}pp "
+                  f"discordant {d['discordant']} p={d['mcnemar_exact_p']:.4f} "
+                  f"{d['structure']} escalation_reaches_union={d['escalation_can_reach_union']}")
+        for name, layer in suite["layers"].items():
+            if layer["excluded_by_reason"]:
+                print(f"    excluded on {name}: {layer['excluded_by_reason']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="benchctl", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -151,6 +190,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--spec-root", type=Path, default=Path("."))
     p.add_argument("--labels", default="ポジティブ,ニュートラル,ネガティブ")
     p.set_defaults(func=cmd_run_local)
+
+    p = sub.add_parser("table", help="fold a run's quality cells into the accumulating routing table")
+    p.add_argument("run", type=Path)
+    p.add_argument("--run-dir", type=Path, required=True,
+                   help="the run's artifact directory, e.g. /artifacts/runs/<run-id>")
+    p.add_argument("--out", type=Path, required=True, help="routing table JSON, created or merged")
+    p.add_argument("--cells", nargs="*", default=None)
+    p.set_defaults(func=cmd_table)
 
     p = sub.add_parser("manifest", help="print the expanded, immutable run manifest")
     p.add_argument("run", type=Path)
