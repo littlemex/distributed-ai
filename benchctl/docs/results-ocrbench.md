@@ -52,8 +52,17 @@ handed fewer items was handed the easier ones. On the 200 items every layer answ
 | --- | --- | --- | --- | --- |
 | sonnet-5 | **0.980** | $1.047 | 2.61 s | **yes** |
 | opus-5 | 0.970 | $7.733 | 1.99 s | no — dominated by sonnet-5 |
-| box | 0.915 | **$0.117** | **0.11 s** | **yes** |
-| haiku | 0.795 | $0.311 | 1.26 s | no — dominated by the box |
+| box | 0.919 | **$0.117** | **0.11 s** | **yes** |
+| gpt-5.6-terra | 0.919 | $1.850 | 1.77 s | no — dominated by the box |
+| haiku | 0.803 | $0.311 | 1.26 s | no — dominated by the box |
+
+`gpt-5.6-terra` is the clearest illustration of what the table is for: it **ties the box exactly** on the
+common set, and is dominated by it anyway at sixteen times the cost and sixteen times the latency. On their
+own 270-item intersection the two are indistinguishable — 3.7 points, 40 discordant pairs, p = 0.154.
+
+Four more layers — gpt-5.6-sol, gpt-5.5, grok-4.6, gemma-4 — are measuring as this is written. The roster is
+reachable after all: `/v1/models` lists 23 Anthropic models, but these five answer when addressed by name, so
+**the gateway under-reports its own allowlist and a roster cannot be enumerated from the API.**
 
 **The frontier is two layers wide: sonnet-5 and the box.** haiku is dominated outright, worse than the box
 at 2.7 times the cost. opus-5 is dominated by sonnet-5, and the two are statistically indistinguishable
@@ -122,15 +131,26 @@ document page exceeds it. The failures are not spread evenly:
 Exactly the document-heavy categories — the largest images, and the OCR work with the most obvious business
 value. **The box answered all 39, scoring 28/39 = 0.718 on them.**
 
-So part of this family's answer is not about model quality at all: through this gateway, these requests
-cannot be served by an API, at any price, because they do not fit in a request. That is a routing fact, and
-it is the kind this project exists to surface. Two things follow:
+So part of this family's answer is not about model quality at all — but the first version of this page
+overstated it as "through this gateway these requests cannot be served by an API at any price". **That is
+wrong.** Adding `gpt-5.6-terra` produced **zero** `request_too_large` failures on the same 278 images: the
+200,000-character cap belongs to the gateway's **Anthropic route**, not to the gateway. Its OpenAI-style
+route accepts the same images that its Anthropic shim refuses.
+
+Which is a more useful fact than the wrong one it replaces. The document-heavy items are servable by an API
+— just not by an Anthropic model through this gateway. That is a **route** constraint, and a router has to
+model it as one: the same image is deliverable to some layers and not others, independently of price or
+quality. Two more things follow:
 
 * The naive comparison (0.845 over 278 against 0.703 over 239) is **invalid** — different item sets, and the
   set the API got is systematically easier. Only the paired figure is comparable, which is why the runner
   drops a pair excluded on either side rather than counting the half that exists.
-* The next run should re-fetch at a lower resolution so nearly everything fits, and send the *same* smaller
-  images to both layers. Downscaling costs OCR accuracy, so it must cost both sides equally.
+* Re-fetching at a lower resolution is still worth doing, so the Anthropic layers can be compared on the
+  full set — but it is now a *convenience* rather than the only way to measure those items, and the smaller
+  images must go to every layer so the cost of downscaling is paid equally.
+* The cap is per route, so it belongs in the table as a per-layer exclusion cause rather than a property of
+  the family. `request_too_large` on three layers and `empty_reply` on a fourth is exactly the distinction
+  the routing table buckets by cause.
 
 ## The protocol asymmetry, which cost a whole run to find
 

@@ -70,15 +70,28 @@ Two constraints on that script, learned the hard way today:
 
 ## What the table says today
 
-One suite, `ocrbench-stratified-278`, four layers, 200 items answered by all four:
+A snapshot lives at `specs/routing-table.json`: one suite, `ocrbench-stratified-278`, 278 items, and the
+layers merged so far. On the items every merged layer answered:
 
 | layer | rate | $/1k items | latency p50 | frontier |
 | --- | --- | --- | --- | --- |
 | api-sonnet-5 | 0.980 | $1.047 | 2.61 s | **yes** |
 | api-opus-5 | 0.970 | $7.733 | 1.99 s | no, dominated by sonnet-5 |
-| box-qwen36-tp2x2 | 0.915 | **$0.117** | **0.11 s** | **yes** |
-| api-haiku-4-5 | 0.795 | $0.311 | 1.26 s | no, dominated by the box |
+| box-qwen36-tp2x2 | 0.919 | **$0.117** | **0.11 s** | **yes** |
+| api-gpt-5.6-terra | 0.919 | $1.850 | 1.77 s | no, dominated by the box |
+| api-haiku-4-5 | 0.803 | $0.311 | 1.26 s | no, dominated by the box |
 
 Every pair crosses, so **escalation cannot reach the union anywhere in this family** — recorded as
-`escalation_can_reach_union: false` on all six pairs, which is the fact a router should read rather than a
+`escalation_can_reach_union: false` on every pair, which is a fact a router should read rather than a
 preference someone expressed.
+
+`gpt-5.6-terra` is the clearest argument for the table's existence: it ties the box exactly on the common
+set and is dominated by it anyway, at sixteen times the cost and sixteen times the latency. A table of
+accuracy alone would have called them equivalent; a table of accuracy and price would have missed that the
+box also answers sixteen times faster.
+
+Merging it also corrected a conclusion the previous page had stated too strongly. The Anthropic layers each
+refused 39 document-heavy images with `request_too_large`, which had been written up as "these cannot be
+served by an API at any price". terra refused **none** of them. The 200,000-character cap belongs to the
+gateway's Anthropic route, not to the gateway, so it is a **per-layer route constraint** — which is why the
+table buckets exclusions by cause on the layer rather than recording a count on the suite.
