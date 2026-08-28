@@ -240,3 +240,69 @@ class TestPairedStatistic:
         from benchctl import scorers
         assert scorers.wilson_lower(38, 48, 0.80) < 0.85
         assert self.stat([True] * 38 + [False] * 10, [True] * 36 + [False] * 12).non_inferior
+
+
+class TestTheRateCardIsTheAuthority:
+    """A price typed into a spec is unreviewable, and one of them was wrong by 17x.
+
+    `gemma-4` was carried at $0.30 input where the gateway's own card says $5.00, so its measured cost was
+    understated seventeenfold and it was published as the cheapest layer on two frontiers. Nothing about a
+    wrong price looks wrong, so the only thing that can catch it is a comparison against the card.
+    """
+
+    CARD = {
+        "rates": {"haiku": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 5.0,
+                            "cache_read_usd_per_mtok": 0.1, "cache_write_usd_per_mtok": 1.25},
+                  "gemma": {"input_usd_per_mtok": 5.0, "output_usd_per_mtok": 25.0,
+                            "cache_read_usd_per_mtok": 0.5, "cache_write_usd_per_mtok": 6.25}},
+        "aliases": {"claude-haiku-4-5": "haiku", "gemma-4": "gemma"},
+    }
+
+    def layer(self, **over) -> spec.Layer:
+        base = {"id": "api-gemma-4", "kind": "api", "model": "gemma-4",
+                "endpoint": "https://example.invalid/v1/chat/completions"}
+        return spec.Layer(**(base | over))
+
+    def test_a_layer_with_no_rates_gets_them_from_the_card(self):
+        out = spec.apply_rate_card({"api-gemma-4": self.layer()}, self.CARD)
+        got = out["api-gemma-4"]
+        assert (got.input_usd_per_mtok, got.output_usd_per_mtok) == (5.0, 25.0)
+        assert got.pricing_status == "gateway_rate_card"
+        assert got.pricing_key == "gemma"
+
+    def test_a_literal_that_disagrees_with_the_card_is_refused(self):
+        with pytest.raises(ValueError) as excinfo:
+            spec.apply_rate_card({"api-gemma-4": self.layer(input_usd_per_mtok=0.30)}, self.CARD)
+        assert "0.3" in str(excinfo.value) and "5.0" in str(excinfo.value)
+
+    def test_a_literal_that_agrees_is_allowed(self):
+        out = spec.apply_rate_card(
+            {"api-haiku-4-5": self.layer(id="api-haiku-4-5", model="claude-haiku-4-5",
+                                         input_usd_per_mtok=1.0, output_usd_per_mtok=5.0)}, self.CARD)
+        assert out["api-haiku-4-5"].pricing_status == "gateway_rate_card"
+
+    def test_a_self_hosted_layer_is_left_alone(self):
+        box = spec.Layer(id="box", kind="self_hosted", model="Qwen/Qwen3.6-35B-A3B",
+                         endpoint="http://box.invalid/v1/chat/completions", hourly_usd=15.2174,
+                         input_usd_per_mtok=0.236, output_usd_per_mtok=4.12, serving_ref="sha256:x")
+        out = spec.apply_rate_card({"box": box}, self.CARD)
+        assert out["box"] is box
+
+    def test_an_api_layer_the_card_does_not_know_must_be_priced_explicitly(self):
+        with pytest.raises(ValueError) as excinfo:
+            spec.apply_rate_card({"api-x": self.layer(id="api-x", model="not-on-the-card")}, self.CARD)
+        assert "no price" in str(excinfo.value)
+
+    def test_an_unknown_pricing_key_is_refused_rather_than_defaulted(self):
+        with pytest.raises(ValueError) as excinfo:
+            spec.apply_rate_card({"api-x": self.layer(id="api-x", pricing_key="typo")}, self.CARD)
+        assert "not a row in the rate card" in str(excinfo.value)
+
+    def test_the_imported_card_prices_every_layer_the_specs_use(self):
+        card = spec._rate_card()
+        assert card, "specs/gateway-rates.json is missing; run scripts/import_gateway_rates.py"
+        for path in sorted((ROOT / "specs/runs").glob("*.yaml")):
+            run = spec.load_run(path)
+            for cell in run.cells:
+                if cell.layer.kind == "api":
+                    assert cell.layer.input_usd_per_mtok is not None, f"{path.name}: {cell.layer.id}"

@@ -311,6 +311,79 @@ def cmd_score(args) -> int:
     return 0
 
 
+def cmd_price(args) -> int:
+    """Re-price a recorded run from the token counts it already wrote, without sending anything.
+
+    The symmetric operation to `score`. `score` exists because a verdict is an opinion about a reply and can
+    be corrected; a price is an opinion about a token count and can be corrected the same way, from the four
+    counts the provider reported. Neither needs the layer spent again.
+
+    It exists because it was needed. Every api layer's rates had been typed into the specs by hand, and
+    `gemma-4` was carried at $0.30 input against the gateway's own $5.00 — understating its measured cost 17x
+    and putting it on two published frontiers as the cheapest layer. The rates now resolve from the gateway's
+    card, but the runs on disk were priced with the old numbers, and re-running four layers over 278 images to
+    fix a multiplication would be absurd.
+
+    The box is left alone. Its money figure is derived from measured throughput at full occupancy rather than
+    from anyone's rate card, so there is nothing here to resolve for it.
+    """
+    run = spec.load_run(args.run)
+    layers = {c.layer.id: c.layer for c in run.cells}
+    changed = 0
+    print(f"{'cell':28} {'layer':20} {'was':>11} {'now':>11} {'change':>8}")
+    for cell in run.cells:
+        if cell.kind != "quality":
+            continue
+        out_dir = args.run_dir / cell.id
+        cost_path, summary_path = out_dir / "cost.jsonl", out_dir / "summary.json"
+        if not (cost_path.exists() and summary_path.exists()):
+            continue
+        layer = layers[cell.layer.id]
+        rows = [json.loads(line) for line in cost_path.read_text().split("\n") if line.strip()]
+        summary = json.loads(summary_path.read_text())
+        if layer.kind != "api":
+            print(f"{cell.id:28} {layer.id:20} "
+                  f"{summary.get('box_usd_at_full_utilisation', 0.0):11.5f} "
+                  f"{'':>11} {'box':>8}")
+            continue
+
+        priced = []
+        total = 0.0
+        for row in rows:
+            detail = row.get("detail") or {}
+            fresh = int(detail.get("fresh_prompt_tokens") or 0)
+            cached = int(detail.get("cached_prompt_tokens") or 0)
+            completion = int(detail.get("completion_tokens") or 0)
+            cache_rate = (layer.cache_read_usd_per_mtok
+                          if layer.cache_read_usd_per_mtok is not None
+                          else (layer.input_usd_per_mtok or 0.0))
+            usd = (fresh * (layer.input_usd_per_mtok or 0.0)
+                   + cached * cache_rate
+                   + completion * (layer.output_usd_per_mtok or 0.0)) / 1_000_000
+            total += usd
+            priced.append(row | {"api_usd": usd,
+                                 "detail": detail | {"pricing_status": layer.pricing_status,
+                                                     "pricing_key": layer.pricing_key}})
+        was = float(summary.get("api_usd") or 0.0)
+        ratio = (total / was) if was else 0.0
+        print(f"{cell.id:28} {layer.id:20} {was:11.5f} {total:11.5f} {ratio:7.2f}x")
+        if abs(total - was) < 1e-12:
+            continue
+        changed += 1
+        if args.dry_run:
+            continue
+        cost_path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in priced))
+        summary_path.write_text(json.dumps(
+            summary | {"api_usd": total, "pricing_status": layer.pricing_status,
+                       "pricing_key": layer.pricing_key,
+                       # Kept, because a reader of this file should be able to see that it moved and by how
+                       # much without going to git for it.
+                       "api_usd_superseded": was}, indent=2))
+    verb = "would change" if args.dry_run else "rewrote"
+    print(f"\n[OK] {verb} {changed} cell(s)")
+    return 0
+
+
 def _not_yet(name: str):
     def inner(args) -> int:
         print(f"[TODO] {name} is not implemented yet; see benchctl/README.md for the order the "
@@ -401,6 +474,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--spec-root", type=Path, default=Path("."))
     p.add_argument("--labels", default="ポジティブ,ニュートラル,ネガティブ")
     p.set_defaults(func=cmd_score)
+
+    p = sub.add_parser("price", help="re-price a recorded run from its own token counts, sending nothing")
+    p.add_argument("run", type=Path)
+    p.add_argument("--run-dir", type=Path, required=True)
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_price)
 
     for name, help_text in (
         ("submit", "create one Job per cell"),

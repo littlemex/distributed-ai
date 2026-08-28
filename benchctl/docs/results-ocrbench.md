@@ -43,7 +43,7 @@ Each layer's own rate is over a different subset, so the four numbers as reporte
 | box | 235/278 = 0.845 | **0** | **$0.117** |
 | haiku | 168/239 = 0.703 | 39 | $0.311 |
 | sonnet-5 | 212/234 = 0.906 | 44 | $1.047 |
-| opus-5 | 194/201 = 0.965 | 77 | $7.733 |
+| opus-5 | 194/201 = 0.965 | 77 | $2.578 |
 
 The rate rises with price and so does the exclusion count, which is the whole problem: a layer that was
 handed fewer items was handed the easier ones. On the 200 items every layer answered:
@@ -51,9 +51,9 @@ handed fewer items was handed the easier ones. On the 200 items every layer answ
 | layer | rate | $/1k items | latency p50 | on frontier |
 | --- | --- | --- | --- | --- |
 | sonnet-5 | **0.980** | $1.047 | 2.61 s | **yes** |
-| opus-5 | 0.970 | $7.733 | 1.99 s | no — dominated by sonnet-5 |
+| opus-5 | 0.970 | $2.578 | 1.99 s | no — dominated by sonnet-5 |
 | box | 0.919 | **$0.117** | **0.11 s** | **yes** |
-| gpt-5.6-terra | 0.919 | $1.850 | 1.77 s | no — dominated by the box |
+| gpt-5.6-terra | 0.919 | $1.559 | 1.77 s | no — dominated by the box |
 | haiku | 0.803 | $0.311 | 1.26 s | no — dominated by the box |
 
 `gpt-5.6-terra` is the clearest illustration of what the table is for: it **ties the box exactly** on the

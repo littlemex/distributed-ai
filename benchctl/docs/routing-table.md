@@ -79,19 +79,27 @@ the second family was merged in, not averaged in, and the OCR numbers did not mo
 | layer | rate | $/1k items | latency p50 | frontier |
 | --- | --- | --- | --- | --- |
 | api-sonnet-5 | **0.980** | $1.047 | 2.61 s | **yes** — most accurate |
-| api-opus-5 | 0.974 | $7.733 | 1.99 s | no |
-| **api-gemma-4** | **0.974** | **$0.108** | 0.97 s | **yes** — near-top accuracy at the lowest price |
-| api-gpt-5.5 | 0.959 | $2.763 | 1.90 s | no |
-| api-gpt-5.6-sol | 0.949 | $1.992 | 2.20 s | no |
-| api-grok-4.6 | 0.949 | $3.334 | **8.64 s** | no — dominated by four layers |
-| **box-qwen36-tp2x2** | 0.923 | $0.117 | **0.11 s** | **yes** — nine times the fastest API |
-| api-gpt-5.6-terra | 0.923 | $1.850 | 1.77 s | no |
+| api-opus-5 | 0.974 | $2.578 | 1.99 s | no — dominated by gemma-4 |
+| **api-gemma-4** | **0.974** | $1.752 | **0.97 s** | **yes** — near-top accuracy, fastest of the accurate |
+| api-gpt-5.5 | 0.959 | $5.676 | 1.90 s | no — and the most expensive layer here |
+| api-gpt-5.6-sol | 0.949 | $3.128 | 2.20 s | no |
+| api-grok-4.6 | 0.949 | $1.820 | **8.64 s** | no — dominated by four layers |
+| **box-qwen36-tp2x2** | 0.923 | **$0.117** | **0.11 s** | **yes** — cheapest by 15x, and nine times the fastest API |
+| api-gpt-5.6-terra | 0.923 | $1.559 | 1.77 s | no — dominated by the box |
 | api-haiku-4-5 | 0.810 | $0.311 | 1.26 s | no |
 
-**Three layers on the frontier, one per axis.** sonnet-5 is the most accurate, gemma-4 is within a whisker
-of it at a tenth the price, and the box answers nine times faster than anything else. Six of nine are
-dominated, and grok-4.6 is dominated by four separate layers — least accurate of the expensive group, most
-expensive but one, and eight times slower than the box.
+**Three layers on the frontier, one per axis.** sonnet-5 is the most accurate, gemma-4 is within a whisker of
+it and the fastest of the accurate layers, and the box is both the cheapest by 15x and nine times faster than
+any API. Six of nine are dominated.
+
+**Every cost in this table was corrected on 2026-08-28** and four of them moved by more than 50%. The rates had
+been transcribed into the specs by hand, and the gateway ships its own card: `gemma-4` was carried at $0.30
+input against the card's $5.00, so its cost here was understated **16x** and it was described as "the lowest
+price" when it is fifteen times the box's. `claude-opus-5` was overstated 3x, `gpt-5.5` understated 2x,
+`grok-4.6` overstated 1.8x. Rates now resolve from `specs/gateway-rates.json` and `benchctl validate` refuses
+a literal that disagrees with it; the runs on disk were re-priced from their own recorded token counts with
+`benchctl price`, without sending anything. What the correction did **not** change is any quality number or
+any conclusion about the box, which is the cheapest layer here either way.
 
 **Almost nothing here is separable on 278 items.** Nearly every pair returns p > 0.1: gemma-4 against the box
 is 1.4 points with p = 0.597, gemma-4 against sonnet-5 is p = 0.581, gemma-4 against opus-5 is p = 1.000.

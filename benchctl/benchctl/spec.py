@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -66,7 +66,13 @@ class Layer:
     cache_read_usd_per_mtok: float | None = None
     hourly_usd: float | None = None
     serving_ref: str | None = None
-    pricing_status: str = "measured"   # "measured" | "list" | "placeholder"
+    pricing_status: str = "measured"   # "measured" | "list" | "placeholder" | "gateway_rate_card"
+    # The rate row this layer bills against in the gateway's own card, resolved through
+    # `specs/gateway-rates.json`. Preferred over writing the four numbers into the spec, because a
+    # hand-typed price is a plausible-looking number whatever it says: `gemma-4` was entered at $0.30
+    # input against the card's $5.00 and published as the cheapest layer in two families on the strength
+    # of it. When a layer declares both a key and literal rates, they must agree or validation refuses.
+    pricing_key: str | None = None
     # Which wire format this layer speaks for images, and where. The box accepts OpenAI
     # `image_url` content parts on its chat endpoint; the gateway's OpenAI shim rejects them outright
     # ("image_url content parts are not supported; use the Anthropic /v1/messages endpoint with base64
@@ -103,6 +109,7 @@ class Layer:
             hourly_usd=raw.get("hourly_usd"),
             serving_ref=raw.get("serving_ref"),
             pricing_status=raw.get("pricing_status", "measured"),
+            pricing_key=raw.get("pricing_key"),
             image_style=raw.get("image_style", "openai"),
             messages_endpoint=raw.get("messages_endpoint"),
             sends_temperature=bool(raw.get("sends_temperature", True)),
@@ -123,9 +130,8 @@ class Layer:
             # and without the serving manifest the numbers cannot be attributed to a configuration.
             _require(layer.hourly_usd is not None, f"{where}: a self_hosted layer needs hourly_usd")
             _require(bool(layer.serving_ref), f"{where}: a self_hosted layer needs serving_ref")
-        else:
-            _require(layer.input_usd_per_mtok is not None and layer.output_usd_per_mtok is not None,
-                     f"{where}: an api layer needs input_usd_per_mtok and output_usd_per_mtok")
+        # An api layer still needs a price, but it may arrive from the gateway's rate card rather than from
+        # the spec, so the requirement is enforced after the card is applied rather than here.
         return layer
 
     @property
@@ -293,6 +299,74 @@ def _index(raws: Iterable[dict], loader, kind: str) -> dict:
     return out
 
 
+RATE_CARD = Path(__file__).resolve().parents[1] / "specs/gateway-rates.json"
+
+
+def _rate_card(path: Path | None = None) -> dict:
+    path = path or RATE_CARD
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def apply_rate_card(layers: dict[str, Layer], card: dict, *, where: str = "layers") -> dict[str, Layer]:
+    """Resolve every API layer's price against the gateway's own card, and refuse a disagreement.
+
+    Three cases, and the third is the one this exists for:
+
+    * A layer names a `pricing_key` and no rates. The card fills them in, and `pricing_status` becomes
+      `gateway_rate_card` — a price from the horse's mouth rather than a transcription or a placeholder.
+    * A layer names neither. Left alone: the box is priced by the hour from measured throughput and is not
+      on the card at all.
+    * A layer names a key *and* rates. They must agree. `gemma-4` was carried in two specs at $0.30 input
+      against the card's $5.00, understating its measured cost 17x, and was published as the cheapest layer
+      on two frontiers on the strength of it. Nothing about a wrong price looks wrong, so the only place
+      the disagreement can surface is here.
+    """
+    rates, aliases = card.get("rates") or {}, card.get("aliases") or {}
+    if not rates:
+        _priced(layers, where)
+        return layers
+    out: dict[str, Layer] = {}
+    for name, layer in layers.items():
+        key = layer.pricing_key or (aliases.get(layer.model) if layer.kind == "api" else None)
+        row = rates.get(key) if key else None
+        if row is None:
+            _require(layer.pricing_key is None,
+                     f"{where}.{name}: pricing_key {layer.pricing_key!r} is not a row in the rate card "
+                     f"({sorted(rates)}). Re-import it with scripts/import_gateway_rates.py.")
+            out[name] = layer
+            continue
+        for field, carded in (("input_usd_per_mtok", row["input_usd_per_mtok"]),
+                              ("output_usd_per_mtok", row["output_usd_per_mtok"]),
+                              ("cache_read_usd_per_mtok", row["cache_read_usd_per_mtok"])):
+            declared = getattr(layer, field)
+            _require(declared is None or abs(declared - carded) < 1e-9,
+                     f"{where}.{name}: {field} is {declared} in the spec and {carded} in the gateway's "
+                     f"rate card for {key!r}. A hand-typed price that disagrees with the card is the "
+                     f"defect this check exists for; delete the literal and keep the pricing_key.")
+        out[name] = replace(
+            layer, pricing_key=key,
+            input_usd_per_mtok=row["input_usd_per_mtok"],
+            output_usd_per_mtok=row["output_usd_per_mtok"],
+            cache_read_usd_per_mtok=row["cache_read_usd_per_mtok"],
+            pricing_status="gateway_rate_card",
+        )
+    _priced(out, where)
+    return out
+
+
+def _priced(layers: dict[str, Layer], where: str) -> None:
+    """Every api layer ends up with a price, from the card or from the spec. Checked once, at the end."""
+    for name, layer in layers.items():
+        if layer.kind != "api":
+            continue
+        _require(layer.input_usd_per_mtok is not None and layer.output_usd_per_mtok is not None,
+                 f"{where}.{name}: no price. Either the model alias {layer.model!r} is missing from the "
+                 f"gateway's rate card — re-import with scripts/import_gateway_rates.py — or the layer "
+                 f"needs an explicit pricing_key.")
+
+
 def load_run(path: Path) -> Run:
     """Read a run spec and everything it references, and expand it into cells.
 
@@ -302,7 +376,7 @@ def load_run(path: Path) -> Run:
     """
     raw = yaml.safe_load(path.read_text()) or {}
     run_id = _ident(raw.get("id"), f"{path}.id")
-    layers = _index(raw.get("layers") or (), Layer.load, "layers")
+    layers = apply_rate_card(_index(raw.get("layers") or (), Layer.load, "layers"), _rate_card())
     suites = _index(raw.get("suites") or (), Suite.load, "suites")
     policies = _index(raw.get("policies") or (), Policy.load, "policies")
     points = _index(raw.get("operation_points") or (), OperationPoint.load, "operation_points")

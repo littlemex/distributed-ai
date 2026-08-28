@@ -14,10 +14,18 @@ the page because which one you believe is the whole question.
 
 | layer | rate | $/1k items | latency p50 | on the frontier |
 | --- | --- | --- | --- | --- |
-| **box-qwen36-tp2x2** | **0.812** | **$4.505** | **5.28 s** | **yes** |
+| **box-qwen36-tp2x2** | **0.812** | **$4.505** | 5.28 s | **yes** |
 | api-sonnet-5 | 0.800 | $58.313 | 10.55 s | no, dominated by the box |
 | api-haiku-4-5 | 0.725 | $13.109 | 7.38 s | no, dominated by the box |
-| api-gemma-4 | 0.700 | $3.470 | 4.73 s | yes, as the cheapest |
+| api-gemma-4 | 0.700 | **$60.000** | **4.73 s** | yes, but only as the fastest, by half a second |
+
+`gemma-4`'s figure was **$3.470 when this page was first written**, and at that number it was the cheapest
+layer in the family. The rate had been transcribed into the spec by hand at $0.30 input where the gateway's own
+card says $5.00, understating it 17x. Corrected, it is the *most expensive* layer here as well as the least
+accurate, and it holds a place on the frontier only for finishing half a second faster than the box. The
+correction moved no quality number and no other layer's cost: haiku and sonnet-5 were transcribed correctly.
+See `cache-discount-eligibility.md` for how prices are resolved now, and `benchctl price` for how a recorded
+run gets re-priced without being re-run.
 
 The box's cost is per item at full occupancy, which is the only honest way to price a fixed-cost box and is
 kept in its own ledger all the way to disk. Every rate is over the same 80 items — all four layers answered
@@ -157,6 +165,8 @@ footnote counts the same as the headline finding.
 **One box configuration, one gateway, one dataset in one language.** GovReport is English government prose;
 nothing here transfers to Japanese long-document summarisation without measuring it.
 
-**`gemma-4`'s prices are placeholders** and its position as the cheapest layer moves if they are wrong. It
-is on the frontier for being cheap, not for being good: its quality deficit against the box and against
-sonnet-5 is real at p = 0.023 and p = 0.022.
+**`gemma-4` was on this page as the cheapest layer and it is the most expensive one.** That is worth stating
+as a limitation rather than only as a correction: the number was wrong for a whole day, it was wrong in the
+direction that made a layer look good, and nothing about it looked wrong. Its quality deficit against the box
+and against sonnet-5 was real throughout at p = 0.023 and p = 0.022, so the quality ranking never depended on
+it.

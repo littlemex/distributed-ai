@@ -1,0 +1,133 @@
+{
+  "aliases": {
+    "claude-3-5-haiku": "haiku",
+    "claude-3-5-haiku-20241022": "haiku",
+    "claude-3-7-sonnet": "sonnet",
+    "claude-3-7-sonnet-20250219": "sonnet",
+    "claude-3-haiku": "haiku",
+    "claude-3-opus": "opus",
+    "claude-3-sonnet": "sonnet",
+    "claude-fable-5": "fable",
+    "claude-haiku-4-5": "haiku",
+    "claude-haiku-4-5-20251001": "haiku",
+    "claude-opus-4": "opus",
+    "claude-opus-4-1": "opus",
+    "claude-opus-4-1-20250805": "opus",
+    "claude-opus-4-20250514": "opus",
+    "claude-opus-4-5": "opus",
+    "claude-opus-4-5-20251101": "opus",
+    "claude-opus-4-6": "opus",
+    "claude-opus-4-7": "opus",
+    "claude-opus-5": "opus",
+    "claude-sonnet-4-5": "sonnet",
+    "claude-sonnet-4-5-20250929": "sonnet",
+    "claude-sonnet-4-6": "sonnet",
+    "claude-sonnet-5": "sonnet",
+    "gemma-4": "gemma",
+    "gemma-4-31b": "gemma",
+    "google.gemma-4-31b": "gemma",
+    "gpt-5.4": "gpt-5",
+    "gpt-5.5": "gpt-5",
+    "gpt-5.6-sol": "gpt-5.6-sol",
+    "gpt-5.6-terra": "gpt-5.6-terra",
+    "grok-4.6": "grok",
+    "nemotron-super-3-120b": "nemotron",
+    "nvidia.nemotron-super-3-120b": "nemotron",
+    "openai.gpt-5.4": "gpt-5",
+    "openai.gpt-5.5": "gpt-5",
+    "openai.gpt-5.6-sol": "gpt-5.6-sol",
+    "openai.gpt-5.6-terra": "gpt-5.6-terra",
+    "qwen.qwen3-next-80b-a3b": "qwen",
+    "qwen3-next-80b": "qwen",
+    "xai.grok-4.6": "grok"
+  },
+  "provenance": {
+    "gateway_commit": "715856f31106725676aba56f5d648fc106b85177",
+    "gateway_defaults": "/Users/akazawt/stratoclave/backend/mvp/defaults",
+    "imported_at": "2026-08-28T21:55:58+09:00",
+    "models_schema_version": 1,
+    "models_sha256": "85c5693b32ba85fc6fe6574936c3db187de2c5cec9d6df97a1bd29235d9c95bc",
+    "pricing_schema_version": 1,
+    "pricing_sha256": "8f3c5140e4a23047b96c16bdc0d8ba63ba92344d875cfc99e3a985310c3517c1"
+  },
+  "rates": {
+    "default": {
+      "cache_read_usd_per_mtok": 0.5,
+      "cache_write_usd_per_mtok": 6.25,
+      "input_usd_per_mtok": 5.0,
+      "output_usd_per_mtok": 25.0
+    },
+    "fable": {
+      "cache_read_usd_per_mtok": 1.0,
+      "cache_write_usd_per_mtok": 12.5,
+      "input_usd_per_mtok": 10.0,
+      "output_usd_per_mtok": 50.0
+    },
+    "gemma": {
+      "cache_read_usd_per_mtok": 0.5,
+      "cache_write_usd_per_mtok": 6.25,
+      "input_usd_per_mtok": 5.0,
+      "output_usd_per_mtok": 25.0
+    },
+    "gpt-5": {
+      "cache_read_usd_per_mtok": 0.5,
+      "cache_write_usd_per_mtok": 6.25,
+      "input_usd_per_mtok": 5.0,
+      "output_usd_per_mtok": 25.0
+    },
+    "gpt-5.6-sol": {
+      "cache_read_usd_per_mtok": 0.44,
+      "cache_write_usd_per_mtok": 5.5,
+      "input_usd_per_mtok": 4.4,
+      "output_usd_per_mtok": 22.0
+    },
+    "gpt-5.6-terra": {
+      "cache_read_usd_per_mtok": 0.22,
+      "cache_write_usd_per_mtok": 2.75,
+      "input_usd_per_mtok": 2.2,
+      "output_usd_per_mtok": 13.2
+    },
+    "grok": {
+      "cache_read_usd_per_mtok": 0.55,
+      "cache_write_usd_per_mtok": 2.75,
+      "input_usd_per_mtok": 2.2,
+      "output_usd_per_mtok": 6.6
+    },
+    "haiku": {
+      "cache_read_usd_per_mtok": 0.1,
+      "cache_write_usd_per_mtok": 1.25,
+      "input_usd_per_mtok": 1.0,
+      "output_usd_per_mtok": 5.0
+    },
+    "nemotron": {
+      "cache_read_usd_per_mtok": 0.5,
+      "cache_write_usd_per_mtok": 6.25,
+      "input_usd_per_mtok": 5.0,
+      "output_usd_per_mtok": 25.0
+    },
+    "opus": {
+      "cache_read_usd_per_mtok": 0.5,
+      "cache_write_usd_per_mtok": 6.25,
+      "input_usd_per_mtok": 5.0,
+      "output_usd_per_mtok": 25.0
+    },
+    "qwen": {
+      "cache_read_usd_per_mtok": 0.5,
+      "cache_write_usd_per_mtok": 6.25,
+      "input_usd_per_mtok": 5.0,
+      "output_usd_per_mtok": 25.0
+    },
+    "sonnet": {
+      "cache_read_usd_per_mtok": 0.3,
+      "cache_write_usd_per_mtok": 3.75,
+      "input_usd_per_mtok": 3.0,
+      "output_usd_per_mtok": 15.0
+    },
+    "vllm": {
+      "cache_read_usd_per_mtok": 0.0,
+      "cache_write_usd_per_mtok": 0.0,
+      "input_usd_per_mtok": 0.2,
+      "output_usd_per_mtok": 0.2
+    }
+  }
+}

@@ -4,6 +4,10 @@
 id: 2026-08-27-classification-v2
 serving_ref: sha256:PLACEHOLDER-set-by-deploy
 
+# Every api layer's rates are resolved from the gateway's own card, `specs/gateway-rates.json`,
+# keyed on the model alias. None are written here on purpose: `gemma-4` was carried at $0.30
+# input against the card's $5.00 and published as the cheapest layer on two frontiers, and
+# nothing about a wrong price looks wrong. `benchctl validate` refuses a literal that disagrees.
 layers:
   - id: box-qwen36-tp2x2
     kind: self_hosted
@@ -20,10 +24,6 @@ layers:
     kind: api
     model: claude-haiku-4-5
     endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
-    input_usd_per_mtok: 1.00
-    output_usd_per_mtok: 5.00
-    cache_read_usd_per_mtok: 0.10
-    pricing_status: list
 
 suites:
   - id: classification-enum-v1
