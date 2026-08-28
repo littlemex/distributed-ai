@@ -233,8 +233,19 @@ class LayerClient:
         # The box. Its per-token rates are derived from measured throughput, so the money figure is a
         # statement about a fully occupied machine and is labelled as such: at half that occupancy the
         # same work costs twice as much, and "the marginal cost is zero" is a different claim again.
+        #
+        # Cached prompt tokens are charged at their own rate, when one has been measured. Charging them at
+        # the fresh rate was the ledger's one structural bias against the box: on the cache-ablation run it
+        # served 72.5% of its prompt tokens from its prefix cache and paid full price for all of them, while
+        # the api branch above discounts a cache read explicitly. `benchctl/cached_prefill_rate.py` measures
+        # the rate rather than assuming it — 224,620 tok/s of cached prefill against 18,417 fresh at the same
+        # concurrency, which is 8.2% of a fresh token, close to the tenth the APIs charge for theirs.
+        cached = reply.cached_prompt_tokens
+        cache_rate = self.layer.cache_read_usd_per_mtok
+        fresh = (reply.prompt_tokens - cached) if cache_rate is not None else reply.prompt_tokens
         usd = (
-            reply.prompt_tokens / million * (self.layer.input_usd_per_mtok or 0.0)
+            fresh / million * (self.layer.input_usd_per_mtok or 0.0)
+            + (cached / million * cache_rate if cache_rate is not None else 0.0)
             + reply.completion_tokens / million * (self.layer.output_usd_per_mtok or 0.0)
         )
         seconds = usd / (self.layer.hourly_usd or 1.0) * 3600 if self.layer.hourly_usd else 0.0
@@ -242,6 +253,8 @@ class LayerClient:
             box_usd_at_full_utilisation=usd,
             box_seconds=seconds,
             detail={
+                "fresh_prompt_tokens": fresh,
+                "cached_prompt_tokens": cached,
                 "prompt_tokens": reply.prompt_tokens,
                 "completion_tokens": reply.completion_tokens,
                 "hourly_usd": self.layer.hourly_usd,

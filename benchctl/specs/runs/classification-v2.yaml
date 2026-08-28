@@ -18,6 +18,11 @@ layers:
     # Derived from measured throughput, not from a list: prefill 17,947 tok/s aggregate at 16 in
     # flight, decode 1,025 tok/s at c=16 (the latter still on the TP=4 configuration).
     input_usd_per_mtok: 0.236
+    # Measured, not assumed: benchctl/cached_prefill_rate.py, 2026-08-28, 224,620 tok/s of cached prefill
+    # against 18,417 fresh at 16 in flight, which is 8.2% of a fresh token. Without this the box pays the
+    # fresh rate for tokens its prefix cache served, which is a bias against it worth 72.5% of the prompt
+    # on the traffic that shares a prefix.
+    cache_read_usd_per_mtok: 0.0188
     output_usd_per_mtok: 4.12
     pricing_status: measured
   - id: api-haiku-4-5

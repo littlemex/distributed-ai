@@ -342,9 +342,46 @@ def cmd_price(args) -> int:
         rows = [json.loads(line) for line in cost_path.read_text().split("\n") if line.strip()]
         summary = json.loads(summary_path.read_text())
         if layer.kind != "api":
-            print(f"{cell.id:28} {layer.id:20} "
-                  f"{summary.get('box_usd_at_full_utilisation', 0.0):11.5f} "
-                  f"{'':>11} {'box':>8}")
+            was = float(summary.get("box_usd_at_full_utilisation") or 0.0)
+            # The box's own cached tokens were never written to its cost rows, because the first version of
+            # its cost function did not distinguish them. They are in `response.jsonl`, which every run
+            # writes, so a re-price can join the two rather than re-run anything.
+            cached_by_item = {}
+            replies = out_dir / "response.jsonl"
+            if replies.exists():
+                for line in replies.read_text().split("\n"):
+                    if line.strip():
+                        row = json.loads(line)
+                        cached_by_item[row["item_id"]] = int(row.get("cached_prompt_tokens") or 0)
+            rate = layer.cache_read_usd_per_mtok
+            if rate is None or not any(cached_by_item.values()):
+                print(f"{cell.id:28} {layer.id:20} {was:11.5f} {'':>11} "
+                      f"{'box' if rate is None else 'box, no hits':>8}")
+                continue
+            priced, total, seconds = [], 0.0, 0.0
+            for row in rows:
+                detail = row.get("detail") or {}
+                prompt = int(detail.get("prompt_tokens") or 0)
+                cached = min(prompt, cached_by_item.get(row["item_id"], 0))
+                usd = ((prompt - cached) * (layer.input_usd_per_mtok or 0.0)
+                       + cached * rate
+                       + int(detail.get("completion_tokens") or 0)
+                       * (layer.output_usd_per_mtok or 0.0)) / 1_000_000
+                box_seconds = usd / layer.hourly_usd * 3600 if layer.hourly_usd else 0.0
+                total += usd
+                seconds += box_seconds
+                priced.append(row | {"box_usd_at_full_utilisation": usd, "box_seconds": box_seconds,
+                                     "detail": detail | {"fresh_prompt_tokens": prompt - cached,
+                                                         "cached_prompt_tokens": cached,
+                                                         "cache_read_usd_per_mtok": rate}})
+            print(f"{cell.id:28} {layer.id:20} {was:11.5f} {total:11.5f} "
+                  f"{(total / was) if was else 0:7.2f}x")
+            if abs(total - was) > 1e-12 and not args.dry_run:
+                changed += 1
+                cost_path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in priced))
+                summary_path.write_text(json.dumps(
+                    summary | {"box_usd_at_full_utilisation": total, "box_seconds": seconds,
+                               "box_usd_superseded": was}, indent=2))
             continue
         if layer.pricing_status == "placeholder" or layer.input_usd_per_mtok is None:
             # Deliberately unpriced: no source for its rate, so it is compared on quality and latency and

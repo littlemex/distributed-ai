@@ -111,7 +111,7 @@ same question, in two arms differing only in a neutral shared preamble, on three
 | layer | arm | prompt tokens | cached | $/1k items | passed |
 | --- | --- | --- | --- | --- | --- |
 | box | bare | 9,005 | 0% | $0.059 | 46/48 |
-| box | padded | 133,997 | **72.5%** | **$0.673** — 11.45x | 46/48 |
+| box | padded | 133,997 | **72.5%** | **$0.234** — 3.98x | 46/48 |
 | haiku-4-5 | bare | 14,644 | 0% | $0.345 | 47/48 |
 | haiku-4-5 | padded | 139,636 | 0% | **$2.949** — 8.55x | 47/48 |
 | sonnet-5 | bare | 14,618 | 0% | $1.034 | 47/48 |
@@ -127,14 +127,39 @@ where a discount arrives: at sonnet-5's posted $3.00 input and $0.30 cache read,
 perfectly would cost $0.00091 against $0.00060 bare, because a 90% discount on tokens you did not need cannot
 beat a 100% discount on not sending them.
 
-**The box's 11.45x is mostly an accounting artefact and should not be read as a cost.** It did get its
-discount — 72.5% of those prompt tokens were prefix-cache hits — but the box's cost model prices every prompt
-token at one rate whether or not it was a hit, while the API model discounts hits explicitly. So the ledger is
-asymmetric, and asymmetric *against* the box: on prefix-sharing traffic it charges the box for work the engine
-did not do. Every box result published so far is pessimistic by that amount, which is the safe direction for a
-conclusion but the wrong number. Fixing it needs a measured cached-prefill rate for the box, which is a
-throughput measurement rather than a guess, and until it exists the asymmetry belongs in every comparison that
-involves prefix reuse.
+The box's row is the one that had to be corrected, and correcting it is the only thing here that could have
+overturned the conclusion. Its first reading was **11.45x**, and most of that was an accounting artefact: it
+did get its discount, 72.5% of those prompt tokens being prefix-cache hits, but its cost model charged every
+prompt token at one rate whether the engine computed it or read it, while the API branch discounts a cache read
+explicitly. The ledger was asymmetric, and asymmetric *against* the box.
+
+## What a cached token costs the box, measured
+
+Closing that needed a rate rather than an assumption, and `benchctl/cached_prefill_rate.py` measures one. For a
+request with a single output token, latency is almost all prefill and is linear in the tokens prefilled, so
+fitting `latency = overhead + n / throughput` over a sweep of sizes separates the per-token cost from the fixed
+cost of a request — once with the prefix missing and once with it hitting.
+
+Two things about that measurement matter more than the number.
+
+**It has to be taken at the concurrency the existing rate was taken at.** The box's published $0.236 per Mtok
+is not a price anyone charges; it is `(hourly_usd / 3600) / prefill_tokens_per_second`, from 17,947 tok/s
+*aggregate at 16 in flight*. Measured serially, fresh prefill runs at 9,383 tok/s — a single stream cannot fill
+the machine — which would give $0.45 and make the cached ratio look far better than it is. At 16 in flight the
+same probe measures **18,417 tok/s fresh, giving $0.2295**, which reproduces the published figure and is what
+validates the instrument. The cached ratio is 3.0% measured serially and **8.2%** at the operating concurrency;
+quoting the serial one would have overstated the box's advantage by nearly 3x.
+
+**The hit arm is never fully cached, so the blend has to be solved rather than quoted.** At 16 lanes racing to
+populate one prefix, the best batch reached 91.5%. Its raw throughput of 115,149 tok/s charges the cached
+tokens for the fresh ones beside them; since fresh throughput is measured independently in the same run,
+`wall = fresh/thr_fresh + cached/thr_cached` can be solved for the only unknown, giving **224,620 tok/s of
+cached prefill, $0.0188 per Mtok, 8.2% of a fresh token**.
+
+Which is close to the tenth the APIs charge for a cache read — so the box's own prefix cache is worth about the
+same discount, on the traffic that has a prefix to reuse. With it in the ledger the box's padded arm falls from
+11.45x to **3.98x**, and the conclusion survives the correction: padding still loses, on every layer, including
+the only one whose cache actually worked.
 
 ## The tokeniser ratio, which is not about caching but is about price
 
