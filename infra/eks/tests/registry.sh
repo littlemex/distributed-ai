@@ -24,6 +24,7 @@ register_all_tests() {
   register_test plan-guard-aws-lookup          test_plan_guard_aws_lookup_failure_is_not_absence baseline static "$TIMEOUT_STATIC"
   register_test plan-guard-removed-vars        test_plan_guard_removed_variables_refuse_to_be_set baseline static "$TIMEOUT_STATIC"
   register_test plan-guard-installer-vars      test_plan_guard_installer_vars_are_declared baseline static "$TIMEOUT_STATIC"
+  register_test teardown-vpc-dependents        test_plan_guard_teardown_names_foreign_vpc_dependents baseline static "$TIMEOUT_STATIC"
   register_test registry-matches-state          test_registry_matches_state              baseline static "$TIMEOUT_STATIC" terraform
   register_test registry-default-layer-attached test_registry_default_data_layer_is_attached baseline static "$TIMEOUT_STATIC"
   register_test registry-preamble-contract      test_registry_preamble_contract          baseline static "$TIMEOUT_STATIC"

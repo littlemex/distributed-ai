@@ -24,6 +24,10 @@
 #   --yes         Skip interactive confirmation, including terraform's own destroy approval
 #                 (it passes -auto-approve). Required for any non-interactive run — see the
 #                 comment at the terraform destroy call for what breaks without it.
+#   --ignore-vpc-dependents
+#                 Run destroy even when the VPC still holds objects this state does not own.
+#                 Those make the last step of destroy fail on DependencyViolation, so the default
+#                 is to name them and stop before an hour is spent finding out.
 #
 # The pools are DISCOVERED, not assumed. accelerator_pools is a map the reader defines, so there
 # is no single pool name this script could default to: a hardcoded default silently matches
@@ -40,6 +44,7 @@ NODEPOOLS=()
 RUN_DESTROY=false
 AUTO_YES=false
 DELETE_PVCS=false
+IGNORE_VPC_DEPENDENTS=false
 
 # Device taints the Terraform module puts on accelerator pools. Extend this if a new device type
 # is added; a pool whose taint is not listed here is not treated as an accelerator pool.
@@ -55,6 +60,7 @@ while [[ $# -gt 0 ]]; do
     --delete-pvcs) DELETE_PVCS=true;       shift ;;
     --destroy)     RUN_DESTROY=true;       shift ;;
     --yes)         AUTO_YES=true;          shift ;;
+    --ignore-vpc-dependents) IGNORE_VPC_DEPENDENTS=true; shift ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -99,6 +105,13 @@ else
   read -rp "Continue against context '$(kubectl config current-context 2>/dev/null)'? [y/N] " ANS
   [[ "${ANS,,}" == "y" ]] || { echo "Aborted."; exit 1; }
 fi
+
+# The VPC and region the AWS-side checks below need. Read from the state rather than the
+# environment: AWS_REGION may point somewhere else entirely (the state bucket's region, a leftover
+# export), and a check that looks in the wrong region reports "nothing here" — the one answer that
+# must never be wrong. Empty when the state cannot be read, and every use is guarded on that.
+VPC_ID=$(cd "$INFRA_DIR" && terraform output -raw vpc_id 2>/dev/null || true)
+REGION=$(cd "$INFRA_DIR" && terraform output -raw region 2>/dev/null || true)
 
 # ── Resolve which NodePools to delete ─────────────────────────────────────────
 # Ask the cluster rather than assuming a name. Every accelerator pool has to be found: leaving
@@ -364,6 +377,145 @@ else:
     print('  none')
 "
 
+# ── Step 2b: name what the VPC holds that this Terraform state does not own ──
+# Anything living in the cluster's subnets that Terraform did not create will block the subnet and
+# security-group deletes at the very END of `terraform destroy`, and the error AWS returns names
+# only the object it could not delete — never the dependent that held it:
+#
+#   Error: deleting Security Group (sg-05d7...): DependencyViolation: resource sg-05d7... has a
+#   dependent object
+#
+# Measured 2026-08-28 on a real teardown: subnet deletes sat at "Still destroying..." for 15
+# minutes, then failed that way three times over. The dependents turned out to be an S3 Files
+# filesystem's mount-target ENIs and the security group they used, all created outside this state
+# by unrelated work in the same VPC. Finding that took a manual crawl through describe-network-
+# interfaces and describe-security-group-rules — which is exactly the crawl this step now does
+# up front, before an hour is spent discovering that it was needed.
+#
+# It reports rather than deletes. A mount target belongs to somebody's filesystem, and this script
+# is not entitled to remove another team's storage plumbing on the way to deleting a cluster; the
+# operator decides. What it will not do is let the run start and fail an hour later with an error
+# that names nothing.
+vpc_dependents_report() {
+  local vpc="$1" region="$2"
+  local state_ids
+  # Every id/arn/identifier this state knows, so "owned" is answered from the state rather than
+  # from a name pattern. The profiling installer, for instance, legitimately puts an S3 Files
+  # mount target in this VPC — that one is in the state and must not be reported as foreign.
+  state_ids="$(terraform -chdir="$INFRA_DIR" show -json 2>/dev/null | python3 -c "
+import json, sys
+def walk(v, out):
+    if isinstance(v, dict):
+        for k, x in v.items():
+            if k in ('id', 'arn', 'identifier', 'group_id', 'security_group_id') and isinstance(x, str):
+                out.add(x)
+            walk(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            walk(x, out)
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+out = set()
+walk(doc.get('values', {}), out)
+print('\n'.join(sorted(out)))
+" 2>/dev/null || true)"
+
+  local enis sgs
+  enis="$(aws ec2 describe-network-interfaces --region "$region" \
+    --filters "Name=vpc-id,Values=$vpc" \
+    --query 'NetworkInterfaces[].[NetworkInterfaceId,Description]' --output text 2>/dev/null || true)"
+  sgs="$(aws ec2 describe-security-groups --region "$region" \
+    --filters "Name=vpc-id,Values=$vpc" \
+    --query 'SecurityGroups[].[GroupId,GroupName]' --output text 2>/dev/null || true)"
+
+  local found=0 id desc name
+  # An ENI in a subnet this state owns blocks that subnet's delete, whatever created it. The
+  # description is what identifies the owner: AWS writes "S3 Files mount target for fs-... (fsmt-...)",
+  # "EFS mount target for fs-...", "ELB app/...", "VPC Endpoint Interface vpce-...". The ids inside it
+  # are checked against the state too, since a managed mount target's ENI has an unmanaged ENI id.
+  while IFS=$'\t' read -r id desc; do
+    [[ -n "$id" ]] || continue
+    printf '%s\n' "$state_ids" | grep -qxF "$id" && continue
+    local claimed=0 tok
+    for tok in $(printf '%s' "$desc" | tr -c 'a-zA-Z0-9-' ' '); do
+      case "$tok" in
+        fsmt-* | fsap-* | fs-* | vpce-* | eni-*)
+          printf '%s\n' "$state_ids" | grep -qxF "$tok" && { claimed=1; break; } ;;
+      esac
+    done
+    [[ "$claimed" == "1" ]] && continue
+    [[ "$found" == "0" ]] && echo "  Network interfaces this state does not own (they hold the subnets):" >&2
+    found=1
+    printf '    %s  %s\n' "$id" "${desc:-(no description)}" >&2
+  done <<< "$enis"
+
+  # A foreign security group only matters when its rules REFERENCE one of ours: that reference is
+  # what turns our security group's delete into DependencyViolation. One that references nothing of
+  # ours is harmless and is not reported, so the list stays short enough to act on.
+  local sg_found=0 sg gname refs
+  while IFS=$'\t' read -r sg gname; do
+    [[ -n "$sg" ]] || continue
+    [[ "$gname" == "default" ]] && continue
+    printf '%s\n' "$state_ids" | grep -qxF "$sg" && continue
+    refs="$(aws ec2 describe-security-group-rules --region "$region" \
+      --filters "Name=group-id,Values=$sg" \
+      --query 'SecurityGroupRules[].ReferencedGroupInfo.GroupId' --output text 2>/dev/null | tr '\t' '\n' | sed '/^$/d;/^None$/d' || true)"
+    local hits=""
+    while read -r r; do
+      [[ -n "$r" ]] || continue
+      printf '%s\n' "$state_ids" | grep -qxF "$r" && hits="${hits} ${r}"
+    done <<< "$refs"
+    [[ -n "$hits" ]] || continue
+    [[ "$sg_found" == "0" ]] && echo "  Security groups this state does not own, whose rules reference ours:" >&2
+    sg_found=1
+    found=1
+    printf '    %s  %s  -> references%s\n' "$sg" "$gname" "$hits" >&2
+  done <<< "$sgs"
+
+  [[ "$found" == "0" ]] && return 0
+  cat >&2 <<'HINT'
+  These will make the LAST step of terraform destroy fail on DependencyViolation, after the
+  cluster and nodes are already gone. Remove them first (their data is not in the VPC — an S3
+  Files or EFS filesystem keeps its contents in S3 / the filesystem itself), then re-run:
+    aws ec2 describe-network-interfaces --network-interface-ids <eni> --query 'NetworkInterfaces[].Description'
+    # S3 Files: delete the mount targets, then the access points, then the filesystem
+    aws cloudcontrol delete-resource --type-name AWS::S3Files::MountTarget --identifier <fsmt-...>
+    aws cloudcontrol delete-resource --type-name AWS::S3Files::AccessPoint --identifier <fsap-...>
+    # EFS: aws efs delete-mount-target --mount-target-id <fsmt-...>
+    aws ec2 delete-security-group --group-id <sg>
+  Or pass --ignore-vpc-dependents to run destroy anyway and deal with the failure when it comes.
+HINT
+  return 1
+}
+
+# Security groups EKS created for this cluster and left behind. Unlike the foreign objects above,
+# these are unambiguously the cluster's own: EKS names them eks-cluster-sg-<cluster>-<id> and is
+# supposed to delete them with the cluster, but one survived a real teardown and then blocked the
+# VPC delete. Safe for this script to remove once the cluster is gone and nothing is attached —
+# which is asserted, not assumed, before each delete.
+sweep_eks_leftover_sgs() {
+  local cluster="$1" region="$2" vpc="$3" swept=0 sg
+  aws eks describe-cluster --name "$cluster" --region "$region" >/dev/null 2>&1 && return 0
+  for sg in $(aws ec2 describe-security-groups --region "$region" \
+    --filters "Name=vpc-id,Values=$vpc" "Name=group-name,Values=eks-cluster-sg-${cluster}-*" \
+    --query 'SecurityGroups[].GroupId' --output text 2>/dev/null | tr '\t' '\n' | sed '/^$/d'); do
+    local attached
+    attached="$(aws ec2 describe-network-interfaces --region "$region" \
+      --filters "Name=group-id,Values=$sg" --query 'length(NetworkInterfaces)' --output text 2>/dev/null || echo 1)"
+    if [[ "$attached" != "0" ]]; then
+      echo "  Leaving $sg alone: $attached network interface(s) still attached." >&2
+      continue
+    fi
+    if aws ec2 delete-security-group --group-id "$sg" --region "$region" >/dev/null 2>&1; then
+      echo "  Removed the security group EKS left behind: $sg"
+      swept=1
+    fi
+  done
+  return $(( swept == 1 ? 0 : 1 ))
+}
+
 # ── Step 3: Optional terraform destroy ───────────────────────────────────────
 if [[ "$RUN_DESTROY" == "true" ]]; then
   echo ""
@@ -372,6 +524,21 @@ if [[ "$RUN_DESTROY" == "true" ]]; then
   echo "!!! This will DELETE the EKS cluster, VPC, and all associated resources. !!!"
   echo "!!! This cannot be undone.                                                !!!"
   echo ""
+  # Before an hour of destroy, not after: name anything in the VPC that this state does not own.
+  if [[ -n "$VPC_ID" ]] && [[ -n "$REGION" ]]; then
+    if ! vpc_dependents_report "$VPC_ID" "$REGION"; then
+      if [[ "$IGNORE_VPC_DEPENDENTS" != "true" ]]; then
+        echo "" >&2
+        echo "Error: refusing to start destroy while the VPC holds objects listed above." >&2
+        exit 1
+      fi
+      echo "  Proceeding anyway (--ignore-vpc-dependents)." >&2
+    fi
+  else
+    echo "  Note: could not read vpc_id/region from the state, so the VPC was not checked for" >&2
+    echo "        objects this state does not own. A destroy that fails at the end on" >&2
+    echo "        DependencyViolation is what that looks like." >&2
+  fi
   if confirm "  Run terraform destroy in $INFRA_DIR?"; then
     # Delete EVERY remaining Karpenter NodePool (monitoring, cpu, any leftover), not just the
     # accelerator ones from Step 2, BEFORE terraform destroy. terraform destroy's internal
@@ -399,10 +566,33 @@ if [[ "$RUN_DESTROY" == "true" ]]; then
     # resources?" on stdin — which in any non-interactive context (nohup, CI, a background run)
     # gets EOF and fails the whole destroy AFTER the Kubernetes cleanup has already happened.
     # That is the worst possible place to stop: the NodePools are gone but the cluster is not.
-    if [[ "$AUTO_YES" == "true" ]]; then
-      terraform destroy -auto-approve
-    else
-      terraform destroy
+    run_destroy() {
+      if [[ "$AUTO_YES" == "true" ]]; then
+        terraform destroy -auto-approve
+      else
+        terraform destroy
+      fi
+    }
+    # One retry, and only after removing something. A destroy that reaches the VPC and fails there
+    # has already deleted the cluster, which is what EKS was waiting on to clean up its own security
+    # group; sweeping that and going again finishes the job in the same run instead of leaving a VPC,
+    # its route table and two security groups behind for somebody to find later. If the sweep removed
+    # nothing, the failure is something this script cannot fix, so it is reported as-is rather than
+    # retried into the same wall.
+    if ! run_destroy; then
+      echo ""
+      echo "  Destroy failed. Checking whether EKS left its own security group behind..." >&2
+      if [[ -n "$VPC_ID" ]] && [[ -n "$REGION" ]] && sweep_eks_leftover_sgs "$CLUSTER_NAME" "$REGION" "$VPC_ID"; then
+        echo "  Retrying destroy now that it is gone."
+        run_destroy
+      else
+        echo "  Nothing left to sweep — the failure above is not one this script can clear." >&2
+        if [[ -n "$VPC_ID" ]] && [[ -n "$REGION" ]]; then
+          echo "  What is still in the VPC:" >&2
+          vpc_dependents_report "$VPC_ID" "$REGION" || true
+        fi
+        exit 1
+      fi
     fi
   else
     echo "  Skipped. Run manually: cd $INFRA_DIR && terraform destroy"

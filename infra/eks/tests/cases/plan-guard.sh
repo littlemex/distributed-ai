@@ -381,3 +381,103 @@ test_plan_guard_installer_vars_are_declared() {
     return 1
   }
 }
+
+# The teardown script's VPC preflight. It exists because a real teardown spent 15 minutes on
+# "Still destroying..." and then failed three times with `DependencyViolation: resource sg-... has a
+# dependent object` — an error that names the object it could not delete and never the dependent
+# holding it. The dependents were an S3 Files filesystem's mount-target ENIs and their security
+# group, created outside that state in the same VPC.
+#
+# Two properties have to hold, and they pull in opposite directions, which is why both are tested:
+# it must name a foreign object that will block the destroy, and it must NOT name one the state owns
+# (the profiling installer legitimately puts an S3 Files mount target in this VPC). A check that
+# cried wolf on the platform's own resources would be turned off, and then it protects nothing.
+_pg_teardown() { printf '%s' "$SCRIPT_DIR/../scripts/04-teardown.sh"; }
+
+# Runs vpc_dependents_report with aws and terraform stubbed from fixture files. Echoes "clean" or
+# the report, so a test can assert on what was named.
+_pg_vpc_report() {
+  local enis="$1" sgs="$2" rules="$3" state_ids="$4"
+  local dir out
+  dir="$(mktemp -d)"
+  printf '%s' "$enis"      >"$dir/enis"
+  printf '%s' "$sgs"       >"$dir/sgs"
+  printf '%s' "$rules"     >"$dir/rules"
+  printf '%s' "$state_ids" >"$dir/ids"
+  {
+    printf 'INFRA_DIR=%s\n' "$dir"
+    # terraform show -json feeds the "what does the state own" set; the fixture is the id list, so
+    # the stub wraps it into the shape the function's python walker reads.
+    cat <<'STUB'
+terraform() {
+  python3 -c "
+import json,sys
+ids=[l for l in open(sys.argv[1]).read().split() if l]
+print(json.dumps({'values':{'root_module':{'resources':[{'values':{'id':i}} for i in ids]}}}))
+" "$INFRA_DIR/ids"
+}
+aws() {
+  case "$*" in
+    *describe-network-interfaces*length*) printf '0\n' ;;
+    *describe-network-interfaces*)        cat "$INFRA_DIR/enis" ;;
+    *describe-security-group-rules*)      cat "$INFRA_DIR/rules" ;;
+    *describe-security-groups*)           cat "$INFRA_DIR/sgs" ;;
+    *) : ;;
+  esac
+}
+STUB
+    sed -n '/^vpc_dependents_report()/,/^}/p' "$(_pg_teardown)"
+    printf 'if vpc_dependents_report vpc-test us-east-2 2>&1; then echo clean; fi\n'
+  } >"$dir/run.sh"
+  grep -q '^vpc_dependents_report()' "$dir/run.sh" || { printf 'could not extract vpc_dependents_report\n' >&2; rm -rf "$dir"; return 2; }
+  bash "$dir/run.sh" 2>&1
+  rm -rf "$dir"
+}
+
+test_plan_guard_teardown_names_foreign_vpc_dependents() {
+  command -v python3 >/dev/null || return 2
+  [ -f "$(_pg_teardown)" ] || return 2
+  local fails=0 out
+  local mt_eni="eni-foreign	S3 Files mount target for fs-0abc (fsmt-0abc)"
+  local own_eni="eni-owned	S3 Files mount target for fs-0own (fsmt-0own)"
+
+  # A mount target ENI the state does not know about: named, with its description, because the
+  # description is the only thing that says whose filesystem it is.
+  out="$(_pg_vpc_report "$mt_eni" "" "" "sg-ours")"
+  case "$out" in
+    *eni-foreign*fsmt-0abc*) ;;
+    *) printf 'FAIL a foreign mount target ENI was not named: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  # The same shape, but the mount target IS in the state (this is what the profiling installer
+  # creates). Reporting it would make the check a nuisance on every profiling cluster.
+  out="$(_pg_vpc_report "$own_eni" "" "" "fsmt-0own")"
+  case "$out" in
+    clean) ;;
+    *) printf 'FAIL a mount target the state owns was reported: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  # A foreign security group is only a problem when its rules reference one of ours — that
+  # reference is what turns our delete into DependencyViolation.
+  out="$(_pg_vpc_report "" "sg-foreign	s3files-mt" "sg-ours" "sg-ours")"
+  case "$out" in
+    *sg-foreign*sg-ours*) ;;
+    *) printf 'FAIL a foreign SG referencing ours was not named: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  # One that references nothing of ours cannot block anything, so it stays out of the report.
+  out="$(_pg_vpc_report "" "sg-foreign	unrelated" "sg-somebody-else" "sg-ours")"
+  case "$out" in
+    clean) ;;
+    *) printf 'FAIL an unrelated foreign SG was reported: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  # The default security group is created with the VPC and deleted with it; never report it.
+  out="$(_pg_vpc_report "" "sg-default	default" "sg-ours" "sg-ours")"
+  case "$out" in
+    clean) ;;
+    *) printf 'FAIL the default SG was reported: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  [ "$fails" -eq 0 ] || return 1
+}
