@@ -48,8 +48,10 @@ Paired, over those 80 items:
 | sonnet-5 vs haiku-4-5 | +7.5 pp | 12 | p = 0.146 |
 | haiku-4-5 vs gemma-4 | +2.5 pp | 12 | p = 0.774 |
 
-So the quality claim is narrow and worth stating exactly: **the box is indistinguishable from
-`claude-sonnet-5` and from `claude-haiku-4-5`, and better than `gemma-4`.** What is not narrow is the
+So the quality claim is narrow and worth stating exactly: **the box is not separated from `claude-sonnet-5`
+or `claude-haiku-4-5` by this experiment, and is better than `gemma-4`.** "Not separated" is not "equal" — 9
+discordant pairs against sonnet-5 cannot support a parity claim, and no non-inferiority margin was declared for
+that pair. Only the `gemma-4` comparison is a finding. What is not narrow is the
 price. Against the layer it ties with, the box costs $4.505 per thousand items against $58.313 — **12.9x
 cheaper** — and answers in half the time at the median.
 

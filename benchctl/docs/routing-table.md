@@ -119,7 +119,9 @@ separate measurement: it never returns a cached token on this gateway in any req
 
 None of the three attempts moved a quality number, and the box stays on the frontier throughout.
 
-**Almost nothing here is separable on 278 items.** Nearly every pair returns p > 0.1: gemma-4 against the box
+**Almost nothing here is separable on 278 items, which is a statement about the experiment and not about the
+layers.** A null result is "not distinguished", never "equal"; none of the pairs below has a non-inferiority
+margin declared, so none of them supports a parity claim. Nearly every pair returns p > 0.1: gemma-4 against the box
 is 1.4 points with p = 0.597, gemma-4 against sonnet-5 is p = 0.581, gemma-4 against opus-5 is p = 1.000.
 The only significant results are the wins over haiku and gpt-5.6-terra. An advisor's warning that a
 ten-point claim needs 25–50 discordant pairs and 150–300 items is borne out from the other side: the

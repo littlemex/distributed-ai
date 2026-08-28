@@ -58,14 +58,15 @@ handed fewer items was handed the easier ones. On the 200 items every layer answ
 
 `gpt-5.6-terra` is the clearest illustration of what the table is for: it **ties the box exactly** on the
 common set, and is dominated by it anyway at sixteen times the cost and sixteen times the latency. On their
-own 270-item intersection the two are indistinguishable — 3.7 points, 40 discordant pairs, p = 0.154.
+own 270-item intersection the difference is 3.7 points over 40 discordant pairs at p = 0.154, which is
+underpowered rather than equal: the experiment did not separate them.
 
 Four more layers — gpt-5.6-sol, gpt-5.5, grok-4.6, gemma-4 — are measuring as this is written. The roster is
 reachable after all: `/v1/models` lists 23 Anthropic models, but these five answer when addressed by name, so
 **the gateway under-reports its own allowlist and a roster cannot be enumerated from the API.**
 
 **The frontier is two layers wide: sonnet-5 and the box.** haiku is dominated outright, worse than the box
-at 2.7 times the cost. opus-5 is dominated by sonnet-5, and the two are statistically indistinguishable
+at 2.7 times the cost. opus-5 is dominated by sonnet-5, and their difference is not significant
 anyway — 8 discordant pairs, p = 0.73.
 
 **The box wins the latency axis outright**, at 0.11 s per item against 1.26 / 1.99 / 2.61 for the three APIs.

@@ -29,6 +29,11 @@ exactly and only where the box beats the cheap tier. That is testable, and this 
 mechanism is the one predicted: the box turns 82.5% of its prompt tokens into cache reads at 8% of the fresh
 rate, and `gemma-4` pays its flat rate on essentially all of them.
 
+**Read that at one significant figure, and read the next section before acting on it.** Six conversations
+against one replica pair with nothing else running is the flat top of this box's own cache-survival curve, and
+the break-even below is close enough to what the pool holds under contention that the margin may not survive
+being busy. Everything here is measured at the box's best corner.
+
 Two corrections to that headline, both of which narrow it.
 
 **`gemma-4` was more verbose, and verbosity is not a rate.** It wrote 690 output tokens against the box's 213
@@ -40,6 +45,31 @@ includes a model behaviour that a different prompt might change.
 sentence, which made the traffic 1,326:1 input-to-output. AgentX's corpus is 117:1. Since the box's output rate
 is $4.12 per Mtok against `gemma-4`'s $0.40 — **ten times worse** — squeezing output out of the shape hands the
 box an advantage the real traffic does not give it. Prefill fidelity is not shape fidelity.
+
+## Is gemma-4 a strawman? No, and it is worth showing why
+
+`gemma-4` is the one API layer here that cannot cache, so comparing the box's cached rate against its flat rate
+invites the objection that the box is being measured against the API's worst representative on exactly the
+traffic that suits the box. The gateway has layers that reach 99.7% on this shape. The objection is answerable
+from the sourced rates without sending anything — the effective price of a prompt token at each layer's own
+measured hit rate:
+
+| layer | hit rate | fresh | cached | **effective $/Mtok of prompt** | output |
+| --- | --- | --- | --- | --- | --- |
+| **box-qwen36-tp2x2** | 82.5% | $0.236 | $0.019 | **$0.0568** | $4.12 |
+| api-gemma-4 | 3.1% | $0.140 | none published | $0.1400 | $0.40 |
+| api-gpt-5.6-terra | 99.7% | $2.200 | $0.220 | $0.2259 | $13.20 |
+| api-sonnet-5 | 99.8% | $3.000 | $0.300 | $0.3054 | $15.00 |
+| api-gpt-5.6-sol | 99.7% | $4.400 | $0.440 | $0.4519 | $22.00 |
+| api-haiku-4-5 | 0.0% | $1.000 | $0.100 | $1.0000 | $5.00 |
+| api-opus-5 | 99.8% | $15.000 | $1.500 | $1.5270 | $75.00 |
+
+**No layer's cached rate reaches the box's, and `gemma-4` is still the cheapest API even against layers running
+at 99.8%** — because a cache read at a tenth of $4.40 is three times `gemma-4`'s full $0.14. So `gemma-4` is the
+correct comparator rather than a convenient one, and the box's prefill advantage is structural rather than an
+artefact of who it was compared against. At the measured shape the whole roster comes out: box $1.635, gemma-4
+$1.953, gpt-5.6-terra $5.825, sonnet-5 $7.268, gpt-5.6-sol $10.713, haiku-4-5 $14.403, opus-5 $36.342 per
+thousand requests.
 
 ## The break-even, which is the actual routing rule
 
@@ -58,13 +88,57 @@ At the measured shape the box needs **71.4%** and achieves **82.5%**, so the mar
 AgentX's true 117:1 the same hit rate would make it **1.56x** cheaper. And at 19:1 there is no hit rate that
 saves it: a decode-heavy family goes to `gemma-4` however well the cache works.
 
-That is the rule this project was looking for, and it is narrower than "the box is cheap":
+### The margin is thinner than it looks, because the two requirements fight each other
 
-- **Prefill-heavy traffic with a reused prefix → the box.** It is the only cheap layer here with a working
-  cache, and 82.5% of a 12k-token shared preamble is worth more than a tenth-of-a-cent input rate.
+The box is cheap only if it is busy — its rate is an hourly cost divided by throughput — and it is cheap only if
+its cache hits. Those pull in opposite directions, because occupancy comes from concurrent conversations and
+concurrent conversations evict each other's prefixes. Putting the break-even on the same axis as
+`results-prefix-survival.md`'s measured hit rates:
+
+| box occupancy | hit rate needed at 63:1 | at 117:1 | what the pool holds |
+| --- | --- | --- | --- |
+| 100% | 71.4% | 58.8% | 99% up to 12 conversations, 71% at 20, **0% at 32** |
+| 75% | 88.2% | 75.3% | |
+| 50% | **never** | 91.9% | |
+| 25% | **never** | **never** | |
+
+At 63:1 the box needs 71.4% at full occupancy, and the pool delivers 71.0% once 20 conversations are competing
+— so the winning region at that ratio is approximately the zero-contention corner this run measured in. Only the
+more prefill-skewed 117:1 shape has visible room: 58.8% needed against 99% held at twelve conversations.
+
+That is the honest form of the box's side of the rule: **it wins at low contention on very prefill-skewed
+traffic**, not "on agentic traffic". Which arrival rates, if any, are simultaneously busy enough to amortise the
+hourly cost and quiet enough to stay above the break-even is a single sweep that has not been run, and it is the
+next measurement rather than a caveat.
+
+### As a principle, and as something a router could actually evaluate
+
+The principle is narrower than "the box is cheap":
+
+- **Prefill-heavy traffic with a reused prefix → the box.** It is the only layer here whose cached rate is an
+  order of magnitude below every API's, and 82.5% of a 12k-token shared preamble is worth more than a
+  tenth-of-a-cent input rate.
 - **Single-shot traffic → `gemma-4`.** Zero reuse means the box pays its fresh $0.236 against `gemma-4`'s
   $0.14, and loses on output ten to one on top. That is exactly why it loses on OCRBench and summarisation.
 - **Decode-heavy traffic → `gemma-4`**, regardless of reuse.
+
+But "prefill-heavy with reuse" is a statement about a token shape, and a router cannot evaluate it: reuse is a
+claim about the future. An advisor's reframing is the one worth adopting, because it turns every term into
+something knowable when the request arrives — **reuse is a property of a session, and sessions are identifiable**:
+
+- **Turn 2 or later of a session whose prefix is already resident on the box → the box.** No forecasting: the
+  prefix is known to be there.
+- **Admit a new session to the box only while pool occupancy is below the cliff** — under half, on this box's
+  measured curve. This is admission control, and it is what the survival experiment is *for* rather than a
+  caveat attached to it.
+- **Turn 1, single-shot, and anything refused admission → the API.**
+
+That last line has a consequence the shape-based rule got wrong. Traffic that overflows the box is by definition
+prefix-reusing traffic, and `gemma-4` is the worst API layer for it on quality-per-dollar terms while being the
+cheapest on price — so overflow is exactly where the choice between `gemma-4` and a caching premium layer needs
+its own answer, and this run does not have one.
+
+None of that is measured yet. It is a design, and the sweep in the section above is what would test it.
 
 ## The premium layers, for completeness
 
@@ -88,9 +162,20 @@ budget before it speaks, at a 96-token cap; its cost per request is over the req
 **Nothing about quality.** The traffic is synthetic, built to a token shape. The families that measure quality
 measure it on real items.
 
-**The box's cost is at 100% utilisation**, as everywhere in this project. At half that occupancy the same work
-costs twice as much, and the 71.4% break-even becomes unreachable. The API rates carry no equivalent
-assumption, so this comparison is at the box's optimistic end and the margin above is the best case.
+**The box's cost is at 100% utilisation**, as everywhere in this project, and the table above is what that
+assumption is worth: at half occupancy the 71.4% break-even is unreachable at any hit rate. The API rates carry
+no equivalent assumption. Four significant figures on $1.636 are not meaningful against a denominator that could
+move it two to five times; one is.
+
+**The 8.2% cached-token rate is a saturation figure.** It was fitted at 16 requests in flight, so it is the
+incremental cost of a cached token on a machine that other traffic is already filling. On a quiet machine the
+average cost of every token rises together, which is the same assumption as the paragraph above and not an
+independent one.
+
+**The latency comparison is not like-for-like on load.** Both figures are full-completion latency at
+concurrency 1 from the same client, but the box was otherwise idle while the API is a shared service under
+whatever load it had. The survival experiment measures what the box's own gap does under contention: from 1.4 s
+to 218 s across the same occupancy range as the table above.
 
 **One box configuration and one gateway.** `gemma-4`'s 3.1% is measured on this gateway, which returns no
 cached tokens for it in any shape probed; the 3.1% here is small enough to be block-boundary noise on a shared
