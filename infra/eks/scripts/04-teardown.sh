@@ -422,26 +422,55 @@ walk(doc.get('values', {}), out)
 print('\n'.join(sorted(out)))
 " 2>/dev/null || true)"
 
+  # AWS creates ENIs on behalf of things this state DOES own, and gives them ids the state never
+  # sees: a NAT gateway's ENI, the EKS control plane's cross-account ENIs, and every node's primary
+  # and CNI-secondary ENIs. Matching on the ENI id alone therefore reported a perfectly clean
+  # cluster as full of foreign objects — verified live on a cluster with nothing but its own nodes,
+  # which listed the node ENIs, the control-plane ENIs and its own NAT gateways, and told the
+  # operator to delete them. Since --destroy is the documented path and monitoring keeps a node
+  # resident by default, that made the primary teardown route unusable without the override.
+  #
+  # So ownership is answered three ways now: the id or a parent id inside the description is in the
+  # state (covers NAT gateways, VPC endpoints, S3 Files / EFS mount targets), the description names
+  # this cluster's control plane, or the ENI is attached to an instance carrying this cluster's
+  # kubernetes.io/cluster tag. That last one is what covers nodes: Karpenter and the managed
+  # nodegroup terminate them during destroy, so they are in transit, not blockers.
+  local cluster instance_ids
+  cluster="$(terraform -chdir="$INFRA_DIR" output -raw cluster_name 2>/dev/null || true)"
+  instance_ids=""
+  if [[ -n "$cluster" ]]; then
+    instance_ids="$(aws ec2 describe-instances --region "$region" \
+      --filters "Name=vpc-id,Values=$vpc" "Name=tag-key,Values=kubernetes.io/cluster/${cluster}" \
+      --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null | tr '\t' '\n' || true)"
+  fi
+
   local enis sgs
   enis="$(aws ec2 describe-network-interfaces --region "$region" \
     --filters "Name=vpc-id,Values=$vpc" \
-    --query 'NetworkInterfaces[].[NetworkInterfaceId,Description]' --output text 2>/dev/null || true)"
+    --query 'NetworkInterfaces[].[NetworkInterfaceId,Attachment.InstanceId,Description]' --output text 2>/dev/null || true)"
   sgs="$(aws ec2 describe-security-groups --region "$region" \
     --filters "Name=vpc-id,Values=$vpc" \
     --query 'SecurityGroups[].[GroupId,GroupName]' --output text 2>/dev/null || true)"
 
-  local found=0 id desc name
+  local found=0 id desc name attached
   # An ENI in a subnet this state owns blocks that subnet's delete, whatever created it. The
   # description is what identifies the owner: AWS writes "S3 Files mount target for fs-... (fsmt-...)",
-  # "EFS mount target for fs-...", "ELB app/...", "VPC Endpoint Interface vpce-...". The ids inside it
-  # are checked against the state too, since a managed mount target's ENI has an unmanaged ENI id.
-  while IFS=$'\t' read -r id desc; do
+  # "EFS mount target for fs-...", "ELB app/...", "VPC Endpoint Interface vpce-...",
+  # "Interface for NAT Gateway nat-...". The ids inside it are checked against the state too, since
+  # an ENI created on behalf of a managed resource has an id the state never sees.
+  while IFS=$'\t' read -r id attached desc; do
     [[ -n "$id" ]] || continue
     printf '%s\n' "$state_ids" | grep -qxF "$id" && continue
+    # Attached to one of this cluster's own nodes: in transit, not a blocker.
+    if [[ -n "$attached" && "$attached" != "None" && -n "$instance_ids" ]]; then
+      printf '%s\n' "$instance_ids" | grep -qxF "$attached" && continue
+    fi
+    # This cluster's control-plane ENIs. AWS names them after the cluster and owns the ids.
+    [[ -n "$cluster" && "$desc" == "Amazon EKS ${cluster}" ]] && continue
     local claimed=0 tok
     for tok in $(printf '%s' "$desc" | tr -c 'a-zA-Z0-9-' ' '); do
       case "$tok" in
-        fsmt-* | fsap-* | fs-* | vpce-* | eni-*)
+        fsmt-* | fsap-* | fs-* | vpce-* | eni-* | nat-* | i-*)
           printf '%s\n' "$state_ids" | grep -qxF "$tok" && { claimed=1; break; } ;;
       esac
     done

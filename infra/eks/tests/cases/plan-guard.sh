@@ -396,6 +396,10 @@ _pg_teardown() { printf '%s' "$SCRIPT_DIR/../scripts/04-teardown.sh"; }
 
 # Runs vpc_dependents_report with aws and terraform stubbed from fixture files. Echoes "clean" or
 # the report, so a test can assert on what was named.
+# ENI fixtures are three tab-separated fields, the same shape the function now queries:
+# <eni-id> <attached instance id or None> <description>. PG_VPC_CLUSTER and PG_VPC_INSTANCES set
+# what `terraform output -raw cluster_name` and `describe-instances` return, which is how the
+# function decides that a node's ENI belongs to this cluster.
 _pg_vpc_report() {
   local enis="$1" sgs="$2" rules="$3" state_ids="$4"
   local dir out
@@ -404,12 +408,18 @@ _pg_vpc_report() {
   printf '%s' "$sgs"       >"$dir/sgs"
   printf '%s' "$rules"     >"$dir/rules"
   printf '%s' "$state_ids" >"$dir/ids"
+  printf '%s' "${PG_VPC_CLUSTER:-}"   >"$dir/cluster"
+  printf '%s' "${PG_VPC_INSTANCES:-}" >"$dir/instances"
   {
     printf 'INFRA_DIR=%s\n' "$dir"
     # terraform show -json feeds the "what does the state own" set; the fixture is the id list, so
-    # the stub wraps it into the shape the function's python walker reads.
+    # the stub wraps it into the shape the function's python walker reads. `output -raw
+    # cluster_name` is a separate call and answers from its own fixture.
     cat <<'STUB'
 terraform() {
+  case "$*" in
+    *output*cluster_name*) cat "$INFRA_DIR/cluster"; return 0 ;;
+  esac
   python3 -c "
 import json,sys
 ids=[l for l in open(sys.argv[1]).read().split() if l]
@@ -418,6 +428,7 @@ print(json.dumps({'values':{'root_module':{'resources':[{'values':{'id':i}} for 
 }
 aws() {
   case "$*" in
+    *describe-instances*)                 cat "$INFRA_DIR/instances" ;;
     *describe-network-interfaces*length*) printf '0\n' ;;
     *describe-network-interfaces*)        cat "$INFRA_DIR/enis" ;;
     *describe-security-group-rules*)      cat "$INFRA_DIR/rules" ;;
@@ -438,8 +449,8 @@ test_plan_guard_teardown_names_foreign_vpc_dependents() {
   command -v python3 >/dev/null || return 2
   [ -f "$(_pg_teardown)" ] || return 2
   local fails=0 out
-  local mt_eni="eni-foreign	S3 Files mount target for fs-0abc (fsmt-0abc)"
-  local own_eni="eni-owned	S3 Files mount target for fs-0own (fsmt-0own)"
+  local mt_eni="eni-foreign	None	S3 Files mount target for fs-0abc (fsmt-0abc)"
+  local own_eni="eni-owned	None	S3 Files mount target for fs-0own (fsmt-0own)"
 
   # A mount target ENI the state does not know about: named, with its description, because the
   # description is the only thing that says whose filesystem it is.
@@ -455,6 +466,53 @@ test_plan_guard_teardown_names_foreign_vpc_dependents() {
   case "$out" in
     clean) ;;
     *) printf 'FAIL a mount target the state owns was reported: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  # The three shapes that made this check unusable on a clean cluster. Verified live: a cluster
+  # whose VPC held nothing but its own nodes reported the node ENIs, the control-plane ENIs and its
+  # own NAT gateways, and told the operator to delete them. AWS creates all three on behalf of
+  # resources this state owns, and gives them ids the state never sees.
+  out="$(PG_VPC_CLUSTER=mycluster PG_VPC_INSTANCES=i-0node \
+    _pg_vpc_report $'eni-node\ti-0node\taws-K8S-i-0node' "" "" "sg-ours")"
+  case "$out" in
+    clean) ;;
+    *) printf 'FAIL a node ENI of this cluster was reported: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  # A node's primary ENI carries no description at all; only the attachment identifies it.
+  out="$(PG_VPC_CLUSTER=mycluster PG_VPC_INSTANCES=i-0node \
+    _pg_vpc_report $'eni-primary\ti-0node\t' "" "" "sg-ours")"
+  case "$out" in
+    clean) ;;
+    *) printf 'FAIL a node primary ENI was reported: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  out="$(PG_VPC_CLUSTER=mycluster _pg_vpc_report $'eni-cp\tNone\tAmazon EKS mycluster' "" "" "sg-ours")"
+  case "$out" in
+    clean) ;;
+    *) printf 'FAIL this cluster control-plane ENI was reported: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  out="$(_pg_vpc_report $'eni-nat\tNone\tInterface for NAT Gateway nat-0ours' "" "" "nat-0ours")"
+  case "$out" in
+    clean) ;;
+    *) printf 'FAIL our own NAT gateway ENI was reported: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  # ...while another cluster's control plane in the same VPC still has to be named: it is exactly
+  # the thing that will fail the subnet delete, and this state cannot remove it.
+  out="$(PG_VPC_CLUSTER=mycluster _pg_vpc_report $'eni-other\tNone\tAmazon EKS someone-else' "" "" "sg-ours")"
+  case "$out" in
+    *eni-other*someone-else*) ;;
+    *) printf 'FAIL another cluster control-plane ENI was not named: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
+
+  # An instance that is not this cluster's is a real blocker, attachment or not.
+  out="$(PG_VPC_CLUSTER=mycluster PG_VPC_INSTANCES=i-0node \
+    _pg_vpc_report $'eni-alien\ti-0alien\taws-K8S-i-0alien' "" "" "sg-ours")"
+  case "$out" in
+    *eni-alien*) ;;
+    *) printf 'FAIL a foreign node ENI was not named: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
   esac
 
   # A foreign security group is only a problem when its rules reference one of ours — that
