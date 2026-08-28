@@ -70,8 +70,11 @@ Two constraints on that script, learned the hard way today:
 
 ## What the table says today
 
-`specs/routing-table.json`: one suite, `ocrbench-stratified-278`, **nine layers**, 278 items. On the 195
-every layer answered:
+`specs/routing-table.json`: two suites now. `ocrbench-stratified-278` with **nine layers** over 278
+items, and `govreport-stratified-80` with four over 80, which is the point of storing per-item verdicts —
+the second family was merged in, not averaged in, and the OCR numbers did not move.
+
+### ocrbench-stratified-278, on the 195 every layer answered
 
 | layer | rate | $/1k items | latency p50 | frontier |
 | --- | --- | --- | --- | --- |
@@ -95,6 +98,25 @@ is 1.4 points with p = 0.597, gemma-4 against sonnet-5 is p = 0.581, gemma-4 aga
 The only significant results are the wins over haiku and gpt-5.6-terra. An advisor's warning that a
 ten-point claim needs 25–50 discordant pairs and 150–300 items is borne out from the other side: the
 differences here are one to three points and need far more items than that.
+
+### govreport-stratified-80, on all 80, which all four layers answered
+
+| layer | rate | $/1k items | latency p50 | frontier |
+| --- | --- | --- | --- | --- |
+| **box-qwen36-tp2x2** | **0.812** | **$4.505** | 5.28 s | **yes** — best quality on the frontier |
+| api-sonnet-5 | 0.800 | $58.313 | 10.55 s | no — dominated by the box |
+| api-haiku-4-5 | 0.725 | $13.109 | 7.38 s | no — dominated by the box |
+| **api-gemma-4** | 0.700 | **$3.470** | 4.73 s | **yes** — the cheapest |
+
+The two suites disagree about the box, and that is the finding rather than a problem. On OCRBench it is
+0.923 against sonnet-5's 0.980 and loses on quality; here it is 0.800 against sonnet-5's 0.800 and wins on
+price by 12.9x. Both are true, they are different traffic, and a single table entry per layer would have had
+to average them into something false. The same table holds `score_version` per layer, because the
+summarisation family's first scorer was inverted and what belongs here is the corrected opinion.
+
+The reason the box's price advantage is so much larger on this family is structural and now measured: these
+requests have a long prefill and no prefix reuse, so the API's cache discount does not apply. Across 2.83
+million prompt tokens the gateway reported 0.04% cached. Full result in `results-summarise.md`.
 
 ## The frontier function was wrong twice, which is worth recording
 
