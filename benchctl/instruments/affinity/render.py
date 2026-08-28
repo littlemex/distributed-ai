@@ -18,6 +18,7 @@ Two things it must not get wrong, because either would fake a pass:
     like perfect affinity while proving nothing, so the key is logged per request and the log is checked.
 """
 
+import re
 import subprocess
 import sys
 
@@ -115,11 +116,42 @@ spec:
 """
 
 
+def deployed_upstreams() -> list[str]:
+    """The IPs the running router is actually pointing at, read from the config it has mounted."""
+    out = subprocess.run(
+        ["kubectl", "--context", CTX, "-n", NS, "get", "cm", "qwen-affinity-conf",
+         "-o", "jsonpath={.data.nginx\\.conf}"],
+        capture_output=True, text=True)
+    if out.returncode != 0:
+        return []
+    return re.findall(r"server\s+(\d+\.\d+\.\d+\.\d+):8000", out.stdout)
+
+
 def main() -> int:
     ips = pod_ips()
     if len(ips) < 2:
         print(f"affinity routing needs at least two replicas; found {len(ips)}", file=sys.stderr)
         return 1
+
+    # The upstreams are pod IPs, which is the price of hash-based affinity in open-source nginx: it cannot
+    # re-resolve a name inside `upstream {}` without losing the hash. So this config goes stale the moment a
+    # replica is rescheduled, silently — the Service keeps an endpoint, the router keeps answering DNS, and
+    # every request times out against an IP nobody holds.
+    #
+    # It happened. The vLLM pods were replaced and the router pointed at the old pair for two days while a
+    # results page went on citing its A/B, and every measurement in between quietly used the plain Service.
+    # So `--verify` exists, and any run that means to measure the affinity path should call it first.
+    if "--verify" in sys.argv:
+        live = deployed_upstreams()
+        if not live:
+            print("no qwen-affinity-conf ConfigMap: the router is not deployed", file=sys.stderr)
+            return 2
+        if sorted(live) != sorted(ips):
+            print(f"STALE: the router points at {sorted(live)} and the replicas are {sorted(ips)}. "
+                  f"Re-render and apply before measuring the affinity path.", file=sys.stderr)
+            return 3
+        print(f"[OK] the router's upstreams match the running replicas: {sorted(ips)}", file=sys.stderr)
+        return 0
     servers = "\n".join(f"    server {ip}:8000 max_fails=0;" for ip in ips)
     conf = CONF.format(servers=servers)
     print(MANIFEST.format(ns=NS, conf="\n".join("    " + line for line in conf.split("\n"))))

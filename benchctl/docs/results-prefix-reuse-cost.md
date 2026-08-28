@@ -181,7 +181,12 @@ to 218 s across the same occupancy range as the table above.
 cached tokens for it in any shape probed; the 3.1% here is small enough to be block-boundary noise on a shared
 preamble rather than a working cache.
 
-**The hit rate is not a constant.** 82.5% is what six conversations against one replica pair achieved with the
-conversation-affinity router. `results-prefix-survival.md` measures what happens to it under load, and the
+**The hit rate is not a constant, and this one is the no-affinity figure.** 82.5% is what six conversations
+against one replica pair achieved through the **plain Service**, not through the conversation-affinity router:
+that router pins pod IPs, the replicas had been rescheduled, and it had been timing out for two days without
+failing visibly. `results-agentx.md`'s A/B puts affinity at about 7.6 points on top, so the box's side of the
+break-even is probably better than measured here — and without affinity a session's turns alternate replicas,
+so every prefix is cached on *both*, which doubles the KV a session occupies and brings the cliff forward.
+Both of those are reasons to re-measure on the restored path rather than to adjust the number here. `results-prefix-survival.md` measures what happens to it under load, and the
 answer is a cliff: past about half the KV pool the hit rate goes to zero. A family that needs 71.4% to be worth
 routing to the box needs to know how close it is running to that cliff.

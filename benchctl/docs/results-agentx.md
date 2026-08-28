@@ -174,6 +174,18 @@ Same corpus, same 65 requests, same 4,171,xxx prompt tokens, same 94.14% theoret
 **Routing was 7.57 of the 9.18 missing points — 82% of the gap.** The remaining 1.61 points are the
 things the advisors named, and they are now the whole of what is left rather than a confound.
 
+**The router this A/B measured was dead for two days afterwards, and every later measurement in this project
+went through the plain Service.** Open-source nginx cannot re-resolve a name inside `upstream {}` without losing
+the hash, so `render.py` pins pod IPs — and when the vLLM replicas were rescheduled on 2026-08-27 the config
+kept pointing at the pair that no longer existed. Nothing failed loudly: the Deployment stayed Ready, the
+Service kept an endpoint, DNS kept answering, and requests to it simply timed out. Restored 2026-08-29 and
+verified from the router's own access log, which shows one correlation id landing on the same replica twice
+while a second id lands on the other. `render.py --verify` now compares the deployed upstreams against the
+running replicas and exits non-zero when they have drifted; any run that means to measure this path should call
+it first. The numbers in the table above stand — they were taken when it worked — but the 82.5% cache hit rate
+on `results-prefix-reuse-cost.md` is a **no-affinity** figure, and this A/B says affinity is worth about 7.6
+points on top of it.
+
 The tail is where it shows most. A 200,000-token prompt landing on the replica that does not hold its
 prefix was a 38-second first token; with affinity that case is gone and the worst is 6.8 s.
 
