@@ -97,7 +97,7 @@ spec:
         - { name: FI_PROVIDER,            value: "efa" }
         - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
         - { name: FI_EFA_FORK_SAFE,       value: "1" }
-        - { name: NCCL_SOCKET_IFNAME,     value: "^lo,docker,veth" }
+        - { name: NCCL_SOCKET_IFNAME,     value: {{ include "experiments.ncclSocketIfname" (dict "w" $v "root" $) | quote }} }
         - { name: NCCL_DEBUG,             value: "INFO" }
       resources:
         limits:

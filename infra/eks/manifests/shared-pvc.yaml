@@ -3,10 +3,10 @@
 #
 # Apply this ONCE PER NAMESPACE, by hand, outside any workload's render cycle:
 #
-#   POOL_PV=$(terraform output -json shared_storage | jq -r '.openzfs.persistent_volume')
+#   POOL_PV=$(terraform output -json shared_storage | jq -r '.fsx_openzfs.persistent_volume')
 #   sed "s/__VOLUME_NAME__/${POOL_PV}/" manifests/shared-pvc.yaml | kubectl apply -n "$NAMESPACE" -f -
 #
-# (swap .openzfs for .fsx_lustre or .fsx_openzfs to bind a different backend — see
+# (swap .fsx_openzfs for .fsx_lustre or .efs to bind a different backend — see
 # `terraform output shared_storage` for the full map)
 #
 # Why this is not part of the Helm chart: each backend exposes exactly ONE static PV

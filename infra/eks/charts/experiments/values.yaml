@@ -278,13 +278,18 @@ ncclTrainjob:
   # least one size in the hundreds of MiB for the bandwidth figure to mean anything.
   sizesMb: "512,1024"
   iters: 20
-  # NCCL's own socket bootstrap interface filter. The default excludes loopback and the CNI-side
-  # interfaces. Worth being explicit on EKS: the Pod Identity agent puts an IDENTICAL link-local
-  # address on every node, so letting auto-detection choose can pick an address that resolves to
-  # the wrong host.
-  socketIfname: "^lo,docker,veth"
+  # Per-workload override of the chart-wide ncclSocketIfname below. Empty = use that default.
+  socketIfname: ""
   # Copies bench.py onto the shared RWX volume (the runtime mounts /shared, not ConfigMaps).
   stageImage: public.ecr.aws/docker/library/busybox:1.36
+
+# NCCL's own socket bootstrap interface filter, shared by every NCCL workload here
+# (ncclProbe, ncclSshd, ncclTrainjob) so the pattern lives in exactly one place. The default
+# excludes loopback and the CNI-side interfaces. Worth being explicit on EKS: the Pod Identity
+# agent puts an IDENTICAL link-local address on every node, so letting auto-detection choose can
+# pick an address that resolves to the wrong host. Note this is an EXCLUDE pattern (leading "^"):
+# naming efa0,efa1,... instead fails the rendezvous, because efa-only interfaces carry no IP.
+ncclSocketIfname: "^lo,docker,veth"
 
 sharedStorage:
   # backend is informational only now (see existingClaimName below) — it used to select which

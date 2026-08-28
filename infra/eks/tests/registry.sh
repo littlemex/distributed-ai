@@ -50,6 +50,7 @@ register_all_tests() {
   # P0 chart-contract: render the workshop serving workloads and assert their structure. Cluster
   # not needed, so these run in baseline/static on every PR and catch a broken serving chart.
   register_test static-gpu-serving-contract   test_static_gpu_serving_contract   baseline static "$TIMEOUT_STATIC" helm
+  register_test static-nccl-ifname-source     test_static_nccl_socket_ifname_single_source baseline static "$TIMEOUT_STATIC" helm
   register_test static-neuron-plugin-contract test_static_neuron_plugin_contract baseline static "$TIMEOUT_STATIC" helm
 
   register_test control-plane   test_control_plane   baseline live-ro "$TIMEOUT_BASE"

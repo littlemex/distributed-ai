@@ -47,7 +47,7 @@ spec:
         - { name: FI_PROVIDER,            value: "efa" }
         - { name: FI_EFA_USE_DEVICE_RDMA, value: "1" }
         - { name: FI_EFA_FORK_SAFE,       value: "1" }
-        - { name: NCCL_SOCKET_IFNAME,     value: "^lo,docker,veth" }
+        - { name: NCCL_SOCKET_IFNAME,     value: {{ include "experiments.ncclSocketIfname" (dict "w" $v "root" $) | quote }} }
         # INFO, not WARN: the "NET/OFI Selected provider is efa" line that proves EFA is in use
         # rather than a silent TCP fallback is emitted at INFO only.
         - { name: NCCL_DEBUG,             value: "INFO" }

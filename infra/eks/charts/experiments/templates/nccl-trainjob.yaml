@@ -205,7 +205,7 @@ spec:
       # Exclude the loopback and CNI-side interfaces from NCCL's own socket bootstrap. On EKS the
       # Pod Identity agent puts an identical link-local address on EVERY node, so leaving
       # auto-detection to pick a "shared" address is a real hazard here.
-      - { name: NCCL_SOCKET_IFNAME, value: {{ $v.socketIfname | default "^lo,docker,veth" | quote }} }
+      - { name: NCCL_SOCKET_IFNAME, value: {{ include "experiments.ncclSocketIfname" (dict "w" $v "root" $) | quote }} }
       - { name: SIZES_MB,          value: {{ $v.sizesMb | default "512,1024" | quote }} }
       - { name: ITERS,             value: {{ $v.iters | default 20 | quote }} }
 {{- end }}
