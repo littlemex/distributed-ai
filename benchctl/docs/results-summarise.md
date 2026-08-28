@@ -17,15 +17,20 @@ the page because which one you believe is the whole question.
 | **box-qwen36-tp2x2** | **0.812** | **$4.505** | 5.28 s | **yes** |
 | api-sonnet-5 | 0.800 | $58.313 | 10.55 s | no, dominated by the box |
 | api-haiku-4-5 | 0.725 | $13.109 | 7.38 s | no, dominated by the box |
-| api-gemma-4 | 0.700 | **$60.000** | **4.73 s** | yes, but only as the fastest, by half a second |
+| **api-gemma-4** | 0.700 | **$1.548** | **4.73 s** | **yes**, as the cheapest and the fastest |
 
-`gemma-4`'s figure was **$3.470 when this page was first written**, and at that number it was the cheapest
-layer in the family. The rate had been transcribed into the spec by hand at $0.30 input where the gateway's own
-card says $5.00, understating it 17x. Corrected, it is the *most expensive* layer here as well as the least
-accurate, and it holds a place on the frontier only for finishing half a second faster than the box. The
-correction moved no quality number and no other layer's cost: haiku and sonnet-5 were transcribed correctly.
-See `cache-discount-eligibility.md` for how prices are resolved now, and `benchctl price` for how a recorded
-run gets re-priced without being re-run.
+`gemma-4`'s cost on this page has been wrong twice, in both directions, and the number above is the third. It
+was first $3.470, from a rate typed into the spec by hand at $0.30 input. It was then $60.000, from importing
+the gateway's own rate card — which turned out to price this model at a `default` row the card itself describes
+as a deliberate over-charge for models it does not know, and which put it at the top of the family instead of
+the bottom. **AWS publishes $0.14 input and $0.40 output** for `google.gemma-4-31b` in us-east-2, the region
+this gateway serves it from, at the `standard` service tier, which gives the $1.548 above. So it is the
+cheapest layer in this family by 2.9x over the box, and the second attempt at fixing the first attempt was the
+furthest from the truth.
+
+The correction moved no quality number and no other layer's cost here: haiku's and sonnet-5's rates are
+corroborated by two independent sources. See `routing-table.md` for how prices resolve now, and `benchctl
+price` for re-pricing a recorded run without re-running it.
 
 The box's cost is per item at full occupancy, which is the only honest way to price a fixed-cost box and is
 kept in its own ledger all the way to disk. Every rate is over the same 80 items — all four layers answered
@@ -165,8 +170,12 @@ footnote counts the same as the headline finding.
 **One box configuration, one gateway, one dataset in one language.** GovReport is English government prose;
 nothing here transfers to Japanese long-document summarisation without measuring it.
 
-**`gemma-4` was on this page as the cheapest layer and it is the most expensive one.** That is worth stating
-as a limitation rather than only as a correction: the number was wrong for a whole day, it was wrong in the
-direction that made a layer look good, and nothing about it looked wrong. Its quality deficit against the box
-and against sonnet-5 was real throughout at p = 0.023 and p = 0.022, so the quality ranking never depended on
-it.
+**`gemma-4`'s cost has been stated three ways on this page in one day**, spanning a factor of 39, and only the
+third has a source anyone can check. The lesson is not that a number was wrong; it is that the most
+official-looking source available — the serving gateway's own rate card — was the *worst* of the three, because
+it deliberately over-charges models it has no rate for and says so in a comment nobody read. Its quality
+deficit against the box and against sonnet-5 was real throughout at p = 0.023 and p = 0.022, so the quality
+ranking never depended on any of it.
+
+**The box's price is not from a rate card at all** and is not comparable in kind: it is an hourly machine cost
+divided by measured throughput at full occupancy. At half that occupancy the same work costs twice as much.

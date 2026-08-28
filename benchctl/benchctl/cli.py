@@ -346,6 +346,23 @@ def cmd_price(args) -> int:
                   f"{summary.get('box_usd_at_full_utilisation', 0.0):11.5f} "
                   f"{'':>11} {'box':>8}")
             continue
+        if layer.pricing_status == "placeholder" or layer.input_usd_per_mtok is None:
+            # Deliberately unpriced: no source for its rate, so it is compared on quality and latency and
+            # not on cost. Pricing it at zero would be the worst available answer, and an earlier draft of
+            # this command did exactly that.
+            print(f"{cell.id:28} {layer.id:20} "
+                  f"{'null' if summary.get('api_usd') is None else format(float(summary['api_usd']), '.5f'):>11} "
+                  f"{'':>11} {'unpriced':>8}")
+            if summary.get("api_usd") is not None and not args.dry_run:
+                # Null, not zero. A zero would join every cost comparison as the cheapest layer there is.
+                summary_path.write_text(json.dumps(
+                    summary | {"api_usd": None, "pricing_status": "placeholder",
+                               "pricing_key": layer.pricing_key,
+                               "api_usd_superseded": summary.get("api_usd")}, indent=2))
+                cost_path.write_text("".join(
+                    json.dumps(r | {"api_usd": None}, ensure_ascii=False) + "\n" for r in rows))
+                changed += 1
+            continue
 
         priced = []
         total = 0.0

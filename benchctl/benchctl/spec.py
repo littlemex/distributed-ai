@@ -299,7 +299,7 @@ def _index(raws: Iterable[dict], loader, kind: str) -> dict:
     return out
 
 
-RATE_CARD = Path(__file__).resolve().parents[1] / "specs/gateway-rates.json"
+RATE_CARD = Path(__file__).resolve().parents[1] / "specs/model-rates.json"
 
 
 def _rate_card(path: Path | None = None) -> dict:
@@ -310,47 +310,59 @@ def _rate_card(path: Path | None = None) -> dict:
 
 
 def apply_rate_card(layers: dict[str, Layer], card: dict, *, where: str = "layers") -> dict[str, Layer]:
-    """Resolve every API layer's price against the gateway's own card, and refuse a disagreement.
+    """Resolve every api layer's price from `specs/model-rates.json`, and refuse a disagreement.
 
-    Three cases, and the third is the one this exists for:
+    The table that gets consulted is built by `scripts/import_model_rates.py`, whose order is AWS Price List
+    first — at the model's own Bedrock region and at a named service tier — then a small reviewed file for the
+    models AWS does not publish, then nothing. "Then nothing" is a real outcome: a model listed under
+    `unpriced` keeps `pricing_status: placeholder` and must not be compared on cost.
 
-    * A layer names a `pricing_key` and no rates. The card fills them in, and `pricing_status` becomes
-      `gateway_rate_card` — a price from the horse's mouth rather than a transcription or a placeholder.
-    * A layer names neither. Left alone: the box is priced by the hour from measured throughput and is not
-      on the card at all.
-    * A layer names a key *and* rates. They must agree. `gemma-4` was carried in two specs at $0.30 input
-      against the card's $5.00, understating its measured cost 17x, and was published as the cheapest layer
-      on two frontiers on the strength of it. Nothing about a wrong price looks wrong, so the only place
-      the disagreement can surface is here.
+    What is deliberately *not* consulted is the gateway's own `pricing.json`. Importing it looked canonical
+    and was worse than the hand-typed numbers it replaced: five of its thirteen keys repeat its `default` row,
+    which the card itself describes as a deliberate over-charge for models it does not know. That put
+    `gemma-4` at $5.00 input against AWS's published $0.14 — 36x — after a hand-typed $0.30 had already put it
+    at 2x. Three numbers for one model, two of them wrong, and the wrongest arrived from the most official
+    looking source.
+
+    A layer that also states a literal rate must agree with the table, which is the check that catches a
+    transcription while it is still cheap to catch.
     """
-    rates, aliases = card.get("rates") or {}, card.get("aliases") or {}
+    rates = card.get("rates") or {}
+    unpriced = card.get("unpriced") or {}
     if not rates:
         _priced(layers, where)
         return layers
     out: dict[str, Layer] = {}
     for name, layer in layers.items():
-        key = layer.pricing_key or (aliases.get(layer.model) if layer.kind == "api" else None)
-        row = rates.get(key) if key else None
-        if row is None:
-            _require(layer.pricing_key is None,
-                     f"{where}.{name}: pricing_key {layer.pricing_key!r} is not a row in the rate card "
-                     f"({sorted(rates)}). Re-import it with scripts/import_gateway_rates.py.")
+        if layer.kind != "api":
             out[name] = layer
             continue
-        for field, carded in (("input_usd_per_mtok", row["input_usd_per_mtok"]),
-                              ("output_usd_per_mtok", row["output_usd_per_mtok"]),
-                              ("cache_read_usd_per_mtok", row["cache_read_usd_per_mtok"])):
-            declared = getattr(layer, field)
-            _require(declared is None or abs(declared - carded) < 1e-9,
-                     f"{where}.{name}: {field} is {declared} in the spec and {carded} in the gateway's "
-                     f"rate card for {key!r}. A hand-typed price that disagrees with the card is the "
-                     f"defect this check exists for; delete the literal and keep the pricing_key.")
+        key = layer.pricing_key or layer.model
+        row = rates.get(key)
+        if row is None:
+            _require(key in unpriced or layer.input_usd_per_mtok is not None,
+                     f"{where}.{name}: {key!r} is neither priced nor listed as unpriced in "
+                     f"{RATE_CARD.name}. Re-import with scripts/import_model_rates.py, or add it to "
+                     f"specs/vendor-rates.json with a source a reader can check.")
+            if key in unpriced:
+                # Comparable on quality and latency, never on cost, and the reason travels with it.
+                out[name] = replace(layer, pricing_status="placeholder", pricing_key=key)
+                continue
+            out[name] = layer
+            continue
+        for field in ("input_usd_per_mtok", "output_usd_per_mtok", "cache_read_usd_per_mtok"):
+            declared, sourced = getattr(layer, field), row.get(field)
+            _require(declared is None or sourced is None or abs(declared - sourced) < 1e-9,
+                     f"{where}.{name}: {field} is {declared} in the spec and {sourced} in "
+                     f"{RATE_CARD.name} for {key!r} ({row.get('source')}). A hand-typed price that "
+                     f"disagrees with a sourced one is the defect this check exists for; delete the "
+                     f"literal.")
         out[name] = replace(
             layer, pricing_key=key,
-            input_usd_per_mtok=row["input_usd_per_mtok"],
-            output_usd_per_mtok=row["output_usd_per_mtok"],
-            cache_read_usd_per_mtok=row["cache_read_usd_per_mtok"],
-            pricing_status="gateway_rate_card",
+            input_usd_per_mtok=row.get("input_usd_per_mtok"),
+            output_usd_per_mtok=row.get("output_usd_per_mtok"),
+            cache_read_usd_per_mtok=row.get("cache_read_usd_per_mtok"),
+            pricing_status=row.get("status") or "sourced",
         )
     _priced(out, where)
     return out
@@ -361,10 +373,12 @@ def _priced(layers: dict[str, Layer], where: str) -> None:
     for name, layer in layers.items():
         if layer.kind != "api":
             continue
+        if layer.pricing_status == "placeholder":
+            continue                    # unpriced on purpose, and excluded from cost comparisons
         _require(layer.input_usd_per_mtok is not None and layer.output_usd_per_mtok is not None,
-                 f"{where}.{name}: no price. Either the model alias {layer.model!r} is missing from the "
-                 f"gateway's rate card — re-import with scripts/import_gateway_rates.py — or the layer "
-                 f"needs an explicit pricing_key.")
+                 f"{where}.{name}: no price for {layer.model!r}. Re-import with "
+                 f"scripts/import_model_rates.py, or add it to specs/vendor-rates.json with a source, "
+                 f"or list it under `unpriced` there so it is compared on quality only.")
 
 
 def load_run(path: Path) -> Run:

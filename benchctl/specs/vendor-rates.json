@@ -1,0 +1,67 @@
+{
+  "$comment": [
+    "Rates that AWS does not publish in the Price List API and this project therefore cannot resolve",
+    "automatically. Every entry needs a `source` a reader can check, and anything not checkable belongs in",
+    "`unpriced` instead of here.",
+    "",
+    "This file exists because the alternative was worse twice over. Rates were first typed into each run",
+    "spec, where `gemma-4` sat at $0.30 input against AWS's published $0.14 and nobody could see it. They",
+    "were then imported wholesale from the gateway's own card, which turned out to price five keys at a",
+    "deliberate over-charge default \u2014 the card says so itself: 'A key absent from every layer falls back to",
+    "default, which is Opus-priced: an unpriced model must over-charge, never under-charge.' Importing that",
+    "default as a price put `gemma-4` at $5.00 input, 36x AWS's number, and published it as the most",
+    "expensive layer in a family where it is the cheapest.",
+    "",
+    "So: AWS Price List first, this file only where AWS publishes nothing, and `unpriced` where neither can",
+    "be sourced. A number with no source is not a price."
+  ],
+  "schema_version": 1,
+  "rates": {
+    "claude-haiku-4-5": {
+      "input_usd_per_mtok": 1.0,
+      "output_usd_per_mtok": 5.0,
+      "cache_read_usd_per_mtok": 0.1,
+      "source": "vendor list price for Claude Haiku 4.5; corroborated exactly by the gateway's own card row 'haiku', which is a distinct row rather than its over-charge default",
+      "status": "vendor_list"
+    },
+    "claude-sonnet-5": {
+      "input_usd_per_mtok": 3.0,
+      "output_usd_per_mtok": 15.0,
+      "cache_read_usd_per_mtok": 0.3,
+      "source": "vendor list price for the Sonnet tier; corroborated exactly by the gateway's card row 'sonnet', a distinct row",
+      "status": "vendor_list"
+    },
+    "claude-opus-5": {
+      "input_usd_per_mtok": 15.0,
+      "output_usd_per_mtok": 75.0,
+      "cache_read_usd_per_mtok": 1.5,
+      "source": "vendor list price for the Opus tier. NOT corroborated by the gateway's card, whose 'opus' row is identical to its over-charge default of $5.00/$25.00 and is therefore not a price. AWS publishes no Price List entry for this model.",
+      "status": "vendor_list"
+    },
+    "gpt-5.6-terra": {
+      "input_usd_per_mtok": 2.2,
+      "output_usd_per_mtok": 13.2,
+      "cache_read_usd_per_mtok": 0.22,
+      "source": "the gateway's card row 'gpt-5.6-terra', a distinct row rather than its default. AWS publishes no Price List entry for this model.",
+      "status": "gateway_card"
+    },
+    "gpt-5.6-sol": {
+      "input_usd_per_mtok": 4.4,
+      "output_usd_per_mtok": 22.0,
+      "cache_read_usd_per_mtok": 0.44,
+      "source": "the gateway's card row 'gpt-5.6-sol', a distinct row rather than its default. AWS publishes no Price List entry for this model.",
+      "status": "gateway_card"
+    },
+    "claude-fable-5": {
+      "input_usd_per_mtok": 10.0,
+      "output_usd_per_mtok": 50.0,
+      "cache_read_usd_per_mtok": 1.0,
+      "source": "the gateway's card row 'fable', a distinct row rather than its default. No public AWS or vendor price exists for this model.",
+      "status": "gateway_card"
+    }
+  },
+  "unpriced": {
+    "gpt-5.5": "The gateway's card maps it to key 'gpt-5', whose rates are identical to the over-charge default and are therefore not a price. AWS publishes no Price List entry. Comparable on quality and latency; must not be compared on cost.",
+    "grok-4.6": "Looked up by name in the AWS Price List, which publishes it; this entry is only here so the by-name lookup considers it, and AWS wins if it answers."
+  }
+}

@@ -602,7 +602,7 @@
           "model": "claude-haiku-4-5",
           "score_version": "v1",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "vendor_list",
           "run_id": "2026-08-28-ocrbench-v1",
           "caveats": [
             "image_wire_format=anthropic: images travel a different endpoint than text"
@@ -912,7 +912,7 @@
           "model": "claude-sonnet-5",
           "score_version": "v1",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "vendor_list",
           "run_id": "2026-08-28-ocrbench-v1",
           "caveats": [
             "temperature_not_pinned: the model rejects the parameter, so its answers are a distribution rather than a point and its interval is wider than the arithmetic",
@@ -1224,7 +1224,7 @@
           "model": "claude-opus-5",
           "score_version": "v1",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "vendor_list",
           "run_id": "2026-08-28-ocrbench-v1",
           "caveats": [
             "temperature_not_pinned: the model rejects the parameter, so its answers are a distribution rather than a point and its interval is wider than the arithmetic",
@@ -1522,8 +1522,8 @@
             "rate": 0.9651741293532339
           },
           "cost": {
-            "usd_total": 0.5181350000000002,
-            "usd_per_scored_item": 0.0025777860696517426,
+            "usd_total": 1.554405,
+            "usd_per_scored_item": 0.007733358208955224,
             "basis": "api_billed"
           },
           "latency_s": {
@@ -1536,7 +1536,7 @@
           "model": "gpt-5.6-terra",
           "score_version": "v1",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "gateway_card",
           "run_id": "2026-08-28-ocrbench-v1",
           "caveats": [
             "temperature_not_pinned: the model rejects the parameter, so its answers are a distribution rather than a point and its interval is wider than the arithmetic"
@@ -1846,7 +1846,7 @@
           "model": "gpt-5.6-sol",
           "score_version": "v1",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "gateway_card",
           "run_id": "2026-08-28-ocrbench-v1",
           "caveats": [
             "temperature_not_pinned: the model rejects the parameter, so its answers are a distribution rather than a point and its interval is wider than the arithmetic"
@@ -2156,9 +2156,11 @@
           "model": "gpt-5.5",
           "score_version": "v1",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "placeholder",
           "run_id": "2026-08-28-ocrbench-v1",
-          "caveats": [],
+          "caveats": [
+            "pricing_placeholder: comparable on quality, not on cost"
+          ],
           "cell_id": "ocr-gpt55-quality",
           "verdicts": {
             "ocrbench-00552": 1,
@@ -2448,9 +2450,9 @@
             "rate": 0.8453237410071942
           },
           "cost": {
-            "usd_total": 1.5778750000000008,
-            "usd_per_scored_item": 0.005675809352517988,
-            "basis": "api_billed"
+            "usd_total": null,
+            "usd_per_scored_item": null,
+            "basis": "no_sourced_price"
           },
           "latency_s": {
             "p50": 1.9017,
@@ -2462,7 +2464,7 @@
           "model": "grok-4.6",
           "score_version": "v1",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "aws_price_list",
           "run_id": "2026-08-28-ocrbench-v1",
           "caveats": [],
           "cell_id": "ocr-grok46-quality",
@@ -2770,7 +2772,7 @@
           "model": "gemma-4",
           "score_version": "v1",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "aws_price_list",
           "run_id": "2026-08-28-ocrbench-v1",
           "caveats": [],
           "cell_id": "ocr-gemma4-quality",
@@ -3062,8 +3064,8 @@
             "rate": 0.8597122302158273
           },
           "cost": {
-            "usd_total": 0.4870659999999995,
-            "usd_per_scored_item": 0.0017520359712230199,
+            "usd_total": 0.013824819999999988,
+            "usd_per_scored_item": 4.9729568345323696e-05,
             "basis": "api_billed"
           },
           "latency_s": {
@@ -3709,7 +3711,7 @@
           "model": "claude-haiku-4-5",
           "score_version": "v3",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "vendor_list",
           "run_id": "2026-08-28-summarise-v1",
           "caveats": [],
           "cell_id": "sum-haiku-quality",
@@ -3817,7 +3819,7 @@
           "model": "gemma-4",
           "score_version": "v3",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "aws_price_list",
           "run_id": "2026-08-28-summarise-v1",
           "caveats": [],
           "cell_id": "sum-gemma4-quality",
@@ -3911,8 +3913,8 @@
             "rate": 0.7
           },
           "cost": {
-            "usd_total": 4.800004,
-            "usd_per_scored_item": 0.060000050000000006,
+            "usd_total": 0.12385462000000003,
+            "usd_per_scored_item": 0.0015481827500000004,
             "basis": "api_billed"
           },
           "latency_s": {
@@ -3925,7 +3927,7 @@
           "model": "claude-sonnet-5",
           "score_version": "v3",
           "kind": "api",
-          "pricing_status": "gateway_rate_card",
+          "pricing_status": "vendor_list",
           "run_id": "2026-08-28-summarise-v1",
           "caveats": [
             "temperature_not_pinned: the model rejects the parameter, so its answers are a distribution rather than a point and its interval is wider than the arithmetic"

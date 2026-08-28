@@ -99,9 +99,13 @@ def ingest_cell(run_dir: Path, cell_id: str, score_version: str = "v1") -> dict:
     latencies = sorted(r["latency_s"] for r in responses.values() if r.get("latency_s"))
     summary = json.loads((cell / "summary.json").read_text()) if (cell / "summary.json").exists() else {}
     scored = [v for v in verdicts.values() if v is not None]
-    api_usd = float(summary.get("api_usd") or 0.0)
-    box_usd = float(summary.get("box_usd_at_full_utilisation") or 0.0)
-    total = api_usd or box_usd
+    # None, not zero, when a layer has no sourced price. Collapsing "unknown" to 0.0 makes the layer the
+    # cheapest thing in the table and, worse, makes it undominatable on cost — which put an unpriced layer on
+    # a published frontier once.
+    api_usd = None if summary.get("api_usd") is None else float(summary["api_usd"])
+    box_usd = None if summary.get("box_usd_at_full_utilisation") is None \
+        else float(summary["box_usd_at_full_utilisation"])
+    total = api_usd if api_usd else (box_usd if box_usd else None)
     return {
         "cell_id": cell_id,
         "verdicts": verdicts,
@@ -110,10 +114,11 @@ def ingest_cell(run_dir: Path, cell_id: str, score_version: str = "v1") -> dict:
                     "rate": (sum(scored) / len(scored)) if scored else None},
         "cost": {
             "usd_total": total,
-            "usd_per_scored_item": (total / len(scored)) if scored else None,
+            "usd_per_scored_item": (total / len(scored)) if (scored and total is not None) else None,
             # Which ledger the number came from, because they are not the same kind of number: one is a
             # bill and the other is an hourly rate divided by throughput at an assumed occupancy.
-            "basis": "api_billed" if api_usd else ("box_hour_at_full_occupancy" if box_usd else "unknown"),
+            "basis": ("api_billed" if api_usd else
+                      "box_hour_at_full_occupancy" if box_usd else "no_sourced_price"),
         },
         "latency_s": {
             "p50": statistics.median(latencies) if latencies else None,
@@ -272,6 +277,11 @@ def frontier(suite: dict, *, alpha: float = 0.05, latency_ratio: float = 1.10) -
         for o in rows:
             if o["layer"] == r["layer"]:
                 continue
+            if o["usd_per_item"] is None:
+                # A layer with no sourced price cannot dominate either. Its cost cannot be shown to be no
+                # higher, and letting "unknown" satisfy "not more expensive" is the same free pass that put
+                # an unpriced layer on the frontier, pointing the other way.
+                continue
             d = pair(o["layer"], r["layer"])
             n = d.get("n") or 0
             # The point estimate must not be worse. Using significance in this direction would be the
@@ -296,5 +306,10 @@ def frontier(suite: dict, *, alpha: float = 0.05, latency_ratio: float = 1.10) -
             strictly_better = quality_better or cheaper or (ol and rl and ol < rl / latency_ratio)
             if strictly_better and cost_ok:
                 r["dominated_by"].append(o["layer"])
-        r["on_frontier"] = not r["dominated_by"]
+        # A layer with no sourced price is not placed. It cannot be dominated on cost, so leaving it in the
+        # comparison hands it a free pass onto the frontier — which is how `gpt-5.5`, whose rate this project
+        # cannot source at all, briefly appeared as a frontier layer. Being unpriced is a reason to withhold
+        # a verdict, not a qualification.
+        r["unpriced"] = r["usd_per_item"] is None
+        r["on_frontier"] = not r["dominated_by"] and not r["unpriced"]
     return sorted(rows, key=lambda r: -r["rate"])

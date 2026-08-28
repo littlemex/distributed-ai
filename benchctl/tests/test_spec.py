@@ -251,11 +251,15 @@ class TestTheRateCardIsTheAuthority:
     """
 
     CARD = {
-        "rates": {"haiku": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 5.0,
-                            "cache_read_usd_per_mtok": 0.1, "cache_write_usd_per_mtok": 1.25},
-                  "gemma": {"input_usd_per_mtok": 5.0, "output_usd_per_mtok": 25.0,
-                            "cache_read_usd_per_mtok": 0.5, "cache_write_usd_per_mtok": 6.25}},
-        "aliases": {"claude-haiku-4-5": "haiku", "gemma-4": "gemma"},
+        "rates": {
+            "claude-haiku-4-5": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 5.0,
+                                 "cache_read_usd_per_mtok": 0.1, "status": "vendor_list",
+                                 "source": "vendor list price"},
+            # AWS's published rate, not the gateway card's over-charge default of $5.00.
+            "gemma-4": {"input_usd_per_mtok": 0.14, "output_usd_per_mtok": 0.40,
+                        "status": "aws_price_list", "source": "AWS Price List API, us-east-2, standard"},
+        },
+        "unpriced": {"gpt-5.5": "the gateway maps it to a key that repeats its over-charge default"},
     }
 
     def layer(self, **over) -> spec.Layer:
@@ -263,23 +267,29 @@ class TestTheRateCardIsTheAuthority:
                 "endpoint": "https://example.invalid/v1/chat/completions"}
         return spec.Layer(**(base | over))
 
-    def test_a_layer_with_no_rates_gets_them_from_the_card(self):
+    def test_a_layer_with_no_rates_gets_them_from_the_table(self):
         out = spec.apply_rate_card({"api-gemma-4": self.layer()}, self.CARD)
         got = out["api-gemma-4"]
-        assert (got.input_usd_per_mtok, got.output_usd_per_mtok) == (5.0, 25.0)
-        assert got.pricing_status == "gateway_rate_card"
-        assert got.pricing_key == "gemma"
+        assert (got.input_usd_per_mtok, got.output_usd_per_mtok) == (0.14, 0.40)
+        assert got.pricing_status == "aws_price_list"
 
-    def test_a_literal_that_disagrees_with_the_card_is_refused(self):
+    def test_a_literal_that_disagrees_with_the_table_is_refused(self):
         with pytest.raises(ValueError) as excinfo:
             spec.apply_rate_card({"api-gemma-4": self.layer(input_usd_per_mtok=0.30)}, self.CARD)
-        assert "0.3" in str(excinfo.value) and "5.0" in str(excinfo.value)
+        assert "0.3" in str(excinfo.value) and "0.14" in str(excinfo.value)
 
     def test_a_literal_that_agrees_is_allowed(self):
         out = spec.apply_rate_card(
             {"api-haiku-4-5": self.layer(id="api-haiku-4-5", model="claude-haiku-4-5",
                                          input_usd_per_mtok=1.0, output_usd_per_mtok=5.0)}, self.CARD)
-        assert out["api-haiku-4-5"].pricing_status == "gateway_rate_card"
+        assert out["api-haiku-4-5"].pricing_status == "vendor_list"
+
+    def test_a_model_listed_as_unpriced_is_a_placeholder_rather_than_a_failure(self):
+        """The point of `unpriced`: comparable on quality and latency, never on cost."""
+        out = spec.apply_rate_card({"api-gpt-55": self.layer(id="api-gpt-55", model="gpt-5.5")}, self.CARD)
+        got = out["api-gpt-55"]
+        assert got.pricing_status == "placeholder"
+        assert got.input_usd_per_mtok is None
 
     def test_a_self_hosted_layer_is_left_alone(self):
         box = spec.Layer(id="box", kind="self_hosted", model="Qwen/Qwen3.6-35B-A3B",
@@ -288,21 +298,27 @@ class TestTheRateCardIsTheAuthority:
         out = spec.apply_rate_card({"box": box}, self.CARD)
         assert out["box"] is box
 
-    def test_an_api_layer_the_card_does_not_know_must_be_priced_explicitly(self):
+    def test_an_api_layer_the_table_does_not_know_is_refused_rather_than_guessed(self):
         with pytest.raises(ValueError) as excinfo:
-            spec.apply_rate_card({"api-x": self.layer(id="api-x", model="not-on-the-card")}, self.CARD)
-        assert "no price" in str(excinfo.value)
+            spec.apply_rate_card({"api-x": self.layer(id="api-x", model="not-in-the-table")}, self.CARD)
+        assert "neither priced nor listed as unpriced" in str(excinfo.value)
 
-    def test_an_unknown_pricing_key_is_refused_rather_than_defaulted(self):
-        with pytest.raises(ValueError) as excinfo:
-            spec.apply_rate_card({"api-x": self.layer(id="api-x", pricing_key="typo")}, self.CARD)
-        assert "not a row in the rate card" in str(excinfo.value)
-
-    def test_the_imported_card_prices_every_layer_the_specs_use(self):
+    def test_every_api_layer_the_specs_use_is_either_sourced_or_declared_unpriced(self):
+        """No third state. A layer with no price and no `unpriced` entry would be silently uncomparable."""
         card = spec._rate_card()
-        assert card, "specs/gateway-rates.json is missing; run scripts/import_gateway_rates.py"
+        assert card, "specs/model-rates.json is missing; run scripts/import_model_rates.py"
         for path in sorted((ROOT / "specs/runs").glob("*.yaml")):
             run = spec.load_run(path)
             for cell in run.cells:
-                if cell.layer.kind == "api":
-                    assert cell.layer.input_usd_per_mtok is not None, f"{path.name}: {cell.layer.id}"
+                layer = cell.layer
+                if layer.kind != "api":
+                    continue
+                priced = layer.input_usd_per_mtok is not None
+                declared_unpriced = layer.pricing_status == "placeholder"
+                assert priced or declared_unpriced, f"{path.name}: {layer.id}"
+
+    def test_the_sourced_table_carries_a_source_for_every_price(self):
+        """A number with no source is not a price, which is the whole lesson of this file."""
+        for alias, row in (spec._rate_card().get("rates") or {}).items():
+            assert row.get("source"), alias
+            assert row.get("status") in {"aws_price_list", "vendor_list", "gateway_card"}, alias

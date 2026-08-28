@@ -79,27 +79,45 @@ the second family was merged in, not averaged in, and the OCR numbers did not mo
 | layer | rate | $/1k items | latency p50 | frontier |
 | --- | --- | --- | --- | --- |
 | api-sonnet-5 | **0.980** | $1.047 | 2.61 s | **yes** — most accurate |
-| api-opus-5 | 0.974 | $2.578 | 1.99 s | no — dominated by gemma-4 |
-| **api-gemma-4** | **0.974** | $1.752 | **0.97 s** | **yes** — near-top accuracy, fastest of the accurate |
-| api-gpt-5.5 | 0.959 | $5.676 | 1.90 s | no — and the most expensive layer here |
+| api-opus-5 | 0.974 | $7.733 | 1.99 s | no — dominated by gemma-4 |
+| **api-gemma-4** | **0.974** | **$0.050** | **0.97 s** | **yes** — near-top accuracy at the lowest price |
+| api-gpt-5.5 | 0.959 | **unpriced** | 1.90 s | not placed — no rate can be sourced |
 | api-gpt-5.6-sol | 0.949 | $3.128 | 2.20 s | no |
-| api-grok-4.6 | 0.949 | $1.820 | **8.64 s** | no — dominated by four layers |
-| **box-qwen36-tp2x2** | 0.923 | **$0.117** | **0.11 s** | **yes** — cheapest by 15x, and nine times the fastest API |
-| api-gpt-5.6-terra | 0.923 | $1.559 | 1.77 s | no — dominated by the box |
+| api-grok-4.6 | 0.949 | $1.820 | **8.64 s** | no — dominated by sonnet-5 and gemma-4 |
+| **box-qwen36-tp2x2** | 0.923 | $0.117 | **0.11 s** | **yes** — nine times faster than any API |
+| api-gpt-5.6-terra | 0.923 | $1.559 | 1.77 s | no — dominated by the box and gemma-4 |
 | api-haiku-4-5 | 0.810 | $0.311 | 1.26 s | no |
 
 **Three layers on the frontier, one per axis.** sonnet-5 is the most accurate, gemma-4 is within a whisker of
-it and the fastest of the accurate layers, and the box is both the cheapest by 15x and nine times faster than
-any API. Six of nine are dominated.
+it at **a fifth of the box's cost**, and the box answers nine times faster than any API. `gpt-5.5` is not
+placed at all: no rate for it can be sourced, and being unpriced is a reason to withhold a verdict rather than
+a qualification — it cannot be dominated on a cost it does not have, and an earlier version of this rule handed
+it a frontier place for exactly that reason.
 
-**Every cost in this table was corrected on 2026-08-28** and four of them moved by more than 50%. The rates had
-been transcribed into the specs by hand, and the gateway ships its own card: `gemma-4` was carried at $0.30
-input against the card's $5.00, so its cost here was understated **16x** and it was described as "the lowest
-price" when it is fifteen times the box's. `claude-opus-5` was overstated 3x, `gpt-5.5` understated 2x,
-`grok-4.6` overstated 1.8x. Rates now resolve from `specs/gateway-rates.json` and `benchctl validate` refuses
-a literal that disagrees with it; the runs on disk were re-priced from their own recorded token counts with
-`benchctl price`, without sending anything. What the correction did **not** change is any quality number or
-any conclusion about the box, which is the cheapest layer here either way.
+**The cost column was wrong twice before this, in opposite directions, and the second attempt was worse than
+the first.** It is worth setting out because the failure was in the choice of source, not in arithmetic.
+
+1. Rates were originally typed into each run spec by hand and marked `placeholder` where unknown. `gemma-4`
+   sat at $0.30 input, which is 2x AWS's published $0.14.
+2. They were then imported wholesale from the gateway's own `pricing.json`, which looked canonical. Five of
+   its thirteen keys repeat its `default` row, and the card says what that means: *"an unpriced model must
+   over-charge, never under-charge."* Importing that default as a price put `gemma-4` at $5.00 input — **36x**
+   AWS's number — and turned it from the cheapest layer in the summarisation family into the most expensive.
+3. Now: **the AWS Price List API**, at each model's own Bedrock region and at the `standard` service tier,
+   because these models are all served through Bedrock and what AWS charges is what the bill says. That
+   matters more than it sounds: this gateway serves the Claude family from us-east-1, `gemma-4` and the
+   gpt-5.x family from us-east-2 and `grok-4.6` from us-west-2, and AWS publishes eighteen rows for
+   `grok-4.6` in one region across `standard`, `flex`, `priority` and their `global-` variants, differing by
+   up to 5x. Anything AWS does not publish — the Claude 4.x/5 family, the gpt-5.x family — comes from
+   `specs/vendor-rates.json`, where every entry carries a source a reader can check. Anything neither can
+   source is `unpriced` and is not placed.
+
+`grok-4.6` is the one case where the gateway's card turned out to be exactly right and the hand-typed number
+wrong: AWS us-east-1 `standard` is $2.20 / $6.60 / $0.55 cache read, matching the card and not the $3.00 /
+$15.00 in the spec. And AWS publishes **no cache-read rate for `gemma-4`**, which is quiet corroboration of a
+separate measurement: it never returns a cached token on this gateway in any request shape.
+
+None of the three attempts moved a quality number, and the box stays on the frontier throughout.
 
 **Almost nothing here is separable on 278 items.** Nearly every pair returns p > 0.1: gemma-4 against the box
 is 1.4 points with p = 0.597, gemma-4 against sonnet-5 is p = 0.581, gemma-4 against opus-5 is p = 1.000.
