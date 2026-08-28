@@ -73,11 +73,16 @@ framing is wrong, and it is worth recording because the resulting number would h
 Prompt caching has a **minimum cacheable prefix**. A translation request is an instruction plus a short
 source and falls under it, so the discount does not apply at all — and even above the minimum the saving
 scales with cached tokens, so a short prefill caps the absolute benefit near zero regardless of hit rate.
-The regimes are:
+
+A later probe made the point harder than this argument does: on this gateway no Claude model does
+shared-prefix caching at *any* length, and `claude-haiku-4-5` returns no cached tokens under any condition at
+all (`cache-discount-eligibility.md`). So the discount was never the box's problem on this gateway, and a
+family built to demonstrate its absence would have been demonstrating something already true everywhere. The
+regimes, with that correction applied:
 
 | traffic | prefill | shared across requests | cache discount |
 | --- | --- | --- | --- |
-| agentic | long | yes, heavily | large — the box was 1.76x more expensive |
+| agentic | long | yes, heavily | assumed large — but measured at zero on this gateway |
 | long summarisation | long | no | impossible — measured at 0.04% cached |
 | translation | short | partly | impossible, below the minimum |
 

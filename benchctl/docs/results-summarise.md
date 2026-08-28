@@ -53,8 +53,10 @@ because a single-cell verdict would not be one.
 
 An advisor named this as the box's second candidate to win, and the reasoning was structural. A single-shot
 summary of a long report has a long prefill and **no prefix reuse**, so the API's cache discount does not
-apply — and that discount is the entire reason the box came out 1.76x *more* expensive on agentic traffic,
-where it was 3.0x cheaper than the same API with caching switched off.
+apply — and an assumed API cache discount is the entire reason the box came out 1.76x *more* expensive on
+agentic traffic, where against the same API with no cache it was 3.0x cheaper. "Assumed" is the correction:
+`cache-discount-eligibility.md` later measured that the API in that comparison never caches on this gateway at
+all, so the family this page contrasts itself with is a hypothetical one.
 
 Across 2.83 million prompt tokens sent to the three API layers, the gateway reported **1,008 cached prompt
 tokens: 0.04%.** That number needs a qualifier it did not originally have, because a later probe

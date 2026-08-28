@@ -188,6 +188,11 @@ class OperationPoint:
     serving_ref: str | None = None
     replicas: int | None = None
     tensor_parallel: int | None = None
+    # A preamble identical on every request, sized to sit above or below a layer's minimum cacheable
+    # prefix. It belongs to the operation point rather than to the task or the layer because it is a
+    # property of the request's shape: the same items and the same question, asked in a shape that either
+    # earns a cache discount or cannot. Two points differing only in this are the ablation.
+    shared_preamble_tokens: int = 0
 
     @staticmethod
     def load(raw: dict, where: str) -> "OperationPoint":
@@ -201,6 +206,7 @@ class OperationPoint:
             serving_ref=raw.get("serving_ref"),
             replicas=raw.get("replicas"),
             tensor_parallel=raw.get("tensor_parallel"),
+            shared_preamble_tokens=int(raw.get("shared_preamble_tokens") or 0),
         )
         _require(point.cell_kind in CELL_KINDS, f"{where}: cell_kind must be one of {CELL_KINDS}")
         _require(point.concurrency > 0, f"{where}: concurrency must be positive")
@@ -269,6 +275,7 @@ class Run:
                     "layer": c.layer.id,
                     "policy": c.policy.id,
                     "operation_point": c.point.id,
+                    "shared_preamble_tokens": c.point.shared_preamble_tokens,
                     "concurrency": c.point.concurrency,
                     "seed": c.seed,
                 }

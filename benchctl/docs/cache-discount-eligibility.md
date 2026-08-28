@@ -1,106 +1,156 @@
-# The prompt-cache discount is not a property of APIs, and it cannot be manufactured
+# The cache discount, measured: which layers get one, for what, and what it does to the agentic verdict
 
-Measured 2026-08-28 through the gateway, by `scripts/probe_cache_eligibility.py`. Two identical requests back
-to back, and the provider's own cached-token count on the second one. Nothing here rests on a published
-policy.
+Measured 2026-08-28 through the gateway, by `scripts/probe_cache_eligibility.py` and the two-arm run in
+`specs/runs/cache-ablation-v1.yaml`. Nothing here rests on a published policy: every number is the provider's
+own cached-token count on a request this harness sent.
 
-The discount matters more than any other single term in this project's arithmetic: it is the entire reason the
-box came out **1.76x more expensive** on agentic traffic where, with caching off, it was **3.0x cheaper**. It
-had never been measured per layer. It should have been, because it is not uniform, and reasoning about "the
-API's cache discount" as though it were a property of APIs turns out to be wrong in three separate ways.
+The discount is the largest single term in this project's arithmetic and it had never been measured per layer.
+It should have been. It is not uniform, it is not what "the API caches and the box does not" describes, and
+one documented conclusion rests on a hit rate this gateway does not deliver.
 
-## Which layers are discounted at all
+## The distinction that decides everything: shared prefix, or identical request
 
-| layer | cached without asking | cached when asked | tokens for identical text |
-| --- | --- | --- | --- |
-| claude-sonnet-5 | **yes, 99.9%** | yes | 7,245 — **x1.60** |
-| claude-opus-5 | **yes, 99.9%** | yes | 7,245 — **x1.60** |
-| gpt-5.6-sol | **yes, 99.9%** | yes | 4,535 — x1.00 |
-| gpt-5.6-terra | **yes, 99.9%** | yes | 4,535 — x1.00 |
-| claude-haiku-4-5 | no, 0% | **no, 0%** | 4,537 — x1.00 |
-| gemma-4 | no, 0% | **no, 0%** | 4,563 — x1.01 |
-| gpt-5.5 | no, 0% | **no, 0%** | 4,535 — x1.00 |
+The first version of this page reported that `claude-sonnet-5` and `claude-opus-5` cache at 99.9% and drew
+routing conclusions from it. The probe behind that number sent **the same request twice**, which cannot tell
+two very different capabilities apart:
 
-`grok-4.6` is in the OCRBench spec but the gateway's allowlist rejects the id under the names tried here, so
-it is absent rather than measured.
+* **Identical-request caching** — the whole request repeats, byte for byte. Nearly useless: traffic that
+  repeats a request identically should cache the *answer* and not pay for a cached prefill at all.
+* **Shared-prefix caching** — many requests share a long preamble and differ after it. This is what agentic
+  traffic, few-shot prompting and system prompts actually look like, and it is the only kind that routes
+  anything.
 
-**The first wrong assumption: that a discount can be requested.** It cannot, either way. Every layer that
-caches does so automatically with no `cache_control` breakpoint, and every layer that does not cache stays at
-zero when given one — including through the gateway's Anthropic `/v1/messages` route, which additionally
-mangles content parts (it billed 9 input tokens for a 2,700-token request, having dropped the preamble). So
-`benchctl`'s client is not leaving anything on the table by never sending a breakpoint, which is worth knowing
-because it looked like a defect when the question was first asked.
+Sending one preamble with three different questions after it separates them, and they come apart completely:
 
-**The second wrong assumption: that the discount is the API tier's advantage.** It is the *premium* tier's
-advantage. `claude-haiku-4-5` and `gemma-4` — the cheap layers the box actually competes with on price — get
-no discount on this gateway at any prefix length. They pay full price for every token of every request,
-forever, no matter how much prefix their traffic shares. `gpt-5.5` likewise, while `gpt-5.6-sol` and
-`gpt-5.6-terra` do cache, so this does not even divide cleanly by vendor or by recency.
-
-**And a third thing, not an assumption but a correction:** `claude-sonnet-5` and `claude-opus-5` read
-identical text as **1.60x** as many tokens as everything else. Their posted input price is therefore not
-comparable to a posted price from any other layer without multiplying by 1.60 first. This is the same effect
-seen from the other side on the summarisation family, where sonnet-5 spent 56% more prompt tokens than the box
-on identical documents.
-
-## The shortest prefix that earns it
-
-Sweeping the shared prefix in one-clause steps, on the layers that cache:
-
-| layer | no discount at | discounted at |
+| layer | identical request repeated | **shared prefix, different tail** |
 | --- | --- | --- |
-| gpt-5.6-sol | 685 tokens | 1,035 tokens |
-| claude-sonnet-5 | 2,125 tokens | 2,245 tokens |
+| gpt-5.6-sol | 99.9% | **99.9%** at 3.5k tokens |
+| gpt-5.6-terra | 99.9% | **99.9%** at 3.5k tokens |
+| gpt-5.5 | 97.3% | **0%** at 3.5k, **97.8%** at 15k |
+| claude-sonnet-5 | 100.0% | **0%** at 5.6k |
+| claude-opus-5 | 100.0% | **0%** at 5.6k and at 24k |
+| claude-haiku-4-5 | **0%** at 3.5k and 15k | **0%** |
+| gemma-4 | **0%** at 3.5k and 15k | **0%** |
+| the box (vLLM prefix caching) | — | **72.5%**, measured on a real run below |
 
-So roughly **1k tokens of shared prefix for the gpt layers and roughly 2.2k for sonnet-5**, and below that
-there is no discount at any hit rate. That immediately rules the discount out for whole families rather than
-for individual requests: a classification item is about a hundred tokens and a translation request a few
-hundred, so neither can reach the minimum on its own content.
+**On this gateway, no Claude model gets a shared-prefix discount.** `claude-sonnet-5` and `claude-opus-5`
+cache only a byte-identical repeat. `claude-haiku-4-5` does not cache even that, at any length tried, asked
+or unasked, through either route the gateway offers. The GPT models do get a genuine shared-prefix discount,
+from about 1k tokens for `gpt-5.6-sol` and somewhere between 3.5k and 15k for `gpt-5.5`. And the box's own
+prefix cache works, which is the capability the APIs were assumed to have and mostly do not.
 
-## Why it cannot be manufactured, which is the part that decides routing
+A discount also cannot be *requested*: every layer that caches does so automatically with no `cache_control`
+breakpoint, and every layer that does not stays at zero when given one. So this harness is not leaving
+anything on the table by never sending one, which is what it looked like when the question was first asked.
+The gateway's Anthropic `/v1/messages` route is worse than useless for it — it mangles content parts, billing
+9 input tokens for a 2,700-token request after dropping the preamble.
 
-The obvious move, once the minimum is known, is to pad short traffic with a shared preamble — a glossary,
-some few-shot examples — until it clears the bar and every request after the first reads from cache. The
-arithmetic says not to, and it is worth doing explicitly, for one classification item on `claude-sonnet-5` at
-its posted $3.00 input, $0.30 cache read and $15.00 output per million:
+**Read every row as the gateway's behaviour, not the provider's.** Anthropic's own API does support
+shared-prefix caching with an explicit breakpoint. What is measured here is what arrives when this project
+sends a request, which is what its cost ledger has to be right about.
 
-| | prompt tokens | input cost | output cost | total |
-| --- | --- | --- | --- | --- |
-| minimal prompt, no discount possible | 120 | $0.00036 | $0.00024 | **$0.00060** |
-| padded to 2,245 so it caches, then read at 10% | 2,245 | $0.00067 | $0.00024 | **$0.00091** |
+## What this does to the agentic verdict
 
-**Padding to reach the minimum costs 1.5x more than not padding**, even with a 90% discount on every token
-of it. That is not a near miss to be tuned away: a 90% discount on tokens you did not need cannot beat a 100%
-discount on not sending them. The cache discount only ever reduces the cost of a prefix the traffic already
-had to carry.
+`results-agentx.md` prices the agentic family like this:
 
-Which gives the routing rule this project was looking for, and it is narrower than expected:
+| | per agentic request |
+| --- | --- |
+| Box, caching on | $0.0211 |
+| `claude-haiku-4-5`, **ideal 94% cache** | $0.0120 — the box is 1.76x more expensive |
+| `claude-haiku-4-5`, no cache at all | $0.0642 — the box is 3.0x cheaper |
 
-- **The API's cache advantage exists only where traffic already carries a long shared prefix** — a system
-  prompt, tool definitions, an accumulating conversation. That is the agentic family, and it is exactly where
-  the box lost, 1.76x.
-- **It cannot be created for traffic that does not have one.** Padding is a net loss.
-- **It is unavailable to the cheap tier entirely on this gateway.** Against `claude-haiku-4-5` or `gemma-4`
-  the box competes at full API price on every family, and no amount of prefix sharing changes that.
-- **And where it does apply, the 1.60x tokeniser ratio eats part of it** for the two Claude layers that have
-  it.
+The 94% is AgentX's theoretical hit rate, and the page says so. What was not known when that table was
+written is that **`claude-haiku-4-5` returns zero cached tokens on this gateway under every condition probed**
+— identical repeats, shared prefixes, 3.5k tokens and 15k, with and without a breakpoint, on both routes. So
+the 1.76x row is a hypothetical, and the row that describes measured gateway behaviour is the one below it:
+**the box is 3.0x cheaper on agentic traffic.**
+
+That is a sign flip on the family this project was built to serve, and it favours the box, so the residual
+uncertainty belongs next to it:
+
+* A gateway could apply a discount in billing without reporting it in `usage`. If so this harness cannot see
+  it and neither ledger is right — but then the 94% row is unverifiable rather than correct.
+* The agentic runs went through the same `/v1/chat/completions` path probed here, so the paths agree, but the
+  agent harness builds longer and more varied prompts than these probes and something in that shape could
+  behave differently.
+* The 3.0x row still assumes the box at 100% utilisation, which the arrival-rate work showed is the
+  optimistic end. That caveat was always on it and still is.
+
+The claim to make is therefore narrow and conditional: **against the cheapest API on this gateway as it
+actually behaves, the box is cheaper on agentic traffic, not more expensive.** Confirming it properly means
+re-running the agentic comparison with the API's cached-token count recorded per request rather than assumed,
+which is now a one-line change to what the ledger already writes.
+
+## Padding to reach the minimum: measured, and it loses for everyone
+
+If a discount needs a long shared prefix, the tempting move is to manufacture one — pad short traffic with a
+glossary or some few-shot examples until it clears the minimum, and let every request after the first read
+from cache. `specs/runs/cache-ablation-v1.yaml` tests that directly: the same 48 classification items and the
+same question, in two arms differing only in a neutral shared preamble, on three layers.
+
+| layer | arm | prompt tokens | cached | $/1k items | passed |
+| --- | --- | --- | --- | --- | --- |
+| box | bare | 9,005 | 0% | $0.059 | 46/48 |
+| box | padded | 133,997 | **72.5%** | **$0.673** — 11.45x | 46/48 |
+| haiku-4-5 | bare | 14,644 | 0% | $0.345 | 47/48 |
+| haiku-4-5 | padded | 139,636 | 0% | **$2.949** — 8.55x | 47/48 |
+| sonnet-5 | bare | 14,618 | 0% | $1.034 | 47/48 |
+| sonnet-5 | padded | 214,202 | 0% | **$13.508** — 13.07x | 47/48 |
+
+**Every layer got more expensive, and not one item changed its verdict.** Quality is identical in both arms on
+all three layers, which is what a deliberately neutral preamble should do and is worth having measured rather
+than assumed.
+
+The API layers got no discount at all, because neither of them does shared-prefix caching — the arm's premise
+failed on the layers it was designed to favour, which is itself the finding. But the arithmetic loses even
+where a discount arrives: at sonnet-5's posted $3.00 input and $0.30 cache read, a padded item that cached
+perfectly would cost $0.00091 against $0.00060 bare, because a 90% discount on tokens you did not need cannot
+beat a 100% discount on not sending them.
+
+**The box's 11.45x is mostly an accounting artefact and should not be read as a cost.** It did get its
+discount — 72.5% of those prompt tokens were prefix-cache hits — but the box's cost model prices every prompt
+token at one rate whether or not it was a hit, while the API model discounts hits explicitly. So the ledger is
+asymmetric, and asymmetric *against* the box: on prefix-sharing traffic it charges the box for work the engine
+did not do. Every box result published so far is pessimistic by that amount, which is the safe direction for a
+conclusion but the wrong number. Fixing it needs a measured cached-prefill rate for the box, which is a
+throughput measurement rather than a guess, and until it exists the asymmetry belongs in every comparison that
+involves prefix reuse.
+
+## The tokeniser ratio, which is not about caching but is about price
+
+Identical text, billed per each vendor's own tokeniser:
+
+| layer | tokens for the same text |
+| --- | --- |
+| gpt-5.6-sol, gpt-5.6-terra, gpt-5.5, claude-haiku-4-5 | ~4,535 — x1.00 |
+| gemma-4 | 4,563 — x1.01 |
+| **claude-sonnet-5, claude-opus-5** | **7,245 — x1.60** |
+
+So sonnet-5's and opus-5's posted input prices are not comparable to any other layer's without multiplying by
+1.60 first. The summarisation family saw this from the other side: sonnet-5 spent 56% more prompt tokens than
+the box on identical documents. Any table of posted per-token prices across these layers is wrong by that
+factor unless it says otherwise.
 
 ## What this does not say
 
-**One gateway.** Every number here is this gateway's behaviour, not the upstream providers'. A gateway can
-strip `cache_control`, fail to pass a cache-eligible request through as one, or route the same model id to a
-deployment with caching disabled. That `gpt-5.6-sol` caches while `gpt-5.5` does not, on the same route, is
-more likely a fact about the gateway's configuration than about the models.
+**One gateway, one day.** That `gpt-5.6-sol` caches while `gpt-5.5` needs four times the prefix, and that no
+Claude model does shared prefixes at all, are far more likely facts about this gateway's configuration than
+about the models. Re-run the probe when a model is added or the gateway is upgraded.
 
-**Nothing here measures the cache-write premium.** A first request that populates a cache is billed above
-plain input on Anthropic's own API, and this gateway reports no `cache_creation_input_tokens`, so a write
-premium would be invisible to `benchctl`'s accounting. The arithmetic above assumes writes are billed as plain
-input, which is the assumption favourable to the padding strategy — and the strategy loses anyway.
+**The probes are single-shot and the cache is stateful.** `gpt-5.5` reported 0% on one identical-repeat probe
+and 97.3% on another, which is a warm-up or eviction artefact, not a capability difference. Read a single 0%
+as "no hit on this attempt" and only a repeated 0% across lengths and modes — which is what haiku and gemma-4
+produced — as an absence.
 
-**Cache lifetime is not measured here.** These probes are back to back. How long a prefix survives between
-turns is a different question, measured for the box in `results-prefix-survival.md`, where the answer is a
-survival curve with a cliff rather than a fixed TTL.
+**No cache-write premium is measured.** A first request that populates a cache is billed above plain input on
+Anthropic's own API, and this gateway reports no `cache_creation_input_tokens`, so a write premium is
+invisible to this ledger. The padding arithmetic above assumes writes are billed as plain input, which is the
+assumption favourable to padding, and padding loses anyway.
 
-**The discount is per shared prefix, not per family.** A family below the minimum today clears it the moment
-its prompt grows a glossary it actually needed. The rule is about what the traffic carries anyway, and that
-is a product decision as much as a measurement.
+**Minimum prefix lengths were measured on identical requests,** so the ~1k figure for `gpt-5.6-sol` and the
+~2.2k for sonnet-5 are minimums for that mode. For shared prefixes the only bracket measured is `gpt-5.5`'s,
+between 3.5k and 15k tokens.
+
+**Cache lifetime is a different question.** These probes are back to back. How long a prefix survives between
+turns under load is measured for the box in `results-prefix-survival.md`, where the answer is a survival curve
+with a cliff rather than a fixed TTL.

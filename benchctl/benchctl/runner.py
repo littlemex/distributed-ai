@@ -21,6 +21,27 @@ from . import scorers
 from .layers import LayerClient
 from .spec import Cell
 
+# One clause repeated. Neutral reference text, so the preamble changes the request's *shape* and not the
+# question: a preamble carrying instructions or examples would make the ablation a prompt-engineering
+# experiment, and the cost effect would no longer be separable from a quality effect.
+_PREAMBLE_CLAUSE = "Reference clause for context. "
+_PREAMBLE_LEAD = ("The following reference material is provided for context, is identical on every "
+                  "request, and does not bear on the answer. ")
+
+
+def shared_preamble(target_tokens: int) -> str:
+    """A deterministic preamble of roughly `target_tokens` tokens, identical across every request.
+
+    Identical is the whole point: a prefix that varies per item cannot be cached by anyone, so a preamble
+    that mentioned the item would measure nothing. Length is approximate because every layer tokenises it
+    differently — which is itself a measured fact, and why the run records what each layer actually billed
+    rather than what was asked for.
+    """
+    if target_tokens <= 0:
+        return ""
+    clauses = max(1, round((target_tokens - 20) / 5))
+    return _PREAMBLE_LEAD + _PREAMBLE_CLAUSE * clauses + "\n\n"
+
 
 def run_quality_cell(
     cell: Cell,
@@ -40,8 +61,13 @@ def run_quality_cell(
     unusable = 0
     started = time.perf_counter()
 
+    preamble = shared_preamble(cell.point.shared_preamble_tokens)
     for item in items:
         prompt = task.prompt(item)
+        if preamble:
+            # Prepended, because a cache only ever matches from the start of the request.
+            prompt = ([{"type": "text", "text": preamble}] + prompt
+                      if isinstance(prompt, list) else preamble + prompt)
         # The layer's budget wins when it declares one, because what a model needs to reach an answer is
         # a property of the model. The metric's protection against verbosity is the scorer's own
         # truncation, not this number, so raising it does not make scoring more generous.
@@ -61,7 +87,8 @@ def run_quality_cell(
             attachments = sum(1 for part in prompt if part.get("type") != "text")
         requests.append({"item_id": item.id, "cell_id": cell.id, "layer": cell.layer.id,
                          "length_bin": getattr(item, "length_bin", None),
-                         "prompt_chars": prompt_chars, "attachments": attachments})
+                         "prompt_chars": prompt_chars, "attachments": attachments,
+                         "shared_preamble_tokens": cell.point.shared_preamble_tokens})
         responses.append({"item_id": item.id, "cell_id": cell.id, "layer": cell.layer.id,
                           "text": reply.text, "prompt_tokens": reply.prompt_tokens,
                           "completion_tokens": reply.completion_tokens,
@@ -110,6 +137,11 @@ def run_quality_cell(
         "box_seconds": box_seconds,
         "wall_s": time.perf_counter() - started,
         "pricing_status": cell.layer.pricing_status,
+        "shared_preamble_tokens": cell.point.shared_preamble_tokens,
+        # What the layer billed, against what the discount applied to. The ablation is read off these two.
+        "prompt_tokens": sum(r["prompt_tokens"] for r in responses),
+        "cached_prompt_tokens": sum(r["cached_prompt_tokens"] for r in responses),
+        "completion_tokens": sum(r["completion_tokens"] for r in responses),
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     return summary
