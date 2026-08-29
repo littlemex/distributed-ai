@@ -223,3 +223,50 @@ No gateway credit: the box is billed by the hour and is otherwise idle.
 **What would not be admissible:** reporting the box's best ceiling against the APIs' as-measured
 numbers without saying the ceilings differ, or raising the ceiling again if 80 also censors. If episodes
 still hit 80, that is reported as "the box does not converge on this traffic", not as a reason for 160.
+
+---
+
+# Pre-registration addendum: the held-out nine
+
+**Written 2026-08-30, before the run.** The first fifteen instances were selected by a rule stated in
+advance; these are the nine the rule left out of the twenty-four in `pilot-subset.json`, so the held-out
+set is defined by the original selection and not chosen now.
+
+`astropy-14995`, `django-17084`, `matplotlib-26342`, `requests-2931`, `xarray-4695`, `xarray-6992`,
+`pylint-7277`, `pytest-8399`, `scikit-learn-15100`.
+
+Three arms, the same configurations already fixed: box at 40 steps thinking off (the setting that
+converges and scores best), `gpt-5.6-terra` on the Responses wire at reasoning `high`, `claude-fable-5`
+on chat completions. Function calling throughout.
+
+## The primary reading, and it is not the confidence interval
+
+**Does the nesting break?** Specifically: is there an instance the box solves that `gpt-5.6-terra` does
+not? Twenty-four instances with zero such cases bounds the true rate at roughly 12% by the same
+three-over-n rule the earlier 2-layer nesting used; one such case turns the box's argument from cost to
+capability and reopens `results-escalation-and-the-box.md`. **This is stated as the primary reading
+because the project's recommendation currently rests on the nesting, and an expansion run for confidence
+intervals that happened to find a counterexample would be indistinguishable from one that went looking
+for it.**
+
+Secondary, in order: the same reading against `claude-fable-5`; the three-arm solve counts with exact
+paired tests on the pooled twenty-four; and the arrangement prices recomputed on the pooled set,
+including the cheap → expensive cascade with no box.
+
+## The detector's held-out test, and what it can still learn
+
+The pre-registered detector failed on the development twelve — best keep-precision 0.62 against a
+required 1.0 — so there is no surviving rule to validate. What the nine can still do is test whether
+that failure replicates, and the reading is fixed now: **the two best development rules ("did not hit
+the ceiling", and the named lead hypothesis) are applied unchanged to the nine, and their keep-precision
+is reported whatever it is.** A rule that reached 1.0 here after 0.62 there would be sampling noise, not
+a discovery, and would be reported as such.
+
+## The token budget, and why it is stated
+
+The gateway's personal credit is denominated in tokens and meters at roughly 1.75× the tokens this
+harness records, measured across the runs so far. Nine episodes on the two API tiers record about 4.3M,
+so about 7.5M of credit is needed; the allowance was reset to 12M before the run so that exhaustion
+mid-pass cannot silently truncate an arm and leave a partial comparison on disk. **If an arm does die on
+credit, its instances are re-run rather than reported partial**, because a subset of nine chosen by where
+the money ran out is not a subset chosen by a rule.
