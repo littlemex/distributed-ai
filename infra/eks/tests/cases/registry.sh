@@ -13,6 +13,13 @@
 registry_region() { printf '%s' "${AWS_REGION_OPT:-${AWS_REGION:-}}"; }
 registry_prefix() { printf '/distai/v1/clusters/%s' "$CLUSTER_NAME"; }
 
+# The preamble tests run the helper in a fresh shell, so the profile has to be handed over in that
+# shell's environment. It must be handed over ONLY when there is one: `AWS_PROFILE=''` is not the
+# same as unset — the AWS CLI takes the empty string as a profile name and fails with "The config
+# profile () could not be found", so every one of these tests failed for a reader authenticating
+# with the default profile (found on a real run, 2026-08-29). Emit the assignment or nothing.
+profile_env() { [ -n "${AWS_PROFILE_OPT:-}" ] && printf "AWS_PROFILE='%s'" "$AWS_PROFILE_OPT"; return 0; }
+
 # aws_cmd, not aws: the harness carries the profile as a flag rather than in the environment, so a
 # raw aws call here would run as whatever the ambient credentials are — or as none.
 registry_value() {
@@ -74,12 +81,12 @@ test_registry_preamble_contract() {
   for shell in bash zsh; do
     command -v "$shell" >/dev/null || continue
     # stdout must stay empty: a chapter may use the preamble inside a command substitution.
-    out="$("$shell" -c "cd '$SCRIPT_DIR/../..' && CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' AWS_PROFILE='${AWS_PROFILE_OPT:-}' source scripts/distai-env.sh 2>/dev/null")"
+    out="$("$shell" -c "cd '$SCRIPT_DIR/../..' && CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' $(profile_env) source scripts/distai-env.sh 2>/dev/null")"
     status=$?
     [ "$status" -eq 0 ] || { printf '%s: sourcing failed (%d)\n' "$shell" "$status" >&2; return 1; }
     [ -z "$out" ] || { printf '%s: wrote to stdout: %s\n' "$shell" "$out" >&2; return 1; }
     # And it must export what a chapter needs, in that same shell.
-    out="$("$shell" -c "cd '$SCRIPT_DIR/../..' && CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' AWS_PROFILE='${AWS_PROFILE_OPT:-}' source scripts/distai-env.sh >/dev/null 2>&1; printf '%s' \"\$DISTAI_STATE_KEY\"")"
+    out="$("$shell" -c "cd '$SCRIPT_DIR/../..' && CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' $(profile_env) source scripts/distai-env.sh >/dev/null 2>&1; printf '%s' \"\$DISTAI_STATE_KEY\"")"
     [ "$out" = "eks/${CLUSTER_NAME}/terraform.tfstate" ] ||
       { printf '%s: DISTAI_STATE_KEY resolved to "%s"\n' "$shell" "$out" >&2; return 1; }
   done
@@ -90,7 +97,7 @@ test_registry_preamble_contract() {
 test_registry_unknown_cluster_fails() {
   local helper="$SCRIPT_DIR/../../scripts/distai-env.sh"
   [ -f "$helper" ] || return 2
-  if bash -c "cd '$SCRIPT_DIR/../..' && CLUSTER_NAME=no-such-cluster-$$ AWS_REGION='$(registry_region)' AWS_PROFILE='${AWS_PROFILE_OPT:-}' source scripts/distai-env.sh >/dev/null 2>&1"; then
+  if bash -c "cd '$SCRIPT_DIR/../..' && CLUSTER_NAME=no-such-cluster-$$ AWS_REGION='$(registry_region)' $(profile_env) source scripts/distai-env.sh >/dev/null 2>&1"; then
     printf 'sourcing succeeded for a cluster that is not registered\n' >&2
     return 1
   fi
@@ -114,7 +121,7 @@ test_registry_preamble_configures_kubectl() {
     # An alias is planted first, so the shell is the one the bug needed.
     out="$("$shell" -c "shopt -s expand_aliases 2>/dev/null; alias k=kubectl
       cd '$SCRIPT_DIR/../..' && CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' \
-        AWS_PROFILE='${AWS_PROFILE_OPT:-}' source scripts/distai-env.sh >/dev/null 2>&1
+        $(profile_env) source scripts/distai-env.sh >/dev/null 2>&1
       printf '%s|%s|%s|%s' \"\$(type k 2>&1 | head -1)\" \"\$(type kubectl 2>&1 | head -1)\" \
         \"\$DISTAI_CONTEXT\" \"\$KUBECONFIG\"")"
     case "$out" in
@@ -143,7 +150,7 @@ test_registry_preamble_configures_kubectl() {
   fi
   # And it must survive a caller that runs with set -eu, since chapters may source it from a script.
   bash -c "set -eu; cd '$SCRIPT_DIR/../..' && CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' \
-    AWS_PROFILE='${AWS_PROFILE_OPT:-}' source scripts/distai-env.sh >/dev/null 2>&1" || {
+    $(profile_env) source scripts/distai-env.sh >/dev/null 2>&1" || {
     printf 'sourcing under set -eu failed\n' >&2
     return 1
   }
@@ -156,9 +163,9 @@ test_registry_failed_resolve_drops_context() {
   [ -f "$helper" ] || return 2
   local out
   out="$(bash -c "cd '$SCRIPT_DIR/../..'
-    CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' AWS_PROFILE='${AWS_PROFILE_OPT:-}' \
+    CLUSTER_NAME='$CLUSTER_NAME' AWS_REGION='$(registry_region)' $(profile_env) \
       source scripts/distai-env.sh >/dev/null 2>&1
-    CLUSTER_NAME=no-such-cluster-\$\$ AWS_REGION='$(registry_region)' AWS_PROFILE='${AWS_PROFILE_OPT:-}' \
+    CLUSTER_NAME=no-such-cluster-\$\$ AWS_REGION='$(registry_region)' $(profile_env) \
       source scripts/distai-env.sh >/dev/null 2>&1
     printf '%s|%s' \"\$DISTAI_CONTEXT\" \"\$KUBECONFIG\"")"
   [ "$out" = "|" ] || {
