@@ -2,7 +2,7 @@
   "ambiguous": {},
   "provenance": {
     "aws_service_tier": "standard",
-    "built_at": "2026-08-28T22:30:10+09:00",
+    "built_at": "2026-08-29T12:22:48+09:00",
     "gateway_keys_refused_as_over_charge_defaults": [],
     "priced_per_model_at_its_own_bedrock_region": true,
     "registry": "/Users/akazawt/stratoclave/backend/mvp/defaults/models.json",

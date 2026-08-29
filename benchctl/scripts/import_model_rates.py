@@ -53,6 +53,26 @@ FIELD_BY_KIND = {
 }
 
 
+# AWS states the unit on each price dimension and it is not the same for every model: most publish per
+# `1K tokens` and some per `1M tokens`. Multiplying by 1000 unconditionally is a silent 1000x error, and it was
+# one — `openai.gpt-5.6-luna` publishes per 1M, and read as 1K it came out at $264 per Mtok of input.
+_UNIT_TO_MTOK = {"1k tokens": 1000.0, "1000 tokens": 1000.0, "1m tokens": 1.0, "tokens": 1e6}
+
+
+def _per_mtok(dimension: dict) -> float | None:
+    """A price per million tokens, from whatever unit AWS stated it in, or None if the unit is unfamiliar.
+
+    Refusing an unfamiliar unit rather than assuming one is the point: a wrong price looks exactly like a right
+    one, and this project has already published a rate that was 36x out.
+    """
+    unit = (dimension.get("unit") or "").strip().lower()
+    factor = _UNIT_TO_MTOK.get(unit)
+    if factor is None:
+        print(f"  [skip] unrecognised price unit {unit!r}; not guessing a conversion", file=sys.stderr)
+        return None
+    return float(dimension["pricePerUnit"]["USD"]) * factor
+
+
 def _classify(attributes: dict) -> str | None:
     """Which of the three rates this product is, from whichever attribute the model was onboarded with."""
     label = (attributes.get("tokenType") or attributes.get("inferenceType") or "").lower()
@@ -114,8 +134,9 @@ def aws_rate(model: str, region: str, tier: str) -> dict | None:
             continue
         for term in (product["terms"].get("OnDemand") or {}).values():
             for dimension in term["priceDimensions"].values():
-                values.setdefault(kind, set()).add(
-                    round(float(dimension["pricePerUnit"]["USD"]) * 1000, 6))
+                usd = _per_mtok(dimension)
+                if usd is not None:
+                    values.setdefault(kind, set()).add(round(usd, 6))
     if "input" not in values or "output" not in values:
         return None
     ambiguous = {k: sorted(v) for k, v in values.items() if len(v) > 1}

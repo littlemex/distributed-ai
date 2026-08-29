@@ -63,5 +63,15 @@
   "unpriced": {
     "gpt-5.5": "The gateway's card maps it to key 'gpt-5', whose rates are identical to the over-charge default and are therefore not a price. AWS publishes no Price List entry. Comparable on quality and latency; must not be compared on cost.",
     "grok-4.6": "Looked up by name in the AWS Price List, which publishes it; this entry is only here so the by-name lookup considers it, and AWS wins if it answers."
+  },
+  "not_served_by_this_gateway": {
+    "gpt-5.6-luna": {
+      "input_usd_per_mtok": 0.264,
+      "output_usd_per_mtok": 1.584,
+      "cache_read_usd_per_mtok": 0.0264,
+      "source": "AWS Price List API, AmazonBedrock, model='openai.gpt-5.6-luna', service_tier=standard. Published in us-gov-west-1 ONLY: a sweep of every region returns standard-tier products for that one and nothing in any commercial region.",
+      "why_not_used": "The gateway rejects it. 'gpt-5.6-luna', 'openai.gpt-5.6-luna' and 'gpt-5.6-luna-preview' all return HTTP 400 'not in the allowlist', so it cannot be measured on this path however it is priced. Recorded because the price is attractive -- $0.264 input is an eighth of gpt-5.6-terra's, and unlike gemma-4 it has a published cache-read rate at a tenth of input -- so it is worth re-probing if the allowlist changes.",
+      "note_on_units": "This model publishes per '1M tokens' where most publish per '1K tokens'. Read as 1K it came out at $264 per Mtok of input, which is what exposed a latent 1000x bug in scripts/import_model_rates.py. Re-importing after the fix changed no existing rate."
+    }
   }
 }
