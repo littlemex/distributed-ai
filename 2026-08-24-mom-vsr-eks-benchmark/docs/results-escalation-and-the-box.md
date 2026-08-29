@@ -173,6 +173,14 @@ three solved the same eight instances and all three missed the same one, while t
 against terra's $0.9634 and fable's $6.4415. Nothing about that set separates the models; everything
 about it separates their prices.
 
+Per solved task on the pooled twenty, which is the column the directory's `README.md` quotes:
+
+| tier | solved | bill | per solved task |
+|---|---|---|---|
+| box | 14/20 | $0.8997 | **$0.0643** |
+| `gpt-5.6-terra` | 16/20 | $2.9545 | $0.1847 |
+| `claude-fable-5` | 20/20 | $14.5899 | $0.7295 |
+
 **The primary reading: the nesting holds, with zero counterexamples in twenty.** No instance exists
 that the box solves and terra does not, nor that terra solves and fable does not. Zero of twenty bounds
 the true rate at roughly 15% by the same rule of thumb the earlier two-layer result used. The box still
