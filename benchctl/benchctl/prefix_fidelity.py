@@ -64,6 +64,10 @@ _TAG = re.compile(r"^\s*TAG:\s*([A-Z]{2}-\d{4})\s*$", re.MULTILINE)
 # to follow the instruction and got the form wrong, and one that wrote nothing forgot the instruction. Only the
 # strict form counts as a pass, but conflating those two would lose the reason.
 _ANY_TAG = re.compile(r"^\s*tag:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+# The refusal form, when the rule offers one. Kept separate from both the strict token and the loose line,
+# because "I do not know" is a third outcome and collapsing it into either would lose the whole question:
+# on an answerable turn a refusal is a failure, and on an unanswerable one it is the only right answer.
+_UNKNOWN = re.compile(r"^\s*TAG:\s*UNKNOWN\s*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -132,12 +136,22 @@ def preamble(facts: list[Fact], target_tokens: int, *, plant: bool,
     return "\n".join(body)
 
 
-def conversation(facts: list[Fact], text: str, turns: int) -> list[list[dict]]:
-    """Turn 1 states the rule and asks the first question; later turns only ask."""
+def conversation(facts: list[Fact], text: str, turns: int,
+                 allow_unknown: bool = False) -> list[list[dict]]:
+    """Turn 1 states the rule and asks the first question; later turns only ask.
+
+    `allow_unknown` adds a refusal to the contract. Without it, a layer asked for something absent has no
+    sanctioned way to say so and has to break the format to refuse — which is what the first run measured, and
+    where the box chose to fabricate instead. Offering the refusal turns "will it fabricate" into "will it
+    fabricate when told not to", which is the question worth acting on.
+    """
     rule = ("From now on, end every reply with a single line in exactly this form and nothing after it:\n"
             "TAG: <token>\n"
             "where <token> is the build token for the module named in that turn's question. "
             "Answer the question itself in one short sentence before the tag line.")
+    if allow_unknown:
+        rule += ("\nIf the build token for that module does not appear in the reference material above, "
+                 "write exactly `TAG: UNKNOWN` instead. Do not guess a token.")
     asked = facts[0]
     messages = [{"role": "user", "content":
                  f"{text}\n\n{rule}\n\nQuestion 1: what is the build token for {asked.module}?"}]
@@ -160,11 +174,14 @@ def score(reply: str, expected: Fact) -> dict:
     """Format and content, separately, because they fail for different reasons."""
     strict = _TAG.findall(reply or "")
     loose = _ANY_TAG.findall(reply or "")
+    refused = bool(_UNKNOWN.search(reply or ""))
     return {
         "tag_present": bool(loose),
         "tag_well_formed": bool(strict),
+        "refused": refused,
         "token_correct": bool(strict) and strict[-1] == expected.token,
-        "emitted": (strict[-1] if strict else (loose[-1][:24] if loose else None)),
+        "emitted": (strict[-1] if strict else ("UNKNOWN" if refused
+                                               else (loose[-1][:24] if loose else None))),
         "expected": expected.token,
     }
 
@@ -189,7 +206,8 @@ def run_controls(facts: list[Fact], turns: int) -> dict:
 
 
 def run_layer(layer, *, conversations: int, turns: int, preamble_tokens: int, facts_per_doc: int,
-              max_tokens: int, seed: int, plant: bool, distractors: bool = False) -> dict:
+              max_tokens: int, seed: int, plant: bool, distractors: bool = False,
+              allow_unknown: bool = False) -> dict:
     client = LayerClient(layer)
     rows = []
     for index in range(conversations):
@@ -198,7 +216,8 @@ def run_layer(layer, *, conversations: int, turns: int, preamble_tokens: int, fa
         text = preamble(facts, preamble_tokens, plant=plant, distractors=distractors,
                         rng=random.Random(seed + index + 7919))
         corr = f"fidelity-{seed}-{index}-{'plant' if plant else 'blank'}"
-        for turn, messages in enumerate(conversation(facts, text, turns), start=1):
+        for turn, messages in enumerate(conversation(facts, text, turns,
+                                                     allow_unknown=allow_unknown), start=1):
             reply = client.complete(messages=messages, max_tokens=max_tokens, temperature=0.0,
                                     correlation_id=corr)
             if not reply.usable:
@@ -230,7 +249,10 @@ def run_layer(layer, *, conversations: int, turns: int, preamble_tokens: int, fa
                          "content": rate(at, "token_correct"),
                          "cached_share": statistics.fmean(r["cached_share"] for r in at)}
     return {
-        "layer": layer.id, "planted": plant, "graded": len(graded),
+        "layer": layer.id, "planted": plant, "allow_unknown": allow_unknown, "graded": len(graded),
+        # On an answerable turn a refusal is a failure; on an unanswerable one it is the only right answer.
+        "refusal_rate": rate(graded, "refused"),
+        "fabrication_rate": (sum(1 for r in graded if r["tag_well_formed"]) / len(graded)) if graded else None,
         "excluded": len(rows) - len(graded),
         "format_rate": rate(graded, "tag_well_formed"),
         "content_rate": rate(graded, "token_correct"),
@@ -252,6 +274,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--preamble-tokens", type=int, default=12000)
     ap.add_argument("--facts", type=int, default=6)
     ap.add_argument("--max-tokens", type=int, default=200)
+    ap.add_argument("--allow-unknown", action="store_true",
+                   help="offer a sanctioned refusal in the contract, so fabricating is a choice rather than "
+                        "the only way to keep the format")
     ap.add_argument("--distractors", action="store_true",
                    help="plant a superseded token one character from each real one, so finding the shape of "
                         "an answer is not the same as reading the right line")
@@ -285,14 +310,15 @@ def main(argv: list[str] | None = None) -> int:
         results.append(run_layer(layer, conversations=args.conversations, turns=args.turns,
                                  preamble_tokens=args.preamble_tokens, facts_per_doc=args.facts,
                                  max_tokens=args.max_tokens, seed=args.seed, plant=True,
-                                 distractors=args.distractors))
+                                 distractors=args.distractors, allow_unknown=args.allow_unknown))
         if args.unanswerable_control:
             n = args.unanswerable_conversations or max(2, args.conversations // 2)
             print(f"  {layer.id} — unanswerable control (facts removed), {n} conversations")
             results.append(run_layer(layer, conversations=n,
                                      turns=args.turns, preamble_tokens=args.preamble_tokens,
                                      facts_per_doc=args.facts, max_tokens=args.max_tokens,
-                                     seed=args.seed, plant=False, distractors=args.distractors))
+                                     seed=args.seed, plant=False, distractors=args.distractors,
+                                     allow_unknown=args.allow_unknown))
 
     print(f"\n{'layer':22} {'planted':>8} {'n':>4} {'cached':>7} {'format':>7} {'content':>8} "
           f"{'fmt >t1':>8} {'cont >t1':>9}")
@@ -300,6 +326,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{r['layer']:22} {str(r['planted']):>8} {r['graded']:4d} {r['cached_share']:6.1%} "
               f"{(r['format_rate'] or 0):6.1%} {(r['content_rate'] or 0):7.1%} "
               f"{(r['format_rate_after_turn_1'] or 0):7.1%} {(r['content_rate_after_turn_1'] or 0):8.1%}")
+
+    print("\nrefusal and fabrication. on a planted arm a refusal is a failure; on an unanswerable arm it is "
+          "the only right answer:")
+    for r in results:
+        kind = "answerable  " if r["planted"] else "unanswerable"
+        print(f"  {r['layer']:22} {kind} refused {(r['refusal_rate'] or 0):6.1%}  "
+              f"well-formed token {(r['fabrication_rate'] or 0):6.1%}  "
+              f"correct {(r['content_rate'] or 0):6.1%}")
 
     print("\ndecoy uptake — a wrong answer that is the superseded token, not just any wrong answer:")
     for r in results:

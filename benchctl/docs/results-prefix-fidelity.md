@@ -99,12 +99,47 @@ context, the box needs a verifier that the APIs do not.** On this traffic — wh
 answerable — it costs nothing. On traffic where questions can be unanswerable, the box's failure mode is silent
 and the APIs' is loud, and loud is cheaper to handle.
 
+## Telling it not to guess barely helps
+
+The obvious objection to the row above is that the contract gave the box no sanctioned way to say "not in the
+document": refusing meant breaking the output format, and it chose to keep the format. So the run was repeated
+with the refusal written into the rule — *"If the build token for that module does not appear in the reference
+material above, write exactly `TAG: UNKNOWN` instead. Do not guess a token."*
+
+| layer | unanswerable: refused | still emitted a well-formed token | answerable: correct | answerable: false refusals |
+| --- | --- | --- | --- | --- |
+| **box-qwen36-tp2x2** | 0% → **24.0%** | 90.0% → **76.0%** | 100% → **100%** | 0% |
+| api-gemma-4 | 0% → **100.0%** | 0% → 0% | 100% → 100% | 0% |
+| api-haiku-4-5 | 0% → **94.0%** | 2.0% → 6.0% | 100% → 100% | 0% |
+
+**Being told explicitly not to guess moves the box from fabricating 90% of the time to fabricating 76% of the
+time.** It takes the offered refusal on 12 of 50 turns. `gemma-4` takes it on all 50 and `claude-haiku-4-5` on
+47.
+
+Two things make that a stronger result rather than a weaker one. Nothing regressed on the answerable arm — all
+three layers stayed at 100% correct with **zero** false refusals — so offering the escape hatch is free, and the
+box simply does not use it. And the caveat this run existed to close is now closed in the unhelpful direction:
+**prompt engineering is not a substitute for the verifier.** A rule that says "do not guess" is followed by the
+box one time in four.
+
+Checking what the fabrications actually were mattered, because the control has a known imperfection: the
+scripted assistant turns carry real tokens, so on the unanswerable arm the *previous* turn's answer is visible in
+the history even though the asked token is absent everywhere. Of the box's 38 well-formed wrong answers, **31
+(81.6%) are tokens that appear nowhere at all** — genuinely invented — and 7 (18.4%) are copies of a token
+visible in the history. So the fabrication reading holds for four fifths of them, and the remaining fifth is a
+different failure with the same operational consequence: a syntactically perfect wrong answer.
+
 ## What this does not say
 
 **Fifty turns per layer on the control, one prompt shape, one output contract.** The refusal difference is
-strong enough at that n to act on, but a layer told explicitly "answer UNKNOWN if the token is absent" might
-behave differently, and that instruction was deliberately not given — the point was what happens when nobody
-thought to give it. Whether the box refuses when asked to is a different measurement and a cheap one.
+strong enough at that n to act on. The obvious mitigation — telling the layer it may refuse — was measured and
+recovers 24 points of the box's 90, which is the section above.
+
+**The unanswerable control is not perfectly clean.** The scripted assistant turns carry real tokens, so the
+previous turn's answer is visible in the history while the asked token is absent. That was quantified rather
+than argued away: 18.4% of the box's well-formed wrong answers are history copies and 81.6% appear nowhere. A
+cleaner control would script the assistant turns with placeholders, and would raise the invented share rather
+than lower it.
 
 **Saturation at both difficulties is a result, not a limitation.** It says this axis does not separate these
 layers rather than that the task was badly chosen, and the useful consequence is to stop measuring it.
