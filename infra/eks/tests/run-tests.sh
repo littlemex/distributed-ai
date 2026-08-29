@@ -96,6 +96,7 @@ source "$SCRIPT_DIR/cases/plan-guard.sh"
 source "$SCRIPT_DIR/cases/registry.sh"
 source "$SCRIPT_DIR/cases/accelprof-client.sh"
 source "$SCRIPT_DIR/cases/static.sh"
+source "$SCRIPT_DIR/cases/install-profiling.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/chart-contract.sh"
 # shellcheck disable=SC1091

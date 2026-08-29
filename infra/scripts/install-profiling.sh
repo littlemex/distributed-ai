@@ -264,7 +264,8 @@ for tool in terraform kubectl helm aws python3 curl; do
 done
 
 # Every kubectl and helm call names the context explicitly. An account usually holds several
-# clusters, and a wrong current-context silently wires the wrong one.
+# clusters, and a wrong current-context silently wires the wrong one. The context therefore lives in
+# this run's own kubeconfig, thrown away with the work directory: see the KUBECONFIG below.
 KCTX="profiling-${CLUSTER_NAME}"
 
 IFS=',' read -r -a ns_array <<<"${PRODUCER_NAMESPACES}"
@@ -277,7 +278,16 @@ say "Phase 1/7: preflight"
 aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${AWS_REGION}" \
   --query 'cluster.status' --output text >/dev/null 2>&1 ||
   die "cluster ${CLUSTER_NAME} not found in ${AWS_REGION}; this installer wires an existing cluster"
-aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --alias "${KCTX}" >/dev/null
+# The caller's kubeconfig is not this script's to write. aws eks update-kubeconfig adds a context AND
+# makes it current, in whatever file KUBECONFIG points at; distai-env.sh points it at one file per
+# (cluster, namespace) and carries the chapter's namespace on that context, so writing there moved
+# the caller onto a context with no namespace and the next client call resolved namespace "default".
+# Exporting KUBECONFIG here is scoped to this process and its children, which is exactly the set of
+# kubectl and helm calls that should see this context. It leaves with the work directory, so an
+# install no longer leaves a context behind to clean up either.
+export KUBECONFIG="${work_dir}/kubeconfig"
+aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --alias "${KCTX}" \
+  --kubeconfig "${KUBECONFIG}" >/dev/null
 kubectl --context "${KCTX}" get --raw /version >/dev/null || die "cannot reach ${CLUSTER_NAME} with kubectl"
 
 account_id="$(aws sts get-caller-identity --query Account --output text)"
@@ -983,12 +993,15 @@ Profiling platform ready on ${CLUSTER_NAME}.
   Trace bucket           : ${trace_bucket}
   Mount zone             : ${mount_zone}
   Producer namespaces    : ${PRODUCER_NAMESPACES}
-  kubectl context        : ${KCTX}
+
+Your kubectl context and namespace are untouched: this run reached the cluster through a kubeconfig of
+its own. The commands below therefore run against whatever context you are on, which for the chapters
+is the one distai-env.sh set.
 
 In each producer namespace, create the ServiceAccount the association targets (the contract is only
 published to namespaces that exist when this runs, so re-run after creating one):
 
-  kubectl --context ${KCTX} create serviceaccount mcp-producer -n <namespace>
+  kubectl create serviceaccount mcp-producer -n <namespace>
 
 Then profile a workload with the client, which needs nothing from the workload's image:
 

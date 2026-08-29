@@ -6,7 +6,7 @@
 # digest that lands in the cluster then depends on whatever the operator has checked out.
 #
 # Called by infra/scripts/install-profiling.sh, or directly:
-#   KCTX=profiling-my-cluster AWS_REGION=us-east-2 \
+#   KCTX=my-cluster AWS_REGION=us-east-2 \
 #     ECR_REGISTRY=<account>.dkr.ecr.us-east-2.amazonaws.com \
 #     infra/eks/scripts/build-profiling-images.sh
 #

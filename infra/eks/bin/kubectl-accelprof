@@ -183,6 +183,13 @@ json_string() {
 
 k() { kubectl ${KUBE_CONTEXT:+--context "${KUBE_CONTEXT}"} "$@"; }
 
+# Which cluster a message is about: with several clusters in one kubeconfig, the namespace alone does
+# not say where the client looked. Named for what k actually uses rather than for kubectl's
+# current-context, which an explicit KUBE_CONTEXT overrides.
+effective_context() {
+  printf '%s' "${KUBE_CONTEXT:-$(kubectl config current-context 2>/dev/null || printf 'unknown')}"
+}
+
 # How to tell the reader to run this again. The file is installed as kubectl-accelprof and the
 # documented interface is the plugin form, so the hint has to be the plugin form — printing the
 # file name would hand out a command that only works if the file happens to be on PATH under it.
@@ -235,10 +242,25 @@ platform_image() {
     printf '%s' "${ACCELPROF_PLATFORM_IMAGE}"
     return
   fi
-  image="$(k get configmap accelprof-config -n "${ns}" \
-    -o jsonpath='{.data.ACCELPROF_PLATFORM_IMAGE}' 2>/dev/null || true)"
+  # Discarding the error here would report an unreachable cluster, an expired login and an RBAC denial
+  # all as "not wired", which sends the reader to the platform owner for a problem in their own shell.
+  # --ignore-not-found is what separates the two: an absent ConfigMap becomes empty output and exit 0,
+  # so a non-zero exit is left meaning only that the namespace could not be read at all. A namespace
+  # that does not exist at all also exits 0 (measured against kubectl 1.35), which is why the message
+  # below offers a mistyped namespace as one reading. The error goes to a file rather than through a
+  # command substitution, which would assign image in a subshell.
+  local err_file
+  # A failed mktemp would turn the redirect below into a redirect to the empty string, and the die
+  # would then blame kubectl for a bash error printed above it.
+  err_file="$(mktemp)" || die "cannot create a temporary file under ${TMPDIR:-/tmp}"
+  if ! image="$(k get configmap accelprof-config -n "${ns}" --ignore-not-found \
+      -o jsonpath='{.data.ACCELPROF_PLATFORM_IMAGE}' 2>"${err_file}")"; then
+    cat "${err_file}" >&2; rm -f "${err_file}"
+    die "cannot read the accelprof-config ConfigMap in namespace ${ns} (context $(effective_context)). The error above is from kubectl: fix the connection, the login or the permission first."
+  fi
+  rm -f "${err_file}"
   [ -n "${image}" ] ||
-    die "namespace ${ns} is not wired for profiling (no accelprof-config ConfigMap). Ask the platform owner to add it to PRODUCER_NAMESPACES and re-run infra/scripts/install-profiling.sh."
+    die "namespace ${ns} is not wired for profiling (no accelprof-config ConfigMap, or no ACCELPROF_PLATFORM_IMAGE in it; context $(effective_context)). If this is not the namespace you meant, pass --namespace or set it on the context. Otherwise ask the platform owner to add it to PRODUCER_NAMESPACES and re-run infra/scripts/install-profiling.sh."
   printf '%s' "${image}"
 }
 
@@ -248,10 +270,18 @@ platform_image() {
 # furthest from the data layer that knows which MLflow this is. Older contracts have no such key, and a
 # link is not worth failing over, so its absence is silent.
 mlflow_experiment_url() {
-  local ns="$1" url arn
-  url="$(k get configmap accelprof-config -n "${ns}" -o jsonpath='{.data.ACCELPROF_MLFLOW_UI_URL}' 2>/dev/null || true)"
+  local ns="$1" pair url arn
+  # One read, because both values come from the same ConfigMap, and --ignore-not-found for the same
+  # reason as in platform_image: silence should mean "the contract does not carry this", not "the read
+  # failed". A failed read still says so, on stderr, without failing the command it decorates.
+  pair="$(k get configmap accelprof-config -n "${ns}" --ignore-not-found \
+    -o jsonpath='{.data.ACCELPROF_MLFLOW_UI_URL}{"\n"}{.data.ACCELPROF_TRACKING_URI}')" || {
+    printf 'warning: could not read the MLflow link from the contract in namespace %s\n' "${ns}" >&2
+    return 0
+  }
+  url="$(printf '%s' "${pair}" | sed -n 1p)"
+  arn="$(printf '%s' "${pair}" | sed -n 2p)"
   [ -n "${url}" ] || return 0
-  arn="$(k get configmap accelprof-config -n "${ns}" -o jsonpath='{.data.ACCELPROF_TRACKING_URI}' 2>/dev/null || true)"
   printf '%s  (%s)\n' "${url}" "${arn##*:}"
 }
 
