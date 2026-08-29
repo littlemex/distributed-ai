@@ -712,7 +712,7 @@ def test_responses_stream_folds_a_call_and_reads_the_other_usage_spelling():
             "input_tokens_details": {"cached_tokens": 200},
             "output_tokens_details": {"reasoning_tokens": 30}}}},
     ):
-        transport._responses_event(reply, event, 0.0)
+        transport._responses_event(reply, event, 0.0, [])
     assert tools.from_tool_calls(reply.tool_calls)[0].args == {"pattern": "qdp"}
     assert reply.finish_reason == "stop"
     assert (reply.prompt_tokens, reply.completion_tokens) == (300, 40)
@@ -725,5 +725,21 @@ def test_a_responses_turn_cut_off_at_the_limit_is_reported_as_length():
     import transport
     reply = transport.Reply(model="m")
     transport._responses_event(reply, {"type": "response.incomplete", "response": {
-        "status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}}}, 0.0)
+        "status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}}}, 0.0, [])
     assert reply.finish_reason == "length"
+
+
+def test_responses_visible_text_survives_the_end_of_the_stream():
+    # The chat path assigns reply.text from a local accumulator when the stream closes, so the
+    # Responses path has to append to the same list. Writing to reply.text directly was silently
+    # undone, and every verdict in a judge pass came back unparseable with no error to show for it.
+    import transport
+    reply = transport.Reply(model="m")
+    parts: list[str] = []
+    for event in (
+        {"type": "response.output_text.delta", "delta": "VERDICT: "},
+        {"type": "response.output_text.delta", "delta": "FIXED"},
+        {"type": "response.completed", "response": {"status": "completed"}},
+    ):
+        transport._responses_event(reply, event, 0.0, parts)
+    assert "".join(parts) == "VERDICT: FIXED"

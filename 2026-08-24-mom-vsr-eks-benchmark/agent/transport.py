@@ -362,7 +362,7 @@ def _consume(
             if event.get("usage"):
                 _usage(reply, event["usage"])
             if endpoint.api == "responses":
-                _responses_event(reply, event, started)
+                _responses_event(reply, event, started, parts)
                 continue
             for choice in event.get("choices") or []:
                 if choice.get("finish_reason"):
@@ -399,8 +399,14 @@ def _consume(
 _RESPONSES_TERMINAL = ("response.completed", "response.incomplete", "response.failed")
 
 
-def _responses_event(reply: Reply, event: dict, started: float) -> None:
-    """Fold one Responses stream event into the reply."""
+def _responses_event(reply: Reply, event: dict, started: float, parts: list[str]) -> None:
+    """Fold one Responses stream event into the reply.
+
+    Visible text goes into `parts`, not into `reply.text`: the caller assigns `reply.text` from that
+    list when the stream ends, so writing to `reply.text` here is silently undone. That is not
+    hypothetical -- it cost this project a whole judge pass, where every verdict came back unparseable
+    because the reply carried no text at all while the usage block showed tokens had been generated.
+    """
     kind = event.get("type") or ""
     if kind == "response.output_item.added":
         item = event.get("item") or {}
@@ -416,7 +422,7 @@ def _responses_event(reply: Reply, event: dict, started: float) -> None:
         if reply.tool_calls:
             reply.tool_calls[-1]["arguments"] += event.get("delta") or ""
     elif kind == "response.output_text.delta":
-        reply.text += event.get("delta") or ""
+        parts.append(event.get("delta") or "")
         if reply.ttft_ms is None:
             reply.ttft_ms = (time.perf_counter() - started) * 1000
     elif kind in _RESPONSES_TERMINAL:

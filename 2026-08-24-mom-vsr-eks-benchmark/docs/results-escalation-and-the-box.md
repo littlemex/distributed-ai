@@ -203,14 +203,71 @@ the same three development episodes.
 So the detector conclusion is unchanged and now rests on twenty instances instead of twelve: **no rule
 in this signal set can be trusted to keep the box's output, so the 15.9% remains a ceiling.**
 
+## A verification signal from outside the repository's tests: three families, all closed
+
+The pooled result left one blocker — the 15.9% needs a signal saying when to keep the box's patch — so
+the remaining candidates were priced before any was built. **The budget for a signal is the whole thing
+it protects: $0.9548 across twenty instances, 4.8 cents each.**
+
+| candidate | cost | verdict |
+|---|---|---|
+| k independent box samples, keep on agreement, k = 3 | box bill × 3 | **+14.1%** against the no-box cascade |
+| the same at k = 2, assuming a *perfect* agreement signal | box bill × 2 | **−0.9%**, so the ceiling is nil |
+| one judge call on the patch, cheap tier | **$0.0075** measured | affordable — evaluated below |
+| the same call on the expensive tier | $0.0550 | **115% of the budget** |
+
+**Self-consistency is dead on arithmetic, not on accuracy.** The largest k that can pay even with a
+perfect agreement signal is 2.06, because a second full episode costs more than the whole arrangement
+saves. That is a result about this box's economics and it needed no experiment.
+
+### The judge call, evaluated offline against ground truth
+
+One call per instance on `gpt-5.6-terra` at reasoning `high`, seeing the bug report and the box's diff
+and nothing else — no hidden tests, no reference patch, no transcript, no test outcomes. The prompt was
+written once before the first call and is reproduced in `PREREG-failure-signal.md`'s addendum. Verdict on
+the last line, `VERDICT: FIXED` or `VERDICT: NOT_FIXED`, with anything unparseable counting as escalate.
+
+Twenty instances, fourteen of them actually solved:
+
+| | kept | escalated |
+|---|---|---|
+| the box had in fact solved it | **14** | 0 |
+| the box had not | **4** | 2 |
+
+**Keep-precision 0.78 against a required 1.00.** The judge approves 18 of 20 patches. It never escalates
+a good one — recall on the box's successes is 14 of 14 — so **all of its errors are in the dangerous
+direction**: it keeps `astropy-14365`, `astropy-14369`, `seaborn-3187` and `xarray-3993`, all of which
+failed the hidden tests. The two it does catch are the ones a human would: `xarray-4094`, whose diff is
+zero bytes, and `pytest-10356`.
+
+The realised bill under it is $2.4369 at **16 of 20 solved**, and that number must not be compared with
+the no-box cascade's $5.9960 at 20 of 20 — the same trap this page corrected earlier. It is cheaper
+because it ships four wrong patches.
+
+There is a structural reason this was likely to fail, visible in the earlier tables. **The judge is
+being asked a finer question than the solver, on less information.** `gpt-5.6-terra` can only *solve* 16
+of these 20 itself; asking it to *discriminate* a fix from a near-miss, without the repository, without
+running anything, and without the tests, is strictly harder than the task it already cannot fully do.
+
+The free signal named in the same pre-registration — does the diff touch a file named in the report —
+reaches precision 0.86 on the seven it keeps. Better than the judge, still not 1.00, and it keeps a third
+as many.
+
+**A stricter prompt is the obvious next move and it is deliberately not taken here.** The
+pre-registration forbids trying several prompts and reporting the best, which is what that would become
+without its own pre-registration and its own held-out set. What can be said now is that the first
+honestly-specified attempt at the only affordable signal family lands at 0.78.
+
 ## What follows
 
-1. **Do not self-host on this evidence, but the reason is now the detector rather than the arithmetic.**
-   On twenty instances the box's oracle contribution over the no-machine cascade is 15.9% and the
-   break-even volume is 319 tasks an hour, which its own throughput can reach. What blocks it is that
-   the 15.9% needs a signal that says when to stop, and no rule in this signal set keeps its output
-   safely — best keep-precision 0.77 against a required 1.0. Doubling its step budget also makes the
-   arrangement 33% worse rather than better.
+1. **Do not self-host on this evidence, and the blocker is now specific and closed.** On twenty
+   instances the box's oracle contribution over the no-machine cascade is 15.9% and the break-even
+   volume is 319 tasks an hour, which its own throughput can reach. What blocks it is that the 15.9%
+   needs a signal saying when to keep the box's patch, and **three families of candidate have now been
+   eliminated against bars fixed in advance**: signals inside the episode reach keep-precision 0.77,
+   self-consistency cannot pay for itself at any k above 2.06, and a cheap-tier judge on the patch
+   reaches 0.78 with every error in the dangerous direction. Doubling the box's step budget also makes
+   the arrangement 33% worse rather than better.
 2. **The escalation signal is the blocker, not the model.** The box's failures are not detectable from
    inside its own episode with anything recorded here, and the most natural candidate is inverted for
    structural reasons. Any future attempt has to bring a signal from outside the checkout.
