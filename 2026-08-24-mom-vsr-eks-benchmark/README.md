@@ -6,8 +6,8 @@ Two questions were asked in this directory, with different units and different a
 through one gateway. Routing did not buy accuracy; choosing a better single model bought 40% of the cost.
 
 **Per solved task, on agentic coding** (this page): SWE-bench Verified instances attempted end to end by
-one tier at a time, scored by each repository's own tests. **Capability is a strict nesting, so routing
-cannot raise quality — and the arrangement that wins depends on which axis you price.**
+one tier at a time, scored by each repository's own tests. **Capability is nested along the chain measured, so
+routing cannot raise quality along it — and the arrangement that wins depends on which axis you price.**
 
 ## The agentic result as it now stands
 
@@ -23,7 +23,10 @@ every tier.
 | `claude-fable-5` | 20/20 | $14.5899 | $0.7295 | 97 s |
 
 **Capability is strictly nested with zero counterexamples in twenty.** Everything the box solved, terra
-solved; everything terra solved, fable solved. So the only saving available is "attempt a cheap tier,
+solved; everything terra solved, fable solved. **Narrowed 2026-08-30:** that is a property of these pairs,
+not of a model pool — the knowledge-question round's any-correct oracle over ten members reached 0.9596
+against the best single member's 0.9105, which requires some questions to be answered by members other than
+the best. Nesting is re-certified per family at admission rather than assumed; see `docs/ROUTING-DESIGN.md`. So the only saving available is "attempt a cheap tier,
 escalate what it fails", and three things decide whether that is worth doing.
 
 **In dollars, with a perfect failure signal**, the box earns 15.9% over an arrangement with no machine in
@@ -58,6 +61,8 @@ solve set is *not* a subset, or a requirement the APIs cannot meet at any price.
 | `docs/results-escalation-and-the-box.md` | the arrangements priced, the volume the machine needs, and the three closed signal families |
 | `docs/results-time-and-reliability.md` | the same arrangements in seconds and in failures, where the ordering inverts |
 | `docs/PREREG-failure-signal.md` | what was fixed before each look, including the readings that would have overturned the conclusion |
+| `docs/ROUTING-DESIGN.md` | what the router should be, from six independent designs, with the defaults and the parameters nobody has measured |
+| `docs/PREREG-kv-cliff.md` | why advertised cache capacity is not reusable capacity, and why the engine's occupancy gauge is not an alarm |
 | `agent/README.md` | the harness itself |
 | `docs/V3-PLAN.md`, `docs/PILOT.md`, `docs/POWER.md` | what was pre-registered before any of it ran |
 
