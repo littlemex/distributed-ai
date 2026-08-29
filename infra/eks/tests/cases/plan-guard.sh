@@ -183,6 +183,28 @@ test_plan_guard_profiling_only_escape_hatch_is_reachable() {
   [ "$fails" -eq 0 ]
 }
 
+# The Capacity Block helpers take their region and profile from the environment, and every chapter
+# exports AWS_REGION. Reading only AWS_DEFAULT_REGION meant a reader who set AWS_REGION=us-west-2
+# searched us-east-2 and got "could not describe reservation" right after paying for a block — and
+# forcing --profile default broke credentials that come from the environment or an instance role.
+# Assert the resolution order rather than the behaviour, because exercising it needs a real CB.
+test_plan_guard_cb_scripts_resolve_region_and_profile() {
+  local fails=0 f script dir
+  dir="$(cd "$SCRIPT_DIR/../scripts" && pwd)"
+  for f in 00-check-cb-offerings.sh 01-purchase-cb.sh 02-post-purchase.sh; do
+    script="$dir/$f"
+    [ -f "$script" ] || { printf 'FAIL %s is missing\n' "$f" >&2; fails=$((fails + 1)); continue; }
+    grep -q 'REGION="\${AWS_REGION:-\${AWS_DEFAULT_REGION:-' "$script" \
+      || { printf 'FAIL %s does not prefer AWS_REGION over AWS_DEFAULT_REGION\n' "$f" >&2; fails=$((fails + 1)); }
+    grep -q 'PROFILE="\${AWS_PROFILE:-}"' "$script" \
+      || { printf 'FAIL %s does not leave PROFILE empty when AWS_PROFILE is unset\n' "$f" >&2; fails=$((fails + 1)); }
+    # The unconditional form is the bug; the guarded form ([[ -n "$PROFILE" ]] && ...) is the fix.
+    grep -q 'aws --region \$REGION --profile \$PROFILE' "$script" \
+      && { printf 'FAIL %s passes --profile unconditionally\n' "$f" >&2; fails=$((fails + 1)); }
+  done
+  [ "$fails" -eq 0 ]
+}
+
 test_plan_guard_owned_list_is_complete() {
   local installer missing=""
   installer="$(_pg_installer)"

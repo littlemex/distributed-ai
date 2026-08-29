@@ -22,8 +22,13 @@
 
 set -euo pipefail
 
-REGION="${AWS_DEFAULT_REGION:-us-east-2}"
-PROFILE="${AWS_PROFILE:-default}"
+# AWS_REGION first: every chapter in the workshop exports AWS_REGION, and reading only
+# AWS_DEFAULT_REGION meant a reader who set AWS_REGION=us-west-2 silently searched us-east-2
+# and got "could not describe reservation" — or worse, a same-shaped id in another region.
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}"
+# Empty, not "default": passing --profile default breaks credentials that come from the
+# environment or an instance role with no [default] profile on disk. Matches the other two.
+PROFILE="${AWS_PROFILE:-}"
 OFFERING_ID=""
 INSTANCE_TYPE="p5en.48xlarge"
 INSTANCE_COUNT=2
@@ -44,7 +49,8 @@ if [[ -z "$OFFERING_ID" ]]; then
   exit 1
 fi
 
-AWS_CMD="aws --region $REGION --profile $PROFILE"
+AWS_CMD="aws --region $REGION"
+[[ -n "$PROFILE" ]] && AWS_CMD="$AWS_CMD --profile $PROFILE"
 
 # ── Dry-run: fetch offering details and show pricing ──────────────────────────
 echo ""

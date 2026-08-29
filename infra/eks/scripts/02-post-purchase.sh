@@ -21,7 +21,10 @@ set -euo pipefail
 
 CR_ID=""
 POOL="gpu-cb"
-REGION="${AWS_DEFAULT_REGION:-us-east-2}"
+# AWS_REGION first: every chapter in the workshop exports AWS_REGION, and reading only
+# AWS_DEFAULT_REGION meant a reader who set AWS_REGION=us-west-2 silently searched us-east-2
+# and got "could not describe reservation" — or worse, a same-shaped id in another region.
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}"
 PROFILE="${AWS_PROFILE:-}"
 
 while [[ $# -gt 0 ]]; do

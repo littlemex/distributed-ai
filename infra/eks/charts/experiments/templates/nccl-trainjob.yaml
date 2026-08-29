@@ -36,7 +36,7 @@ Render + apply (read GPU/EFA off a live node — they are per-instance facts):
   helm template exp ./charts/experiments -n $NS --set namespace=$NS \
     --set ncclTrainjob.enabled=true --set ncclTrainjob.nodeRole=$POOL \
     --set ncclTrainjob.gpuCount=$GPU --set ncclTrainjob.efaCount=$EFA \
-    --set ncclTrainjob.image=<nccl-tests or any torch+EFA image> | kubectl apply -f -
+    --set ncclTrainjob.image=<a torch+EFA image, e.g. the PyTorch DLC> | kubectl apply -f -
 Verify:
   kubectl -n $NS logs -f -l jobset.sigs.k8s.io/jobset-name=nccl-trainjob | grep -E "Selected provider|GB/s"
 */ -}}
@@ -44,8 +44,8 @@ Verify:
 {{- $v := .Values.ncclTrainjob }}
 {{- if not $v.nodeRole }}{{ fail "ncclTrainjob.nodeRole is required — set it to the accelerator_pools key of the target GPU pool (Karpenter labels its nodes node-role=<key>). Selecting on nvidia.com/gpu.product does NOT work: that label only appears after the GPU Operator labels a running node, so Karpenter cannot provision against it." }}{{- end }}
 {{- if not $v.image }}{{ fail "ncclTrainjob.image is required — it must carry BOTH torchrun and the aws-ofi-nccl plugin. The nccl-tests image this chart uses for ncclSshd does NOT qualify: it is built around Open MPI and has no torch, so the pods die with 'exec: torchrun: executable file not found in $PATH'. The ddp-sample image does not qualify either: it is the plain pytorch base, so NCCL finds no EFA provider and silently falls back to TCP sockets. An AWS Deep Learning Container (763104351884.dkr.ecr.<region>.amazonaws.com/pytorch-training:<ver>-gpu-...-ec2-...) ships both." }}{{- end }}
-{{- if not $v.gpuCount }}{{ fail "ncclTrainjob.gpuCount is required — read it from a live node's allocatable nvidia.com/gpu rather than hardcoding a per-instance fact." }}{{- end }}
-{{- if not $v.efaCount }}{{ fail "ncclTrainjob.efaCount is required — read it from a live node's allocatable vpc.amazonaws.com/efa. It is the physical card count minus one (card 0 carries the node IP), and it differs per family, so a fixed value leaves the pod Pending on a different instance type." }}{{- end }}
+{{- if not $v.gpuCount }}{{ fail "ncclTrainjob.gpuCount is required — take it from the instance type's GPU count (aws ec2 describe-instance-types) or from a live node's allocatable nvidia.com/gpu, rather than hardcoding a per-instance fact." }}{{- end }}
+{{- if not $v.efaCount }}{{ fail "ncclTrainjob.efaCount is required — take it from terraform output accelerator_pool_efa_schedulable for this pool (that output is derived from the EC2 API, so it works before any node exists; a live node's allocatable vpc.amazonaws.com/efa is the same number once one is up). On a multi-card instance it is the card count minus one, because card 0 carries the node IP; a single-card instance schedules 1. It differs per family, so a fixed value leaves the pod Pending on a different instance type." }}{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

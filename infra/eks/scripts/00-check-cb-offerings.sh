@@ -25,8 +25,14 @@
 
 set -euo pipefail
 
-REGION="${AWS_DEFAULT_REGION:-us-east-2}"
-PROFILE="${AWS_PROFILE:-default}"
+# AWS_REGION first: every chapter in the workshop exports AWS_REGION, and reading only
+# AWS_DEFAULT_REGION meant a reader who set AWS_REGION=us-west-2 silently searched us-east-2
+# and got "could not describe reservation" — or worse, a same-shaped id in another region.
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}"
+# Empty, not "default": passing --profile default breaks the common case of credentials
+# coming from the environment or an instance role with no [default] profile on disk.
+# 02-post-purchase.sh already did it this way; the two scripts now agree.
+PROFILE="${AWS_PROFILE:-}"
 INSTANCE_TYPES=""
 INSTANCE_COUNT=2
 DURATION_HOURS=24
@@ -44,7 +50,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-AWS_CMD="aws --region $REGION --profile $PROFILE"
+AWS_CMD="aws --region $REGION"
+[[ -n "$PROFILE" ]] && AWS_CMD="$AWS_CMD --profile $PROFILE"
 
 # The offering search window. The API rejects an end date beyond what it currently sells
 # (roughly 8 days out for short blocks), so --days-ahead is clamped on error below.
@@ -66,7 +73,7 @@ fi
 
 echo "=== Capacity Block Offerings ==="
 echo "Region        : $REGION"
-echo "Profile       : $PROFILE"
+echo "Profile       : ${PROFILE:-(none set; using the ambient credentials)}"
 echo "Instance count: $INSTANCE_COUNT"
 echo "Duration      : ${DURATION_HOURS}h"
 echo "Window        : $START_RANGE .. $END_RANGE"
