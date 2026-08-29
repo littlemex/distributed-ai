@@ -267,6 +267,36 @@ resource "null_resource" "wait_for_node_drain" {
               return 0
             fi
             echo "wait_for_node_drain: $count $label still present (attempt $i/$max_attempts)..."
+            # Every 30 attempts (5 minutes), name what is holding the drain instead of counting at
+            # the operator for half an hour. The usual holder is a pod annotated
+            # karpenter.sh/do-not-disrupt that lives OUTSIDE the namespace the teardown script
+            # cleaned: Karpenter will not evict it, so its node never empties. Observed live — the
+            # image-cache chapter's cache-headroom Deployment in kube-system pinned a cpu node and
+            # the gate sat at "1 NodeClaim(s) still present" until it was deleted by hand, with
+            # nothing in the output pointing at it. Read-only and best-effort; a kubectl or python
+            # hiccup here must never fail a teardown that is otherwise progressing.
+            if [ "$label" = "NodeClaim(s)" ] && [ $(( i % 30 )) -eq 0 ]; then
+              local held
+              held=$(kubectl get pods -A -o json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for pod in doc.get("items", []):
+    meta = pod.get("metadata", {})
+    ann = meta.get("annotations") or {}
+    if ann.get("karpenter.sh/do-not-disrupt") == "true":
+        node = (pod.get("spec") or {}).get("nodeName") or "(unscheduled)"
+        print("    %s/%s on %s" % (meta.get("namespace"), meta.get("name"), node))
+' 2>/dev/null || true)
+              if [ -n "$held" ]; then
+                echo "wait_for_node_drain: these pods carry karpenter.sh/do-not-disrupt, so Karpenter" >&2
+                echo "wait_for_node_drain: will not evict them and their nodes cannot empty:" >&2
+                printf '%s\n' "$held" >&2
+                echo "wait_for_node_drain: delete them (or the controller that owns them) to let the drain finish." >&2
+              fi
+            fi
           fi
           sleep 10
         done

@@ -526,7 +526,14 @@ HINT
 # which is asserted, not assumed, before each delete.
 sweep_eks_leftover_sgs() {
   local cluster="$1" region="$2" vpc="$3" swept=0 sg
-  aws eks describe-cluster --name "$cluster" --region "$region" >/dev/null 2>&1 && return 0
+  # The cluster is still up, so its security group is in use and not a leftover. Return
+  # "swept nothing" rather than success: returning success made the caller retry destroy and
+  # print "now that it is gone" after removing nothing, which sent the operator looking for a
+  # cleared blocker that never existed. A failure this early is not one this sweep can clear.
+  if aws eks describe-cluster --name "$cluster" --region "$region" >/dev/null 2>&1; then
+    echo "  The cluster is still up, so its security group is not a leftover; nothing to sweep." >&2
+    return 1
+  fi
   for sg in $(aws ec2 describe-security-groups --region "$region" \
     --filters "Name=vpc-id,Values=$vpc" "Name=group-name,Values=eks-cluster-sg-${cluster}-*" \
     --query 'SecurityGroups[].GroupId' --output text 2>/dev/null | tr '\t' '\n' | sed '/^$/d'); do
