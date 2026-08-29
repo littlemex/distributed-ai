@@ -1,0 +1,55 @@
+# vLLM tuning overlay for Qwen/Qwen3.8-27B.
+# Layered on charts/vllm-serving/values.yaml with `helm template -f`.
+# The MODEL FACTS this tuning derives from live in serving/models/qwen3.8-27b.yaml.
+#
+# Why these values (all rooted in the hybrid linear-attention architecture):
+#  - architecture qwen3_5 needs vLLM >= 0.27.0 (Qwen3_5ForConditionalGeneration is registered
+#    there); v0.27.1 is pinned in the image.
+#  - 48 of 64 layers are linear_attention (Gated DeltaNet). Prefix caching is NOT supported
+#    for the recurrent-state layers -> enablePrefixCaching stays false. Do not advertise
+#    "cheap repeated system prompts" for this model.
+#  - Which resource caps concurrency depends on the window. The 48 recurrent layers hold a
+#    fixed state per sequence regardless of length, so at a short window they are the
+#    binding constraint. At a very long one the 16 full-attention layers dominate: 64 KiB of
+#    KV per token means a million-token sequence reserves ~64 GiB and only two fit. Measured
+#    on this deployment, throughput saturated at two concurrent requests under the 1M window.
+#  - bf16 weights ~54 GiB do not fit one 48 GiB L40S -> tensorParallelSize 4 on g6e.12xlarge
+#    (num_kv_heads=4 divides TP4). TP2 also works on a 2-GPU slice if the pool changes.
+#  - native context is 262144; the deployed window comes from common/model.env, and YaRN is
+#    injected by deploy.sh only when that window exceeds native.
+
+image: vllm/vllm-openai:v0.27.1
+nodeRole: gpu-l40s
+gpuCount: 4
+tensorParallelSize: 4
+gpuMemoryUtilization: 0.92
+# maxNumSeqs is deliberately absent: it is set by the context profile
+# (serving/common/context-profiles.env) because it is the same decision as the window. The
+# chart's default of 16 applies if this is rendered without deploy.sh, which is only safe at
+# a short window.
+
+# Online FP8: halves the weight bytes read per decode token (measured FP8+MTP c=1 ~1.7x faster than
+# bf16 no-spec; FP8 is near-lossless and MTP is lossless). served-model-name stays Qwen/Qwen3.8-27B
+# so the agents need no change.
+quantization: fp8
+# Multimodal memory guard: this is a VLM (verified it reads images/video); cap items per request.
+limitMmPerPrompt: '{"image": 2, "video": 1}'
+extraEnv:
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"   # allow max_model_len > native; YaRN handles the extended range
+enablePrefixCaching: false
+
+# MTP self-speculative decoding: Qwen3.8-27B ships a 1-layer MTP head, so this needs no separate
+# draft model and is lossless (target-verified). num_speculative_tokens 3 reuses the MTP layer
+# multi-step; measured ~1.69x TPOT at c=1 (FP8/random) vs no-spec, and composes with YaRN 1M.
+speculativeConfig: '{"method": "mtp", "num_speculative_tokens": 3}'
+
+# tool calling: the chat_template emits Qwen3 XML (<tool_call><function=..><parameter=..>),
+# so the matching vLLM parser is qwen3_coder (hermes expects JSON and would fail to parse).
+enableAutoToolChoice: true
+toolCallParser: qwen3_coder
+
+# serve in non-thinking mode by default (thinking + greedy decoding endlessly repeats, and an
+# agent backend does not want a reasoning preamble each turn). Per-request chat_template_kwargs
+# can re-enable it. Verified: enable_thinking=false returns a clean 2-token answer vs a verbose
+# thinking trace.
+chatTemplateKwargs: '{"enable_thinking": false}'

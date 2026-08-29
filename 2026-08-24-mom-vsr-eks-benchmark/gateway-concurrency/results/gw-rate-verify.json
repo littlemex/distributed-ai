@@ -1,0 +1,78 @@
+{
+  "config": {
+    "target": "gateway",
+    "base_url": "https://d8b03j8erit4k.cloudfront.net",
+    "api_key_file": "/root/gw-verify/.sclv-key",
+    "model": "gemma-4",
+    "direct_transport": "mantle",
+    "direct_bedrock_model_id": "google.gemma-4-31b",
+    "direct_region": "us-east-2",
+    "concurrency": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "rate": [
+      100.0,
+      200.0
+    ],
+    "rate_duration": 20.0,
+    "requests_multiplier": 3,
+    "min_requests_per_stage": 8,
+    "max_requests_per_stage": 60,
+    "max_tokens": 16,
+    "stream": false,
+    "prompt": "Reply with a single short sentence about the weather.",
+    "timeout": 180.0,
+    "stage_gap_s": 10.0,
+    "out": "/root/gw-verify/gw-rate-verify.json"
+  },
+  "stages": [
+    {
+      "concurrency": 100.0,
+      "n_requests": 2001,
+      "duration_s": 23.74,
+      "n_ok": 2001,
+      "n_error": 0,
+      "throughput_ok_req_s": 84.29,
+      "attempted_req_s": 84.29,
+      "lat_p50_ms": 575,
+      "lat_p95_ms": 1170,
+      "lat_max_ms": 14935,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 2001
+      },
+      "err_counts": {},
+      "offered_rate": 100.0
+    },
+    {
+      "concurrency": 200.0,
+      "n_requests": 4001,
+      "duration_s": 29.268,
+      "n_ok": 2862,
+      "n_error": 1139,
+      "throughput_ok_req_s": 97.79,
+      "attempted_req_s": 136.7,
+      "lat_p50_ms": 7320,
+      "lat_p95_ms": 11680,
+      "lat_max_ms": 16065,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 2862,
+        "None": 1139
+      },
+      "err_counts": {
+        "client_error:ClientConnectorError": 240,
+        "client_error:ClientConnectorDNSError": 899
+      },
+      "offered_rate": 200.0
+    }
+  ]
+}

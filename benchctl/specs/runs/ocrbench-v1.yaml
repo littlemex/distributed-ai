@@ -1,0 +1,194 @@
+# OCRBench, the first multimodal family and the first with four layers instead of two.
+#
+# Four representatives rather than the whole roster, on both advisors' advice: measure a new family
+# with box / cheap / mid / premium, and widen into the rest only where the frontier actually swaps.
+# Ten models across three families teaches nothing about which model is needed where.
+#
+# What the gateway actually serves constrains this. The project's roster named gemma4, grok4.6 and the
+# gpt-5.6 family; /v1/models returns 23 Anthropic models and none of those, so they are not silently
+# substituted — they are simply absent and recorded as absent.
+id: 2026-08-28-ocrbench-v1
+serving_ref: sha256:PLACEHOLDER-set-by-deploy
+
+# Every api layer's rates are resolved from the gateway's own card, `specs/gateway-rates.json`,
+# keyed on the model alias. None are written here on purpose: `gemma-4` was carried at $0.30
+# input against the card's $5.00 and published as the cheapest layer on two frontiers, and
+# nothing about a wrong price looks wrong. `benchctl validate` refuses a literal that disagrees.
+layers:
+  - id: box-qwen36-tp2x2
+    kind: self_hosted
+    model: Qwen/Qwen3.6-35B-A3B
+    endpoint: http://qwen-serving.qwen-trial.svc.cluster.local:8000/v1/chat/completions
+    hourly_usd: 15.2174
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+    # Text-derived rates, and they are the wrong rates for this family: image tokens have their own
+    # prefill profile and the vision encoder is a separate cost. Recorded so the cost column is not
+    # empty, and NOT to be quoted for OCR until a vision perf cell exists.
+    input_usd_per_mtok: 0.236
+    # Measured, not assumed: benchctl/cached_prefill_rate.py, 2026-08-28, 224,620 tok/s of cached prefill
+    # against 18,417 fresh at 16 in flight, which is 8.2% of a fresh token. Without this the box pays the
+    # fresh rate for tokens its prefix cache served, which is a bias against it worth 72.5% of the prompt
+    # on the traffic that shares a prefix.
+    cache_read_usd_per_mtok: 0.0188
+    output_usd_per_mtok: 4.12
+    pricing_status: measured
+  - id: api-haiku-4-5
+    kind: api
+    model: claude-haiku-4-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    # The gateway's OpenAI shim rejects image_url parts outright, so images go to the Anthropic
+    # endpoint instead. Found by having all 278 items come back as transport failures.
+    image_style: anthropic
+    messages_endpoint: https://d8b03j8erit4k.cloudfront.net/v1/messages
+  - id: api-sonnet-5
+    kind: api
+    model: claude-sonnet-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    # Rejects the parameter outright: "`temperature` is deprecated for this model". So this layer's
+    # answers are not pinned the way the box's and haiku's are, and its rate carries that caveat.
+    sends_temperature: false
+    # Both of these came back empty on some items at 48 tokens, every one at finish_reason max_tokens:
+    # the model spends the budget before it speaks. opus-5 on 38 of 278, sonnet-5 on 5.
+    answer_token_budget: 1024
+    # The gateway's OpenAI shim rejects image_url parts outright, so images go to the Anthropic
+    # endpoint instead. Found by having all 278 items come back as transport failures.
+    image_style: anthropic
+    messages_endpoint: https://d8b03j8erit4k.cloudfront.net/v1/messages
+  - id: api-opus-5
+    kind: api
+    model: claude-opus-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    # Rejects the parameter outright: "`temperature` is deprecated for this model". So this layer's
+    # answers are not pinned the way the box's and haiku's are, and its rate carries that caveat.
+    sends_temperature: false
+    # Both of these came back empty on some items at 48 tokens, every one at finish_reason max_tokens:
+    # the model spends the budget before it speaks. opus-5 on 38 of 278, sonnet-5 on 5.
+    answer_token_budget: 1024
+    # The gateway's OpenAI shim rejects image_url parts outright, so images go to the Anthropic
+    # endpoint instead. Found by having all 278 items come back as transport failures.
+    image_style: anthropic
+    messages_endpoint: https://d8b03j8erit4k.cloudfront.net/v1/messages
+
+  # The rest of the project's roster, which `/v1/models` does not list. It returns 23 Anthropic models;
+  # these five answer when addressed by name, so the gateway's enumeration under-reports its own
+  # allowlist and a roster cannot be discovered from the API. Probed one request at a time.
+  #
+  # `answer_token_budget` is per layer because one number cannot serve them: measured on a single OCR
+  # item, gemma-4 and gpt-5.6-terra emit text inside 64 tokens while gpt-5.5 spends 388 on reasoning and
+  # says nothing under 1,024. Prices are placeholders — the gateway publishes no rate card for these —
+  # so they are comparable on quality and latency and NOT on cost.
+  - id: api-gpt-56-terra
+    kind: api
+    model: gpt-5.6-terra
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    sends_temperature: false      # "temperature does not support 0 with this model"
+    answer_token_budget: 256
+  - id: api-gpt-56-sol
+    kind: api
+    model: gpt-5.6-sol
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    sends_temperature: false
+    answer_token_budget: 1024     # 54 reasoning tokens on one item; leave room for worse
+  - id: api-gpt-55
+    kind: api
+    model: gpt-5.5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    answer_token_budget: 2048     # 388 reasoning tokens on one item, and silent under 1,024
+  - id: api-grok-46
+    kind: api
+    model: grok-4.6
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    answer_token_budget: 2048     # 180 reasoning tokens, silent under 1,024
+  - id: api-gemma-4
+    kind: api
+    model: gemma-4
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    answer_token_budget: 256
+
+suites:
+  - id: ocrbench-stratified-278
+    family: ocr
+    # Stratified by source dataset, not sampled at random: the question this family exists to answer is
+    # where the frontier swaps, and printed text is expected to sit differently from charts, tables and
+    # handwriting. A random draw would under-represent the small categories carrying that signal.
+    items_provenance: public-dataset
+    items: /artifacts/ocrbench-2026-08-28/manifest.jsonl
+    task_plugin: tasks.ocr_vqa
+    scorer: scorers.exact_label
+    baseline_layer: api-haiku-4-5
+    floor:
+      kind: paired_non_inferiority
+      metric: exact_label
+      margin_pp: 5.0            # wider than the text families: 278 items over 25 categories is thinner
+      confidence: 0.80
+    length_bins: [512, 2048, 8192]
+
+policies:
+  - id: direct
+    steps:
+      - layer_ref: box-qwen36-tp2x2
+
+operation_points:
+  - id: quality-c1
+    cell_kind: quality
+    concurrency: 1
+    input_tokens: 2048
+    output_tokens: 48
+    ephemeral_storage: 8Gi
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+
+cells:
+  - id: ocr-box-quality
+    suite: ocrbench-stratified-278
+    layer: box-qwen36-tp2x2
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-haiku-quality
+    suite: ocrbench-stratified-278
+    layer: api-haiku-4-5
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-sonnet5-quality
+    suite: ocrbench-stratified-278
+    layer: api-sonnet-5
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-opus5-quality
+    suite: ocrbench-stratified-278
+    layer: api-opus-5
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-gpt56terra-quality
+    suite: ocrbench-stratified-278
+    layer: api-gpt-56-terra
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-gpt56sol-quality
+    suite: ocrbench-stratified-278
+    layer: api-gpt-56-sol
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-gpt55-quality
+    suite: ocrbench-stratified-278
+    layer: api-gpt-55
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-grok46-quality
+    suite: ocrbench-stratified-278
+    layer: api-grok-46
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828
+  - id: ocr-gemma4-quality
+    suite: ocrbench-stratified-278
+    layer: api-gemma-4
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260828

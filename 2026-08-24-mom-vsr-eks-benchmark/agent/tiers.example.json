@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Which model each tier is, where it lives, and what it is charged at.",
+    "No address is committed: `url` is filled in by run.sh from the environment, because a",
+    "gateway host is a property of a deployment and not of the experiment.",
+    "",
+    "The self-hosted tier states its own rate. The gateway's table prices it at the top",
+    "tier because Bedrock publishes no list price for the model, and its generic `vllm` key",
+    "is $0.20 per million, which is neither the machine's cost nor anything measured. The",
+    "figure below is the one measured on this deployment at the throughput knee, and",
+    "`rate_basis` is required so it cannot be quietly changed into a nicer number."
+  ],
+  "premium": {
+    "model": "claude-fable-5",
+    "pricing_key": "fable",
+    "reasoning_effort": "high"
+  },
+  "cheap": {
+    "model": "gpt-5.6-terra",
+    "pricing_key": "gpt-5.6-terra"
+  },
+  "self_hosted": {
+    "model": "Qwen/Qwen3.6-35B-A3B",
+    "api_key_env": null,
+    "rate": {
+      "fresh_in": 0.236,
+      "out": 4.12,
+      "cache_read": 0.0188,
+      "cache_write": 0.236
+    },
+    "rate_basis": "measured 2026-08-29 on Qwen3.6-35B-A3B-FP8, g6e.12xlarge at $15.2174/h, TP=2 x 2 replicas. fresh_in from 18,417 prefill tok/s aggregate at 16 in flight; cache_read from 224,620 tok/s of cached prefill measured the same way, which is 8.2% of a fresh token (benchctl/cached_prefill_rate.py). cache_write priced as fresh input because the engine does the same work to populate a block as to compute it. THIS REPLACES the earlier $10.68 flat rate, whose basis said prefix caching is unsupported on the hybrid attention layers -- that was a missing opt-in flag rather than an architectural limit, so the old rate priced every repeated prompt as recomputed and overstated the box input rate by about 45x."
+  }
+}

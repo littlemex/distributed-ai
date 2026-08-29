@@ -1,0 +1,134 @@
+# Can the prompt-cache discount be manufactured? Two arms, one knob, the same items and the same question.
+#
+# `docs/cache-discount-eligibility.md` measured who gets the discount and from what prefix length, and worked
+# out arithmetically that padding short traffic to clear the minimum costs more than it saves: a 90% discount
+# on tokens you did not need cannot beat a 100% discount on not sending them. That is the counter-intuitive
+# claim in the whole cache story, so it gets measured rather than asserted.
+#
+# The knob is `shared_preamble_tokens` on the operation point: neutral reference text, identical on every
+# request, prepended. Nothing else differs between the arms — same items, same instruction, same layers, same
+# concurrency — so any cost difference is the arm and any quality difference is a side effect worth knowing.
+#
+# Three layers on purpose. `claude-sonnet-5` caches automatically above ~2,245 tokens, so it is the arm's best
+# case. `claude-haiku-4-5` never caches on this gateway at any length, so it shows what padding costs when no
+# discount arrives at all. And the box caches too — vLLM's prefix cache holds the preamble just as well — but
+# its cost model prices every prompt token at one rate whether or not it was a hit, so this run also puts a
+# number on that asymmetry rather than leaving it in a comment.
+id: 2026-08-28-cache-ablation-v1
+serving_ref: sha256:PLACEHOLDER-set-by-deploy
+
+# Every api layer's rates are resolved from the gateway's own card, `specs/gateway-rates.json`,
+# keyed on the model alias. None are written here on purpose: `gemma-4` was carried at $0.30
+# input against the card's $5.00 and published as the cheapest layer on two frontiers, and
+# nothing about a wrong price looks wrong. `benchctl validate` refuses a literal that disagrees.
+layers:
+  - id: box-qwen36-tp2x2
+    kind: self_hosted
+    model: Qwen/Qwen3.6-35B-A3B
+    endpoint: http://qwen-serving.qwen-trial.svc.cluster.local:8000/v1/chat/completions
+    hourly_usd: 15.2174
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+    input_usd_per_mtok: 0.236
+    # Measured, not assumed: benchctl/cached_prefill_rate.py, 2026-08-28, 224,620 tok/s of cached prefill
+    # against 18,417 fresh at 16 in flight, which is 8.2% of a fresh token. Without this the box pays the
+    # fresh rate for tokens its prefix cache served, which is a bias against it worth 72.5% of the prompt
+    # on the traffic that shares a prefix.
+    cache_read_usd_per_mtok: 0.0188
+    output_usd_per_mtok: 4.12
+    pricing_status: measured
+  - id: api-haiku-4-5
+    kind: api
+    model: claude-haiku-4-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    # The card gives this layer a cache-read rate, and on this gateway it is unreachable: it returned zero
+    # cached tokens at every prefix length tried, in every shape, asked and unasked.
+  - id: api-sonnet-5
+    kind: api
+    model: claude-sonnet-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+    sends_temperature: false
+    answer_token_budget: 512
+
+suites:
+  - id: classification-enum-v1
+    family: classification
+    items_provenance: public-dataset
+    items: specs/items/classification-ja-public-v2.jsonl
+    task_plugin: tasks.classification_enum
+    scorer: scorers.exact_label
+    baseline_layer: api-haiku-4-5
+    # The primary outcome of this run is cost, which is deterministic per token. The floor is declared because
+    # the harness compares against one, but 48 items detects only a large quality move, and that is the only
+    # claim the quality side of this run can carry.
+    floor:
+      kind: paired_non_inferiority
+      metric: exact_label
+      margin_pp: 5.0
+      confidence: 0.80
+    length_bins: [512, 2048, 8192]
+
+policies:
+  - id: direct
+    steps:
+      - layer_ref: box-qwen36-tp2x2
+
+operation_points:
+  # Below every minimum measured on this gateway, so no discount is reachable by anyone.
+  - id: quality-c1-bare
+    cell_kind: quality
+    concurrency: 1
+    input_tokens: 256
+    output_tokens: 16
+    ephemeral_storage: 8Gi
+    shared_preamble_tokens: 0
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+  # Above sonnet-5's measured minimum of ~2,245 even before its 1.60x tokeniser inflation, so the discount is
+  # reachable for the layers that have one. 2,600 nominal rather than 2,300: the preamble is sized in a
+  # nominal five-tokens-per-clause that only the compact tokenisers actually hit, and an arm that lands just
+  # under the bar on one layer would measure the sizing, not the strategy.
+  - id: quality-c1-padded
+    cell_kind: quality
+    concurrency: 1
+    input_tokens: 4096
+    output_tokens: 16
+    ephemeral_storage: 8Gi
+    shared_preamble_tokens: 2600
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+
+cells:
+  - id: abl-box-bare
+    suite: classification-enum-v1
+    layer: box-qwen36-tp2x2
+    policy: direct
+    operation_point: quality-c1-bare
+    seed: 20260828
+  - id: abl-box-padded
+    suite: classification-enum-v1
+    layer: box-qwen36-tp2x2
+    policy: direct
+    operation_point: quality-c1-padded
+    seed: 20260828
+  - id: abl-haiku-bare
+    suite: classification-enum-v1
+    layer: api-haiku-4-5
+    policy: direct
+    operation_point: quality-c1-bare
+    seed: 20260828
+  - id: abl-haiku-padded
+    suite: classification-enum-v1
+    layer: api-haiku-4-5
+    policy: direct
+    operation_point: quality-c1-padded
+    seed: 20260828
+  - id: abl-sonnet5-bare
+    suite: classification-enum-v1
+    layer: api-sonnet-5
+    policy: direct
+    operation_point: quality-c1-bare
+    seed: 20260828
+  - id: abl-sonnet5-padded
+    suite: classification-enum-v1
+    layer: api-sonnet-5
+    policy: direct
+    operation_point: quality-c1-padded
+    seed: 20260828

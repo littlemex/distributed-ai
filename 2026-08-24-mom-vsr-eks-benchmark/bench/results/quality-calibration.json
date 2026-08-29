@@ -1,0 +1,16 @@
+{
+  "accuracy_by_model": {
+    "local/qwen3.8-27b": 0.6384297520661157,
+    "sclv/claude-fable-5": 0.878099173553719,
+    "sclv/claude-opus-5": 0.878099173553719,
+    "sclv/claude-sonnet-5": 0.8347107438016529,
+    "sclv/gemma-4": 0.8202479338842975,
+    "sclv/gpt-5.6-sol": 0.8512396694214877,
+    "sclv/gpt-5.6-terra": 0.8119834710743802,
+    "sclv/grok-4.6": 0.8760330578512396,
+    "sclv/nemotron-super-3-120b": 0.5289256198347108,
+    "sclv/qwen3-next-80b": 0.6239669421487604
+  },
+  "n_questions": 484,
+  "source_fold": "calibration"
+}

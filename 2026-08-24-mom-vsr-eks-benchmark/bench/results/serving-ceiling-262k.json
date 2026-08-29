@@ -1,0 +1,54 @@
+{
+  "before": {
+    "running": 0.0,
+    "waiting": 0.0,
+    "prompt_tokens": 0.0,
+    "generation_tokens": 0.0
+  },
+  "sweep": [
+    {
+      "concurrency": 1,
+      "requests": 4,
+      "wall_s": 6.119105792,
+      "output_tokens_per_s": 83.67235628927659,
+      "requests_per_s": 0.6536902835099734,
+      "p50_s": 1.248708083,
+      "p95_s": 2.409770917,
+      "generated": 512.0,
+      "usd_per_mtok_out": 50.519140884972224
+    },
+    {
+      "concurrency": 2,
+      "requests": 4,
+      "wall_s": 4.551618749999999,
+      "output_tokens_per_s": 112.48745295286432,
+      "requests_per_s": 0.8788082261942525,
+      "p50_s": 2.2477671664999996,
+      "p95_s": 3.2186347920000005,
+      "generated": 512.0,
+      "usd_per_mtok_out": 37.57801821085611
+    },
+    {
+      "concurrency": 4,
+      "requests": 8,
+      "wall_s": 4.473500957999999,
+      "output_tokens_per_s": 228.90349406738636,
+      "requests_per_s": 1.788308547401456,
+      "p50_s": 2.2094035004999997,
+      "p95_s": 2.4774505829999995,
+      "generated": 1024.0,
+      "usd_per_mtok_out": 18.466540114547847
+    },
+    {
+      "concurrency": 9,
+      "requests": 18,
+      "wall_s": 7.851907790999999,
+      "output_tokens_per_s": 293.4318717599928,
+      "requests_per_s": 2.292436498124944,
+      "p50_s": 3.7723738539999987,
+      "p95_s": 5.1690935840000005,
+      "generated": 2304.0,
+      "usd_per_mtok_out": 14.405577452107854
+    }
+  ]
+}

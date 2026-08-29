@@ -1,0 +1,112 @@
+# The measurement runs in the cluster because the router is only reachable there.
+#
+# The router's service is ClusterIP: a run driven from a laptop would have to go
+# through a port-forward, which puts a process on someone's desk and a laptop's
+# sleep timer on the critical path of a run that takes hours. So the harness runs
+# next to what it measures, and the results land on a shared volume that outlives
+# the Job.
+#
+# There is no purpose-built image. The harness is a handful of files delivered as
+# a ConfigMap, its dependencies come from PyPI, and the upstream benchmark is
+# cloned at a pinned commit — which also records exactly whose datasets and whose
+# scorer produced the numbers.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mom-bench-results
+  labels:
+    app.kubernetes.io/name: mom-bench
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ${BENCH_STORAGE_CLASS}
+  resources:
+    requests:
+      storage: ${BENCH_VOLUME_SIZE}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${JOB_NAME}
+  labels:
+    app.kubernetes.io/name: mom-bench
+spec:
+  # A measurement can run for an hour, and an involuntary kill — a consolidated
+  # node, a failed instance — must not throw away what it already paid for. The
+  # entrypoint adds `--resume` for the collecting subcommands, so a retry skips
+  # the cells already on the volume instead of buying them twice.
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mom-bench
+      annotations:
+        # Karpenter consolidates underutilised nodes, and a Job pod that happens
+        # to be the only thing left on one is a prime candidate. It evicted this
+        # very Job mid-run. A long measurement is not relocatable work: it holds
+        # in-flight requests that are already being billed.
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: harness
+          image: ${BENCH_IMAGE}
+          command: ["/bin/bash", "/opt/bench/entrypoint.sh"]
+          args: ${JOB_ARGS}
+          env:
+            - name: VSR_URL
+              value: "http://vsr.${NAMESPACE}.svc.cluster.local:8801/v1/chat/completions"
+            - name: VSR_CLASSIFY_URL
+              value: "http://vsr.${NAMESPACE}.svc.cluster.local:8080/api/v1/classify/intent"
+            - name: UPSTREAM_REPO
+              value: "${UPSTREAM_REPO}"
+            # Quoted because a short commit sha like 43446e8 is valid YAML
+            # scientific notation, and an unquoted one arrives as a number.
+            - name: UPSTREAM_COMMIT
+              value: "${UPSTREAM_COMMIT}"
+            # Both caches live on the shared volume, so a second Job neither
+            # re-downloads the dataset nor rebuilds the environment.
+            - name: HF_HOME
+              value: "/results/cache/huggingface"
+            - name: PIP_CACHE_DIR
+              value: "/results/cache/pip"
+            - name: RESULTS_DIR
+              value: "/results/${RUN_ID}"
+          volumeMounts:
+            - name: code
+              mountPath: /opt/bench/src
+              readOnly: true
+            # Nested on purpose: a ConfigMap key cannot contain a slash, so the
+            # package directory has to arrive as its own mount rather than as
+            # keys named "harness/....py".
+            - name: harness
+              mountPath: /opt/bench/src/harness
+              readOnly: true
+            - name: entrypoint
+              mountPath: /opt/bench/entrypoint.sh
+              subPath: entrypoint.sh
+              readOnly: true
+            - name: results
+              mountPath: /results
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 6Gi
+      volumes:
+        - name: code
+          configMap:
+            name: ${CODE_CONFIGMAP}
+        - name: harness
+          configMap:
+            name: ${HARNESS_CONFIGMAP}
+        - name: entrypoint
+          configMap:
+            name: ${CODE_CONFIGMAP}
+            items:
+              - key: entrypoint.sh
+                path: entrypoint.sh
+        - name: results
+          persistentVolumeClaim:
+            claimName: mom-bench-results

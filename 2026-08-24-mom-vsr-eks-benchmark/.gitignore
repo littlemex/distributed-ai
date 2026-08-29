@@ -1,0 +1,4 @@
+# Run results live on EFS, not in git: they are large, they are regenerated, and a diff of a
+# score file is not a reviewable change. The declarations that produced them are versioned; the
+# results are collected with `collect` and kept on the shared volume.
+results/
