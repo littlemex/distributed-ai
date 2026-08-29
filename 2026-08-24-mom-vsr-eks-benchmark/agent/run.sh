@@ -33,6 +33,8 @@ JOB="${JOB:0:57}${PASS:+-p${PASS}}"
 # answers. `PASS=2` puts them under /results/pass2/, one level deeper, which is why the
 # report's first-pass glob does not pick them up.
 PASS_DIR="${PASS:+pass${PASS}/}"
+# The protocol is part of what an episode is, not a setting on top of it, so a function-calling
+# episode must not land on a text one. Pass PASS=fc alongside PROTOCOL=function-calling.
 IMAGE="swebench/sweb.eval.x86_64.${INSTANCE_ID//__/_1776_}:latest"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
@@ -101,7 +103,7 @@ cp "${STRATOCLAVE_DEFAULTS}/pricing.json" "${WORK}/pricing.json"
 if [[ -n "${SCORE_ONLY:-}" ]]; then
   EPISODE_CMD='echo "[INFO] score-only: the diff already on the volume, no model calls"; test -f "$OUT/diff.patch" || { echo "[FAIL] no diff at $OUT/diff.patch"; exit 1; }; status=0'
 else
-  EPISODE_CMD='"$HARNESS_PY" /code/loop.py --instance /data/instance.json --tiers /data/tiers.json --pricing /data/pricing.json --policy '"${POLICY}"' --out "$OUT" --max-steps ${MAX_STEPS:-40} --max-tokens ${MAX_TOKENS:-1200000} --max-usd ${MAX_USD:-20.0} 2>&1 | tee "$OUT/loop.log"; status=$?'
+  EPISODE_CMD='"$HARNESS_PY" /code/loop.py --instance /data/instance.json --tiers /data/tiers.json --pricing /data/pricing.json --policy '"${POLICY}"' --out "$OUT" --max-steps ${MAX_STEPS:-40} --max-tokens ${MAX_TOKENS:-1200000} --max-usd ${MAX_USD:-20.0} --protocol ${PROTOCOL:-text} 2>&1 | tee "$OUT/loop.log"; status=$?'
 fi
 
 # Results go to a shared volume, not to the pod. The first role-based episode finished, its
@@ -210,6 +212,8 @@ spec:
               value: "${MAX_USD:-20.0}"
             - name: VLLM_METRICS_URL
               value: "${VLLM_METRICS_URL:-}"
+            - name: PROTOCOL
+              value: "${PROTOCOL:-text}"
           volumeMounts:
             - {name: code, mountPath: /code}
             - {name: data, mountPath: /data}

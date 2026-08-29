@@ -52,6 +52,27 @@ enough of it to know why it misbehaves, change it, and run any existing tests ne
 not add new files unless the fix needs one.
 """
 
+# The same instructions with the syntax removed, for --protocol function-calling. Everything that
+# is not about *how to write a call* is word-for-word identical, so the two arms differ in encoding
+# and not in what the model is asked to do.
+SYSTEM_TOOL_CALLING = """\
+You are fixing a bug in a Python repository checked out at /testbed. You interact with it \
+only through the tools provided, one call per turn, and you are finished when the library behaves \
+correctly — a test suite you cannot see will decide that.
+
+Rules that are enforced rather than requested:
+
+* Editing a test file fails the task. The tests that judge you are not in this checkout;
+  they are applied after you finish, so there is nothing to be gained by guessing at them.
+* `old` must appear exactly once in the file, whitespace included. If it does not, the
+  edit is refused and you are told so.
+* Paths are relative to the checkout.
+
+Work in this order unless you have a reason not to: find the code the report is about, read \
+enough of it to know why it misbehaves, change it, and run any existing tests near it. Do \
+not add new files unless the fix needs one.
+"""
+
 HANDOFF = """\
 You are writing the fix for a bug in a Python repository. Another engineer has already \
 investigated and hands you their findings. Reply with `write_patch` actions and nothing \
@@ -130,6 +151,11 @@ class Step:
     usage_anomaly: str | None = None
     # Set when the provider never reported usage and the cost is an approximation.
     usd_estimated: bool = False
+    # Which serialisations the arguments arrived in, and whether any of them is one the v1 reader
+    # would have refused. Recorded per step, not summed per episode, so a solved trajectory can be
+    # audited for whether it ever depended on the tolerant path -- see tools.GRAMMAR_VERSION.
+    arg_encodings: list[str] = field(default_factory=list)
+    tolerant_parse: bool = False
 
 
 def build_policy(name: str, args) -> pol.Policy:
@@ -236,16 +262,15 @@ def run_episode(args) -> dict:
         max_handoffs=args.max_handoffs,
     )
     state = pol.EpisodeState()
+    extra = ("handoff",) if strategy.hands_off_patch else ()
+    system = (
+        SYSTEM_TOOL_CALLING if args.protocol == "function-calling"
+        else SYSTEM.format(
+            protocol=tools.protocol(withhold=strategy.withholds, add=extra)
+        )
+    )
     messages = [
-        {
-            "role": "system",
-            "content": SYSTEM.format(
-                protocol=tools.protocol(
-                    withhold=strategy.withholds,
-                    add=("handoff",) if strategy.hands_off_patch else (),
-                )
-            ),
-        },
+        {"role": "system", "content": system},
         {"role": "user", "content": _opening(instance)},
     ]
 
@@ -291,7 +316,7 @@ def run_episode(args) -> dict:
         switch_tax_usd = sum(step.switch_tax_usd for step in steps)
         episode = _write_episode(
             args, instance, roster, strategy, budget, state, steps, per_tier,
-            stopped, started, switch_tax_usd,
+            stopped, started, switch_tax_usd, messages,
         )
     return episode
 
@@ -327,6 +352,7 @@ def _drive(
                 messages=messages,
                 max_tokens=args.max_reply_tokens,
                 reasoning_effort=model.effort,
+                tool_schemas=_schemas_for(args, strategy),
             )
         except transport.Unreachable as exc:
             # The attempts that failed were still billed, so they are charged before the
@@ -362,7 +388,11 @@ def _drive(
             else 0.0
         )
 
-        actions = tools.parse_all(reply.text or "")
+        actions = (
+            tools.from_tool_calls(reply.tool_calls)
+            if args.protocol == "function-calling"
+            else tools.parse_all(reply.text or "")
+        )
         action, observation = _act(
             actions, strategy, state, read_paths, reply, decision.tier
         )
@@ -370,8 +400,26 @@ def _drive(
         if observation.tests_passed is False:
             state.verify_failures += 1
 
-        messages.append({"role": "assistant", "content": reply.text or ""})
-        messages.append({"role": "user", "content": _observation_text(observation)})
+        if args.protocol == "function-calling" and reply.tool_calls:
+            calls = [
+                {"id": call["id"] or f"call_{state.steps}_{i}", "type": "function",
+                 "function": {"name": call["name"], "arguments": call["arguments"]}}
+                for i, call in enumerate(reply.tool_calls)
+            ]
+            messages.append({
+                "role": "assistant", "content": reply.text or None, "tool_calls": calls,
+            })
+            # One result per call, because a provider that sent two calls expects two results and
+            # rejects the next request otherwise.
+            text = _observation_text(observation)
+            for call in calls:
+                messages.append({
+                    "role": "tool", "tool_call_id": call["id"], "content": text,
+                })
+                text = "(carried out together with the call above)"
+        else:
+            messages.append({"role": "assistant", "content": reply.text or ""})
+            messages.append({"role": "user", "content": _observation_text(observation)})
 
         reasons = strategy.consider(state, budget)
         step = _step(
@@ -576,6 +624,8 @@ def _step(
         retried_attempts=len(reply.abandoned),
         usage_anomaly=reply.usage_anomaly,
         usd_estimated=reply.estimated,
+        arg_encodings=list(action.encodings) if action else [],
+        tolerant_parse=bool(action and action.tolerant),
     )
 
 
@@ -627,7 +677,7 @@ def _reply_cost(rate: pol.Rate, reply: transport.Reply) -> float:
 
 def _write_episode(
     args, instance, roster, strategy, budget, state, steps, per_tier,
-    stopped, started, switch_tax_usd,
+    stopped, started, switch_tax_usd, messages,
 ) -> dict:
     """Record the episode, including one that ended badly.
 
@@ -639,6 +689,15 @@ def _write_episode(
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "diff.patch").write_text(diff)
+    # The replies themselves, so a grammar change can be re-parsed against what was actually sent
+    # instead of re-run. Without this the only record of a turn's syntax was its signature, which
+    # is why the 2228 already-paid-for steps could not be re-read under the v2 reader and the
+    # non-interference check had to be inferred. Assistant turns in full because they are the thing
+    # being parsed; observations clipped because they are the harness's own output and large.
+    (out / "transcript.json").write_text(json.dumps([
+        m if m.get("role") == "assistant" else {**m, "content": (m.get("content") or "")[:500]}
+        for m in messages
+    ], indent=1))
     episode = {
         "instance_id": instance["instance_id"],
         "policy": strategy.describe(),
@@ -659,6 +718,7 @@ def _write_episode(
             "verify_failures": state.verify_failures,
             "diff_bytes": len(diff),
         },
+        "format_compliance": _format_compliance(steps, getattr(args, "protocol", "text")),
         "per_tier": per_tier,
         "escalated_at": state.escalated_at,
         "triggers_fired": state.triggers_fired,
@@ -678,6 +738,46 @@ def _write_episode(
     for note in episode["notes"]:
         print(f"     [NOTE] {note}")
     return episode
+
+
+def _format_compliance(steps: list[Step], protocol: str = "text") -> dict:
+    """Whether the model could drive the tools at all, kept apart from whether it fixed the bug.
+
+    A single solve rate confounds the two, and this project has now seen the confound dominate: a
+    box that named the right tool on every turn scored zero because it wrote the arguments in its
+    own dialect. So each failure mode is counted separately, and the tolerant-path count is
+    reported whether or not it is zero -- a reader comparing tiers needs to see that it is 0% for
+    the APIs and large for one box, because that asymmetry is the finding.
+    """
+    needs_arg = {"list_dir": "dir", "search": "pattern", "read_file": "path",
+                 "run_tests": "target", "write_patch": "path"}
+    counted = [s for s in steps if s.step_type != "unreachable"]
+    parsed = [s for s in counted if s.tool]
+    return {
+        "grammar_version": tools.GRAMMAR_VERSION,
+        "protocol": protocol,
+        "steps": len(counted),
+        "no_action": sum(1 for s in counted if not s.tool),
+        "unknown_tool": sum(1 for s in parsed if s.tool not in tools.STEP_TYPE),
+        # The signature is built from the naming arguments only, so empty parentheses on a tool
+        # that has one is exactly "the target was never named".
+        "empty_required_arg": sum(
+            1 for s in parsed
+            if s.tool in needs_arg and (s.signature or "").endswith("()")
+        ),
+        "tolerant_parse": sum(1 for s in parsed if s.tolerant_parse),
+        "encodings": sorted({e for s in parsed for e in s.arg_encodings}),
+    }
+
+
+def _schemas_for(args, strategy: pol.Policy) -> list[dict] | None:
+    """The tool schemas this arm declares, or nothing when the protocol is text."""
+    if args.protocol != "function-calling":
+        return None
+    return tools.schemas(
+        withhold=strategy.withholds,
+        add=("handoff",) if strategy.hands_off_patch else (),
+    )
 
 
 def _comparability(
@@ -965,6 +1065,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="a runaway guard, not an experimental condition: an episode "
                              "that hits it is recorded as not comparable")
     parser.add_argument("--max-reply-tokens", type=int, default=8192)
+    # The text protocol is the benchmark. Function calling is a diagnostic arm: it answers how much
+    # of a model's failure to drive the tools is the text protocol resembling, without matching, the
+    # tool-call syntax the model was trained on. Episodes from the two are not comparable to each
+    # other and the episode records which one produced it.
+    parser.add_argument("--protocol", default="text",
+                        choices=("text", "function-calling"),
+                        help="how the model is asked for a tool call")
     parser.add_argument("--first-event-s", type=float, default=900.0,
                         help="how long a model may think before saying anything")
     parser.add_argument("--idle-s", type=float, default=120.0,

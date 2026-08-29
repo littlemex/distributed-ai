@@ -20,14 +20,14 @@
     "pricing_key": "gpt-5.6-terra"
   },
   "self_hosted": {
-    "model": "Qwen/Qwen3.8-27B",
+    "model": "Qwen/Qwen3.6-35B-A3B",
     "api_key_env": null,
     "rate": {
-      "fresh_in": 10.68,
-      "out": 10.68,
-      "cache_read": 10.68,
-      "cache_write": 10.68
+      "fresh_in": 0.236,
+      "out": 4.12,
+      "cache_read": 0.0188,
+      "cache_write": 0.236
     },
-    "rate_basis": "measured 2026-08-26: g6e.12xlarge at $15.2174/h, 396 output tok/s at the 48-concurrent knee, 262k window, throughput tune. Input priced the same as output because the machine bills wall-clock and its prefix caching is unsupported on the hybrid linear-attention layers, so a repeated prompt is recomputed. See docs/V3-PLAN.md."
+    "rate_basis": "measured 2026-08-29 on Qwen3.6-35B-A3B-FP8, g6e.12xlarge at $15.2174/h, TP=2 x 2 replicas. fresh_in from 18,417 prefill tok/s aggregate at 16 in flight; cache_read from 224,620 tok/s of cached prefill measured the same way, which is 8.2% of a fresh token (benchctl/cached_prefill_rate.py). cache_write priced as fresh input because the engine does the same work to populate a block as to compute it. THIS REPLACES the earlier $10.68 flat rate, whose basis said prefix caching is unsupported on the hybrid attention layers -- that was a missing opt-in flag rather than an architectural limit, so the old rate priced every repeated prompt as recomputed and overstated the box input rate by about 45x."
   }
 }

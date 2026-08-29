@@ -385,6 +385,23 @@ class CheapOnly(Policy):
         return Decision(CHEAP, "the policy uses one tier throughout")
 
 
+class SelfHostedOnly(Policy):
+    """The box alone, all the way, which is the arm the pilot was missing.
+
+    `capacity-first` sends to the box and spills to the cheap tier when there is no room, so an episode under it
+    is only a box trajectory when it happened not to spill. That made the box's trajectory a by-product of
+    admission control rather than something measured, and a comparison of *trajectories* — how many turns each
+    model needs for the same task — has to hold the model fixed for the whole episode. On the same instances the
+    box took 27 steps where the cheap tier took 8, so the difference is not a detail.
+    """
+
+    name = "self-hosted-always"
+    required_tiers = (SELF_HOSTED,)
+
+    def decide(self, state: EpisodeState) -> Decision:
+        return Decision(SELF_HOSTED, "the policy uses one tier throughout")
+
+
 class OneWayEscalation(Policy):
     """Cheap until a trigger fires, premium from then on, and never back.
 
@@ -529,6 +546,7 @@ class RoleBased(Policy):
 POLICIES = {
     PremiumOnly.name: PremiumOnly,
     CheapOnly.name: CheapOnly,
+    SelfHostedOnly.name: SelfHostedOnly,
     OneWayEscalation.name: OneWayEscalation,
     CapacityFirst.name: CapacityFirst,
     RoleBased.name: RoleBased,

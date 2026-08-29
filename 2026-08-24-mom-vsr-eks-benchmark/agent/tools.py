@@ -23,6 +23,7 @@ charging it the turn.
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import subprocess
@@ -47,6 +48,35 @@ STEP_TYPE = {
     "done": "finish",
 }
 
+# The reader's grammar version, and it is part of every result. v1 accepted `key: value` lines
+# only. v2 also accepts two encodings of the same pair that models trained on tool-calling emit
+# inside the block -- `<parameter=key>value</parameter>` and `<key>value</key>` -- because a
+# self-hosted Qwen3.6-35B-A3B wrote 68.8% of its arguments that way and scored zero for it while
+# naming the right tool every time.
+#
+# Frozen 2026-08-29, before the re-run that motivated it, and extended after observing that
+# model's output. That is disclosed rather than presented as neutral: the change lifts exactly one
+# tier, because the two APIs never emitted these forms (0 of 1330 and 0 of 258 recorded steps) and
+# the previous box emitted them 8 times in 640. What it must never do is absorb a real failure, so
+# it does not invent values, does not map an invented tool name onto a real one, and does not
+# rescue an empty value. Every action records which encodings produced it, and every episode
+# counts how many needed a tolerant one, so "the reader learned its dialect" stays separable from
+# "the model got better".
+GRAMMAR_VERSION = 2
+
+# The argument names each tool owns. A tolerant encoding is honoured only for a name in this
+# table: `<dir>/testbed</dir>` is an argument to `list_dir` and `<thinking>...</thinking>` is not,
+# and without the table the second becomes an argument called "thinking".
+ARG_NAMES = {
+    "list_dir": ("dir",),
+    "search": ("pattern", "dir"),
+    "read_file": ("path", "start"),
+    "run_tests": ("target",),
+    "write_patch": ("path", "old", "new"),
+    "done": ("note",),
+    "handoff": ("note",),
+}
+
 # Enough to read a definition and its neighbourhood; not enough to page a whole module in
 # one turn, which is how a context fills with material no step needed.
 MAX_READ_LINES = 400
@@ -61,6 +91,20 @@ class Action:
     tool: str
     args: dict[str, str]
     raw: str = ""
+    # Which serialisation each argument arrived in, most-canonical first. Kept per action rather
+    # than per episode so a solved trajectory can be checked for whether it ever needed the
+    # tolerant path.
+    encodings: tuple[str, ...] = ()
+
+    # The text encodings v1 refused. Named rather than defined by exclusion, so that the
+    # function-calling arm -- a different protocol, not a lenient reading of this one -- does not
+    # count every one of its actions as a tolerant parse and hide the number that matters.
+    TOLERATED = ("parameter-tag", "element-tag")
+
+    @property
+    def tolerant(self) -> bool:
+        """Did reading this action need a text encoding v1 would have rejected?"""
+        return any(e in self.TOLERATED for e in self.encodings)
 
     @property
     def step_type(self) -> str:
@@ -215,6 +259,108 @@ def protocol(
 PROTOCOL = protocol()
 
 
+# The same tools as a JSON schema, for the diagnostic arm that drives the model through its own
+# tool-calling interface instead of this text protocol. It exists to answer one question the text
+# arm cannot: how much of a model's failure to drive the tools is the protocol's near-miss
+# resemblance to the syntax the model was trained on. A Qwen3.6-35B-A3B told to emit
+# `<action tool="search">` writes `<parameter=pattern">` -- its native form with the wrapper's
+# attribute quoting bleeding in -- so the two are not independent.
+#
+# Descriptions are the same sentences the text protocol shows, so the arms differ in encoding and
+# not in what the model is told the tools do.
+_SCHEMA_DESC = {
+    "list_dir": "what is in a directory",
+    "search": "where a name appears in the tree, as a regex",
+    "read_file": "up to 400 lines of a file from `start`",
+    "run_tests": "run tests that already exist in this checkout",
+    "write_patch": "replace an exact block of a file; `old` must appear exactly once, whitespace included",
+    "done": "you are finished, and why",
+    "handoff": "describe the fix and the files it touches, without writing the patch yourself",
+}
+_SCHEMA_ARGS = {
+    "dir": ("string", "a path relative to the checkout"),
+    "pattern": ("string", "a regex"),
+    "path": ("string", "a path relative to the checkout"),
+    "start": ("integer", "the first line to show"),
+    "target": ("string", "a pytest target"),
+    "old": ("string", "the exact lines to replace"),
+    "new": ("string", "what to put there"),
+    "note": ("string", "one or two sentences"),
+}
+# Which arguments a tool cannot be called without. `start` and a search's `dir` are optional in the
+# text protocol too, so requiring them here would make the arms differ in more than encoding.
+_SCHEMA_REQUIRED = {
+    "list_dir": ("dir",), "search": ("pattern",), "read_file": ("path",),
+    "run_tests": ("target",), "write_patch": ("path", "old", "new"),
+    "done": ("note",), "handoff": ("note",),
+}
+
+
+def schemas(withhold: tuple[str, ...] = (), add: tuple[str, ...] = ()) -> list[dict]:
+    """The tool schemas for a policy that does not offer every tool.
+
+    Mirrors `protocol()`: a withheld tool is not declared, so the model is never shown a tool it
+    would then be refused.
+    """
+    names = [name for name in DEFAULT_TOOLS if name not in withhold]
+    names += [name for name in add if name not in names]
+    out = []
+    for name in names:
+        properties = {
+            arg: {"type": _SCHEMA_ARGS[arg][0], "description": _SCHEMA_ARGS[arg][1]}
+            for arg in ARG_NAMES[name]
+        }
+        out.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": _SCHEMA_DESC[name],
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": list(_SCHEMA_REQUIRED[name]),
+                },
+            },
+        })
+    return out
+
+
+def from_tool_calls(calls: list[dict]) -> list[Action]:
+    """Read structured calls as actions, without repairing them.
+
+    Arguments that are not a JSON object, or whose values are not scalars, are dropped rather than
+    coerced -- the point of the arm is to measure whether the model can drive the tools through its
+    own interface, and a reader that patched up broken JSON would answer a different question.
+    """
+    out = []
+    for call in calls:
+        name = call.get("name") or ""
+        if not name:
+            continue
+        args: dict[str, str] = {}
+        try:
+            parsed = json.loads(call.get("arguments") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            for key, value in parsed.items():
+                if not isinstance(value, (str, int, float, bool)):
+                    continue
+                # An empty value does not claim the name, which is the same rule the text reader
+                # applies. Both arms must agree on it: this model fills an optional `dir` with ""
+                # and the tools read a missing `dir` as the checkout root, so keeping the empty
+                # string would make every function-calling search grep a path that does not exist
+                # -- an arm broken by a convention rather than by the model.
+                if value == "":
+                    continue
+                args[str(key)] = str(value)
+        out.append(Action(
+            tool=name, args=args,
+            raw=json.dumps(call)[:2000], encodings=("function-call",),
+        ))
+    return out
+
+
 def parse_all(text: str) -> list[Action]:
     """Every action in an assistant turn, in order.
 
@@ -263,17 +409,64 @@ def principal(actions: list[Action]) -> Action | None:
     )
 
 
+# The two tolerant encodings, in the order they are tried. Both are the same key/value pair in a
+# tag rather than on a line, which is what `--tool-call-parser=qwen3_coder` trains a model to emit.
+_PARAMETER_TAG = re.compile(r"<parameter=(\w+)\s*>(.*?)</parameter\s*>", re.DOTALL)
+_ELEMENT_TAG = re.compile(r"<(\w+)\s*>(.*?)</\1\s*>", re.DOTALL)
+
+
 def _action(tool: str, body: str) -> Action:
+    """Read one action's arguments, recording which serialisation each arrived in.
+
+    The rule across all four encodings is the same: **the first non-empty value for a name wins,
+    and nothing is ever synthesised.** A name that ends up empty stays empty and the tool refuses
+    it, because `pattern:` with nothing after it is the model failing to name a target and not a
+    serialisation this reader should be forgiving about. See GRAMMAR_VERSION for why the tolerant
+    encodings exist and what they are not allowed to do.
+    """
     args: dict[str, str] = {}
-    # Heredoc arguments first, so a patch body containing "path:" is not re-parsed as one.
-    for key, value in re.findall(r"^(\w+):\s*<<<\n(.*?)\n>>>\s*$", body, flags=re.DOTALL | re.MULTILINE):
+    seen: list[str] = []
+
+    def offer(key: str, value: str, encoding: str) -> None:
+        # Empty does not claim the name, so a model that writes the skeleton and then the value in
+        # its own dialect is read as it meant; a model that writes only the skeleton still fails.
+        if not value or args.get(key):
+            return
         args[key] = value
+        if encoding not in seen:
+            seen.append(encoding)
+
+    # Heredoc first, so a patch body containing "path:" is not re-parsed as an argument.
+    for key, value in re.findall(r"^(\w+):\s*<<<\n(.*?)\n>>>\s*$", body, flags=re.DOTALL | re.MULTILINE):
+        offer(key, value, "heredoc")
     stripped = re.sub(r"^\w+:\s*<<<\n.*?\n>>>\s*$", "", body, flags=re.DOTALL | re.MULTILINE)
-    for line in stripped.splitlines():
+
+    # The canonical line form, which is what the protocol asks for and what every tier but one
+    # sends. Tag bodies are excluded so `<parameter=pattern>\nfoo: bar\n</parameter>` does not
+    # also read as a line called "foo".
+    lines = _PARAMETER_TAG.sub("", _ELEMENT_TAG.sub("", stripped))
+    empty_names: list[str] = []
+    for line in lines.splitlines():
         match = re.match(r"^\s*(\w+):\s*(.*)$", line)
-        if match and match.group(1) not in args:
-            args[match.group(1)] = _unquote(match.group(2).strip())
-    return Action(tool=tool, args=args, raw=body[:2000])
+        if not match:
+            continue
+        value = _unquote(match.group(2).strip())
+        if not value:
+            empty_names.append(match.group(1))
+        offer(match.group(1), value, "canonical")
+
+    # The tolerant encodings, for this tool's own argument names only.
+    allowed = ARG_NAMES.get(tool, ())
+    for pattern, encoding in ((_PARAMETER_TAG, "parameter-tag"), (_ELEMENT_TAG, "element-tag")):
+        for key, value in pattern.findall(stripped):
+            if key in allowed:
+                offer(key, value.strip("\n"), encoding)
+
+    # A name written as an empty line and never supplied by any encoding is the model's failure,
+    # and it is recorded as present-but-empty so the tool's own error can name it.
+    for key in empty_names:
+        args.setdefault(key, "")
+    return Action(tool=tool, args=args, raw=body[:2000], encodings=tuple(seen))
 
 
 def _unquote(value: str) -> str:
@@ -342,6 +535,31 @@ def is_test_path(path: str) -> bool:
     )
 
 
+# What a filled-in call looks like, per tool, for the error that says an argument is missing. A
+# rejection that restates only the requirement ("search needs a pattern") leaves the model to guess
+# at the syntax, and the guess it made was its own tool-calling dialect -- so the harness's error
+# message pushed it further off contract than it started. The form is shown filled in rather than
+# as a skeleton, because a skeleton is what it was already sending back empty.
+_FILLED = {
+    "list_dir": 'dir: astropy/io/ascii',
+    "search": 'pattern: def _read_table',
+    "read_file": 'path: astropy/io/ascii/qdp.py',
+    "run_tests": 'target: astropy/io/ascii/tests/test_qdp.py',
+    "write_patch": 'path: astropy/io/ascii/qdp.py\nold: <<<\n...the exact lines...\n>>>\nnew: <<<\n...what to put there...\n>>>',
+    "done": 'note: the reader now accepts lower-case commands',
+    "handoff": 'note: qdp.py line 62 upper-cases the command before matching',
+}
+
+
+def _needs(tool: str, what: str) -> Observation:
+    """Refuse a call for a missing argument, and show the exact form that would work."""
+    return Observation(
+        f"{tool} needs {what}, and none was given. Reply with exactly this, filled in:\n"
+        f'<action tool="{tool}">\n{_FILLED[tool]}\n</action>',
+        ok=False,
+    )
+
+
 def execute(action: Action) -> Observation:
     """Carry out one action and describe what happened."""
     try:
@@ -355,7 +573,7 @@ def execute(action: Action) -> Observation:
 def _execute(action: Action) -> Observation:
     args = action.args
     if action.tool == "list_dir":
-        target = _inside(args.get("dir", "."))
+        target = _inside(args.get("dir") or ".")
         if not target.is_dir():
             return Observation(f"{args.get('dir')} is not a directory", ok=False)
         names = sorted(
@@ -367,8 +585,8 @@ def _execute(action: Action) -> Observation:
     if action.tool == "search":
         pattern = args.get("pattern")
         if not pattern:
-            return Observation("search needs a pattern", ok=False)
-        where = shlex.quote(args.get("dir", "."))
+            return _needs("search", "a pattern")
+        where = shlex.quote(args.get("dir") or ".")
         result = _run(
             f"grep -rn --include='*.py' -E {shlex.quote(pattern)} {where} | head -60",
             timeout=120,
@@ -378,7 +596,7 @@ def _execute(action: Action) -> Observation:
     if action.tool == "read_file":
         path = args.get("path")
         if not path:
-            return Observation("read_file needs a path", ok=False)
+            return _needs("read_file", "a path")
         target = _inside(path)
         if not target.is_file():
             return Observation(f"{path} is not a file", ok=False)
@@ -396,7 +614,7 @@ def _execute(action: Action) -> Observation:
     if action.tool == "run_tests":
         target = args.get("target")
         if not target:
-            return Observation("run_tests needs a target", ok=False)
+            return _needs("run_tests", "a target")
         # `; exit ${PIPESTATUS[0]}` because the exit status is the verdict and a pipe
         # through `tail` would replace it with tail's own success.
         result = _run(
@@ -414,8 +632,8 @@ def _execute(action: Action) -> Observation:
         return Observation(args.get("note") or args.get("reason") or "")
 
     return Observation(
-        f"there is no tool called {action.tool!r}; the tools are "
-        f"{sorted(STEP_TYPE)}",
+        f"there is no tool called {action.tool!r}; the tools are {sorted(STEP_TYPE)}. "
+        'Call one of those, as <action tool="NAME">, with its arguments one per line.',
         ok=False,
     )
 
@@ -500,7 +718,7 @@ def _verdict(returncode: int) -> bool | None:
 def _write_patch(args: dict[str, str]) -> Observation:
     path, old, new = args.get("path"), args.get("old"), args.get("new")
     if not path or old is None or new is None:
-        return Observation("write_patch needs path, old and new", ok=False)
+        return _needs("write_patch", "path, old and new")
     # A block that was opened and never closed leaves the marker itself as the value, and
     # applying that writes `<<<` into the repository: one episode replaced a method definition
     # in Django's query.py with it, and every test then failed to import. The usual cause is a

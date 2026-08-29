@@ -566,3 +566,101 @@ class TestFragmentsWithNoTail:
     def test_a_real_continuation_is_still_joined(self):
         ids = ("t.py::test_powers[-10-1", "/", "10]", "t.py::test_x")
         assert score.repair_ids(ids) == ("t.py::test_powers[-10-1 / 10]", "t.py::test_x")
+
+
+# --- grammar v2: the tolerant argument encodings, and what they must refuse ------------------
+#
+# Frozen with the reader. The rules exist because a self-hosted Qwen3.6-35B-A3B wrote 68.8% of its
+# arguments in its own tool-calling dialect inside the harness's block and scored zero for it while
+# naming the right tool every time. The tests that matter most here are the refusals: a reader that
+# also rescued invented tools or empty arguments would be absorbing the model's real failures.
+
+
+def test_canonical_form_is_unchanged_and_not_marked_tolerant():
+    action = tools.parse_all('<action tool="search">\npattern: def prepare_body\n</action>')[0]
+    assert action.args == {"pattern": "def prepare_body"}
+    assert action.encodings == ("canonical",)
+    assert action.tolerant is False
+
+
+def test_parameter_tag_is_read_as_the_same_argument():
+    action = tools.parse_all(
+        '<action tool="search">\n<parameter=pattern>\nqdp\n</parameter>\n</action>'
+    )[0]
+    assert action.args == {"pattern": "qdp"}
+    assert action.tolerant is True
+
+
+def test_element_tag_is_read_for_a_name_the_tool_owns():
+    action = tools.parse_all('<action tool="list_dir">\n<dir>\n/testbed\n</dir>\n</action>')[0]
+    assert action.args == {"dir": "/testbed"}
+    assert action.tolerant is True
+
+
+def test_element_tag_is_ignored_for_a_name_the_tool_does_not_own():
+    # Otherwise a model thinking out loud acquires an argument called "thinking".
+    action = tools.parse_all(
+        '<action tool="search">\n<thinking>\nlet me look\n</thinking>\npattern: qdp\n</action>'
+    )[0]
+    assert action.args == {"pattern": "qdp"}
+    assert action.tolerant is False
+
+
+def test_an_empty_value_is_not_rescued():
+    action = tools.parse_all('<action tool="search">\npattern:\n</action>')[0]
+    assert action.args == {"pattern": ""}
+    assert action.tolerant is False
+    assert tools.execute(action).ok is False
+
+
+def test_an_empty_line_does_not_block_the_value_the_model_then_gave():
+    # The skeleton followed by the value in the model's own dialect is one intent, not a conflict.
+    action = tools.parse_all(
+        '<action tool="search">\npattern:\n<parameter=pattern>\nqdp\n</parameter>\n</action>'
+    )[0]
+    assert action.args == {"pattern": "qdp"}
+    assert action.tolerant is True
+
+
+def test_a_colon_inside_a_tag_body_is_not_a_second_argument():
+    action = tools.parse_all(
+        '<action tool="search">\n<parameter=pattern>\nfoo: bar\n</parameter>\n</action>'
+    )[0]
+    assert action.args == {"pattern": "foo: bar"}
+
+
+def test_an_invented_tool_gains_no_arguments_and_is_still_refused():
+    action = tools.parse_all(
+        '<action tool="run_command">\n<parameter=command>\nls\n</parameter>\n</action>'
+    )[0]
+    assert action.args == {}
+    observation = tools.execute(action)
+    assert observation.ok is False
+    assert "no tool called" in observation.text
+
+
+def test_the_first_non_empty_value_wins_and_nothing_is_synthesised():
+    action = tools.parse_all(
+        '<action tool="search">\npattern: canonical\n<parameter=pattern>\ndialect\n</parameter>\n</action>'
+    )[0]
+    assert action.args == {"pattern": "canonical"}
+    assert action.tolerant is False
+
+
+def test_heredoc_arguments_still_win_over_everything():
+    action = tools.parse_all(
+        '<action tool="write_patch">\npath: a.py\n'
+        "old: <<<\n  if x: pass\n>>>\nnew: <<<\n  if x:\n    pass\n>>>\n</action>"
+    )[0]
+    assert action.args["old"] == "  if x: pass"
+    assert action.args["new"] == "  if x:\n    pass"
+    assert action.tolerant is False
+
+
+def test_a_missing_argument_error_shows_the_form_that_would_work():
+    # The v1 error said only "search needs a pattern", and the model answered it by switching
+    # further into its own dialect. An error that restates the grammar is environment quality.
+    observation = tools.execute(tools.Action(tool="search", args={}))
+    assert observation.ok is False
+    assert '<action tool="search">' in observation.text
+    assert "pattern: " in observation.text

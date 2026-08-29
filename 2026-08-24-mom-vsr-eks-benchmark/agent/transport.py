@@ -75,6 +75,10 @@ class Reply:
     # Set when the cost of this call is an approximation rather than the provider's own
     # figure, which happens when a stream breaks before the usage chunk.
     estimated: bool = False
+    # Structured calls, when the request declared tools. Accumulated from the stream rather
+    # than read whole: a tool call arrives as fragments of its own JSON arguments, and taking
+    # only the first fragment yields a call whose arguments are half a JSON object.
+    tool_calls: list[dict] = field(default_factory=list)
 
     @property
     def fresh_prompt_tokens(self) -> int:
@@ -182,6 +186,7 @@ def complete(
     messages: list[dict],
     max_tokens: int,
     reasoning_effort: str | None = None,
+    tool_schemas: list[dict] | None = None,
 ) -> Reply:
     """Send one chat completion and stream it back.
 
@@ -200,6 +205,7 @@ def complete(
             # makes the cache split visible here.
             "stream_options": {"include_usage": True},
             **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
+            **({"tools": tool_schemas, "tool_choice": "auto"} if tool_schemas else {}),
         }
     ).encode()
     headers = {"content-type": "application/json"}
@@ -347,6 +353,17 @@ def _consume(
             for choice in event.get("choices") or []:
                 if choice.get("finish_reason"):
                     reply.finish_reason = choice["finish_reason"]
+                for fragment in ((choice.get("delta") or {}).get("tool_calls") or []):
+                    slot = int(fragment.get("index") or 0)
+                    while len(reply.tool_calls) <= slot:
+                        reply.tool_calls.append({"id": "", "name": "", "arguments": ""})
+                    call = reply.tool_calls[slot]
+                    call["id"] = fragment.get("id") or call["id"]
+                    function = fragment.get("function") or {}
+                    call["name"] = function.get("name") or call["name"]
+                    call["arguments"] += function.get("arguments") or ""
+                    if reply.ttft_ms is None:
+                        reply.ttft_ms = (time.perf_counter() - started) * 1000
                 piece = (choice.get("delta") or {}).get("content")
                 if not piece:
                     # Role-only or reasoning-only. For a reasoning model the thinking
