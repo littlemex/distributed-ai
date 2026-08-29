@@ -11,18 +11,30 @@ repository family in `pilot-subset.json`, plus the second for every family with 
 
 On the twelve instances where every arm ran to an end its own policy chose:
 
-| arm | solved | steps / episode | spend | per solved task |
-|---|---|---|---|---|
-| box `Qwen3.6-35B-A3B-FP8` | 6 / 12 | 30.8 | $0.5714 | **$0.0952** |
-| `gpt-5.6-terra`, reasoning `high` | 8 / 12 | 14.9 | $1.9911 | $0.2489 |
-| `claude-fable-5` | **12 / 12** | 13.5 | $8.1485 | $0.6790 |
+| arm | solved | steps / episode | output | spend | per solved task |
+|---|---|---|---|---|---|
+| box `Qwen3.6-35B-A3B-FP8`, thinking off | 6 / 12 | 30.8 | 55.7 ktok | $0.5714 | **$0.0952** |
+| the same box, thinking on | 5 / 12 | 23.9 | 189.7 ktok | $1.0873 | $0.2175 |
+| `gpt-5.6-terra`, reasoning `high` | 8 / 12 | 14.9 | 58.6 ktok | $1.9911 | $0.2489 |
+| `claude-fable-5` | **12 / 12** | 13.5 | 70.7 ktok | $8.1485 | $0.6790 |
 
 **Capability is strictly nested and cost runs the other way.** Every instance the box solved, terra
-solved; every instance terra solved, fable solved; and fable solved all twelve. Meanwhile the box costs
-2.61× less per solved task than terra and 7.13× less than fable.
+solved; every instance terra solved, fable solved; and fable solved all twelve. The nesting holds with the
+box's thinking on or off.
 
-Only the box-versus-fable gap is statistically distinguishable — six discordant pairs, exact two-sided
-p = 0.031. Box against terra rests on two, p = 0.500, so on these instances the two are not separable on
+**On this corpus the box's thinking is pure cost.** Turning it on triples the output tokens, nearly
+doubles the bill, and buys nothing: 5 solved against 6, with the thinking-on solve set a subset of the
+thinking-off one (`pylint-6386` went the other way; 0/1 discordant, p = 1.000). It also *lowers* the step
+count, 30.8 to 23.9 — the box thinks longer per turn and acts fewer times inside the same 40-step budget.
+
+That matters for how the box's cheapness should be read. Its advantage over terra is 2.61× **at its own
+best setting**, which is thinking off; matched to terra's configuration, with both models thinking, the two
+are within 14% of each other ($0.2175 against $0.2489). The box is not cheaper because it is a local
+GPU — it is cheaper because on this traffic it does not need to think, and the API tier is paying for
+reasoning that its own accuracy does need.
+
+Only the box-versus-fable gap is statistically distinguishable — seven discordant pairs, exact two-sided
+p = 0.016. Box against terra rests on three, p = 0.250, so on these instances the two are not separable on
 solve count and the difference between them is the price.
 
 ## Why twelve and not fifteen
@@ -45,8 +57,9 @@ ordering, with fable's quality understated by an infrastructure fault.
    is in turn a strict subset of fable's.
 
 So the shape of the routing question is unchanged and its arithmetic is inverted. The box is not a
-cheaper way to get the same work done; it is a cheaper way to get *some* of the work done, and the price
-of the work it can finish is a quarter of the cheap API's.
+cheaper way to get the same work done; it is a cheaper way to get *some* of the work done, and — run
+without thinking, which is also how it scores best here — the price of the work it can finish is 38% of
+the cheap API's.
 
 An earlier draft of this page reported the box's solve set as a strict *superset* of terra's. That was
 measured against a terra forced to run with reasoning off, which is the next section.
@@ -83,10 +96,21 @@ this deployment, and `benchctl/docs/results-arrival-sweep.md` shows that rate on
 3,295 prefix-reusing requests an hour. A box idling between episodes bills $15.2174/h regardless; at
 pilot volumes that dominates every figure here. This is a marginal cost, not an invoice.
 
+**Both asymmetries were found late, and one of them was mine.** The box's deployment starts with
+`--default-chat-template-kwargs={"enable_thinking": false}`, so the first version of this page compared a
+box that was not thinking against an API that was — the same fault it had just refused to accept in the
+other direction, when terra was forced to run with reasoning off. `chat_template_kwargs` overrides it per
+request, so the box arm was re-run rather than argued about. The ordering did not change; the reading of
+*why* the box is cheap did.
+
 **The box is the only arm the step budget binds.** It used 30.8 steps an episode against 15 and 14, and
 six of its fifteen episodes ended on the 40-step ceiling with a diff that did not pass. Terra ended all
 fifteen on its own. Raising the ceiling would change the box's number and nothing else's, so the 6/12 is
 a result at this budget rather than a property of the model.
+
+**The thinking comparison is one corpus and one budget.** Thinking-on lost a solve inside the same
+40-step ceiling while spending 3.4× the output tokens, so part of what looks like "thinking does not help"
+may be "thinking does not fit in forty steps". Raising the ceiling would test that; it was not raised.
 
 **Cache hit rates differ and were not equalised.** 87.0% of the box's prompt tokens were cached reads,
 91.2% of terra's and 78.5% of fable's. All three are priced at each tier's own cached rate, so the
@@ -105,7 +129,11 @@ export TIERS=$PWD/tiers.function-calling.json
 PASS=fc  POLICIES=self-hosted-always ./sweep.sh
 PASS=fc  POLICIES=premium-always ./sweep.sh
 PASS=fcr POLICIES=cheap-always ./sweep.sh    # terra on the Responses wire, reasoning high
+PASS=fct POLICIES=self-hosted-always ./sweep.sh   # the box with enable_thinking true
 ```
+
+The last two differ from the first only in `tiers.function-calling.json`, which carries the tier's wire and
+its `chat_template_kwargs`. The thinking-off box arm used `tiers.example.json`.
 
 Three operational notes. The instance images are 1-3 GB against a node's 20 GiB, so `run.sh` declares an
 `ephemeral-storage` request — without it the kubelet reached DiskPressure and evicted a running episode

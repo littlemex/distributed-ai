@@ -2,16 +2,24 @@
   "_comment": [
     "The tier definitions for the function-calling arm (docs/PROTOCOL.md).",
     "",
-    "gpt-5.6-terra speaks the Responses API here, at reasoning_effort 'high'. That is not a",
-    "preference: this gateway's /v1/chat/completions refuses function tools together with any",
-    "reasoning_effort other than 'none', and the text arm ran this tier at 'high' with 63.3% of its",
-    "output tokens being reasoning. Sending it to /openai/v1/responses is what keeps the arm",
-    "comparing protocols rather than comparing a reasoning model against itself with reasoning off.",
+    "Both paid tiers and the box think here, which is the point of this file. Two asymmetries had to",
+    "be removed before the arms measured the same thing:",
     "",
-    "(The chat-completions refusal names '/v1/responses'. This gateway serves it at",
-    "'/openai/v1/responses'; the bare path is a 404.)",
+    "1. gpt-5.6-terra speaks the Responses API at reasoning_effort 'high'. This gateway's",
+    "   /v1/chat/completions refuses function tools together with any reasoning_effort other than",
+    "   'none', and forced to 'none' the tier is a different model: reasoning falls from 80% of its",
+    "   output tokens to zero, 26% of its steps produce no call at all, and it solves 5 of 15 instead",
+    "   of 9. (The refusal names '/v1/responses'; this gateway serves it at '/openai/v1/responses'.)",
     "",
-    "claude-fable-5 needs no change: it accepts function tools on chat completions as configured."
+    "2. The self-hosted deployment starts with --default-chat-template-kwargs={\"enable_thinking\":",
+    "   false}, so the box was answering without thinking while terra spent 80% of its output on",
+    "   reasoning. chat_template_kwargs overrides that per request, so no redeployment is needed.",
+    "   This deployment has no --reasoning-parser, so the box's thinking arrives as ordinary content",
+    "   and is billed as ordinary output tokens at $4.12/Mtok -- its expensive side. reasoning_tokens",
+    "   is therefore 0 for this tier whether thinking is on or off; thinking_chars on each step is",
+    "   what says it happened.",
+    "",
+    "claude-fable-5 needs neither change."
   ],
   "premium": {
     "model": "claude-fable-5",
@@ -33,6 +41,9 @@
       "cache_read": 0.0188,
       "cache_write": 0.236
     },
-    "rate_basis": "measured 2026-08-29 on Qwen3.6-35B-A3B-FP8, g6e.12xlarge at $15.2174/h, TP=2 x 2 replicas. fresh_in from 18,417 prefill tok/s aggregate at 16 in flight; cache_read from 224,620 tok/s of cached prefill measured the same way, which is 8.2% of a fresh token (benchctl/cached_prefill_rate.py). cache_write priced as fresh input because the engine does the same work to populate a block as to compute it. THIS REPLACES the earlier $10.68 flat rate, whose basis said prefix caching is unsupported on the hybrid attention layers -- that was a missing opt-in flag rather than an architectural limit, so the old rate priced every repeated prompt as recomputed and overstated the box input rate by about 45x."
+    "rate_basis": "measured 2026-08-29 on Qwen3.6-35B-A3B-FP8, g6e.12xlarge at $15.2174/h, TP=2 x 2 replicas. fresh_in from 18,417 prefill tok/s aggregate at 16 in flight; cache_read from 224,620 tok/s of cached prefill measured the same way, which is 8.2% of a fresh token (benchctl/cached_prefill_rate.py). cache_write priced as fresh input because the engine does the same work to populate a block as to compute it. THIS REPLACES the earlier $10.68 flat rate, whose basis said prefix caching is unsupported on the hybrid attention layers -- that was a missing opt-in flag rather than an architectural limit, so the old rate priced every repeated prompt as recomputed and overstated the box input rate by about 45x.",
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
   }
 }

@@ -165,6 +165,12 @@ class Model:
     # what the tier needs -- gpt-5.6-terra can only have both function tools and reasoning on the
     # Responses API -- and not from a switch on the run.
     api: str = "chat"
+    # Passed to the server as `chat_template_kwargs`. The self-hosted deployment starts with
+    # `--default-chat-template-kwargs={"enable_thinking": false}`, so the box was answering without
+    # thinking while gpt-5.6-terra spent 80% of its output tokens on reasoning -- the same asymmetry
+    # this harness refused to accept in the other direction. Per tier and per request, because it is
+    # a property of the arm and needs no redeployment.
+    template_kwargs: dict | None = None
     api_key_env: str | None = None
     rate: "Rate | None" = None
     rate_basis: str | None = None

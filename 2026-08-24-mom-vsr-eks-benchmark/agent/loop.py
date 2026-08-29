@@ -156,6 +156,12 @@ class Step:
     # audited for whether it ever depended on the tolerant path -- see tools.GRAMMAR_VERSION.
     arg_encodings: list[str] = field(default_factory=list)
     tolerant_parse: bool = False
+    # How much visible thinking preceded the call, in characters. Recorded because this deployment
+    # has no reasoning parser: the box's thinking arrives as ordinary content and is billed as
+    # ordinary output tokens, so `reasoning_tokens` is 0 whether thinking is on or off, and a reader
+    # comparing this arm against a provider that reports the split would read the 0 as "did not
+    # think". The token cost of it is already in completion_tokens.
+    thinking_chars: int = 0
 
 
 def build_policy(name: str, args) -> pol.Policy:
@@ -238,6 +244,7 @@ def load_tiers(path: Path, default_url: str) -> pol.Roster:
             rate=rate,
             rate_basis=basis,
             api=entry.get("api", "chat"),
+            template_kwargs=entry.get("chat_template_kwargs"),
         )
 
     premium, cheap = model(pol.PREMIUM), model(pol.CHEAP)
@@ -354,6 +361,7 @@ def _drive(
                 max_tokens=args.max_reply_tokens,
                 reasoning_effort=model.effort,
                 tool_schemas=_schemas_for(args, strategy),
+                template_kwargs=model.template_kwargs,
             )
         except transport.Unreachable as exc:
             # The attempts that failed were still billed, so they are charged before the
@@ -407,8 +415,15 @@ def _drive(
                  "function": {"name": call["name"], "arguments": call["arguments"]}}
                 for i, call in enumerate(reply.tool_calls)
             ]
+            # A thinking tier's own reasoning is not fed back. This deployment has no reasoning
+            # parser, so the thinking arrives as ordinary content, and echoing it would put the
+            # model's scratch work in every later prompt -- which the Responses arm does not do for
+            # gpt-5.6-terra either. Keeping the two arms symmetric is the whole point of the knob.
+            thinks = bool((model.template_kwargs or {}).get("enable_thinking"))
             messages.append({
-                "role": "assistant", "content": reply.text or None, "tool_calls": calls,
+                "role": "assistant",
+                "content": None if thinks else (reply.text or None),
+                "tool_calls": calls,
             })
             # One result per call, because a provider that sent two calls expects two results and
             # rejects the next request otherwise.
@@ -627,6 +642,9 @@ def _step(
         usd_estimated=reply.estimated,
         arg_encodings=list(action.encodings) if action else [],
         tolerant_parse=bool(action and action.tolerant),
+        # Only when the turn also produced a call: a reply that is nothing but prose is a
+        # no-action step and its length is not thinking, it is the failure.
+        thinking_chars=len(reply.text or "") if (reply.tool_calls and reply.text) else 0,
     )
 
 

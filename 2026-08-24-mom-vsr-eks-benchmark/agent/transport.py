@@ -193,6 +193,7 @@ def complete(
     max_tokens: int,
     reasoning_effort: str | None = None,
     tool_schemas: list[dict] | None = None,
+    template_kwargs: dict | None = None,
 ) -> Reply:
     """Send one chat completion and stream it back.
 
@@ -214,6 +215,8 @@ def complete(
             "stream_options": {"include_usage": True},
             **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
             **({"tools": tool_schemas, "tool_choice": "auto"} if tool_schemas else {}),
+            # vLLM's own knob, overriding whatever the server was started with.
+            **({"chat_template_kwargs": template_kwargs} if template_kwargs else {}),
         }
     ).encode()
     headers = {"content-type": "application/json"}
