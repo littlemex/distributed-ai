@@ -1,7 +1,8 @@
 # eventbridge-cb-alarm.tf
 # One-shot EventBridge Scheduler rule PER reserved pool that fires 1 hour before that
 # pool's Capacity Block ends, publishing to a shared SNS topic so the team can drain
-# workloads gracefully. Driven entirely by the per-pool cb_end_date in accelerator_pools —
+# workloads gracefully. The end date comes from local.pool_cb_end_date: resolved from the
+# reservation behind cb_reservation_id, or the per-pool cb_end_date when it is set as an override —
 # a cluster with several Capacity Blocks gets one alert each.
 #
 # Uses the at() one-time schedule expression (UTC): at(yyyy-mm-ddThh:mm:ss), computed by
@@ -155,7 +156,7 @@ resource "aws_scheduler_schedule" "cb_expiry_alert" {
 # Outputs — per-pool alert expressions and the shared SNS topic ARN
 # ---------------------------------------------------------------------------
 output "cb_expiry_alert_schedule_exprs" {
-  description = "Map of reserved pool name → EventBridge at() expression for its CB expiry alert (1 hour before cb_end_date). Empty when no pool sets cb_end_date."
+  description = "Map of reserved pool name → EventBridge at() expression for its CB expiry alert (1 hour before the reservation ends). Empty when no reserved pool has a resolvable end date, or when every alert time has already passed."
   value       = local.cb_alert_schedule_expr
 }
 
