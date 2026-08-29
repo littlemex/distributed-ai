@@ -9,6 +9,7 @@
 #   kubectl accelprof run --alias team1-lora-sweep --image <your image> -- python train.py --lr 3e-4
 #   kubectl accelprof get                      the run submitted last, and its run id
 #   kubectl accelprof runs --alias team1-lora-sweep
+#   kubectl accelprof mcp exec -- claude -p 'analyse this run' --mcp-config "$ACCELPROF_MCP_CONFIG"
 #
 # run submits and returns immediately. Recording happens in the cluster, so nothing local needs to
 # stay alive; --wait is available when watching one short run is more convenient.
@@ -67,6 +68,20 @@
 # runs options:
 #   --alias NAME          restrict the listing to one campaign.
 #   --namespace NS        default: the current context's namespace.
+#
+# mcp verbs:
+#   The analysis and knowledge servers speak streamable HTTP inside the cluster, so a client on this
+#   machine needs a forwarded port. Doing that by hand costs a terminal per server and leaves the
+#   client configured against ports nobody is holding open, which is why it is a verb here.
+#   exec -- COMMAND...    run COMMAND with the servers reachable, then leave the tunnels as they were
+#                         found. ACCELPROF_MCP_CONFIG carries a --mcp-config JSON string naming every
+#                         server and ACCELPROF_<NAME>_URL each URL, so COMMAND needs to know neither
+#                         the ports nor which servers exist.
+#   up                    hold the tunnels open and print the URLs, for an interactive client. Safe to
+#                         repeat: a tunnel that already answers is kept.
+#   down                  close the tunnels this opened.
+#   status                what is listening, and whether it answers MCP.
+#   config                print the --mcp-config JSON, bringing the tunnels up if needed.
 set -euo pipefail
 
 self="$(basename "$0")"
@@ -623,10 +638,232 @@ cmd_runs() {
   mlflow_experiment_url "${namespace}"
 }
 
+# ── mcp ────────────────────────────────────────────────────────────────────────────────────────
+# One Service per MCP entry in the chart, in the namespace the platform owns, so the servers are
+# discovered rather than listed here: adding one to the platform should not require editing a client.
+MCP_NS="mcp"
+
+mcp_state_dir() {
+  local base="${TMPDIR:-/tmp}"
+  # Keyed by context so that two clusters forwarded at once cannot overwrite each other's record, and
+  # under TMPDIR so that a reboot cannot leave behind a file claiming a pid something else now owns.
+  printf '%s/accelprof-mcp/%s' "${base%/}" "$(effective_context | tr -c 'A-Za-z0-9_.-' '_')"
+}
+
+mcp_services() {
+  k get svc -n "${MCP_NS}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | sort
+}
+
+# One MCP initialize round trip. A listening port proves the tunnel exists, not that the server behind
+# it works, and the difference shows up here: kubectl keeps the port open after the Pod is gone.
+mcp_answers() {
+  curl -sf -o /dev/null --max-time 5 \
+    -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+    -X POST "$1" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"kubectl-accelprof","version":"1"}}}'
+}
+
+mcp_alive() {
+  local pid
+  pid="$(cat "$1" 2>/dev/null || true)"
+  [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+
+mcp_stop_one() {
+  local svc="$1" dir="$2" pid
+  pid="$(cat "${dir}/${svc}.pid" 2>/dev/null || true)"
+  if [ -n "${pid}" ]; then
+    kill "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
+  fi
+  rm -f "${dir}/${svc}.pid" "${dir}/${svc}.port" "${dir}/${svc}.log"
+}
+
+# A preferred port keeps the printed URL stable between runs, which matters when a human wrote it into
+# a client's configuration. A busy port is not an error: the local port is ours to choose, so it falls
+# back to whatever the kernel hands out, and either way the port is read back from kubectl's own line
+# rather than assumed.
+mcp_start_one() {
+  local svc="$1" want="$2" dir="$3"
+  local log="${dir}/${svc}.log" spec port pid i
+  for spec in "${want}:8080" ":8080"; do
+    : >"${log}"
+    # kubectl directly rather than through k, because k is a shell function: backgrounding it makes $!
+    # the pid of a subshell whose child is the real kubectl, and killing the subshell leaves the tunnel
+    # up. That leak is invisible — the port keeps answering — until the next run finds the port taken.
+    kubectl ${KUBE_CONTEXT:+--context "${KUBE_CONTEXT}"} port-forward "svc/${svc}" -n "${MCP_NS}" \
+      "${spec}" >>"${log}" 2>&1 &
+    pid=$!
+    port=""
+    for i in $(seq 1 60); do
+      port="$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\).*/\1/p' "${log}" | head -1)"
+      [ -n "${port}" ] && break
+      kill -0 "${pid}" 2>/dev/null || break
+      sleep 0.25
+    done
+    if [ -n "${port}" ]; then
+      printf '%s' "${pid}" >"${dir}/${svc}.pid"
+      printf '%s' "${port}" >"${dir}/${svc}.port"
+      return 0
+    fi
+    kill "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
+  done
+  printf 'could not forward svc/%s in namespace %s. kubectl said:\n' "${svc}" "${MCP_NS}" >&2
+  sed 's/^/    /' "${log}" >&2
+  return 1
+}
+
+# Prints the services it had to start, so that exec puts back exactly what it changed and a tunnel
+# somebody else opened with "mcp up" survives.
+mcp_bring_up() {
+  local dir svcs svc port started="" n=0
+  dir="$(mcp_state_dir)"
+  mkdir -p "${dir}"
+  svcs="$(mcp_services)"
+  [ -n "${svcs}" ] ||
+    die "no MCP Services in namespace ${MCP_NS} (context $(effective_context)). Install the platform with infra/scripts/install-profiling.sh, or point kubectl at the cluster that has it."
+  while IFS= read -r svc; do
+    [ -n "${svc}" ] || continue
+    n=$((n + 1))
+    port="$(cat "${dir}/${svc}.port" 2>/dev/null || true)"
+    if mcp_alive "${dir}/${svc}.pid" && [ -n "${port}" ] && mcp_answers "http://127.0.0.1:${port}/mcp"; then
+      continue
+    fi
+    mcp_stop_one "${svc}" "${dir}"
+    mcp_start_one "${svc}" "$((8079 + n))" "${dir}" || return 1
+    started="${started}${svc}
+"
+    port="$(cat "${dir}/${svc}.port")"
+    mcp_answers "http://127.0.0.1:${port}/mcp" || {
+      printf 'the tunnel to svc/%s is open on port %s but the server did not answer MCP. Look at it with:\n    kubectl -n %s logs deploy/%s\n' \
+        "${svc}" "${port}" "${MCP_NS}" "${svc}" >&2
+      return 1
+    }
+  done <<EOF
+${svcs}
+EOF
+  printf '%s' "${started}"
+}
+
+mcp_urls() {
+  local dir svc port
+  dir="$(mcp_state_dir)"
+  while IFS= read -r svc; do
+    [ -n "${svc}" ] || continue
+    port="$(cat "${dir}/${svc}.port" 2>/dev/null || true)"
+    [ -n "${port}" ] || continue
+    mcp_alive "${dir}/${svc}.pid" || continue
+    printf '%s http://127.0.0.1:%s/mcp\n' "${svc}" "${port}"
+  done <<EOF
+$(mcp_services)
+EOF
+}
+
+# Built from what is actually listening rather than from what should be. Names are prefixed so the
+# tools arrive as mcp__accelprof-<server>__<tool> and cannot collide with a client's own servers.
+mcp_config_json() {
+  local first=1 svc url
+  printf '{"mcpServers":{'
+  while read -r svc url; do
+    [ -n "${svc}" ] || continue
+    [ "${first}" = "1" ] || printf ','
+    first=0
+    printf '"accelprof-%s":{"type":"http","url":"%s"}' "${svc}" "${url}"
+  done <<EOF
+$(mcp_urls)
+EOF
+  printf '}}\n'
+}
+
+mcp_export_env() {
+  local svc url name
+  ACCELPROF_MCP_CONFIG="$(mcp_config_json | tr -d '\n')"
+  export ACCELPROF_MCP_CONFIG
+  while read -r svc url; do
+    [ -n "${svc}" ] || continue
+    name="ACCELPROF_$(printf '%s' "${svc}" | tr 'a-z-' 'A-Z_')_URL"
+    export "${name}=${url}"
+  done <<EOF
+$(mcp_urls)
+EOF
+}
+
+mcp_close_listed() {
+  local dir svc
+  dir="$(mcp_state_dir)"
+  while IFS= read -r svc; do
+    [ -n "${svc}" ] || continue
+    mcp_stop_one "${svc}" "${dir}"
+  done
+  rmdir "${dir}" 2>/dev/null || true
+}
+
+cmd_mcp() {
+  local verb="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "${verb}" in
+    up)
+      mcp_bring_up >/dev/null || exit 1
+      say "MCP servers are reachable from this machine"
+      mcp_urls | while read -r svc url; do printf '    %-12s %s\n' "${svc}" "${url}"; done
+      # The registration lines are printed with the ports actually in use, because a port that was
+      # taken moves and a URL written down by hand then points at nothing.
+      printf '\n    register them with a client that keeps a session open:\n'
+      mcp_urls | while read -r svc url; do
+        printf '      claude mcp add --transport http accelprof-%s %s\n' "${svc}" "${url}"
+      done
+      printf '\n    close them with:  %s mcp down\n' "$(invocation)"
+      ;;
+    down)
+      mcp_close_listed <<EOF
+$(mcp_services)
+EOF
+      say "tunnels closed"
+      ;;
+    status)
+      local out svc url
+      out="$(mcp_urls)"
+      [ -n "${out}" ] || { say "no tunnels are open. Open them with: $(invocation) mcp up"; return 0; }
+      printf '%s\n' "${out}" | while read -r svc url; do
+        if mcp_answers "${url}"; then
+          printf '    %-12s %s  answers MCP\n' "${svc}" "${url}"
+        else
+          printf '    %-12s %s  port open, no MCP answer\n' "${svc}" "${url}"
+        fi
+      done
+      ;;
+    config)
+      mcp_bring_up >/dev/null || exit 1
+      mcp_config_json
+      ;;
+    exec)
+      [ "${1:-}" = "--" ] && shift
+      [ $# -gt 0 ] || die "mcp exec needs a command: $(invocation) mcp exec -- <command>"
+      local started rc=0
+      started="$(mcp_bring_up)" || exit 1
+      mcp_export_env
+      # The command owns the exit code. The tunnels are put back either way, and only the ones this
+      # invocation opened are closed.
+      set +e
+      "$@"
+      rc=$?
+      set -e
+      mcp_close_listed <<EOF
+${started}
+EOF
+      return "${rc}"
+      ;;
+    -h|--help|"") usage 0 ;;
+    *) die "unknown mcp verb: ${verb} (expected exec, up, down, status or config)" ;;
+  esac
+}
+
 case "${1:-}" in
   run) shift; cmd_run "$@" ;;
   get) shift; cmd_get "$@" ;;
   runs|list) shift; cmd_runs "$@" ;;
+  mcp) shift; cmd_mcp "$@" ;;
   ""|-h|--help|help) usage 0 ;;
-  *) die "unknown subcommand: $1 (expected run, get or runs)" ;;
+  *) die "unknown subcommand: $1 (expected run, get, runs or mcp)" ;;
 esac

@@ -43,6 +43,7 @@ register_all_tests() {
   register_test accelprof-client-alias         test_accelprof_client_alias_narrows_the_latest baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-mlflow-url    test_accelprof_client_mlflow_url_comes_from_the_contract baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-diagnosis     test_accelprof_client_separates_unreadable_from_unwired baseline static "$TIMEOUT_STATIC"
+  register_test accelprof-client-mcp-exec      test_accelprof_client_mcp_exec_wraps_and_restores baseline static "$TIMEOUT_STATIC"
   register_test static-terraform-validate test_static_terraform_validate baseline static "$TIMEOUT_STATIC" terraform
   register_test static-profiling-install-kubeconfig test_profiling_install_leaves_the_caller_kubeconfig_alone baseline static "$TIMEOUT_STATIC"
 
