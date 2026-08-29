@@ -93,7 +93,12 @@ src, out, url = sys.argv[1], sys.argv[2], sys.argv[3]
 tiers = {k: v for k, v in json.load(open(src)).items() if not k.startswith("_")}
 for tier, entry in tiers.items():
     if tier != "self_hosted":
-        entry["url"] = url
+        # A tier that speaks the Responses API needs the other path on the same host. The base is
+        # passed in as the chat path because that is what every other tier wants.
+        entry["url"] = (
+            url.replace("/v1/chat/completions", "/openai/v1/responses")
+            if entry.get("api") == "responses" else url
+        )
     elif not entry.get("url"):
         entry["url"] = __import__("os").environ.get("QWEN_LOCAL_ENDPOINT_URL", "")
 json.dump(tiers, open(out, "w"), indent=2)

@@ -237,6 +237,7 @@ def load_tiers(path: Path, default_url: str) -> pol.Roster:
             api_key_env=entry.get("api_key_env", "STRATOCLAVE_API_KEY"),
             rate=rate,
             rate_basis=basis,
+            api=entry.get("api", "chat"),
         )
 
     premium, cheap = model(pol.PREMIUM), model(pol.CHEAP)
@@ -760,10 +761,12 @@ def _format_compliance(steps: list[Step], protocol: str = "text") -> dict:
         "no_action": sum(1 for s in counted if not s.tool),
         "unknown_tool": sum(1 for s in parsed if s.tool not in tools.STEP_TYPE),
         # The signature is built from the naming arguments only, so empty parentheses on a tool
-        # that has one is exactly "the target was never named".
+        # that has one means the target was never named -- but only the refused ones are failures.
+        # `list_dir` with no `dir` lists the checkout root and succeeds, and counting that as a
+        # malformed action inflates the very number this block exists to keep honest.
         "empty_required_arg": sum(
             1 for s in parsed
-            if s.tool in needs_arg and (s.signature or "").endswith("()")
+            if s.tool in needs_arg and (s.signature or "").endswith("()") and not s.ok
         ),
         "tolerant_parse": sum(1 for s in parsed if s.tolerant_parse),
         "encodings": sorted({e for s in parsed for e in s.arg_encodings}),
@@ -1044,6 +1047,7 @@ def _endpoint_for(args, model: pol.Model) -> transport.Endpoint:
         api_key=key,
         first_event_s=args.first_event_s,
         idle_s=args.idle_s,
+        api=model.api,
     )
 
 

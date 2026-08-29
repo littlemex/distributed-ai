@@ -1,12 +1,13 @@
 # Per request the box is cheaper; per solved task it is not, unless its cache is on
 
 
-> **The direction of this page's headline is wrong, corrected 2026-08-29.** Its box column comes from a
-> text-protocol run on which that box loses 45% of its actions to serialisation while the two APIs lose
-> almost none, so it compares a protocol mismatch and reports it as capability. On the same instances
-> under function calling the box solves 6 of 15 at $0.1251 per solved task against $0.2391 for a
-> reasoning-off `gpt-5.6-terra`, and its solve set is a strict superset of that terra's rather than a
-> subset. The measurements below stand; the 2.61x figure and the subset claim do not. See
+> **The cost direction of this page's headline is wrong, corrected 2026-08-29. Its subset claim stands.**
+> The box column comes from a text-protocol run on which that box loses 42% of its actions to
+> serialisation while the two APIs lose almost none, so the 2.61x figure priced a grammar. Driven through
+> function calling with reasoning intact on every tier, the box costs **2.61x less** per solved task than
+> `gpt-5.6-terra` ($0.0952 against $0.2489) and 7.13x less than `claude-fable-5` ($0.6790) -- while its
+> solve set stays a strict subset of terra's, which is a strict subset of fable's, and fable solves every
+> instance that ran. So this page's "the box solved nothing the API did not" was right. See
 > `2026-08-24-mom-vsr-eks-benchmark/docs/PROTOCOL.md` and `results-function-calling-arm.md` there.
 
 Measured from the 120 real SWE-bench episodes this project already ran, 2026-08-29. No new spend: the pilot

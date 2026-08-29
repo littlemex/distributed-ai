@@ -1,16 +1,17 @@
 {
   "_comment": [
-    "The tier definitions for the function-calling diagnostic arm (docs/PROTOCOL.md).",
+    "The tier definitions for the function-calling arm (docs/PROTOCOL.md).",
     "",
-    "One difference from tiers.example.json, and it is not cosmetic: gpt-5.6-terra runs with",
-    "reasoning_effort 'none'. This gateway's /v1/chat/completions refuses function tools together",
-    "with any other reasoning_effort ('To use function tools, use /v1/responses or set",
-    "reasoning_effort to none'), and the text arm ran that tier at 'high', where 63.3% of its output",
-    "tokens were reasoning. So this arm's terra is a cheaper, weaker configuration and not the same",
-    "comparator wearing a different protocol. A like-for-like terra under function calling needs",
-    "/v1/responses, which this harness does not speak.",
+    "gpt-5.6-terra speaks the Responses API here, at reasoning_effort 'high'. That is not a",
+    "preference: this gateway's /v1/chat/completions refuses function tools together with any",
+    "reasoning_effort other than 'none', and the text arm ran this tier at 'high' with 63.3% of its",
+    "output tokens being reasoning. Sending it to /openai/v1/responses is what keeps the arm",
+    "comparing protocols rather than comparing a reasoning model against itself with reasoning off.",
     "",
-    "claude-fable-5 needs no change: it accepts function tools as configured."
+    "(The chat-completions refusal names '/v1/responses'. This gateway serves it at",
+    "'/openai/v1/responses'; the bare path is a 404.)",
+    "",
+    "claude-fable-5 needs no change: it accepts function tools on chat completions as configured."
   ],
   "premium": {
     "model": "claude-fable-5",
@@ -20,7 +21,8 @@
   "cheap": {
     "model": "gpt-5.6-terra",
     "pricing_key": "gpt-5.6-terra",
-    "reasoning_effort": "none"
+    "reasoning_effort": "high",
+    "api": "responses"
   },
   "self_hosted": {
     "model": "Qwen/Qwen3.6-35B-A3B",

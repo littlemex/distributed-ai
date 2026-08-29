@@ -664,3 +664,66 @@ def test_a_missing_argument_error_shows_the_form_that_would_work():
     assert observation.ok is False
     assert '<action tool="search">' in observation.text
     assert "pattern: " in observation.text
+
+
+# --- the Responses wire ---------------------------------------------------------------------
+#
+# A second wire exists because this gateway refuses function tools together with any
+# reasoning_effort other than "none" on chat completions, and a comparator with its reasoning
+# switched off is a different model. The translation is the whole surface, so it is pinned here.
+
+
+def test_responses_body_turns_chat_history_into_items():
+    import transport
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "search", "arguments": '{"pattern":"x"}'}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "no match"},
+    ]
+    body = transport._responses_body("m", messages, 800, "high", tools.schemas())
+    kinds = [item.get("type") or item.get("role") for item in body["input"]]
+    assert kinds == ["system", "user", "function_call", "function_call_output"]
+    assert body["input"][2]["call_id"] == body["input"][3]["call_id"] == "c1"
+    assert body["reasoning"] == {"effort": "high"}
+    assert "max_output_tokens" in body and "max_tokens" not in body
+
+
+def test_responses_declares_tools_flat_not_nested():
+    import transport
+    body = transport._responses_body("m", [{"role": "user", "content": "x"}], 10, None, tools.schemas())
+    first = body["tools"][0]
+    assert first["type"] == "function" and "function" not in first
+    assert first["name"] and first["parameters"]
+
+
+def test_responses_stream_folds_a_call_and_reads_the_other_usage_spelling():
+    import transport
+    reply = transport.Reply(model="m")
+    for event in (
+        {"type": "response.output_item.added",
+         "item": {"type": "function_call", "call_id": "c9", "name": "search", "arguments": ""}},
+        {"type": "response.function_call_arguments.delta", "delta": '{"pattern":'},
+        {"type": "response.function_call_arguments.delta", "delta": '"qdp"}'},
+        {"type": "response.completed", "response": {"status": "completed", "usage": {
+            "input_tokens": 300, "output_tokens": 40,
+            "input_tokens_details": {"cached_tokens": 200},
+            "output_tokens_details": {"reasoning_tokens": 30}}}},
+    ):
+        transport._responses_event(reply, event, 0.0)
+    assert tools.from_tool_calls(reply.tool_calls)[0].args == {"pattern": "qdp"}
+    assert reply.finish_reason == "stop"
+    assert (reply.prompt_tokens, reply.completion_tokens) == (300, 40)
+    assert (reply.cached_prompt_tokens, reply.reasoning_tokens) == (200, 30)
+
+
+def test_a_responses_turn_cut_off_at_the_limit_is_reported_as_length():
+    # Otherwise the loop files it as the model failing to follow a format, and the capacity policy
+    # withdraws a tier on that count.
+    import transport
+    reply = transport.Reply(model="m")
+    transport._responses_event(reply, {"type": "response.incomplete", "response": {
+        "status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}}}, 0.0)
+    assert reply.finish_reason == "length"

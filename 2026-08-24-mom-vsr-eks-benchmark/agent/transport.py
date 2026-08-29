@@ -163,6 +163,12 @@ class Endpoint:
     # premium episodes and calls it a quality result.
     max_attempts: int = 5
     backoff_s: float = 2.0
+    # "chat" for /v1/chat/completions, "responses" for the OpenAI Responses API. The second exists
+    # for one reason: this gateway refuses function tools together with any reasoning_effort other
+    # than "none" on chat completions, and gpt-5.6-terra's text arm ran at "high" with 63.3% of its
+    # output tokens being reasoning. Comparing protocols on a model whose reasoning had to be
+    # switched off compares two things at once, so the arm that keeps reasoning needs this wire.
+    api: str = "chat"
 
     def connect(self) -> http.client.HTTPConnection:
         parsed = urlparse(self.url)
@@ -195,7 +201,9 @@ def complete(
     step a second attempt that no other policy's step got.
     """
     body = json.dumps(
-        {
+        _responses_body(model, messages, max_tokens, reasoning_effort, tool_schemas)
+        if endpoint.api == "responses"
+        else {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
@@ -350,6 +358,9 @@ def _consume(
                 reply.served_model = event["model"]
             if event.get("usage"):
                 _usage(reply, event["usage"])
+            if endpoint.api == "responses":
+                _responses_event(reply, event, started)
+                continue
             for choice in event.get("choices") or []:
                 if choice.get("finish_reason"):
                     reply.finish_reason = choice["finish_reason"]
@@ -380,19 +391,131 @@ def _consume(
         reply.text = "".join(parts)
 
 
+# The Responses stream names its events instead of nesting deltas under a choice, so the pieces of a
+# call arrive as three different event types rather than as fragments of one.
+_RESPONSES_TERMINAL = ("response.completed", "response.incomplete", "response.failed")
+
+
+def _responses_event(reply: Reply, event: dict, started: float) -> None:
+    """Fold one Responses stream event into the reply."""
+    kind = event.get("type") or ""
+    if kind == "response.output_item.added":
+        item = event.get("item") or {}
+        if item.get("type") == "function_call":
+            reply.tool_calls.append({
+                "id": item.get("call_id") or item.get("id") or "",
+                "name": item.get("name") or "",
+                "arguments": item.get("arguments") or "",
+            })
+            if reply.ttft_ms is None:
+                reply.ttft_ms = (time.perf_counter() - started) * 1000
+    elif kind == "response.function_call_arguments.delta":
+        if reply.tool_calls:
+            reply.tool_calls[-1]["arguments"] += event.get("delta") or ""
+    elif kind == "response.output_text.delta":
+        reply.text += event.get("delta") or ""
+        if reply.ttft_ms is None:
+            reply.ttft_ms = (time.perf_counter() - started) * 1000
+    elif kind in _RESPONSES_TERMINAL:
+        response = event.get("response") or {}
+        if response.get("usage"):
+            _usage(reply, response["usage"])
+        if response.get("model"):
+            reply.served_model = response["model"]
+        # `status` is the Responses spelling of a finish reason, and "incomplete" carries the
+        # reason the loop needs: a turn cut off at the output limit must not be filed as the model
+        # failing to follow a format.
+        status = response.get("status") or ""
+        detail = (response.get("incomplete_details") or {}).get("reason")
+        reply.finish_reason = (
+            "length" if detail == "max_output_tokens"
+            else "stop" if status == "completed"
+            else detail or status or None
+        )
+        if response.get("error"):
+            error = response["error"]
+            message = error.get("message") if isinstance(error, dict) else error
+            reply.error = f"response error: {str(message)[:300]}"
+    elif kind == "error":
+        reply.error = f"error event: {str(event.get('message') or event)[:300]}"
+
+
+def _responses_body(
+    model: str,
+    messages: list[dict],
+    max_tokens: int,
+    reasoning_effort: str | None,
+    tool_schemas: list[dict] | None,
+) -> dict:
+    """The same turn as a Responses request.
+
+    The loop keeps one message list, in the chat shape, and the translation happens here: which
+    wire a tier speaks is a serialisation concern and letting it reach the loop would give the
+    harness a third dialect of its own history to keep consistent.
+
+    Two shape differences that are not stylistic. A tool is declared flat -- `{"type": "function",
+    "name": ...}` rather than nested under `"function"` -- and a turn's history is items rather than
+    messages: an assistant tool call becomes a `function_call` item and its result a
+    `function_call_output` item keyed by the same `call_id`. The model's own `reasoning` items are
+    deliberately not echoed back; the gateway accepts the history without them, and carrying
+    encrypted reasoning across turns would put content in the prompt that the token accounting
+    cannot see.
+    """
+    items: list[dict] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "assistant" and message.get("tool_calls"):
+            if message.get("content"):
+                items.append({"role": "assistant", "content": message["content"]})
+            for call in message["tool_calls"]:
+                function = call.get("function") or {}
+                items.append({
+                    "type": "function_call",
+                    "call_id": call.get("id") or "",
+                    "name": function.get("name") or "",
+                    "arguments": function.get("arguments") or "{}",
+                })
+        elif role == "tool":
+            items.append({
+                "type": "function_call_output",
+                "call_id": message.get("tool_call_id") or "",
+                "output": message.get("content") or "",
+            })
+        elif message.get("content") is not None:
+            items.append({"role": role, "content": message["content"]})
+    body = {
+        "model": model,
+        "input": items,
+        "max_output_tokens": max_tokens,
+        "stream": True,
+    }
+    if reasoning_effort:
+        body["reasoning"] = {"effort": reasoning_effort}
+    if tool_schemas:
+        body["tools"] = [
+            {"type": "function", **(schema.get("function") or {})} for schema in tool_schemas
+        ]
+        body["tool_choice"] = "auto"
+    return body
+
+
 def _usage(reply: Reply, usage: dict) -> None:
     """Read one usage block, in whichever spelling it arrives.
 
     Every spelling is read because a call whose cache state is unknown cannot be priced,
     and the cache state is the term that decides whether escalation can pay for itself.
     """
-    reply.prompt_tokens = int(usage.get("prompt_tokens") or reply.prompt_tokens)
-    reply.completion_tokens = int(usage.get("completion_tokens") or reply.completion_tokens)
-    out_details = usage.get("completion_tokens_details") or {}
+    reply.prompt_tokens = int(
+        usage.get("prompt_tokens") or usage.get("input_tokens") or reply.prompt_tokens
+    )
+    reply.completion_tokens = int(
+        usage.get("completion_tokens") or usage.get("output_tokens") or reply.completion_tokens
+    )
+    out_details = usage.get("completion_tokens_details") or usage.get("output_tokens_details") or {}
     reply.reasoning_tokens = int(
         out_details.get("reasoning_tokens") or reply.reasoning_tokens
     )
-    in_details = usage.get("prompt_tokens_details") or {}
+    in_details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
     for key in ("cached_tokens", "cacheReadInputTokens", "cache_read_input_tokens"):
         value = in_details.get(key, usage.get(key))
         if value is not None:

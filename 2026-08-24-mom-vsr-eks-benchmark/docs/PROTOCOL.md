@@ -87,16 +87,21 @@ token budgets; only the protocol differs.
 |---|---|---|---|
 | solved | 0 / 8 | 3 / 15 | **6 / 15** |
 | produced any diff | 0 / 8 | 6 / 15 | **13 / 15** |
-| unusable actions | 68.8% argless | **45.2%** | **1.0%** |
+| unusable actions | 68.8% argless | **41.9%** | **1.0%** |
 | — of which no action at all | 23% of steps | 180 steps (35.2%) | 1 step |
 | — invented a tool | 2 | 6 | 0 |
-| — named no target | 220 | 45 | 4 |
+| — named no target *and refused* | 220 | 28 | 4 |
 | steps | 320 | 511 | 490 |
 | spend | $0.124 | $0.4697 | $0.7505 |
 | per solved task | n/a | $0.1566 | **$0.1251** |
 
 The v1 column is the aborted run and covers 8 instances, so read it as the direction and not as a paired
 number. The v2 and function-calling columns are the same fifteen instances.
+
+"Named no target" counts only the calls that were *refused* for it. `list_dir` with no `dir` lists the
+checkout root and succeeds, so counting every empty-argument call as malformed inflated the v2 column by 17
+steps in an earlier version of this page — the number this block exists to keep honest was the one being
+overstated.
 
 Two things in that table matter more than the solve counts.
 
@@ -116,16 +121,19 @@ lose none. That comparison is therefore measuring a protocol mismatch and report
 its box figure is a lower bound on the box rather than an estimate of it.
 
 Restating it needed the API tiers under function calling too, on the same instances, and
-`docs/results-function-calling-arm.md` now does that. The short version: the box solves 6 of 15 at $0.1251
-per solved task against $0.2391 for a reasoning-off `gpt-5.6-terra`, and its solve set is a strict superset
-of that terra's rather than a subset. The earlier headline had the direction wrong, and its magnitude was
-measuring a grammar.
+`docs/results-function-calling-arm.md` now does that with reasoning intact on every tier. Of that page's two
+claims about the box against `gpt-5.6-terra`, **the cost direction was wrong and the subset claim was
+right**: the box costs 2.61× *less* per solved task, not more, and its solve set remains a strict subset of
+terra's, which is a strict subset of `claude-fable-5`'s.
 
-One obstacle is worth recording here because it constrains the comparison: `gpt-5.6-terra` cannot combine
-function tools with `reasoning_effort` on this gateway's `/v1/chat/completions` — it requires
-`reasoning_effort: "none"` or the `/v1/responses` endpoint, which this harness does not speak. So that arm
-ran with reasoning off, which is a cheaper and weaker terra, and it is labelled as such everywhere rather
-than folded in. `claude-fable-5` needs no such change.
+Getting there needed a second wire. `gpt-5.6-terra` cannot combine function tools with `reasoning_effort`
+on this gateway's `/v1/chat/completions`; it needs `reasoning_effort: "none"` or the Responses API, served
+here at `/openai/v1/responses`. Forced to `none` it is a different model — reasoning drops from 80% of its
+output tokens to zero, 26% of its steps produce no call at all, and it solves 5 of 15 instead of 9. So the
+harness speaks both wires and the tier says which, rather than the comparison quietly resting on a
+comparator with its reasoning switched off. That mistake was made once here: an earlier version of this
+page reported the box's solve set as a *superset* of terra's, measured against exactly that weakened
+terra.
 
 ## What is not claimed
 

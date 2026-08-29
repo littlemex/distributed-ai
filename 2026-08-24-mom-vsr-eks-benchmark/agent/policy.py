@@ -161,6 +161,10 @@ class Model:
     pricing_key: str | None = None
     effort: str | None = None
     url: str | None = None
+    # Which wire this tier speaks: "chat" or "responses". A tier property because it follows from
+    # what the tier needs -- gpt-5.6-terra can only have both function tools and reasoning on the
+    # Responses API -- and not from a switch on the run.
+    api: str = "chat"
     api_key_env: str | None = None
     rate: "Rate | None" = None
     rate_basis: str | None = None
