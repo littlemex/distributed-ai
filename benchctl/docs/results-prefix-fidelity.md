@@ -95,9 +95,15 @@ output format makes harder to notice: a downstream system parsing `TAG:` gets a 
 either way.
 
 That has a routing consequence the cost work does not: **if the traffic can ask about things absent from its
-context, the box needs a verifier that the APIs do not.** On this traffic — where every question was
-answerable — it costs nothing. On traffic where questions can be unanswerable, the box's failure mode is silent
-and the APIs' is loud, and loud is cheaper to handle.
+context, the box's failure mode is silent where the APIs' is loud**, and loud is cheaper to handle.
+
+**Corrected 2026-08-29:** this section originally said the box "needs a verifier that the APIs do not". An
+advisor disagreed and is right — `claude-haiku-4-5` still emits a well-formed token on 6% of unanswerable turns
+with the refusal offered, so a design that validates only the box leaks at 6%. If provenance is a hard invariant
+it applies to whatever the fallback is. `decided-against-fabrication-verifier.md` measures what such a check can
+and cannot do, and concludes against building one: its detection rate falls from 100% to 80.4% as the context
+fills with copyable material, and its extractor goes from 0 false flags to 307 on four million characters of
+real prose when the grammar is widened by two characters.
 
 ## Telling it not to guess barely helps
 

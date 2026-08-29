@@ -107,7 +107,8 @@ def _decoy_token(token: str, rng: random.Random) -> str:
 
 
 def preamble(facts: list[Fact], target_tokens: int, *, plant: bool,
-             distractors: bool = False, rng: random.Random | None = None) -> str:
+             distractors: bool = False, rng: random.Random | None = None,
+             filler_tokens: int = 0) -> str:
     """A long shared context with the facts buried in it, or deliberately without them.
 
     `plant=False` builds the unanswerable control: same length, same shape, same questions, no answers in it.
@@ -119,6 +120,24 @@ def preamble(facts: list[Fact], target_tokens: int, *, plant: bool,
     second.
     """
     body: list[str] = ["Reference documentation for the request-validation service.", ""]
+    # Tokens for unrelated components, so the context is token-*dense* without answering anything asked.
+    #
+    # This exists because of the sharpest objection to the fabrication finding: the fixture is token-sparse,
+    # which maximises invention, because there is nothing to copy. A rich context offers copyable material, and
+    # if fabrication shifts from inventing to copying as density rises, then a containment check catches the
+    # failure mode the fixture over-represents and misses the one real traffic would have. Detection would be a
+    # decreasing function of exactly the contexts worth caring about.
+    if filler_tokens and rng is not None:
+        letters = "BCDFGHJKLMNPQRSTVWXZ"
+        asked = {f.module for f in facts}
+        body.append("## Component index")
+        for i in range(filler_tokens):
+            name = f"component-{i + 1:03d}"
+            if name in asked:
+                continue
+            tok = f"{rng.choice(letters)}{rng.choice(letters)}-{rng.randrange(1000, 9999)}"
+            body.append(f"The build token for {name} is {tok}.")
+        body.append("")
     # The filler sentence is about 20 tokens, so the divisor is measured rather than assumed; every result
     # reports the tokens the layer actually billed instead of this estimate.
     per_section = max(1, (target_tokens // 20) // max(1, len(facts)))
@@ -207,14 +226,14 @@ def run_controls(facts: list[Fact], turns: int) -> dict:
 
 def run_layer(layer, *, conversations: int, turns: int, preamble_tokens: int, facts_per_doc: int,
               max_tokens: int, seed: int, plant: bool, distractors: bool = False,
-              allow_unknown: bool = False) -> dict:
+              allow_unknown: bool = False, filler_tokens: int = 0) -> dict:
     client = LayerClient(layer)
     rows = []
     for index in range(conversations):
         rng = random.Random(seed + index)
         facts = build_facts(facts_per_doc, rng)
         text = preamble(facts, preamble_tokens, plant=plant, distractors=distractors,
-                        rng=random.Random(seed + index + 7919))
+                        rng=random.Random(seed + index + 7919), filler_tokens=filler_tokens)
         corr = f"fidelity-{seed}-{index}-{'plant' if plant else 'blank'}"
         for turn, messages in enumerate(conversation(facts, text, turns,
                                                      allow_unknown=allow_unknown), start=1):
@@ -229,6 +248,8 @@ def run_layer(layer, *, conversations: int, turns: int, preamble_tokens: int, fa
             # anything else: it says the layer found the line and read the wrong one.
             decoys = {_decoy_token(f.token, random.Random(seed + index + 7919)) for f in facts}
             verdict["took_decoy"] = bool(verdict["emitted"]) and verdict["emitted"] in decoys
+            # The containment check the verifier would apply: is the emitted token anywhere in what was sent?
+            verdict["in_context"] = bool(verdict["emitted"]) and verdict["emitted"] in text
             rows.append({"conversation": index, "turn": turn, "excluded": None,
                          "prompt_tokens": reply.prompt_tokens,
                          "cached_prompt_tokens": reply.cached_prompt_tokens,
@@ -274,6 +295,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--preamble-tokens", type=int, default=12000)
     ap.add_argument("--facts", type=int, default=6)
     ap.add_argument("--max-tokens", type=int, default=200)
+    ap.add_argument("--filler-tokens", type=int, default=0,
+                   help="plant this many tokens for unrelated components, making the context token-dense so "
+                        "there is material to copy rather than only material to invent from")
     ap.add_argument("--allow-unknown", action="store_true",
                    help="offer a sanctioned refusal in the contract, so fabricating is a choice rather than "
                         "the only way to keep the format")
@@ -310,7 +334,8 @@ def main(argv: list[str] | None = None) -> int:
         results.append(run_layer(layer, conversations=args.conversations, turns=args.turns,
                                  preamble_tokens=args.preamble_tokens, facts_per_doc=args.facts,
                                  max_tokens=args.max_tokens, seed=args.seed, plant=True,
-                                 distractors=args.distractors, allow_unknown=args.allow_unknown))
+                                 distractors=args.distractors, allow_unknown=args.allow_unknown,
+                                 filler_tokens=args.filler_tokens))
         if args.unanswerable_control:
             n = args.unanswerable_conversations or max(2, args.conversations // 2)
             print(f"  {layer.id} — unanswerable control (facts removed), {n} conversations")
@@ -318,7 +343,8 @@ def main(argv: list[str] | None = None) -> int:
                                      turns=args.turns, preamble_tokens=args.preamble_tokens,
                                      facts_per_doc=args.facts, max_tokens=args.max_tokens,
                                      seed=args.seed, plant=False, distractors=args.distractors,
-                                     allow_unknown=args.allow_unknown))
+                                     allow_unknown=args.allow_unknown,
+                                     filler_tokens=args.filler_tokens))
 
     print(f"\n{'layer':22} {'planted':>8} {'n':>4} {'cached':>7} {'format':>7} {'content':>8} "
           f"{'fmt >t1':>8} {'cont >t1':>9}")
