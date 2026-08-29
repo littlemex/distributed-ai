@@ -50,3 +50,48 @@ This is a capacity property of one deployment at one preamble size. It says noth
 result, which is settled against self-hosting for that traffic on other grounds. It matters for the
 traffic family where the box does win — prefill-dominated with prefix reuse — and it is measured because
 an operator of that family needs an alarm, not because it changes any conclusion already reported.
+
+
+---
+
+# Outcome: the prediction was wrong by about an order of magnitude, and the sweep was stopped
+
+**Stopped 2026-08-30, deliberately and short of the third reading.** What was measured contradicts the
+prediction badly enough to be worth recording, and the remaining question turned out to be a property of
+one checkpoint rather than of routing, which is not what this project is for.
+
+**What the prediction said:** the hit rate holds while resident tokens stay under `kv_cache_size_tokens`
+of 2,042,667 per replica, i.e. about 170 distinct 12,000-token prefixes.
+
+**What happened**, against one replica addressed by pod IP, at a fixed prompt size of about 4,525 tokens:
+
+| distinct prefixes written between populate and reuse | tokens written | % of advertised KV | cached share on reuse |
+|---|---|---|---|
+| 32 | 149,292 | 7.3% | **93.4%** |
+| 64 | 294,190 | 14.4% | **0.0%** |
+
+And with 19,779-token prompts the reuse hit was already 0.0% at 40 distinct prefixes — 791,160 tokens, or
+38.7% of the advertised figure. Two calls back to back hit 9,504 of 9,916 tokens (95.8%), so the cache
+works; what fails is surviving intervening traffic.
+
+**So the reusable prefix cache on this deployment is somewhere between 7% and 14% of the capacity the
+engine advertises**, and the arithmetic in the prediction — resident tokens against
+`kv_cache_size_tokens` — is not the right model of it.
+
+**The second reading is settled, and it is a negative:** `kv_cache_usage_perc` read 0.00% throughout,
+including immediately after writing 791,160 tokens of distinct prefixes. It reflects blocks held by
+*running* requests, not blocks retained for reuse. **It cannot be used as a cache-occupancy alarm.** An
+alarm has to be computed by the caller from distinct resident prefixes it has sent.
+
+**The third reading — whether the bound is in tokens or in resident prefixes — was not established, and
+the sweep was stopped rather than finished.** The reason is scope: separating those two would characterise
+the block and SSM-state accounting of one hybrid checkpoint, and this project's conclusions have to hold
+for an arbitrary tier. What generalises is the warning and the method, not the number:
+
+- **Advertised cache capacity is not reusable capacity**, and the gap here is nearly an order of magnitude.
+- **The engine's own occupancy gauge may not be an alarm**, so a router that depends on cache economics has
+  to track distinct resident prefixes itself.
+- The way to find a tier's real reusable capacity is the two-line experiment above: populate, interpose a
+  measured number of tokens, re-send, read `cached_tokens` from the response. It costs minutes and it is
+  worth running for **any** tier whose economics depend on prefix reuse — which, on this deployment, means
+  any self-hosted tier, since cached input costs 8.2% of fresh.
