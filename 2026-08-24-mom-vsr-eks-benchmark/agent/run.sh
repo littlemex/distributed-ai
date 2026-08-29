@@ -82,7 +82,12 @@ PY
 # The gateway address is a deployment fact, so it is injected here rather than committed.
 # Note for anyone editing the guards above: an apostrophe inside ${VAR:?message} opens a
 # quote in bash and swallows the rest of the file.
-python3 - "${HERE}/tiers.example.json" "${WORK}/tiers.json" "https://${STRATOCLAVE_HOST}/v1/chat/completions" <<'PY'
+# TIERS names the file, because which model a tier is and how it is configured are properties of
+# an arm rather than of the harness: the function-calling arm has to run gpt-5.6-terra with
+# reasoning off, since this gateway refuses function tools together with reasoning_effort on
+# /v1/chat/completions, and that is a different configuration which must be visible in the arm's
+# definition instead of hidden behind a flag.
+python3 - "${TIERS:-${HERE}/tiers.example.json}" "${WORK}/tiers.json" "https://${STRATOCLAVE_HOST}/v1/chat/completions" <<'PY'
 import json, sys
 src, out, url = sys.argv[1], sys.argv[2], sys.argv[3]
 tiers = {k: v for k, v in json.load(open(src)).items() if not k.startswith("_")}
@@ -220,8 +225,14 @@ spec:
             - {name: work, mountPath: /work}
             - {name: results, mountPath: /results}
           resources:
-            requests: {cpu: "1", memory: 4Gi}
-            limits: {cpu: "4", memory: 12Gi}
+            # ephemeral-storage is requested explicitly, and that is not boilerplate: the instance
+            # images are 1-3 GB each, a node holds 20 GiB, and nothing tells the scheduler that a
+            # pod is about to pull one. Several episodes on one node put the kubelet into
+            # DiskPressure and it evicted a running episode mid-pull -- twice, on the same node,
+            # for matplotlib. Declaring the pull's footprint is what makes the scheduler spread
+            # them; `jobs/agentx.yaml` carries the same note for the same reason.
+            requests: {cpu: "1", memory: 4Gi, ephemeral-storage: 8Gi}
+            limits: {cpu: "4", memory: 12Gi, ephemeral-storage: 24Gi}
       volumes:
         - {name: code, configMap: {name: ${JOB}-code}}
         - {name: data, configMap: {name: ${JOB}-data}}

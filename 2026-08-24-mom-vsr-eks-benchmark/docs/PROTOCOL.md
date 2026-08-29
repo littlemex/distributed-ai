@@ -93,6 +93,7 @@ token budgets; only the protocol differs.
 | — named no target | 220 | 45 | 4 |
 | steps | 320 | 511 | 490 |
 | spend | $0.124 | $0.4697 | $0.7505 |
+| per solved task | n/a | $0.1566 | **$0.1251** |
 
 The v1 column is the aborted run and covers 8 instances, so read it as the direction and not as a paired
 number. The v2 and function-calling columns are the same fifteen instances.
@@ -114,11 +115,17 @@ came from a text-protocol run, on which this box loses 45% of its actions to ser
 lose none. That comparison is therefore measuring a protocol mismatch and reporting it as capability, and
 its box figure is a lower bound on the box rather than an estimate of it.
 
-Restating it needs the API tiers under function calling too, on the same instances. That is in progress and
-has one hard obstacle: `gpt-5.6-terra`, the cost comparator, cannot combine function tools with
-`reasoning_effort` on this gateway's `/v1/chat/completions` — it requires `reasoning_effort: "none"` or the
-`/v1/responses` endpoint. Running it with reasoning switched off makes it a different comparator, so that
-arm will be reported with the change stated rather than folded in. `claude-fable-5` needs no such change.
+Restating it needed the API tiers under function calling too, on the same instances, and
+`docs/results-function-calling-arm.md` now does that. The short version: the box solves 6 of 15 at $0.1251
+per solved task against $0.2391 for a reasoning-off `gpt-5.6-terra`, and its solve set is a strict superset
+of that terra's rather than a subset. The earlier headline had the direction wrong, and its magnitude was
+measuring a grammar.
+
+One obstacle is worth recording here because it constrains the comparison: `gpt-5.6-terra` cannot combine
+function tools with `reasoning_effort` on this gateway's `/v1/chat/completions` — it requires
+`reasoning_effort: "none"` or the `/v1/responses` endpoint, which this harness does not speak. So that arm
+ran with reasoning off, which is a cheaper and weaker terra, and it is labelled as such everywhere rather
+than folded in. `claude-fable-5` needs no such change.
 
 ## What is not claimed
 
