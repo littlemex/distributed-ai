@@ -153,7 +153,25 @@ echo "  Delete PVCs : $DELETE_PVCS"
 echo "  Destroy     : $RUN_DESTROY"
 echo ""
 
+# ── Is the cluster still reachable? ───────────────────────────────────────────
+# A destroy that failed late (a VPC dependency, say) leaves the EKS cluster already gone. The
+# documented recovery is "clear the leftover and re-run", and re-running lands here: the Step 1
+# deletes below have no `|| true`, so an unreachable API server aborts the script under `set -e`
+# BEFORE terraform destroy — the reader is told to re-run something that cannot re-run. When the
+# API server does not answer there is nothing left to delete in Kubernetes, so skip Steps 1 and 2
+# and go straight to the Terraform side.
+K8S_REACHABLE=true
+if ! kubectl --request-timeout=15s get --raw /readyz >/dev/null 2>&1; then
+  K8S_REACHABLE=false
+  echo ""
+  echo "The Kubernetes API server did not answer. Skipping the Kubernetes cleanup (Steps 1 and 2)."
+  echo "This is the expected state when the cluster is already destroyed and you are re-running to"
+  echo "finish the Terraform side. If the cluster SHOULD be up, stop here and fix kubectl first —"
+  echo "otherwise accelerator nodes could still be running and billing."
+fi
+
 # ── Step 1: Delete GPU workloads ──────────────────────────────────────────────
+if [[ "$K8S_REACHABLE" == "true" ]]; then
 echo "Step 1 — Delete GPU pods and workloads in namespace: $NAMESPACE"
 if confirm "  Delete all workloads (Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, bare Pods, TrainJobs, MPIJobs) in $NAMESPACE?"; then
   # --wait=false on every delete: kubectl delete defaults to --wait=true, which blocks until
@@ -370,6 +388,8 @@ if left:
 else:
     print('  none')
 "
+
+fi  # K8S_REACHABLE — Steps 1 and 2 need a live API server
 
 # ── Step 3: Optional terraform destroy ───────────────────────────────────────
 if [[ "$RUN_DESTROY" == "true" ]]; then
