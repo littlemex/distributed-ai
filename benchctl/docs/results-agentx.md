@@ -227,6 +227,12 @@ four, and the KV pressure that would eventually break the hit rate is nowhere in
 | `claude-haiku-4-5`, ideal 94% cache | $0.0120 — the box is **1.76x more expensive** (was 3.04x) |
 | `claude-haiku-4-5`, no cache at all | $0.0642 — the box is 3.0x cheaper |
 
+**And the unit is per request.** `results-agentic-cost-per-solve.md` prices the same family per *solved task*
+from this project's own 120 SWE-bench episodes, and the box needs 27 steps where the APIs need 5 and 8, reads 15x
+the prompt tokens, and solves zero instances they failed. Per solved task it is 2.61x dearer than `gpt-5.6-terra`
+with its cache off and 1.3x cheaper with it on. The per-request figure below cannot be multiplied into the
+per-task one.
+
 **Correction, 2026-08-28: the 94% row is a hypothesis this gateway does not deliver.** `claude-haiku-4-5`
 returns zero cached tokens here under every condition probed — identical repeats, shared prefixes and, most to
 the point, a **growing multi-turn conversation**, which is the shape this family sends. 3.5k tokens through 15k,

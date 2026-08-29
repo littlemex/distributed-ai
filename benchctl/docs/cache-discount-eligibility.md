@@ -96,6 +96,13 @@ uncertainty belongs next to it:
 * The 3.0x row still assumes the box at 100% utilisation, which the arrival-rate work showed is the
   optimistic end. That caveat was always on it and still is.
 
+**And the unit is per request, which `results-agentic-cost-per-solve.md` shows is the wrong one for this family.**
+On the same SWE-bench instances the box takes 27 steps where `claude-fable-5` takes 5 and `gpt-5.6-terra` takes 8,
+reads 15x the prompt tokens, and solves 37.5% against 57.5% and 79.2% — solving **zero** instances that either API
+failed. Per solved task it is 2.61x dearer than `gpt-5.6-terra` with its cache off and 1.3x cheaper with it on.
+Neither figure contradicts the row above; they have different denominators, and the per-request one cannot be
+multiplied into the per-task one because the trajectories differ by 3.4x.
+
 The claim to make is therefore narrow and conditional: **against the cheapest API on this gateway as it
 actually behaves, the box is cheaper on agentic traffic, not more expensive.** Confirming it properly means
 re-running the agentic comparison with the API's cached-token count recorded per request rather than assumed,
