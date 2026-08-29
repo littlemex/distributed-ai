@@ -7,6 +7,8 @@ recorded by `results-function-calling-arm.md`. The detector analysis follows
 ## The question
 
 Capability across the three tiers is a strict nesting, so routing cannot raise quality and the only
+
+**Narrowed 2026-08-30:** "routing cannot raise quality" holds along a chain whose tiers are nested, and nesting is a per-family, per-pair property re-certified at admission — not a global one. The knowledge-question round recorded an any-correct oracle of 0.9596 against the best single member's 0.9105 over ten members, which is only possible if some questions are answered by members other than the best. Two advisors caught the overreach independently; see `docs/ROUTING-DESIGN.md`.
 saving takes one shape: attempt a cheap tier, escalate what it fails. Pricing that arrangement needs an
 answer to "did it fail", which in the benchmark comes from a test suite that production does not have.
 Two things therefore had to be measured: what the arrangement is worth with a perfect answer, and what
