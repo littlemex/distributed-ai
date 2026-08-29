@@ -99,7 +99,7 @@ uncertainty belongs next to it:
 **And the unit is per request, which `results-agentic-cost-per-solve.md` shows is the wrong one for this family.**
 On the same SWE-bench instances the box takes 27 steps where `claude-fable-5` takes 5 and `gpt-5.6-terra` takes 8,
 reads 15x the prompt tokens, and solves 37.5% against 57.5% and 79.2% — solving **zero** instances that either API
-failed. Per solved task it is 2.61x dearer than `gpt-5.6-terra` with its cache off and 1.3x cheaper with it on.
+failed. Per solved task it is 2.61 (**the direction of that figure was corrected 2026-08-29: it measured a text-protocol mismatch, and under function calling the box is 1.91x cheaper per solved task than a reasoning-off terra -- see `2026-08-24-mom-vsr-eks-benchmark/docs/results-function-calling-arm.md`**)x dearer than `gpt-5.6-terra` with its cache off and 1.3x cheaper with it on.
 Neither figure contradicts the row above; they have different denominators, and the per-request one cannot be
 multiplied into the per-task one because the trajectories differ by 3.4x.
 

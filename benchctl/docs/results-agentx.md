@@ -229,7 +229,7 @@ four, and the KV pressure that would eventually break the hit rate is nowhere in
 
 **And the unit is per request.** `results-agentic-cost-per-solve.md` prices the same family per *solved task*
 from this project's own 120 SWE-bench episodes, and the box needs 27 steps where the APIs need 5 and 8, reads 15x
-the prompt tokens, and solves zero instances they failed. Per solved task it is 2.61x dearer than `gpt-5.6-terra`
+the prompt tokens, and solves zero instances they failed. Per solved task it is 2.61 (**the direction of that figure was corrected 2026-08-29: it measured a text-protocol mismatch, and under function calling the box is 1.91x cheaper per solved task than a reasoning-off terra -- see `2026-08-24-mom-vsr-eks-benchmark/docs/results-function-calling-arm.md`**)x dearer than `gpt-5.6-terra`
 with its cache off and 1.3x cheaper with it on. The per-request figure below cannot be multiplied into the
 per-task one.
 

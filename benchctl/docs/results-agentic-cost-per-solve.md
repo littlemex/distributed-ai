@@ -1,5 +1,14 @@
 # Per request the box is cheaper; per solved task it is not, unless its cache is on
 
+
+> **The direction of this page's headline is wrong, corrected 2026-08-29.** Its box column comes from a
+> text-protocol run on which that box loses 45% of its actions to serialisation while the two APIs lose
+> almost none, so it compares a protocol mismatch and reports it as capability. On the same instances
+> under function calling the box solves 6 of 15 at $0.1251 per solved task against $0.2391 for a
+> reasoning-off `gpt-5.6-terra`, and its solve set is a strict superset of that terra's rather than a
+> subset. The measurements below stand; the 2.61x figure and the subset claim do not. See
+> `2026-08-24-mom-vsr-eks-benchmark/docs/PROTOCOL.md` and `results-function-calling-arm.md` there.
+
 Measured from the 120 real SWE-bench episodes this project already ran, 2026-08-29. No new spend: the pilot
 recorded per-step model, prompt tokens, cached tokens, completion tokens and outcome for every one of 2,228 model
 calls, and the question below is answerable from those records.
