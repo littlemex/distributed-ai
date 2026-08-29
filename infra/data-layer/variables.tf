@@ -48,7 +48,7 @@ variable "mlflow_name" {
 variable "mlflow_backend" {
   description = <<-EOT
     Which SageMaker MLflow to create: "app" (serverless) or "server" (a managed tracking server,
-    billed for every hour it exists and stoppable to pause that). Both speak the same MLflow REST API
+    billed for every hour it is running and stoppable to pause that). Both speak the same MLflow REST API
     and both are addressed by their ARN as MLFLOW_TRACKING_URI, so nothing above this layer changes;
     the sagemaker-mlflow plugin reads the resource type out of the ARN to pick the endpoint and the
     signing service.

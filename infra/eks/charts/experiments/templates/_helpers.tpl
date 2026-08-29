@@ -14,23 +14,29 @@ quote so a namespace like "true"/"off" is not YAML-coerced to a bool.
 {{- end -}}
 
 {{/*
-Shared-storage static PV name for the training workloads' /shared mount. The three storage
-backends each expose ONE static PV, created by the matching *.tf (all RWX):
+NCCL_SOCKET_IFNAME for one workload: its own socketIfname if set, else the chart-wide default.
+Kept as a helper because three workloads (ncclProbe, ncclSshd, ncclTrainjob) must agree on the
+pattern — a literal repeated per template drifts the moment one environment needs a different
+exclude list, and the symptom (one workload rendezvous-ing, another hanging) does not point here.
+Call with a dict: (dict "w" $workloadValues "root" $).
+*/}}
+{{- define "experiments.ncclSocketIfname" -}}
+{{- $w := .w | default dict -}}
+{{- $own := $w.socketIfname | default "" -}}
+{{- if $own -}}{{ $own }}{{- else -}}{{ .root.Values.ncclSocketIfname | required "ncclSocketIfname is required (chart-wide NCCL bootstrap interface filter)" }}{{- end -}}
+{{- end -}}
+
+{{/*
+Shared-storage static PV names, for reference only. Each backend exposes ONE static PV, created
+by the matching *.tf (all RWX):
   openzfs → "openzfs-shared"       (openzfs.tf; single-AZ NFS home/general-shared — DEFAULT)
   fsx     → "fsx-training"         (fsx.tf; single-AZ Lustre high-throughput scratch)
   efs     → "efs-neuron-workspace" (efs.tf; regional multi-AZ RWX — demoted opt-in)
-The chosen filesystem must be enabled in Terraform (its var.<x>_enabled = true) so the PV
-exists, or the PVC below stays Pending. fail on an unknown backend so a typo is caught at
-render time rather than binding to nothing.
+There is deliberately NO helper resolving a backend to one of these names. Workloads bind by PVC
+name (sharedStorage.existingClaimName), and which PV that claim holds is decided once, by hand,
+in manifests/shared-pvc.yaml. A helper here would read sharedStorage.backend and make it look
+like the chart still selects the filesystem, which it has not done since the PVC moved out.
 */}}
-{{- define "experiments.sharedVolumeName" -}}
-{{- $b := .Values.sharedStorage.backend -}}
-{{- if eq $b "openzfs" -}}openzfs-shared
-{{- else if eq $b "fsx" -}}fsx-training
-{{- else if eq $b "efs" -}}efs-neuron-workspace
-{{- else -}}{{ fail (printf "sharedStorage.backend must be openzfs|fsx|efs, got %q" $b) }}
-{{- end -}}
-{{- end -}}
 
 {{/*
 Shared-storage PVC name. REQUIRED — sharedStorage.existingClaimName. The chart used to render

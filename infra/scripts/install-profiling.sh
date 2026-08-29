@@ -135,6 +135,7 @@ guard_plan() {
   profiling_addresses >"${work_dir}/owned.txt"
   protected_addresses >"${work_dir}/protected.txt"
   ALLOW_UNRELATED="${ALLOW_UNRELATED:-0}" PROFILING_ONLY="${PROFILING_ONLY:-0}" LABEL="${label}" \
+    PLAN_IS_PREVIEW="${PLAN_IS_PREVIEW:-0}" \
     python3 - "${plan_file}.json" "${work_dir}/owned.txt" "${work_dir}/protected.txt" <<'PY'
 import json, os, re, sys
 
@@ -222,12 +223,24 @@ if buckets["record-update"] and os.environ.get("ALLOW_RECORD_UPDATES") != "1":
 # PROFILING_ONLY changes how the plan is MADE (it targets the platform's own addresses); it does not
 # make an unrelated change in the resulting plan safe to apply. Terraform can pull a dependency of a
 # target into a targeted plan, and the saved plan is what gets applied, so the only override for
-# unrelated changes is the one that says so.
-if buckets["unrelated"] and os.environ["ALLOW_UNRELATED"] != "1":
-    sys.exit(f"error: the {label} plan contains {len(buckets['unrelated'])} change(s) unrelated to "
-             "profiling (listed above). This is pre-existing cluster drift, not something this "
-             "installer introduced. Re-run with PROFILING_ONLY=1 to plan only the profiling "
-             "resources, or ALLOW_UNRELATED=1 to apply everything as listed.")
+# unrelated changes is the one that says so — on the plan that is actually applied.
+#
+# Which is why an unrelated change is NOT fatal on a preview plan. Under PROFILING_ONLY=1 the wide
+# plan is made only to show the operator what is drifting; the plan that gets applied is the narrowed
+# one, and it is guarded in its own right below. Exiting here made the escape hatch this very message
+# recommends unreachable: the only situation where PROFILING_ONLY=1 is wanted is one where unrelated
+# drift exists, and the wide plan ran first and refused before the narrowed plan was ever made.
+# Everything above (a delete of the record of record, an update to it) stays fatal even on a preview,
+# because a plan proposing those means something is wrong that narrowing does not fix.
+if buckets["unrelated"]:
+    if os.environ.get("PLAN_IS_PREVIEW") == "1":
+        print(f"    {len(buckets['unrelated'])} unrelated change(s) above will NOT be applied "
+              "(PROFILING_ONLY=1 narrows the plan to the profiling resources)")
+    elif os.environ["ALLOW_UNRELATED"] != "1":
+        sys.exit(f"error: the {label} plan contains {len(buckets['unrelated'])} change(s) unrelated to "
+                 "profiling (listed above). This is pre-existing cluster drift, not something this "
+                 "installer introduced. Re-run with PROFILING_ONLY=1 to plan only the profiling "
+                 "resources, or ALLOW_UNRELATED=1 to apply everything as listed.")
 PY
 }
 
@@ -661,7 +674,9 @@ for repo in accelprof accelprof-knowledge; do
     "aws_ecr_repository.profiling[\"${repo}\"]" "${repo}" >/dev/null
 done
 
-guard_plan "${eks_dir}" "cluster" "${eks_vars[@]}"
+# Under PROFILING_ONLY the wide plan is a report, not the thing that gets applied, so it is inspected
+# in preview mode: unrelated drift is listed and the run continues to the narrowed plan.
+PLAN_IS_PREVIEW="${PROFILING_ONLY:-0}" guard_plan "${eks_dir}" "cluster" "${eks_vars[@]}"
 if [ "${PROFILING_ONLY:-0}" = "1" ]; then
   say "narrowing to the profiling addresses (PROFILING_ONLY=1)"
   targets=()

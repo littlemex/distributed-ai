@@ -3,7 +3,7 @@
 #
 # Two shapes of the same thing, chosen with var.mlflow_backend, whose description is where the
 # trade-off between them is written down. In short: "app" is serverless and has nothing to stop;
-# "server" is billed for every hour it exists and can be stopped to pause that, and it is the only one
+# "server" is billed for every hour it is running and can be stopped to pause that, and it is the only one
 # whose IAM can say "log but never delete". mlflow_version is pinned because changing it forces a
 # replacement of a tracking server.
 #

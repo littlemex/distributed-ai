@@ -21,7 +21,10 @@ set -euo pipefail
 
 CR_ID=""
 POOL="gpu-cb"
-REGION="${AWS_DEFAULT_REGION:-us-east-2}"
+# AWS_REGION first: every chapter in the workshop exports AWS_REGION, and reading only
+# AWS_DEFAULT_REGION meant a reader who set AWS_REGION=us-west-2 silently searched us-east-2
+# and got "could not describe reservation" — or worse, a same-shaped id in another region.
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}"
 PROFILE="${AWS_PROFILE:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -98,7 +101,8 @@ Add this reserved pool to accelerator_pools in accelerator-pools.auto.tfvars, th
     device_plugin     = "${DEVICE_PLUGIN}"
     capacity_type     = "reserved"
     cb_reservation_id = "${CR_ID}"           # zone/end date are derived from this reservation
-    cb_end_date       = "${END_DATE}"   # optional: schedules a pre-expiry SNS alert
+    cb_end_date       = "${END_DATE}"   # optional: emergency override of the derived end date;
+                                             # the pre-expiry SNS alert works without this line
     volume_size       = "500Gi"
 EOF
 if [[ "$DEVICE_PLUGIN" == "neuron" ]]; then
@@ -111,5 +115,8 @@ cat <<EOF
 
 Then:
   terraform apply
+
+apply creates the NodePool, not a node: Karpenter launches one when a pod requests the pool, so
+the command below is empty until you schedule a workload on it.
   kubectl get nodes -l karpenter.sh/capacity-type=reserved
 EOF

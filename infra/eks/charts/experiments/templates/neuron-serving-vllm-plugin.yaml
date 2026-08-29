@@ -2,7 +2,9 @@
 neuron-serving-vllm-plugin — vLLM OpenAI-compatible server on a Trainium node via the vLLM Neuron
 plugin. Verified on trn2.3xlarge with Qwen/Qwen3-VL-4B-Instruct (multimodal). This is Basic09.
 
-Prereqs: a Trainium node (a Capacity-Block managed nodegroup) with the Neuron device plugin.
+Prereqs: a Neuron node with the device plugin on it. In this repo that comes from an
+accelerator_pools entry with capacity_type = "reserved" and a cb_reservation_id, which Karpenter
+launches on demand — so there is no node until a pod asks for one.
 
 Render + apply:
   helm template exp ./charts/experiments --set namespace=$NS \

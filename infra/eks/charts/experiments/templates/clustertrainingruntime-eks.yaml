@@ -54,8 +54,10 @@ spec:
             spec:
               template:
                 metadata:
-                  # The CPU NodePool consolidates underutilized nodes after 30s and can evict a
-                  # worker mid-run; do-not-disrupt pins every pod. Harmless on GPU pools (WhenEmpty).
+                  # Every pool is WhenEmpty, so consolidation never touches a node running a
+                  # worker. Drift is the reason this annotation exists: it fires independently of
+                  # consolidationPolicy, so a new AMI release replaces a live node mid-run.
+                  # do-not-disrupt blocks voluntary disruption (drift, expiry) on every pod.
                   annotations:
                     karpenter.sh/do-not-disrupt: "true"
                 spec:

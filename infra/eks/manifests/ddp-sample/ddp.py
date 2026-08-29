@@ -4,7 +4,7 @@
 
 Adapted from awsome-distributed-ai's `3.test_cases/pytorch/ddp/ddp.py` (itself derived from
 pytorch/examples multigpu_torchrun.py). Launched under Kubeflow Trainer v2: the TrainJob's
-torch plugin points torchrun at node-0 for c10d rendezvous (no self-hosted etcd Service) and
+torch plugin points torchrun at node-0 as the rendezvous host (no self-hosted etcd Service) and
 injects PET_NNODES / PET_NPROC_PER_NODE / PET_MASTER_ADDR etc. torchrun then exports
 RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR / MASTER_PORT into each training process, which is
 what init_process_group(backend=...) reads below (rendezvous info comes from the environment,
@@ -77,9 +77,9 @@ class MLP(nn.Module):
 
 
 def ddp_setup():
-    # Argless init_process_group() uses the env:// rendezvous: WORLD_SIZE / RANK / MASTER_ADDR /
-    # MASTER_PORT are already exported by torchrun (see the module docstring). nccl on GPU,
-    # gloo on CPU — the only knob that differs between the two paths.
+    # init_process_group takes only the backend; the rendezvous is env://, so WORLD_SIZE / RANK /
+    # MASTER_ADDR / MASTER_PORT are already exported by torchrun (see the module docstring).
+    # nccl on GPU, gloo on CPU — the only knob that differs between the two paths.
     log(f"backend={backend} cuda_available={use_cuda} device_count={torch.cuda.device_count() if use_cuda else 0}")
     init_process_group(backend=backend)
 

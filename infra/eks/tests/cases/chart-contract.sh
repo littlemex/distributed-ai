@@ -90,6 +90,39 @@ _cc_assert_serving() {
   printf '%s\n' "$render" | grep -qE '^\s+- \{ name: http, port: [0-9]+' || { echo "no Service http port"; return 1; }
 }
 
+# NCCL_SOCKET_IFNAME must come from ONE place for all three NCCL workloads. It used to be a literal
+# repeated in each template, which is how ncclProbe and ncclSshd silently stopped following the
+# value ncclTrainjob read from values.yaml. The failure that regression produces is nasty: the
+# workload the reader measures with rendezvouses while the one they sanity-check with hangs, and
+# nothing in either pod's output points at the chart. So assert the wiring, not just the default.
+test_static_nccl_socket_ifname_single_source() {
+  local pool=test-pool tj probe sshd overridden
+  tj="$(_cc_render nccl-trainjob.yaml --set ncclTrainjob.enabled=true \
+    --set ncclTrainjob.nodeRole=$pool --set ncclTrainjob.gpuCount=8 --set ncclTrainjob.efaCount=1 \
+    --set ncclTrainjob.image=example:v1 --set sharedStorage.existingClaimName=shared-claim)" || return 1
+  probe="$(_cc_render nccl-probe.yaml --set ncclProbe.enabled=true --set ncclProbe.nodeRole=$pool)" || return 1
+  sshd="$(_cc_render nccl-sshd.yaml --set ncclSshd.enabled=true --set ncclSshd.nodeRole=$pool \
+    --set sharedStorage.existingClaimName=shared-claim)" || return 1
+  local want='"^lo,docker,veth"'
+  local w
+  for w in "trainjob:$tj" "probe:$probe" "sshd:$sshd"; do
+    printf '%s\n' "${w#*:}" | grep -q "NCCL_SOCKET_IFNAME.*value: $want" \
+      || { echo "${w%%:*} does not carry the chart-wide NCCL_SOCKET_IFNAME default ($want)"; return 1; }
+  done
+  # Moving the chart-wide value must move every workload, not just the one that reads its own key.
+  # (helm --set splits on "," so the comma in the pattern is escaped.)
+  local i
+  for i in nccl-trainjob:ncclTrainjob nccl-probe:ncclProbe nccl-sshd:ncclSshd; do
+    local tmpl="${i%%:*}" key="${i#*:}"
+    overridden="$(_cc_render "$tmpl.yaml" --set "$key.enabled=true" --set "$key.nodeRole=$pool" \
+      --set "$key.gpuCount=8" --set "$key.efaCount=1" --set "$key.image=example:v1" \
+      --set sharedStorage.existingClaimName=shared-claim \
+      --set 'ncclSocketIfname=^lo\,probe-only-check')" || return 1
+    printf '%s\n' "$overridden" | grep -q 'NCCL_SOCKET_IFNAME.*value: "\^lo,probe-only-check"' \
+      || { echo "$tmpl ignores the chart-wide ncclSocketIfname override (literal left in template?)"; return 1; }
+  done
+}
+
 # gpuServingVllm (Basic07): renders nothing by default; with nodeRole it is a GPU vLLM Deployment.
 test_static_gpu_serving_contract() {
   local render

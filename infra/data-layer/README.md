@@ -30,7 +30,7 @@ terraform init            # uses an S3+KMS backend in real use; see versions.tf
 terraform apply           # buckets + IAM only (the MLflow stays OFF by default)
 
 # opt in to a managed SageMaker MLflow for a campaign. Which one is not optional: "app" is
-# serverless, "server" is a tracking server billed for every hour it exists. Switching later
+# serverless, "server" is a tracking server billed for every hour it is running. Switching later
 # destroys the one that exists along with every run's metadata, so this stops if it is unset.
 terraform apply -var mlflow_enabled=true -var mlflow_backend=app
 terraform output -raw mlflow_arn            # -> MLFLOW_TRACKING_URI for producers/readers

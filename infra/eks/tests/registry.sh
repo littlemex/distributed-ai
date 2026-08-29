@@ -24,6 +24,8 @@ register_all_tests() {
   register_test plan-guard-aws-lookup          test_plan_guard_aws_lookup_failure_is_not_absence baseline static "$TIMEOUT_STATIC"
   register_test plan-guard-removed-vars        test_plan_guard_removed_variables_refuse_to_be_set baseline static "$TIMEOUT_STATIC"
   register_test plan-guard-installer-vars      test_plan_guard_installer_vars_are_declared baseline static "$TIMEOUT_STATIC"
+  register_test plan-guard-only-escape-hatch   test_plan_guard_profiling_only_escape_hatch_is_reachable baseline static "$TIMEOUT_STATIC"
+  register_test plan-guard-cb-region-profile   test_plan_guard_cb_scripts_resolve_region_and_profile baseline static "$TIMEOUT_STATIC"
   register_test registry-matches-state          test_registry_matches_state              baseline static "$TIMEOUT_STATIC" terraform
   register_test registry-default-layer-attached test_registry_default_data_layer_is_attached baseline static "$TIMEOUT_STATIC"
   register_test registry-preamble-contract      test_registry_preamble_contract          baseline static "$TIMEOUT_STATIC"
@@ -50,6 +52,7 @@ register_all_tests() {
   # P0 chart-contract: render the workshop serving workloads and assert their structure. Cluster
   # not needed, so these run in baseline/static on every PR and catch a broken serving chart.
   register_test static-gpu-serving-contract   test_static_gpu_serving_contract   baseline static "$TIMEOUT_STATIC" helm
+  register_test static-nccl-ifname-source     test_static_nccl_socket_ifname_single_source baseline static "$TIMEOUT_STATIC" helm
   register_test static-neuron-plugin-contract test_static_neuron_plugin_contract baseline static "$TIMEOUT_STATIC" helm
 
   register_test control-plane   test_control_plane   baseline live-ro "$TIMEOUT_BASE"

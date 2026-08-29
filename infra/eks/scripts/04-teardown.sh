@@ -97,7 +97,9 @@ else
     exit 1
   fi
   read -rp "Continue against context '$(kubectl config current-context 2>/dev/null)'? [y/N] " ANS
-  [[ "${ANS,,}" == "y" ]] || { echo "Aborted."; exit 1; }
+  # bash 3.2-safe yes/no (no ${var,,}) — macOS ships /bin/bash 3.2, and this script is the one
+  # that stops GPU billing: it must not die on a substitution the reader's shell cannot parse.
+  case "$ANS" in [yY]|[yY][eE][sS]) ;; *) echo "Aborted."; exit 1 ;; esac
 fi
 
 # ── Resolve which NodePools to delete ─────────────────────────────────────────
@@ -105,7 +107,12 @@ fi
 # one behind means GPU or Neuron instances keep billing after the reader believes teardown ran.
 if [[ ${#NODEPOOLS[@]} -eq 0 ]]; then
   TAINTS_CSV=$(IFS=,; echo "${ACCELERATOR_TAINTS[*]}")
-  mapfile -t NODEPOOLS < <(
+  # Read with a while loop rather than `mapfile`: mapfile is bash 4+, and on macOS /bin/bash is
+  # 3.2, where it fails with "mapfile: command not found" — under `set -e` that aborts teardown
+  # right where the accelerator pools would have been discovered, leaving GPU nodes billing.
+  while IFS= read -r _np; do
+    [ -n "$_np" ] && NODEPOOLS+=("$_np")
+  done < <(
     kubectl get nodepool -o json 2>/dev/null \
       | TAINTS_CSV="$TAINTS_CSV" python3 -c "
 import json, os, sys
@@ -136,7 +143,7 @@ confirm() {
     return 0
   fi
   read -rp "$MSG [y/N] " ANS
-  [[ "${ANS,,}" == "y" ]]
+  case "$ANS" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
 }
 
 echo "=== Teardown Plan ==="
@@ -146,7 +153,25 @@ echo "  Delete PVCs : $DELETE_PVCS"
 echo "  Destroy     : $RUN_DESTROY"
 echo ""
 
+# ── Is the cluster still reachable? ───────────────────────────────────────────
+# A destroy that failed late (a VPC dependency, say) leaves the EKS cluster already gone. The
+# documented recovery is "clear the leftover and re-run", and re-running lands here: the Step 1
+# deletes below have no `|| true`, so an unreachable API server aborts the script under `set -e`
+# BEFORE terraform destroy — the reader is told to re-run something that cannot re-run. When the
+# API server does not answer there is nothing left to delete in Kubernetes, so skip Steps 1 and 2
+# and go straight to the Terraform side.
+K8S_REACHABLE=true
+if ! kubectl --request-timeout=15s get --raw /readyz >/dev/null 2>&1; then
+  K8S_REACHABLE=false
+  echo ""
+  echo "The Kubernetes API server did not answer. Skipping the Kubernetes cleanup (Steps 1 and 2)."
+  echo "This is the expected state when the cluster is already destroyed and you are re-running to"
+  echo "finish the Terraform side. If the cluster SHOULD be up, stop here and fix kubectl first —"
+  echo "otherwise accelerator nodes could still be running and billing."
+fi
+
 # ── Step 1: Delete GPU workloads ──────────────────────────────────────────────
+if [[ "$K8S_REACHABLE" == "true" ]]; then
 echo "Step 1 — Delete GPU pods and workloads in namespace: $NAMESPACE"
 if confirm "  Delete all workloads (Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, bare Pods, TrainJobs, MPIJobs) in $NAMESPACE?"; then
   # --wait=false on every delete: kubectl delete defaults to --wait=true, which blocks until
@@ -363,6 +388,8 @@ if left:
 else:
     print('  none')
 "
+
+fi  # K8S_REACHABLE — Steps 1 and 2 need a live API server
 
 # ── Step 3: Optional terraform destroy ───────────────────────────────────────
 if [[ "$RUN_DESTROY" == "true" ]]; then
