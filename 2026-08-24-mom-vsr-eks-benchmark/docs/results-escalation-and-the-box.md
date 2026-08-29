@@ -37,18 +37,24 @@ API cascade is *worse* than using it as the only first stage, and beats the no-b
 The box bills $15.2174 an hour whether or not it is used. At 2.7 cents of oracle saving per task it has
 to process **571 tasks an hour** to cover its own bill against an arrangement that needs no machine.
 
-Measured on this corpus, a box episode takes a median of 76 seconds and a mean of 105. So:
+Measured over the pooled twenty, a box episode takes a median of 76 seconds and a mean of 94. So:
 
-| episodes in flight | tasks an hour at 105s each |
+| episodes in flight | tasks an hour at 94s each |
 |---|---|
-| 4 | 137 |
-| 16 | 547 |
-| 48 | 1,642 |
+| 4 | 154 |
+| 16 | 616 |
+| 48 | 1,848 |
 
 Break-even sits between 4 and 16 concurrent episodes — that is, **the box must run at close to
 saturation, continuously, on exactly this kind of traffic, to be worth owning at all**, and that is
-before any detector loses part of the 6.8%. Against the cheap tier alone the requirement is 1,592 tasks
-an hour, because the oracle saving there is 0.96 cents a task.
+before any detector loses part of the saving. Against the cheap tier alone the requirement is far higher,
+because the oracle saving there is under a cent a task.
+
+**These wall-clock figures were mixed once and are now consistent.** An earlier version of this section
+used the development fifteen's mean of 105 seconds against economics computed on the pooled twenty,
+which is the same class of inconsistency this page corrects elsewhere. At the pooled mean the break-even
+volume of 319 tasks an hour needs **8.3 concurrent episodes**, so the requirement is a little easier than
+the earlier text implied, not harder.
 
 This is consistent with `benchctl/docs/results-arrival-sweep.md`, which put the crossover at roughly
 3,295 prefix-reusing requests an hour on a different traffic shape. Both say the same thing in
