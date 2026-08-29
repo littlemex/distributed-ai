@@ -37,6 +37,11 @@ Only the box-versus-fable gap is statistically distinguishable — seven discord
 p = 0.016. Box against terra rests on three, p = 0.250, so on these instances the two are not separable on
 solve count and the difference between them is the price.
 
+> **Read this page's per-solve column together with `results-escalation-and-the-box.md`.** The nesting
+> means the only way to use the box is to attempt it and escalate what it fails, and priced that way its
+> whole contribution over an arrangement with no machine in it is 6.8% — $0.32 across these twelve tasks.
+> The per-solve ratios below are correct and they are not what routing saves.
+
 ## Why twelve and not fifteen
 
 Three episodes on the premium tier ended with the gateway answering 200 and an empty stream:
