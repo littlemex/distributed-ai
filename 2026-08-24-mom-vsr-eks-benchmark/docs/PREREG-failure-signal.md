@@ -166,3 +166,60 @@ Whether difficulty can be predicted *before* the episode runs. That is a differe
 tier from the task, not from the attempt — and it needs a different pre-registration. It is worth
 noting that this project already found, in v1, that an inferred difficulty label carried no accuracy
 signal at p = 0.58, which is why the step-type label was derived from the action taken instead.
+
+---
+
+# Pre-registration addendum: raising the step ceiling
+
+**Written 2026-08-29, after the free cross-tabulation below and before the run.**
+
+## What the free check already settled
+
+Both advisors asked for the censoring cross-tab before spending anything, and it resolves the thinking
+confound without a run. On the twelve paired instances:
+
+| | thinking off | thinking on |
+|---|---|---|
+| cut off (step or token ceiling) | 4 | 4 |
+| ended on its own | 8 | 8 |
+| solved among those that ended on their own | **5 / 8** | **5 / 8** |
+| solved among those cut off | 1 / 4 | 0 / 4 |
+
+Thinking-on is **not** more censored, and conditional on ending freely the two settings are identical.
+The whole 6-versus-5 difference is one instance, `pylint-6386`, which both settings drove to the 40-step
+ceiling — thinking-off produced a 765-byte patch that passed and thinking-on a 1,013-byte patch at 4.5×
+the output tokens that did not. **So "thinking does not fit in forty steps" has no support, and
+"thinking does not help on this corpus" stands.** The thinking question needs no further spend.
+
+## What still needs the run, and what it would change
+
+Four of twelve box episodes are right-censored, and only 1 of those 4 solved. If the ceiling is what
+stops them, the box's 6/12 is an underestimate, and everything downstream moves: the nesting (a box
+solve that the cheap tier missed would give the box a capability argument for the first time), the
+oracle cascade at $4.7130, and the 6.8% margin over the no-box arrangement.
+
+**The run.** All fifteen instances, box only, thinking off, `--max-steps 80` and the token budget raised
+in proportion to 2.4M so the step ceiling stays the binding constraint rather than handing the episode
+to the token ceiling instead. All fifteen rather than the censored four, because selecting the censored
+ones conditions on a prior stochastic outcome and the comparison would be biased in the box's favour.
+No gateway credit: the box is billed by the hour and is otherwise idle.
+
+**Readings fixed now.**
+
+1. **Solve count at 80 steps against 6/15 at 40.** Reported with the exact paired test over discordant
+   instances, and with the count of episodes that still hit 80.
+2. **Whether the nesting survives.** Specifically: does any instance appear that the box solves and
+   `gpt-5.6-terra` does not? That is the one outcome that changes the project's recommendation from
+   "do not self-host for this traffic" to "the box has a capability argument", and it is named now so
+   that finding it later cannot be presented as a surprise.
+3. **The economics, recomputed.** The oracle cascade and the margin over the no-box cascade, at the new
+   solve count and the new bill. **The box's episodes get more expensive as the ceiling rises**, so a
+   higher solve count does not automatically improve the margin, and both terms are reported.
+4. **The budget asymmetry, stated.** The API arms ran at 40 steps and all of them ended on their own, so
+   raising only the box's ceiling does not disadvantage them — but it does mean the arms no longer share
+   a budget. Any comparison after this run is reported as "box at 80 steps against APIs at 40, where the
+   APIs never reached 40", and the fact that no API episode was censored is what makes that admissible.
+
+**What would not be admissible:** reporting the box's best ceiling against the APIs' as-measured
+numbers without saying the ceilings differ, or raising the ceiling again if 80 also censors. If episodes
+still hit 80, that is reported as "the box does not converge on this traffic", not as a reason for 160.
