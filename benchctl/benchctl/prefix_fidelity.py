@@ -86,10 +86,33 @@ def build_facts(count: int, rng: random.Random) -> list[Fact]:
     return out
 
 
-def preamble(facts: list[Fact], target_tokens: int, *, plant: bool) -> str:
+def _decoy_token(token: str, rng: random.Random) -> str:
+    """A token one character away, which is what makes a sloppy read wrong rather than merely vague."""
+    head, tail = token.split("-")
+    if rng.random() < 0.5:
+        letters = "BCDFGHJKLMNPQRSTVWXZ"
+        swap = rng.randrange(2)
+        other = rng.choice([c for c in letters if c != head[swap]])
+        head = head[:swap] + other + head[swap + 1:]
+    else:
+        digits = list(tail)
+        pos = rng.randrange(4)
+        digits[pos] = str((int(digits[pos]) + rng.randrange(1, 10)) % 10)
+        tail = "".join(digits)
+    return f"{head}-{tail}"
+
+
+def preamble(facts: list[Fact], target_tokens: int, *, plant: bool,
+             distractors: bool = False, rng: random.Random | None = None) -> str:
     """A long shared context with the facts buried in it, or deliberately without them.
 
     `plant=False` builds the unanswerable control: same length, same shape, same questions, no answers in it.
+
+    `distractors=True` also plants, next to each real fact, a *superseded* token one character away from it.
+    The first version of this run saturated — three layers at 100% cannot be ordered — and the reason is that
+    finding the only `XX-####` near a module name is not hard. A decoy makes the difference between reading the
+    line and pattern-matching the shape, and a layer that answers with the superseded token has done the
+    second.
     """
     body: list[str] = ["Reference documentation for the request-validation service.", ""]
     # The filler sentence is about 20 tokens, so the divisor is measured rather than assumed; every result
@@ -99,6 +122,11 @@ def preamble(facts: list[Fact], target_tokens: int, *, plant: bool) -> str:
         body.append(f"## Section {index}: {fact.module}")
         body.append(_FILLER * per_section)
         if plant:
+            if distractors and rng is not None:
+                decoy = _decoy_token(fact.token, rng)
+                # Deliberately before the real one, so reading only the first match is the wrong answer.
+                body.append(f"The build token for {fact.module} was {decoy} until the 4.2 release; "
+                            f"that value is superseded and must not be used.")
             body.append(f"The build token for {fact.module} is {fact.token}.")
         body.append("")
     return "\n".join(body)
@@ -161,13 +189,14 @@ def run_controls(facts: list[Fact], turns: int) -> dict:
 
 
 def run_layer(layer, *, conversations: int, turns: int, preamble_tokens: int, facts_per_doc: int,
-              max_tokens: int, seed: int, plant: bool) -> dict:
+              max_tokens: int, seed: int, plant: bool, distractors: bool = False) -> dict:
     client = LayerClient(layer)
     rows = []
     for index in range(conversations):
         rng = random.Random(seed + index)
         facts = build_facts(facts_per_doc, rng)
-        text = preamble(facts, preamble_tokens, plant=plant)
+        text = preamble(facts, preamble_tokens, plant=plant, distractors=distractors,
+                        rng=random.Random(seed + index + 7919))
         corr = f"fidelity-{seed}-{index}-{'plant' if plant else 'blank'}"
         for turn, messages in enumerate(conversation(facts, text, turns), start=1):
             reply = client.complete(messages=messages, max_tokens=max_tokens, temperature=0.0,
@@ -175,7 +204,12 @@ def run_layer(layer, *, conversations: int, turns: int, preamble_tokens: int, fa
             if not reply.usable:
                 rows.append({"conversation": index, "turn": turn, "excluded": "transport"})
                 continue
-            verdict = score(reply.text, expected_for_turn(facts, turn))
+            expected = expected_for_turn(facts, turn)
+            verdict = score(reply.text, expected)
+            # A wrong answer that is the superseded token is a different mistake from a wrong answer that is
+            # anything else: it says the layer found the line and read the wrong one.
+            decoys = {_decoy_token(f.token, random.Random(seed + index + 7919)) for f in facts}
+            verdict["took_decoy"] = bool(verdict["emitted"]) and verdict["emitted"] in decoys
             rows.append({"conversation": index, "turn": turn, "excluded": None,
                          "prompt_tokens": reply.prompt_tokens,
                          "cached_prompt_tokens": reply.cached_prompt_tokens,
@@ -218,6 +252,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--preamble-tokens", type=int, default=12000)
     ap.add_argument("--facts", type=int, default=6)
     ap.add_argument("--max-tokens", type=int, default=200)
+    ap.add_argument("--distractors", action="store_true",
+                   help="plant a superseded token one character from each real one, so finding the shape of "
+                        "an answer is not the same as reading the right line")
+    ap.add_argument("--unanswerable-conversations", type=int, default=0,
+                   help="how many conversations the unanswerable control gets; 0 means half of --conversations")
     ap.add_argument("--unanswerable-control", action="store_true",
                     help="also run with the facts removed from the preamble, which is the control that "
                          "decides whether any of this measures retrieval")
@@ -245,13 +284,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {layer.id} ({layer.model}) at {layer.endpoint}")
         results.append(run_layer(layer, conversations=args.conversations, turns=args.turns,
                                  preamble_tokens=args.preamble_tokens, facts_per_doc=args.facts,
-                                 max_tokens=args.max_tokens, seed=args.seed, plant=True))
+                                 max_tokens=args.max_tokens, seed=args.seed, plant=True,
+                                 distractors=args.distractors))
         if args.unanswerable_control:
-            print(f"  {layer.id} — unanswerable control (facts removed)")
-            results.append(run_layer(layer, conversations=max(2, args.conversations // 2),
+            n = args.unanswerable_conversations or max(2, args.conversations // 2)
+            print(f"  {layer.id} — unanswerable control (facts removed), {n} conversations")
+            results.append(run_layer(layer, conversations=n,
                                      turns=args.turns, preamble_tokens=args.preamble_tokens,
                                      facts_per_doc=args.facts, max_tokens=args.max_tokens,
-                                     seed=args.seed, plant=False))
+                                     seed=args.seed, plant=False, distractors=args.distractors))
 
     print(f"\n{'layer':22} {'planted':>8} {'n':>4} {'cached':>7} {'format':>7} {'content':>8} "
           f"{'fmt >t1':>8} {'cont >t1':>9}")
@@ -259,6 +300,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{r['layer']:22} {str(r['planted']):>8} {r['graded']:4d} {r['cached_share']:6.1%} "
               f"{(r['format_rate'] or 0):6.1%} {(r['content_rate'] or 0):7.1%} "
               f"{(r['format_rate_after_turn_1'] or 0):7.1%} {(r['content_rate_after_turn_1'] or 0):8.1%}")
+
+    print("\ndecoy uptake — a wrong answer that is the superseded token, not just any wrong answer:")
+    for r in results:
+        graded = [x for x in r["rows"] if x.get("excluded") is None]
+        took = [x for x in graded if x.get("took_decoy")]
+        if graded:
+            print(f"  {r['layer']:22} planted={str(r['planted']):5} {len(took):3d}/{len(graded):3d} "
+                  f"= {len(took)/len(graded):5.1%}")
 
     print("\ncontent rate by turn, which is where instruction decay would show:")
     for r in results:
