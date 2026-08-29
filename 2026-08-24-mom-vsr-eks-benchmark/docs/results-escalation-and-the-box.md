@@ -147,13 +147,70 @@ figures above.
 Neither loss is a model property and neither is free in production. A 20% episode-loss rate on either
 tier changes the cascade arithmetic through retries, and nothing in this project measures that yet.
 
+## The held-out nine, and how much the answer moved
+
+The nine instances the original selection rule left out were run on all three arms, with breaking the
+nesting named in advance as the primary reading. One instance is dropped: `xarray-6992`, where the
+gateway ended the premium episode with 200 and an empty stream **after billing $9.2452 across 28 steps**.
+
+| | development 12 | held-out 8 | pooled 20 |
+|---|---|---|---|
+| box solved | 6 (50%) | **8 (100%)** | 14 (70%) |
+| `gpt-5.6-terra` solved | 8 (67%) | **8 (100%)** | 16 (80%) |
+| `claude-fable-5` solved | 12 (100%) | 8 (100%) | 20 (100%) |
+| box bill | $0.5714 | $0.3283 | $0.8997 |
+| terra bill | $1.9911 | $0.9634 | $2.9545 |
+| fable bill | $8.1485 | $6.4415 | $14.5899 |
+
+**On the held-out nine the three tiers are indistinguishable in outcome and 20× apart in price.** All
+three solved the same eight instances and all three missed the same one, while the box billed $0.3283
+against terra's $0.9634 and fable's $6.4415. Nothing about that set separates the models; everything
+about it separates their prices.
+
+**The primary reading: the nesting holds, with zero counterexamples in twenty.** No instance exists
+that the box solves and terra does not, nor that terra solves and fable does not. Zero of twenty bounds
+the true rate at roughly 15% by the same rule of thumb the earlier two-layer result used. The box still
+has no capability argument.
+
+**But the pooled arrangement figures move in the box's favour, and materially.**
+
+| arrangement, pooled twenty | solved | total |
+|---|---|---|
+| expensive alone | 20/20 | $14.5899 |
+| cheap → expensive, no box | 20/20 | **$5.9960** |
+| box → expensive | 20/20 | **$5.0412** |
+| box → cheap → expensive | 20/20 | $5.2461 |
+
+The box's oracle contribution over the arrangement with no machine is **$0.9548 across twenty tasks —
+15.9%, up from 6.8% on the development twelve.** At 4.8 cents a task the break-even volume falls from
+571 tasks an hour to **319**, and that matters qualitatively rather than by degree: 319 an hour is
+*below* the box's own measured throughput at sixteen concurrent episodes (547 an hour), where 571 was
+above it. **The volume condition changes from implausible to merely demanding.**
+
+### The detector, on the held-out set, is exactly the uninformative case the pre-registration named
+
+| rule | development 12 | held-out 8 | pooled 20 |
+|---|---|---|---|
+| did not hit the ceiling | 0.62 | **1.00** | 0.77 |
+| ended on its own and own tests green | 0.57 | **1.00** | 0.75 |
+
+Both rules score a perfect keep-precision on the held-out eight — **and the base rate there is 8 of 8,
+so every rule scores 1.00 by construction.** The pre-registration said in advance that a rule reaching
+1.0 there after 0.62 here is sampling noise rather than a discovery, and that is what this is. Pooled
+over twenty the best precision is 0.77, still short of the required 1.0, and the three false keeps are
+the same three development episodes.
+
+So the detector conclusion is unchanged and now rests on twenty instances instead of twelve: **no rule
+in this signal set can be trusted to keep the box's output, so the 15.9% remains a ceiling.**
+
 ## What follows
 
-1. **For this traffic, on this evidence, do not self-host.** The API cascade — cheap first, escalate
-   its failures to the expensive tier — solves 12 of 12 for $5.0326 with no machine, no capacity
-   planning, and no ceiling to blow through. The best the box can do with a perfect oracle is 6.8%
-   better than that, it cannot be given a perfect oracle, and doubling its budget makes it 33% worse
-   rather than better.
+1. **Do not self-host on this evidence, but the reason is now the detector rather than the arithmetic.**
+   On twenty instances the box's oracle contribution over the no-machine cascade is 15.9% and the
+   break-even volume is 319 tasks an hour, which its own throughput can reach. What blocks it is that
+   the 15.9% needs a signal that says when to stop, and no rule in this signal set keeps its output
+   safely — best keep-precision 0.77 against a required 1.0. Doubling its step budget also makes the
+   arrangement 33% worse rather than better.
 2. **The escalation signal is the blocker, not the model.** The box's failures are not detectable from
    inside its own episode with anything recorded here, and the most natural candidate is inverted for
    structural reasons. Any future attempt has to bring a signal from outside the checkout.
