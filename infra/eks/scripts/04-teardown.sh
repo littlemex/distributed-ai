@@ -97,7 +97,9 @@ else
     exit 1
   fi
   read -rp "Continue against context '$(kubectl config current-context 2>/dev/null)'? [y/N] " ANS
-  [[ "${ANS,,}" == "y" ]] || { echo "Aborted."; exit 1; }
+  # bash 3.2-safe yes/no (no ${var,,}) — macOS ships /bin/bash 3.2, and this script is the one
+  # that stops GPU billing: it must not die on a substitution the reader's shell cannot parse.
+  case "$ANS" in [yY]|[yY][eE][sS]) ;; *) echo "Aborted."; exit 1 ;; esac
 fi
 
 # ── Resolve which NodePools to delete ─────────────────────────────────────────
@@ -105,7 +107,12 @@ fi
 # one behind means GPU or Neuron instances keep billing after the reader believes teardown ran.
 if [[ ${#NODEPOOLS[@]} -eq 0 ]]; then
   TAINTS_CSV=$(IFS=,; echo "${ACCELERATOR_TAINTS[*]}")
-  mapfile -t NODEPOOLS < <(
+  # Read with a while loop rather than `mapfile`: mapfile is bash 4+, and on macOS /bin/bash is
+  # 3.2, where it fails with "mapfile: command not found" — under `set -e` that aborts teardown
+  # right where the accelerator pools would have been discovered, leaving GPU nodes billing.
+  while IFS= read -r _np; do
+    [ -n "$_np" ] && NODEPOOLS+=("$_np")
+  done < <(
     kubectl get nodepool -o json 2>/dev/null \
       | TAINTS_CSV="$TAINTS_CSV" python3 -c "
 import json, os, sys
@@ -136,7 +143,7 @@ confirm() {
     return 0
   fi
   read -rp "$MSG [y/N] " ANS
-  [[ "${ANS,,}" == "y" ]]
+  case "$ANS" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
 }
 
 echo "=== Teardown Plan ==="

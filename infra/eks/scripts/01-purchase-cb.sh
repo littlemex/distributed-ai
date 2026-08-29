@@ -94,10 +94,12 @@ echo ""
 
 # ── Confirmation prompt ───────────────────────────────────────────────────────
 read -rp "Proceed with purchase? [y/N] " CONFIRM
-if [[ "${CONFIRM,,}" != "y" ]]; then
-  echo "Aborted. No charges incurred."
-  exit 0
-fi
+# bash 3.2-safe (no ${var,,}): macOS ships /bin/bash 3.2, and a purchase prompt must not be
+# skipped or crash on a substitution the reader's shell cannot parse.
+case "$CONFIRM" in
+  [yY]|[yY][eE][sS]) ;;
+  *) echo "Aborted. No charges incurred."; exit 0 ;;
+esac
 
 # ── Purchase ──────────────────────────────────────────────────────────────────
 echo ""
