@@ -26,8 +26,10 @@ every tier.
 solved; everything terra solved, fable solved. **Narrowed 2026-08-30:** that is a property of these pairs,
 not of a model pool — the knowledge-question round's any-correct oracle over ten members reached 0.9596
 against the best single member's 0.9105, which requires some questions to be answered by members other than
-the best. Nesting is re-certified per family at admission rather than assumed; see `docs/ROUTING-DESIGN.md`. So the only saving available is "attempt a cheap tier,
-escalate what it fails", and three things decide whether that is worth doing.
+the best. Nesting is re-certified per family at admission rather than assumed; see `docs/ROUTING-DESIGN.md`.
+
+So along this chain the only saving available is "attempt a cheap tier, escalate what it fails", and three
+things decide whether that is worth doing.
 
 **In dollars, with a perfect failure signal**, the box earns 15.9% over an arrangement with no machine in
 it ($5.0412 against $5.9960), and needs 319 tasks an hour to cover its own bill — inside its measured
