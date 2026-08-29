@@ -18,10 +18,55 @@ suite — that is why the task was given to a model. **So the 42.2% is the ceili
 cannot currently be implemented, and what is realisable is whatever a failure detector recovers of
 it.** This pre-registration fixes how that detector will be evaluated.
 
+## Amended 2026-08-29, before looking, on two advisors' reading
+
+Both advisors independently said the polarity was wrong, and they are right. Given the cost asymmetry
+— a false "the box succeeded" ships a wrong patch, a false "the box failed" costs one escalation at
+$0.166 or $0.679 — the object to build is not a failure detector but a **high-precision success
+detector**: escalate by default, and keep the box's output only when a cheap sufficient condition for
+success holds. That is a strictly easier thing to build, because a sufficient condition can be
+conservative, and its natural candidate (the model's own test run passing on its own patch) has a
+narrow failure mode rather than an open-ended one.
+
+One premise in the first draft was also too strong. "In production there are no tests" is wrong for
+coding traffic specifically: repositories have suites, linters and CI. The self-run `run_tests`
+outcome is not a proxy for a production signal — for this traffic it *is* the production signal.
+
+Three further amendments, all before any look:
+
+- **Post-fix episodes only.** The 120 episodes from before the protocol fix were produced by a harness
+  on which the box lost 42% of its actions, so their step counts, diff sizes and terminations describe
+  a different failure mode. They are used for nothing here, not even as priors.
+- **The signal list is closed to five, and only univariate decision stumps are allowed.** At n ≈ 12 per
+  arm a fitted model is a random number generator. The five: (a) the final outcome of self-run tests on
+  the model's own patch, (b) whether the episode hit the step ceiling, (c) whether any diff was
+  produced, (d) step count, (e) diff size. Signals 6-9 of the original list are dropped rather than
+  kept as extras, because keeping them is the fishing.
+- **The lead hypothesis is named in advance:** *escalate iff (ceiling hit OR self-run tests failed or
+  never ran)*, i.e. keep only an episode that ended on its own having run its own tests green. It is
+  named now because the recorded data may well already support it, and a rule that is stated first is
+  evidence where the same rule found afterwards is not.
+
+**The metric is money, not AUC.** Report the realised cascade cost under the rule, bracketed by
+always-escalate ($8.1484 to the expensive tier) and the oracle ($4.7128). The rule's value is where it
+lands in that bracket. Report alongside it the keep-precision, P(judged solved | rule says keep).
+
+**The bar to act, fixed now.** Keep-precision must be 1.0 on the twelve development instances; then
+the rule is validated on the twelve instances not yet run (candidate 3), where at most one false keep
+is permitted and at least half the oracle gap must be recovered. Anything weaker supports a shadow
+run, not a routing change.
+
+**And the sample bound is stated before any of it.** With zero observed false keeps, the one-sided 95%
+upper bound on the accepted-error rate is about 5% at 59 accepted episodes, 3% at 100, 1.7% at 177.
+So this data can find a promising rule or kill a bad one; it cannot certify a defect rate below 1%
+whatever it shows. If an escaped defect costs $100 against an escalation at $0.679, the economically
+justified keep threshold is P(success) > 99.3%, which no sample this size can demonstrate. The
+deliverable is therefore a candidate rule and a shadow-mode recommendation, not a production switch.
+
 ## The claim under test
 
-> On episodes the box ran, at least one signal available *inside* the episode separates the episodes
-> whose patch passed the hidden tests from those whose patch did not.
+> On episodes the box ran, at least one signal available *inside* the episode identifies a subset of
+> episodes whose patch passed the hidden tests, with no false members.
 
 ## Signals, named in advance
 
@@ -102,6 +147,18 @@ box cannot be used as a first stage, and the 42.2% stays a ceiling rather than a
 publishable result and it redirects the project: either to a signal set that does not exist yet
 (which this project already refused to build once, see `benchctl/docs/decided-against-fabrication-verifier.md`),
 or to committing a whole traffic family to one tier rather than routing per request.
+
+## The free calculation this pre-registration exists alongside
+
+One advisor pointed out a number this project has not computed and should have: the **cheap → expensive
+cascade, with no box at all**. Every escalation figure so far starts from the box. If routing the cheap
+API's failures to the expensive one lands near the box → expensive oracle figure of $4.7128, then the
+box is not merely hard to route to — it is redundant against an arrangement with no fixed cost, no
+capacity planning and no ceiling to blow through.
+
+That calculation needs no pre-registration because it involves no search: it is one sum over
+per-instance bills already recorded. It is reported next to the detector result, and if it comes back
+at or below the box cascade, it is the headline and the detector is a footnote.
 
 ## What this does not test
 
