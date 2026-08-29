@@ -1,5 +1,7 @@
 # The routing table: measurements that survive a model being added
 
+> **`gemma-4` is excluded from comparisons as of 2026-08-29** — it is served only on bedrock-mantle, which this project cannot route production traffic through. Its measurements on this page are real and stay; where it was the *comparator*, see `excluded-gemma-4.md` for the restated numbers.
+
 A router needs a table, and a table has to survive models arriving one at a time. This is the shape that
 survives, and the reason for it is one run: on OCRBench four layers reported 0.845, 0.703, 0.906 and 0.965,
 and **not one of those numbers was comparable to another**, because each layer answered a different subset —

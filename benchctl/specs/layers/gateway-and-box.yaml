@@ -16,10 +16,9 @@ layers:
     cache_read_usd_per_mtok: 0.0188
     output_usd_per_mtok: 4.12
     pricing_status: measured
-  - id: api-gemma-4
-    kind: api
-    model: gemma-4
-    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+  # api-gemma-4 removed 2026-08-29: served only on bedrock-mantle, which production traffic cannot use, so it
+  # is not a routing option however it scores. Its past measurements stay in the run specs and the results
+  # pages, which are the record of what was measured; see docs/excluded-gemma-4.md.
   - id: api-haiku-4-5
     kind: api
     model: claude-haiku-4-5

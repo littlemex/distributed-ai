@@ -1,4 +1,11 @@
-# The box's constraint is volume, not eviction: it needs 8,000 requests an hour to be worth using
+# The box's constraint is volume, not eviction: it needs a few thousand requests an hour
+
+> **`gemma-4` is excluded from comparisons as of 2026-08-29** — it is served only on bedrock-mantle, which this project cannot route production traffic through. Its measurements on this page are real and stay; where it was the *comparator*, see `excluded-gemma-4.md` for the restated numbers.
+
+> The crossing point below is stated against `gemma-4` at $1.953 per 1k,
+> which was the cheapest layer when this was run. Against the cheapest usable API,
+> `gpt-5.6-terra` at $5.825 per 1k, the box wins from about **3,295 requests an hour** rather than
+> 8,329. The sweep itself is unchanged: only the line it is compared against moved.
 
 Measured 2026-08-29 by `benchctl/arrival_sweep.py`. Box: Qwen3.6-35B-A3B-FP8, TP=2 x 2 replicas, $15.2174/h,
 prefix caching on, **through the restored conversation-affinity router** with a stable `X-Correlation-ID` per
@@ -61,15 +68,20 @@ at all until it is carrying real traffic.
 The earlier rule was about token shapes, then about sessions. It now has a third term, and it is the one an
 operator can act on first:
 
-- **Do not route to the box at all unless the box can be kept above roughly 8,000 prefix-reusing requests an
-  hour.** Below that the machine's hourly cost dominates everything the cache can save, and `gemma-4` is
-  cheaper by up to 25x. This is a capacity-planning question, not a per-request one.
+- **Do not route to the box at all unless it can be kept above a few thousand prefix-reusing requests an
+  hour.** Below that the machine's hourly cost dominates everything the cache can save — at 313 requests an hour
+  the box is 25x dearer than the $1.953 line and 8x dearer than the $5.825 one. This is a capacity-planning
+  question, not a per-request one. The value of the threshold is whatever the cheapest routable API costs:
+  **8,329 requests an hour against `gemma-4`'s $1.953, and 3,295 against `gpt-5.6-terra`'s $5.825**, which is
+  the one that applies now that `gemma-4` is not routable.
 - **Above that threshold, route turn 2 and later of any session whose prefix is resident.** The affinity router
   makes that the same thing as routing by `X-Correlation-ID`.
 - **Watch the working set, not the concurrency.** Eviction is set by resident tokens. At 13k-token prefixes it
   never bit at 34 in flight; at 60k it bit at 32 sessions. The number to alarm on is share of the KV pool.
-- **Decode-heavy traffic still goes to `gemma-4`** whatever the load: the box's output rate is ten times
-  `gemma-4`'s and no amount of prefill caching touches that.
+- **Decode-heavy traffic still goes to an API** whatever the load: the box's output rate is $4.12 per Mtok
+  against `gpt-5.6-terra`'s $13.20 and `claude-haiku-4-5`'s $5.00, so on output the box is no longer the cheap
+  one by a wide margin — and prefill caching does not touch output at all. (Against `gemma-4`'s $0.40 the gap was
+  ten to one, which is what this line originally said.)
 
 ## What this does not say
 
@@ -77,17 +89,21 @@ operator can act on first:
 hour" is a forecast, and so is "will still be resident". This run measures what happens at a given arrival rate;
 it does not show that a router can predict one.
 
-**The crossing point is specific to this comparison and this shape.** It is where the box's amortised cost meets
-`gemma-4`'s flat $1.953 on 13k-token prefixes with 200-word replies. A different output share moves it, a
-different competitor moves it, and AWS changing `gemma-4`'s published rate moves it.
+**The crossing point is specific to the comparison and the shape, and the comparison has already changed once.**
+It is where the box's amortised cost meets whatever the cheapest routable API charges, on 13k-token prefixes with
+200-word replies. At $1.953 that was 8,329 requests an hour; at $5.825 it is 3,295. A different output share moves
+it, a different competitor moves it, and AWS changing a published rate moves it — so the number to carry forward
+is the box's cost curve, which is measured, rather than the crossing, which is a comparison.
 
 **180 seconds per point, one window each, no repeats.** The low-λ points rest on 18 to 48 completed requests.
 Sessions still in flight when the window closes are abandoned, so their work is in the wall clock but their
 requests are not in the count — which overstates the box's cost by roughly the in-flight share, about 4% at the
 top of the sweep. Conservative, but it is there.
 
-**No quality measurement.** This is a bill and a latency distribution. The family where the box wins on cost
-is still the family with no quality number against `gemma-4`, which is the next gap.
+**No quality measurement on this page.** This is a bill and a latency distribution. The quality gap it named as
+the next gap has since been measured in `results-prefix-fidelity.md`: instruction retention and prefix retrieval
+do not degrade under caching, and the box's one defect is that it fabricates a well-formed answer where the APIs
+refuse.
 
 **The affinity router had to be restored to run this**, and it pins pod IPs, so it will go stale again the next
 time a replica is rescheduled. `instruments/affinity/render.py --verify` is the check; a sweep on the affinity

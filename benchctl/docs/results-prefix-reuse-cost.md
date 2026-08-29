@@ -1,5 +1,7 @@
 # Prefix reuse is the box's whole advantage, and 71% of it is the smaller of two conditions
 
+> **`gemma-4` is excluded from comparisons as of 2026-08-29** — it is served only on bedrock-mantle, which this project cannot route production traffic through. Its measurements on this page are real and stay; where it was the *comparator*, see `excluded-gemma-4.md` for the restated numbers.
+
 > **Superseded in part by `results-arrival-sweep.md`.** The break-even hit rate below is correct and the box
 > clears it. What this page got wrong is the framing: it treated eviction as the binding constraint, and the
 > arrival sweep shows the binding constraint is volume — the box needs about 8,000 prefix-reusing requests an
@@ -31,7 +33,8 @@ exactly and only where the box beats the cheap tier. That is testable, and this 
 | **box-qwen36-tp2x2** | 13,338 | 213 | **82.5%** | 63:1 | **$1.636** | **0.47 s** |
 | api-gemma-4 | 13,362 | 690 | 3.1% | 19:1 | $2.147 | 10.76 s |
 
-**The box is 1.31x cheaper on identical traffic, and 23x faster at the median.** The prediction holds, and the
+**The box is 1.31x cheaper on identical traffic, and 23x faster at the median.** (Against the cheapest
+*usable* API it is **3.56x** cheaper — `gemma-4` is no longer routable, see `excluded-gemma-4.md`.) The prediction holds, and the
 mechanism is the one predicted: the box turns 82.5% of its prompt tokens into cache reads at 8% of the fresh
 rate, and `gemma-4` pays its flat rate on essentially all of them.
 
@@ -134,9 +137,11 @@ The principle is narrower than "the box is cheap":
 - **Prefill-heavy traffic with a reused prefix → the box.** It is the only layer here whose cached rate is an
   order of magnitude below every API's, and 82.5% of a 12k-token shared preamble is worth more than a
   tenth-of-a-cent input rate.
-- **Single-shot traffic → `gemma-4`.** Zero reuse means the box pays its fresh $0.236 against `gemma-4`'s
-  $0.14, and loses on output ten to one on top. That is exactly why it loses on OCRBench and summarisation.
-- **Decode-heavy traffic → `gemma-4`**, regardless of reuse.
+- **Single-shot traffic → an API.** Zero reuse means the box pays its fresh $0.236 with no discount, which is
+  why it loses on OCRBench and summarisation. Which API depends on the family; `gemma-4` was the cheapest and is
+  no longer routable.
+- **Decode-heavy traffic → an API**, regardless of reuse: the box's $4.12 output rate is beaten by every
+  routable layer except the premium pair.
 
 But "prefill-heavy with reuse" is a statement about a token shape, and a router cannot evaluate it: reuse is a
 claim about the future. An advisor's reframing is the one worth adopting, because it turns every term into

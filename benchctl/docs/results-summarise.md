@@ -1,5 +1,7 @@
 # Long-document summarisation: the box matches a premium API at a thirteenth of the price
 
+> **`gemma-4` is excluded from comparisons as of 2026-08-29** — it is served only on bedrock-mantle, which this project cannot route production traffic through. Its measurements on this page are real and stay; where it was the *comparator*, see `excluded-gemma-4.md` for the restated numbers.
+
 Measured 2026-08-28. Box: Qwen3.6-35B-A3B-FP8, TP=2 x 2 replicas, $15.2174/h, prefix caching on. APIs
 through the gateway: `claude-haiku-4-5` (the baseline the floor is defined against), `claude-sonnet-5`,
 `gemma-4`. Items: 80 GovReport test documents, stratified by length across four bins from 11,516 to 116,680
