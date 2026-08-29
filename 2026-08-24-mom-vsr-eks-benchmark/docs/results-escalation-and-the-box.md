@@ -264,6 +264,25 @@ pre-registration forbids trying several prompts and reporting the best, which is
 without its own pre-registration and its own held-out set. What can be said now is that the first
 honestly-specified attempt at the only affordable signal family lands at 0.78.
 
+## The same arrangements in seconds and in failures
+
+`results-time-and-reliability.md` prices the table above in the two dimensions it left out, and the
+second one changes which arrangement wins.
+
+- **The no-box cascade is the fastest of the three that solve everything**, at every percentile (p50 67s
+  against 82s). The box's dollar saving costs 22% more median latency. The remote cheap API is faster
+  than the local GPU on every percentile, because it needs half the steps.
+- **The premium tier failed 4 of 24 episodes**, always the gateway answering 200 with an empty stream,
+  and the **$17.6850 sunk on those four exceeds its entire successful bill of $14.5899** because they die
+  late. Priced as retries at $0.8842 per attempted premium call, **the ordering inverts**: the three-stage
+  cascade becomes cheapest at $8.7831 and box → expensive becomes dearest at $10.3467, because it calls
+  the unreliable tier six times where the others call it four.
+
+So the box's contribution survives but changes shape — 7.9% rather than 15.9%, earned as the first of
+three stages rather than as the alternative to the premium tier — and the general lesson is that **when
+the last tier is expensive and unreliable, a middle tier is partly worth having because it keeps you away
+from the last one.**
+
 ## What follows
 
 1. **Do not self-host on this evidence, and the blocker is now specific and closed.** On twenty
