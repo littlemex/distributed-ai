@@ -11,7 +11,12 @@ source "$SCRIPT_DIR/lib/suites.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/resolve.sh"
 
-NAMESPACE="${NAMESPACE:-distai-test}"
+# The test namespace is read from EKS_TEST_NAMESPACE, not NAMESPACE. This harness DELETES the
+# namespace it works in, and NAMESPACE is a name a reader is very likely to have exported for their
+# own workload (the chapters do exactly that). Inheriting it pointed the harness at the workshop
+# namespace, where the ownership guard then refused to run at all — a stop with a confusing message
+# for something the reader never asked for. Found on a real run (2026-08-30).
+NAMESPACE="${EKS_TEST_NAMESPACE:-distai-test}"
 CLUSTER_NAME="${CLUSTER_NAME:-}"
 AWS_REGION_OPT="${AWS_REGION:-}"
 AWS_PROFILE_OPT="${AWS_PROFILE:-}"
@@ -46,7 +51,8 @@ Options:
   --skip-layer LAYER             Skip static, live-ro, live-mut, gpu, or neuron (repeatable)
   --list                         Print the registry table and exit
   --keep-ns                      Keep the test namespace for inspection
-  --namespace NAME               Test namespace
+  --namespace NAME               Test namespace (or EKS_TEST_NAMESPACE; NAMESPACE is ignored on
+                                 purpose, see the note by its default)
   --cluster-name NAME            Override derived cluster name
   --region REGION                Override derived AWS region
   --profile PROFILE              AWS CLI profile
