@@ -270,3 +270,57 @@ so about 7.5M of credit is needed; the allowance was reset to 12M before the run
 mid-pass cannot silently truncate an arm and leave a partial comparison on disk. **If an arm does die on
 credit, its instances are re-run rather than reported partial**, because a subset of nine chosen by where
 the money ran out is not a subset chosen by a rule.
+
+---
+
+# Pre-registration addendum: a judge call as the verification signal
+
+**Written 2026-08-30, before any judge call is made.** The pooled result leaves one blocker: the 15.9%
+the box could save needs a signal saying when to keep its patch, and no signal inside the episode
+supplies one. This addendum fixes how the only remaining candidate is evaluated.
+
+## Two candidates were eliminated by arithmetic, before being built
+
+The budget for a verification signal is the whole thing it is trying to protect: $0.9548 across twenty
+instances, 4.8 cents an instance. Anything costing more than that cannot help however accurate it is.
+
+| candidate | what it costs | verdict |
+|---|---|---|
+| k independent box samples, keep on agreement, k = 3 | box bill × 3 | **+14.1% against the no-box cascade** |
+| the same at k = 2, assuming a *perfect* agreement signal | box bill × 2 | **−0.9%**, i.e. the ceiling is nil |
+| one judge call on the box's patch, cheap tier, 4k in / 300 out | $0.0128 a call | 26.7% of the budget |
+| the same call on the expensive tier | $0.0550 a call | **115% of the budget** |
+
+The largest k that can pay even with a perfect signal is 2.06, so **self-consistency on this box is
+dead** — not because agreement is a bad signal but because a second full episode costs more than the
+arrangement saves. That is recorded as a result rather than tried.
+
+## The candidate that survives, and its reading
+
+**A single judge call on the cheap tier, evaluated offline against data already on disk.** The box's
+patches and the hidden-test outcomes are recorded for all twenty-four instances, so this needs no new
+episodes: one call per instance, compared with ground truth.
+
+**What the judge sees, fixed now:** the instance's problem statement, and the box's diff. It does **not**
+see the hidden tests, the reference patch, the box's transcript, or whether any test passed. Anything
+else would make the evaluation optimistic about a signal production could not compute.
+
+**What it returns, fixed now:** a verdict on its last line, exactly `VERDICT: FIXED` or
+`VERDICT: NOT_FIXED`. **An unparseable answer counts as NOT_FIXED**, i.e. escalate, because a judge that
+cannot be read must not be able to keep a patch by accident.
+
+**The bar, unchanged from the earlier addendum:** keep-precision 1.0 — every instance the judge keeps
+must actually be solved. Reported alongside: the realised cascade bill **including the judge's own cost
+on every instance**, against the no-box cascade at $5.9960 and the oracle at $5.0412. A judge that
+clears the precision bar but whose calls cost more than it saves is reported as failing.
+
+**The sample bound, restated:** twenty instances, fourteen of them solved. Zero false keeps bounds the
+accepted-error rate at roughly 15%, which is not a production certification and is not claimed as one.
+
+**One free signal is measured in the same pass**, named now so it is not added afterwards: whether the
+box's diff touches a file named in the problem statement. It costs nothing and its keep-precision is
+reported whatever it is.
+
+**What would make this a fishing expedition:** trying several prompts and reporting the best. The prompt
+is written once, before the first call, and is included verbatim in the results page. If it needs
+changing, the change and the reason are recorded and the earlier numbers stay on the page.
