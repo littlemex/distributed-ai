@@ -309,8 +309,11 @@ test_accelprof_client_mlflow_url_comes_from_the_contract() {
   mkdir -p "$dir/bin"
   cat >"$dir/bin/kubectl" <<'STUB'
 #!/usr/bin/env bash
+# The two keys are read in one jsonpath, so the order of these arms matters: a request naming both has
+# to answer both, on the two lines the real kubectl would produce.
 args="$*"
 case "$args" in
+  *ACCELPROF_MLFLOW_UI_URL*ACCELPROF_TRACKING_URI*) printf '%s\n%s\n' "${UI_URL}" "${TRACKING_ARN}" ;;
   *ACCELPROF_MLFLOW_UI_URL*) printf '%s\n' "${UI_URL}" ;;
   *ACCELPROF_TRACKING_URI*) printf '%s\n' "${TRACKING_ARN}" ;;
   *go-template*) ;;
@@ -329,11 +332,78 @@ STUB
     *"https://app-ABC.mlflow.sagemaker.us-east-2.app.aws/"*) ;;
     *) printf 'FAIL the published URL was not shown: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
   esac
+  # Which MLflow the URL belongs to comes from the second key, so the two are read together and the
+  # tail of the ARN is shown next to the link.
+  case "$out" in
+    *"(mlflow-app/app-ABC)"*) ;;
+    *) printf 'FAIL the MLflow the link points at was not named: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
+  esac
   # No key in the contract: no link, and no crash either.
   out="$(run_get "" "arn:aws:sagemaker:us-east-2:1:mlflow-tracking-server/srv")"
   case "$out" in
     *https://*) printf 'FAIL a URL was invented with none published: %s\n' "$(printf '%s' "$out" | tr '\n' '|')" >&2; fails=$((fails + 1)) ;;
     *) ;;
+  esac
+  rm -rf "$dir"
+  [ "$fails" -eq 0 ] || return 1
+}
+
+# A namespace without the contract and a namespace that cannot be read at all are different problems
+# with different owners: the first is the platform owner's, the second is the reader's own shell. The
+# client used to report both as "not wired", which is why this pins the two messages apart. It matters
+# most right after the installer runs, because that is when a reader is most likely to be pointed at
+# the wrong context and least likely to suspect it.
+test_accelprof_client_separates_unreadable_from_unwired() {
+  local client
+  client="$(_ac_client)"
+  [ -x "$client" ] || return 2
+  local dir out fails=0
+  dir="$(mktemp -d)"
+  mkdir -p "$dir/bin"
+  # MODE=absent answers the way kubectl does for a missing ConfigMap under --ignore-not-found: nothing
+  # on stdout, exit 0. MODE=unreachable answers the way it does for a cluster it cannot reach.
+  cat >"$dir/bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+case "${MODE}" in
+  absent) exit 0 ;;
+  unreachable) printf 'Unable to connect to the server: dial tcp: lookup nope: no such host\n' >&2; exit 1 ;;
+esac
+STUB
+  chmod +x "$dir/bin/kubectl"
+  run_run() {
+    MODE="$1" PATH="$dir/bin:$PATH" KUBE_CONTEXT=some-context "$client" run \
+      --alias t-s --namespace ns --image image.example/w:t --dry-run -- true 2>&1 || true
+  }
+  out="$(run_run absent)"
+  case "$out" in
+    *"is not wired for profiling"*) ;;
+    *) printf 'FAIL absent ConfigMap did not report a wiring problem: %s\n' "$out" >&2; fails=$((fails + 1)) ;;
+  esac
+  case "$out" in
+    *"pass --namespace"*) ;;
+    *) printf 'FAIL wiring message does not mention the namespace could be wrong: %s\n' "$out" >&2; fails=$((fails + 1)) ;;
+  esac
+  case "$out" in
+    *"cannot read the accelprof-config ConfigMap"*)
+      printf 'FAIL absent ConfigMap also reported as a read failure: %s\n' "$out" >&2; fails=$((fails + 1)) ;;
+  esac
+  out="$(run_run unreachable)"
+  case "$out" in
+    *"is not wired for profiling"*) printf 'FAIL unreachable cluster reported as a wiring problem: %s\n' "$out" >&2; fails=$((fails + 1)) ;;
+  esac
+  case "$out" in
+    *"cannot read the accelprof-config ConfigMap"*) ;;
+    *) printf 'FAIL unreachable cluster did not report a read failure: %s\n' "$out" >&2; fails=$((fails + 1)) ;;
+  esac
+  # The reader cannot act on "it failed" without the reason kubectl gave, or without knowing which
+  # cluster was asked.
+  case "$out" in
+    *"Unable to connect to the server"*) ;;
+    *) printf "FAIL kubectl's own error was swallowed: %s\n" "$out" >&2; fails=$((fails + 1)) ;;
+  esac
+  case "$out" in
+    *some-context*) ;;
+    *) printf 'FAIL the message does not name the context: %s\n' "$out" >&2; fails=$((fails + 1)) ;;
   esac
   rm -rf "$dir"
   [ "$fails" -eq 0 ] || return 1

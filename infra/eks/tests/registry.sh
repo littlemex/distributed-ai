@@ -42,7 +42,9 @@ register_all_tests() {
   register_test accelprof-client-output-guard  test_accelprof_client_rejects_bad_output_before_submitting baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-alias         test_accelprof_client_alias_narrows_the_latest baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-mlflow-url    test_accelprof_client_mlflow_url_comes_from_the_contract baseline static "$TIMEOUT_STATIC"
+  register_test accelprof-client-diagnosis     test_accelprof_client_separates_unreadable_from_unwired baseline static "$TIMEOUT_STATIC"
   register_test static-terraform-validate test_static_terraform_validate baseline static "$TIMEOUT_STATIC" terraform
+  register_test static-profiling-install-kubeconfig test_profiling_install_leaves_the_caller_kubeconfig_alone baseline static "$TIMEOUT_STATIC"
 
   register_test image-build-ddp-sample-golden test_image_build_ddp_sample_golden baseline static "$TIMEOUT_STATIC" helm
   register_test image-build-custom-render     test_image_build_custom_render     baseline static "$TIMEOUT_STATIC" helm
