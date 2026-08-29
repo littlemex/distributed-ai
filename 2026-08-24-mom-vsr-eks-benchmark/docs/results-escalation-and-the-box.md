@@ -105,12 +105,55 @@ in-repo tests are not a proxy for a production signal but *are* the production s
 traffic in general that is right. For this benchmark shape it is structurally false, and any
 verification signal for this corpus has to come from somewhere other than the tests in the tree.
 
+## Doubling the step ceiling: the box's number was not being censored
+
+Four of twelve box episodes ended on a budget rather than on their own, so the 6/12 might have been an
+artefact of the 40-step ceiling. `PREREG-failure-signal.md` fixed four readings before the run; all
+fifteen instances were re-run at `--max-steps 80` with the token budget raised in proportion to 2.4M,
+box only, thinking off.
+
+| reading, fixed in advance | result |
+|---|---|
+| solve count at 80 against 6/15 at 40 | **6 → 5**. No instance was gained; one was lost. Exact two-sided p = 1.000 |
+| does the nesting survive | **yes** — no instance exists that the box solves and `gpt-5.6-terra` does not |
+| the economics, recomputed | box → expensive rises from **$4.7130 to $6.7024**, against $5.0326 with no box |
+| episodes still censored | **4 of 15**, now on the token budget rather than the step budget |
+
+**Doubling the budget bought nothing and cost 47%.** The box's bill over the fifteen instances went from
+$0.7505 to $1.1034 for one solve fewer. The one lost instance, `pylint-6386`, had solved at 40 steps
+using all 40 and failed at 80 using 65 — run-to-run variation rather than a budget effect, which is
+itself a caveat worth stating: three other instances also *finished earlier* at the higher ceiling
+(`astropy-14365` 18 → 11 steps, `xarray-3993` 29 → 11, `scikit-learn-14496` 16 → 12). **A single run per
+instance measures an episode, not a stable capability**, and none of the differences here exceed that
+noise.
+
+So the 40-step figures stand as the box's numbers, and the arrangement conclusion gets stronger rather
+than weaker: at the budget where the box converges it is 6.8% better than owning no machine, and at
+twice that budget it is **33% worse**.
+
+The four episodes that still do not converge now exhaust 2.4M tokens instead of 80 steps — `django-15128`
+spent 2,403,005 prompt tokens across 72 steps, about 33,000 tokens of history per step, with ten failed
+runs of its own tests and no patch at the end. Per the pre-registration that is reported as **the box
+does not converge on this traffic**, and not as an argument for a third ceiling.
+
+## Availability is part of the product, for both sides
+
+Two infrastructure losses, symmetric enough to be worth stating together. The expensive tier lost 3 of
+15 episodes to the gateway answering 200 with an empty stream. The box lost 3 of 15 in the 80-step pass
+when its node's containerd died mid-run and both replicas were rescheduled — five minutes of model
+loading during which every request failed. Those three were re-run after the box came back and are the
+figures above.
+
+Neither loss is a model property and neither is free in production. A 20% episode-loss rate on either
+tier changes the cascade arithmetic through retries, and nothing in this project measures that yet.
+
 ## What follows
 
 1. **For this traffic, on this evidence, do not self-host.** The API cascade — cheap first, escalate
    its failures to the expensive tier — solves 12 of 12 for $5.0326 with no machine, no capacity
-   planning, and no step ceiling to blow through. The best the box can do with a perfect oracle is
-   6.8% better than that, and it cannot be given a perfect oracle.
+   planning, and no ceiling to blow through. The best the box can do with a perfect oracle is 6.8%
+   better than that, it cannot be given a perfect oracle, and doubling its budget makes it 33% worse
+   rather than better.
 2. **The escalation signal is the blocker, not the model.** The box's failures are not detectable from
    inside its own episode with anything recorded here, and the most natural candidate is inverted for
    structural reasons. Any future attempt has to bring a signal from outside the checkout.
