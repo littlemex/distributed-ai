@@ -16,7 +16,11 @@ defaults:
 #   name            (required)  DNS-1123 label; also the Service name
 #   image           (required)  { repository, tag }
 #   transport       "http" (default; server speaks streamable-http) | "stdio" (wrapped by supergateway)
-#   port            default 8080
+#   port            default 8080. The Service declares it, and a client reads it from there.
+#   path            unset by default. Set it only for a server whose MCP endpoint is not at /mcp; it is
+#                   then published as the Service annotation mcp-host.distai.dev/path, and a client
+#                   with no annotation to read uses /mcp. A stdio entry is served by supergateway,
+#                   whose streamable-HTTP path is /mcp, so leave this unset for those.
 #   command         (http)      argv list, e.g. ["python","-m","analysis_mcp.server"]
 #   stdioCommand    (stdio)     the upstream MCP's argv, e.g. ["mlflow","mcp","run"]
 #   env             map of NAME->value

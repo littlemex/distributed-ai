@@ -2,7 +2,8 @@
 
 One chart that runs the platform's MCP servers on CPU Pods in the `mcp` namespace, driven by a
 values list. Each entry in `mcps` renders one Deployment + Service; add an MCP by adding an entry,
-no template change. A laptop reaches each over `kubectl port-forward` as a streamable-http endpoint.
+no template change. A laptop reaches each over `kubectl port-forward` as a streamable-http endpoint; `kubectl distai-mcp`
+does that from the contract below, so a client needs to know neither the names nor the ports.
 
 ## Two transports
 
@@ -24,11 +25,32 @@ resolve/analyze → diagnose.
 
 ## Per-entry keys
 
-`name`, `image {repository, tag}`, `transport`, `port` (8080), `command` (http) / `stdioCommand`
-(stdio), `env` (map), `serviceAccountName` (a Pod-Identity SA only where AWS credentials are
-needed), `s3files {enabled, volumeHandle, mountBase, zone}` (an MCP that reads traces),
-and `nodeSelector` / `resources` / `replicas` / `blockImds` overrides. Cluster-wide defaults live
-under `defaults`.
+`name`, `image {repository, tag}`, `transport`, `port` (8080), `path` (see below), `command` (http) /
+`stdioCommand` (stdio), `env` (map), `serviceAccountName` (a Pod-Identity SA only where AWS
+credentials are needed), `s3files {enabled, volumeHandle, mountBase, zone}` (an MCP that reads
+traces), and `nodeSelector` / `resources` / `replicas` / `blockImds` overrides. Cluster-wide defaults
+live under `defaults`.
+
+## What a client is told
+
+A client has to find these servers without being told which ones exist, so each Service declares
+three things and a client reads all three from the object rather than assuming them.
+
+- The label `app.kubernetes.io/component: mcp-host` says the Service is an MCP endpoint. That is what
+  a client selects on, within the namespace.
+- `spec.ports[0].port` is where it listens. One entry renders one port; a Service with more than one
+  is outside what this chart produces, and a client is entitled to read the first.
+- The annotation `mcp-host.distai.dev/path` is the MCP path, set only when an entry sets `path`. With
+  no annotation a client uses `/mcp`, which is what both transports serve by default: the http servers
+  here mount it there, and supergateway's streamable-HTTP path is `/mcp` unless told otherwise.
+
+Changing any of the three means reading the client's discovery and URL construction in the same
+change, because the two halves of this contract live in different files.
+
+Holding a forwarded port open is a session, not a service: `kubectl port-forward` ends when the Pod
+it selected goes away, and nothing here reconnects. That is deliberate — a client is expected to open
+what it needs for as long as it needs it — but it means a long-lived registration pointing at a
+forwarded port will eventually point at nothing.
 
 ## Security
 
