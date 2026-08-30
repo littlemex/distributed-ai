@@ -184,6 +184,12 @@ test_distai_mcp_down_and_status_use_local_state() {
     *"nothing was open"*) ;;
     *) printf 'FAIL down claimed to close another context'"'"'s tunnels: %s\n' "$out" >&2; fails=$((fails + 1)) ;;
   esac
+  # The top-level dispatch is not a function, so a `local` there is a runtime error that bash prints and
+  # walks past; the message stays correct while the script is broken.
+  case "$out" in
+    *"can only be used in a function"*|*"line "*": local:"*)
+      printf 'FAIL down hit a shell error: %s\n' "$out" >&2; fails=$((fails + 1)) ;;
+  esac
   env PATH="$dir/bin:$PATH" TMPDIR="$dir" "$bin" down >/dev/null 2>&1 || true
   rm -rf "$dir"
   [ "$fails" -eq 0 ] || return 1

@@ -344,9 +344,10 @@ EOF
       say "closed ${CLOSED_COUNT} tunnel(s) for context $(effective_context), namespace ${NS}"
     else
       say "nothing was open for context $(effective_context), namespace ${NS}"
-      local base="${TMPDIR:-/tmp}"
+      # No local here: this is the top-level dispatch, not a function, and bash rejects it there.
+      state_root="${TMPDIR:-/tmp}"
       printf '    tunnels opened under another context or namespace have their own record under %s\n' \
-        "${base%/}/distai-mcp" >&2
+        "${state_root%/}/distai-mcp" >&2
     fi
     ;;
   status)
