@@ -150,7 +150,45 @@ for Neuron — in `charts/experiments`).
 
 ---
 
-## 4. Use a Capacity Block (H200 / H100 / Trainium)
+## 4. Use GDRCopy without a privileged Pod
+
+By default, `/dev/gdrdrv` (the GDRCopy kernel device) is either absent, or present on
+the host but not reachable from an unprivileged container — a hostPath mount grants
+the file's inode, not the container's device-cgroup permission, so `gdr_open()` still
+fails with `EPERM`. `aws-ofi-nccl` handles this today by logging a benign warning and
+falling back to a loopback copy, so most workloads never notice.
+
+To let a Pod use GDRCopy directly, without `privileged: true`:
+
+1. Set `gdrcopy_device_plugin_enabled = true` in `terraform.tfvars` and apply. This
+   installs a device plugin that advertises `/dev/gdrdrv` as an extended resource on
+   every GPU node (see `gdrcopy_extended_resource_name`, `gdrcopy_device_plugin_count`
+   in `variables.tf` for the knobs). It has no effect on any Pod that does not opt in.
+2. Request the resource in your Pod, alongside the GPUs:
+
+```yaml
+resources:
+  limits:
+    nvidia.com/gpu: 1
+    gdrcopy/gdrdrv: 1
+```
+
+No other securityContext change is required. Verify with the tools the AWS EFA
+installer already ships in the image:
+
+```bash
+gdrcopy_sanity
+gdrcopy_copybw
+```
+
+A Pod that requests `gdrcopy/gdrdrv` on a node where `/dev/gdrdrv` is not loaded stays
+`Pending` with an `Insufficient gdrcopy/gdrdrv` scheduling event — the same class of
+outcome as requesting more EFA than a node has — rather than starting and failing
+inside the container.
+
+---
+
+## 5. Use a Capacity Block (H200 / H100 / Trainium)
 
 Capacity Blocks reserve scarce accelerator capacity for a fixed window. The
 workflow:
@@ -209,7 +247,7 @@ kubectl -n $NS exec nccl-server -- mpirun --allow-run-as-root -np $((2*GPU)) \
 
 ---
 
-## 5. Run on Trainium / Inferentia (Neuron)
+## 6. Run on Trainium / Inferentia (Neuron)
 
 Add a pool with `device_plugin = "neuron"` and the Neuron AMI:
 
@@ -231,7 +269,7 @@ so device IDs are allocated contiguously. See
 
 ---
 
-## 6. Shared storage
+## 7. Shared storage
 
 The default storage set is two single-AZ FSx layers (the awsome-distributed-ai
 design), matching a cluster that pins every accelerator pool to one AZ. All
@@ -262,7 +300,7 @@ and `fsx_enabled=false` (the CSI drivers remain, but no filesystem is billed).
 
 ---
 
-## 7. Expose a service to the internet (demo)
+## 8. Expose a service to the internet (demo)
 
 A CloudFront → ALB → EKS path is included as a sample, off by default. It is a
 **two-phase** apply because the ALB must exist before CloudFront can point at
@@ -280,7 +318,7 @@ it.
 
 ---
 
-## 8. Tear it down
+## 9. Tear it down
 
 Stop paying for the cluster when you are done:
 
@@ -305,7 +343,7 @@ kubectl delete ingress --all -A     # removes ALBs created by the LB controller
 
 ---
 
-## 9. Troubleshooting quick reference
+## 10. Troubleshooting quick reference
 
 | You see… | Do this |
 |---|---|

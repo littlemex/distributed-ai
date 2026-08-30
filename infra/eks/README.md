@@ -72,6 +72,12 @@ without editing resource blocks. You add a workload by adding a map entry.
   from a reusable Helm Job (`image-builder-lib`). A workshop reader or CI job
   needs no local container runtime; this is the canonical way to build any image
   this cluster runs. See [In-cluster image builder](#in-cluster-image-builder-buildkit--ecr).
+- **GDRCopy without `privileged: true` (opt-in).** A device plugin
+  (`gdrcopy_device_plugin_enabled`) advertises `/dev/gdrdrv` as an extended
+  resource, so a Pod that requests it gets a working `gdr_open()` without any
+  extra container privilege. Off by default and inert for every Pod that does
+  not request the resource. See [Use GDRCopy without a privileged
+  Pod](./docs/usage.md#4-use-gdrcopy-without-a-privileged-pod).
 
 ---
 
@@ -203,6 +209,12 @@ The add-on stack is derived from the pools (see `locals.tf`):
 | `has_gpu_pool` | any pool `device_plugin = "nvidia"` | NVIDIA GPU Operator |
 | `has_neuron_pool` | any pool `device_plugin = "neuron"` | neuron-helm-chart (device plugin) |
 | `has_efa_pool` | any pool with EFA | aws-efa-k8s-device-plugin |
+
+One add-on is gated by an explicit variable instead of a pool shape, because it changes
+what a workload manifest must request, not just what the cluster installs:
+`gdrcopy_device_plugin_enabled` installs a device plugin that advertises `/dev/gdrdrv` as
+an extended resource on GPU nodes. See [Use GDRCopy without a privileged
+Pod](./docs/usage.md#4-use-gdrcopy-without-a-privileged-pod).
 
 ---
 
@@ -513,6 +525,7 @@ Discovered by direct measurement and cluster inspection.
 | NCCL falls back to TCP (much slower) | Positive `NCCL_SOCKET_IFNAME` hides EFA interfaces | Use an exclusion pattern: `NCCL_SOCKET_IFNAME=^lo,docker,veth`. |
 | `fi_info -p efa` empty in a Pod | Pod missing the EFA resource request | Add `limits: {vpc.amazonaws.com/efa: "<n>"}` and the EFA toleration. |
 | EFA device-plugin chart/app version confusion | Chart version ≠ app/image version | Pin the chart version; do not substitute the app version. |
+| `aws-ofi-nccl` logs `Failed to initialize GDRCopy: Failed to open gdr handle`, `gdrcopy_copybw` reports `gdr_open error` even with a hostPath mount to `/dev/gdrdrv` | A hostPath volume grants the device's inode, not the container's device-cgroup allowlist entry — `open()` still returns `EPERM` | Set `gdrcopy_device_plugin_enabled = true` and request `gdrcopy/gdrdrv: 1` in the Pod instead of a hostPath mount; see [Use GDRCopy without a privileged Pod](./docs/usage.md#4-use-gdrcopy-without-a-privileged-pod). |
 
 ### Data & Hugging Face
 
