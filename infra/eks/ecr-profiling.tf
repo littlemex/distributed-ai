@@ -26,19 +26,42 @@ resource "aws_ecr_lifecycle_policy" "profiling" {
   for_each   = aws_ecr_repository.profiling
   repository = each.value.name
 
-  # Keep the platform's history short: values pin images by digest, so superseded tags are only
-  # useful for a rollback within the recent past.
+  # The deployment pins images by digest, which is the reason a digest has to stay pullable rather than
+  # a reason it can be discarded. The build tags are moving ones (v1, v1-nsys), so every rebuild leaves
+  # the previously deployed digest untagged while a running Deployment still names it. Expiring by
+  # count over "any" tag status therefore deleted images that were in use, and nothing noticed: the
+  # Pods were already running, so the pull failure waited for the next node replacement or eviction and
+  # then returned 403 for an image nobody had changed.
+  #
+  # build-profiling-images.sh gives every published digest a second, never-moving tag (pinned-<digest>)
+  # so that a deployed digest is never merely untagged. The rules below then bound the history without
+  # being able to delete something a Deployment names, until it is more than 30 builds old:
+  # untagged images are genuine leftovers (an interrupted push), and the pinned tags are the history.
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Expire all but the 10 most recent images"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 10
-      }
-      action = { type = "expire" }
-    }]
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Expire untagged images after 7 days; a published digest always carries pinned-<digest>"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 7
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Keep the 30 most recent pinned digests"
+        selection = {
+          tagStatus     = "tagged"
+          tagPrefixList = ["pinned-"]
+          countType     = "imageCountMoreThan"
+          countNumber   = 30
+        }
+        action = { type = "expire" }
+      },
+    ]
   })
 }
 
