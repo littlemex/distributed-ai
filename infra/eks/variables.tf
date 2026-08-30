@@ -639,6 +639,75 @@ variable "gdrcopy_loader_image" {
   default     = "public.ecr.aws/amazonlinux/amazonlinux:2023"
 }
 
+variable "gdrcopy_device_plugin_enabled" {
+  description = <<-EOT
+    Whether to install a Kubernetes device plugin that advertises /dev/gdrdrv as an
+    extended resource, so GPU pods can gdr_open() it without `privileged: true`.
+
+    This is orthogonal to var.gdrcopy_mode / var.gpu_operator_enable_gdrcopy, which load the
+    gdrdrv kernel module on the host. Loading the module only gets you a device node with
+    mode crw-rw-rw- in the host's /dev; it does NOT get an unprivileged container access to
+    that node. A hostPath volume of type CharDevice makes the inode visible inside the
+    container, but open("/dev/gdrdrv", O_RDWR) still fails with EPERM, because the container
+    runtime never added a matching entry to the container's device-cgroup allowlist — a
+    hostPath volume grants the inode, not the cgroup permission. Only a device plugin's
+    Allocate() response (or `privileged: true`, which also disables the cgroup allowlist)
+    can add that entry. Verified live: gdrcopy_copybw reports "gdr_open error: Is gdrdrv
+    driver installed and loaded?" through a hostPath mount, and reports a real bandwidth
+    number once the same pod requests the resource this plugin advertises instead.
+
+    Off by default: the DaemonSet is a no-op for every pod that does not request
+    var.gdrcopy_extended_resource_name, so enabling it does not change behavior for the
+    existing fleet. See var.gdrcopy_extended_resource_name for how a consumer opts in.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "gdrcopy_device_plugin_image" {
+  description = <<-EOT
+    Image for the gdrcopy device-plugin DaemonSet: github.com/squat/generic-device-plugin
+    (Apache-2.0), a Kubernetes device plugin that advertises arbitrary host device-file
+    paths as extended resources. Chosen over a bespoke plugin because Allocate() on this
+    project already returns kubelet DeviceSpec entries (HostPath/ContainerPath/Permissions)
+    for a plain character device — exactly the primitive this feature needs — with no
+    FUSE/USB/bind-mount code path exercised for our single-device use. Pinned to a digest;
+    override to track a newer commit (the project does not cut frequent tagged releases).
+  EOT
+  type        = string
+  default     = "docker.io/squat/generic-device-plugin:2cc50b0@sha256:dc192e164c69b03f156765793a1be62ca437709ae477b27ca7d8f3dcf5021576"
+}
+
+variable "gdrcopy_extended_resource_name" {
+  description = <<-EOT
+    Extended resource name a Pod must request to receive /dev/gdrdrv. A consuming manifest
+    opts in with, e.g.:
+      resources:
+        limits:
+          gdrcopy/gdrdrv: "1"
+    Pods that do not add this request are completely unaffected by
+    var.gdrcopy_device_plugin_enabled, on every node, regardless of whether that node has
+    gdrdrv loaded. Must be a valid Kubernetes extended resource name ("domain/name").
+    Changing this value changes what workload manifests must request; update consumers in
+    the same change.
+  EOT
+  type        = string
+  default     = "gdrcopy/gdrdrv"
+}
+
+variable "gdrcopy_device_plugin_count" {
+  description = <<-EOT
+    How many containers on ONE node may be allocated /dev/gdrdrv concurrently. This is a
+    plugin-side fan-out, not a hardware limit like nvidia.com/gpu: gdrdrv itself supports
+    many concurrent openers (each rank/process opens its own fd), so the plugin is
+    configured to advertise the same physical device path this many times over. Default 8
+    matches one grant per GPU on a p5en.48xlarge / p6-b300.48xlarge node (8 accelerators);
+    raise it if a node ever schedules more than 8 GDRCopy-using containers at once.
+  EOT
+  type        = number
+  default     = 8
+}
+
 # ── Component versions ────────────────────────────────────────────────────────
 # Pinned by default to the versions verified in this project. Override to upgrade.
 

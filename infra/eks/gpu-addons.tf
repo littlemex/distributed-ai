@@ -3,6 +3,10 @@
 #   1. NVIDIA GPU Operator      (var.gpu_operator_chart_version) — only if a GPU pool exists
 #   2. AWS EFA k8s Device Plugin (var.efa_device_plugin_chart_version) — if any pool uses EFA
 #      (shared by GPU and Neuron pools; trn2/p5/p5en/g6e all surface EFA via this plugin)
+#   3. gdrdrv-loader DaemonSet   (var.gdrcopy_mode == "daemonset") — loads the gdrdrv kernel
+#      module; see the resource comment below for why this is a fallback, not the default.
+#   4. gdrcopy device plugin     (var.gdrcopy_device_plugin_enabled) — advertises /dev/gdrdrv
+#      as an extended resource so pods can use it without `privileged: true`.
 # The Neuron device plugin is a separate add-on (neuron-addons.tf); the multi-node training
 # launcher is Kubeflow Trainer v2 (trainer.tf), which replaced the old Training Operator v1.
 #
@@ -283,3 +287,142 @@ resource "kubectl_manifest" "gdrdrv_loader" {
 # Note: the "single gdrdrv loader" exclusivity is enforced as a hard plan-time error by a
 # cross-variable validation on var.gdrcopy_mode (variables.tf), not a `check` block here —
 # a `check` assert only warns and would still let a two-loader apply through.
+
+# ---------------------------------------------------------------------------
+# 4. gdrcopy device plugin — only when var.gdrcopy_device_plugin_enabled == true.
+#
+#    Loading gdrdrv (items 1-3 above) makes /dev/gdrdrv exist on the HOST with mode
+#    crw-rw-rw-. It does not, by itself, get an unprivileged container access to it: a
+#    hostPath volume of type CharDevice makes the inode visible, but open() still fails
+#    with EPERM, because the container's device-cgroup allowlist was never updated — a
+#    hostPath volume grants the inode, not the cgroup permission. Verified live: with a
+#    hostPath mount, `gdrcopy_copybw` reports "gdr_open error: Is gdrdrv driver installed
+#    and loaded?"; `aws-ofi-nccl` logs the same failure once per rank and falls back to a
+#    loopback copy. gdrcopy is a small-message latency optimization, so that fallback is
+#    silent and easy to miss.
+#
+#    Design chosen: a generic Kubernetes device plugin (github.com/squat/generic-device-
+#    plugin, Apache-2.0) configured with ONE device group for /dev/gdrdrv. A device
+#    plugin's Allocate() response carries kubelet DeviceSpec entries (HostPath,
+#    ContainerPath, Permissions); the KUBELET applies those to the container's device
+#    cgroup — the plugin process itself never needs elevated privilege to grant that
+#    access, and neither does the consuming pod. This is the same mechanism the NVIDIA
+#    device plugin and the AWS EFA device plugin already use in this module to hand out
+#    nvidia.com/gpu and vpc.amazonaws.com/efa: fit the existing pattern rather than invent
+#    a new one.
+#
+#    Alternatives considered and rejected:
+#      - NVIDIA Container Toolkit CDI spec extension: would require editing the CDI spec
+#        the GPU Operator's container-toolkit daemonset generates, or running a second CDI
+#        spec generator. Either couples this feature to the operator's internal file format
+#        and rollout, so a change here could restart the operator's daemonsets — exactly the
+#        blast radius this project must avoid on a cluster with a live training job. A
+#        generic device plugin is a wholly separate Kubernetes object with no dependency on,
+#        and no ability to disturb, the GPU Operator or its device plugin.
+#      - NVIDIA device plugin configuration (e.g. its device-list-strategy / config CRD):
+#        the upstream nvidia-device-plugin has no notion of a bare host character device
+#        like gdrdrv; it manages CUDA devices and MIG partitions. There is no supported knob
+#        for "also hand out this one extra /dev node," so this is not an option, not merely
+#        a rejected trade-off.
+#      - `privileged: true` on the workload: works, but is the thing this feature exists to
+#        avoid (requirement, not a preference) — it grants every device on the host, not
+#        just gdrdrv, to every container in the pod.
+#
+#    Fit-for-purpose over building a bespoke plugin: the project's Allocate() path already
+#    returns exactly the DeviceSpec primitive this feature needs for a plain character
+#    device, with the FUSE/USB/bind-mount code paths simply unused — so adopting it costs a
+#    DaemonSet, not a Go service to build and carry in this repo.
+#
+#    Consumer opt-in (must change together with any change to
+#    var.gdrcopy_extended_resource_name):
+#      resources:
+#        limits:
+#          gdrcopy/gdrdrv: "1"
+#    A pod that omits this request is unaffected by this feature on every node, whether or
+#    not that node has gdrdrv loaded — the plugin only ever changes what an EXPLICIT request
+#    for this resource can be granted.
+#
+#    Graceful degradation, verified live: the `optional: true` path setting makes the
+#    plugin treat a missing /dev/gdrdrv as "zero devices," not an error — it does not crash
+#    or CrashLoopBackOff. A pod that requests the resource on a node where it is absent
+#    stays cleanly `Pending` ("Insufficient gdrcopy/gdrdrv"), the same class of outcome as
+#    requesting more EFA than a node has. Reproduced by pointing a second device group at a
+#    path that does not exist on either live node: the plugin advertised capacity 0 for it
+#    with no restart, and a pod requesting it stayed Pending with a normal
+#    FailedScheduling event while a sibling pod with no gdrcopy request scheduled and ran
+#    normally on the same node.
+#
+#    Unprivileged by design, not just by omission: the container runs with
+#    `privileged: false`, `allowPrivilegeEscalation: false`, all Linux capabilities dropped,
+#    and a read-only root filesystem. It only needs read access to /dev (to discover the
+#    device path) and write access to /var/lib/kubelet/device-plugins (to register its
+#    socket with the kubelet) — verified live with this exact securityContext on the free
+#    node of the cluster this module targets.
+resource "kubectl_manifest" "gdrcopy_device_plugin" {
+  count = var.gdrcopy_device_plugin_enabled && local.has_gpu_pool ? 1 : 0
+
+  yaml_body = yamlencode({
+    apiVersion = "apps/v1"
+    kind       = "DaemonSet"
+    metadata = {
+      name      = "gdrcopy-device-plugin"
+      namespace = "kube-system"
+      labels    = { app = "gdrcopy-device-plugin" }
+    }
+    spec = {
+      selector       = { matchLabels = { app = "gdrcopy-device-plugin" } }
+      updateStrategy = { type = "RollingUpdate" }
+      template = {
+        metadata = { labels = { app = "gdrcopy-device-plugin" } }
+        spec = {
+          # Only GPU nodes carry gdrdrv; NFD sets this label regardless of whether the GPU
+          # Operator or the AMI's preinstalled driver owns the driver stack.
+          nodeSelector      = { "nvidia.com/gpu.present" = "true" }
+          priorityClassName = "system-node-critical"
+          # Same toleration set as the GPU Operator operands (module taints + the shared
+          # user-taint ledger), so this plugin lands on exactly the same GPU nodes they do.
+          tolerations = local.gpu_operator_tolerations
+          containers = [{
+            name  = "gdrcopy-device-plugin"
+            image = var.gdrcopy_device_plugin_image
+            args = [
+              "--domain", split("/", var.gdrcopy_extended_resource_name)[0],
+              "--device", yamlencode({
+                name = split("/", var.gdrcopy_extended_resource_name)[1]
+                groups = [{
+                  count = var.gdrcopy_device_plugin_count
+                  paths = [{
+                    path = "/dev/gdrdrv"
+                    # A missing device becomes zero advertised units, not a plugin crash —
+                    # this is what makes a node without gdrdrv loaded degrade gracefully.
+                    optional = true
+                  }]
+                }]
+              }),
+            ]
+            securityContext = {
+              privileged               = false
+              allowPrivilegeEscalation = false
+              readOnlyRootFilesystem   = true
+              capabilities             = { drop = ["ALL"] }
+            }
+            resources = {
+              requests = { cpu = "20m", memory = "16Mi" }
+              limits   = { cpu = "100m", memory = "32Mi" }
+            }
+            volumeMounts = [
+              { name = "device-plugins", mountPath = "/var/lib/kubelet/device-plugins" },
+              { name = "dev", mountPath = "/dev", readOnly = true },
+            ]
+          }]
+          volumes = [
+            { name = "device-plugins", hostPath = { path = "/var/lib/kubelet/device-plugins", type = "DirectoryOrCreate" } },
+            { name = "dev", hostPath = { path = "/dev" } },
+          ]
+        }
+      }
+    }
+  })
+
+  depends_on = [helm_release.gpu_operator]
+}
