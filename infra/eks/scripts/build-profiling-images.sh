@@ -60,9 +60,13 @@ build() {
     --set imageBuild.contextSource=configMap
     --set "imageBuild.contextConfigMap=${job}-ctx"
   )
-  local arg
+  local arg key value
   for arg in "$@"; do
-    set_args+=(--set "imageBuild.buildArgs.${arg%%=*}=${arg#*=}")
+    key="${arg%%=*}"; value="${arg#*=}"
+    # --set-string with commas escaped, because a build argument's value is ordinary text: a pip
+    # requirement carries extras (accelprof[mcp,sagemaker]) and helm reads an unescaped comma as the
+    # next key, which fails with "key has no value" rather than passing the value through.
+    set_args+=(--set-string "imageBuild.buildArgs.${key}=${value//,/\\,}")
   done
   helm template exp "${eks_dir}/charts/experiments" -s templates/image-build-custom.yaml \
     "${set_args[@]}" | k apply -f - >/dev/null
