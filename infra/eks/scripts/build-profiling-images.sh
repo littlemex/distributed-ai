@@ -20,6 +20,7 @@ set -euo pipefail
 
 eks_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 say() { printf '\n--> %s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 k() { kubectl --context "${KCTX}" "$@"; }
@@ -59,15 +60,42 @@ build() {
     --set imageBuild.contextSource=configMap
     --set "imageBuild.contextConfigMap=${job}-ctx"
   )
-  local arg
+  local arg key value
   for arg in "$@"; do
-    set_args+=(--set "imageBuild.buildArgs.${arg%%=*}=${arg#*=}")
+    key="${arg%%=*}"; value="${arg#*=}"
+    # --set-string with commas escaped, because a build argument's value is ordinary text: a pip
+    # requirement carries extras (accelprof[mcp,sagemaker]) and helm reads an unescaped comma as the
+    # next key, which fails with "key has no value" rather than passing the value through.
+    set_args+=(--set-string "imageBuild.buildArgs.${key}=${value//,/\\,}")
   done
   helm template exp "${eks_dir}/charts/experiments" -s templates/image-build-custom.yaml \
     "${set_args[@]}" | k apply -f - >/dev/null
   k -n image-builder wait --for=condition=complete "job/${job}-${tag}" --timeout=30m ||
     die "build ${job}-${tag} did not complete; see: kubectl --context ${KCTX} -n image-builder logs job/${job}-${tag}"
+  pin "${repo}" "$(digest_of "${repo}" "${tag}")"
   say "${repo}:${tag} published as $(digest_of "${repo}" "${tag}")"
+}
+
+# A second tag that never moves, so that a digest a Deployment pins is never merely untagged. The build
+# tags here are moving ones, and the values files pin digests: without this, the next rebuild leaves the
+# digest a running Pod names with no tag, and the repository's lifecycle rule is then free to delete it.
+# The failure that follows is invisible until the Pod is rescheduled, and then reads as a 403 on an
+# image nobody changed. Idempotent: put-image on an existing tag is an ImageAlreadyExistsException.
+pin() {
+  local repo="$1" digest="$2" manifest media
+  is_digest "${digest}" || { warn "no digest to pin for ${repo}"; return 0; }
+  manifest="$(aws ecr batch-get-image --region "${AWS_REGION}" --repository-name "${repo}" \
+    --image-ids "imageDigest=${digest}" --query 'images[0].imageManifest' --output text 2>/dev/null || true)"
+  media="$(aws ecr batch-get-image --region "${AWS_REGION}" --repository-name "${repo}" \
+    --image-ids "imageDigest=${digest}" --query 'images[0].imageManifestMediaType' --output text 2>/dev/null || true)"
+  [ -n "${manifest}" ] && [ "${manifest}" != "None" ] || { warn "could not read the manifest of ${repo}@${digest} to pin it"; return 0; }
+  if aws ecr put-image --region "${AWS_REGION}" --repository-name "${repo}" \
+      --image-manifest "${manifest}" --image-manifest-media-type "${media}" \
+      --image-tag "pinned-${digest#sha256:}" >/dev/null 2>&1; then
+    say "pinned ${repo}@${digest} as pinned-${digest#sha256:}"
+  else
+    say "${repo}@${digest} is already pinned"
+  fi
 }
 
 helm dependency build "${eks_dir}/charts/experiments" >/dev/null

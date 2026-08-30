@@ -121,7 +121,13 @@ kind: Service
 metadata:
   name: {{ $mcp.name }}
   namespace: {{ $ns }}
-  labels: { app: {{ $mcp.name }} }
+  # A client has to find these without being told which ones exist, and a selector needs a label, so
+  # the label is the discovery contract: namespace + this component. The port and the path below are
+  # the rest of it, which is why they are declared here rather than assumed by every client.
+  labels: { app: {{ $mcp.name }}, app.kubernetes.io/component: mcp-host }
+  {{- if $mcp.path }}
+  annotations: { mcp-host.distai.dev/path: {{ $mcp.path | quote }} }
+  {{- end }}
 spec:
   selector: { app: {{ $mcp.name }} }
   ports:

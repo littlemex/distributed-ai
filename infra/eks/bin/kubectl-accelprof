@@ -67,6 +67,7 @@
 # runs options:
 #   --alias NAME          restrict the listing to one campaign.
 #   --namespace NS        default: the current context's namespace.
+#
 set -euo pipefail
 
 self="$(basename "$0")"
@@ -628,5 +629,5 @@ case "${1:-}" in
   get) shift; cmd_get "$@" ;;
   runs|list) shift; cmd_runs "$@" ;;
   ""|-h|--help|help) usage 0 ;;
-  *) die "unknown subcommand: $1 (expected run, get or runs)" ;;
+  *) die "unknown subcommand: $1 (expected run, get or runs). Forwarding the MCP servers moved to kubectl distai-mcp." ;;
 esac
