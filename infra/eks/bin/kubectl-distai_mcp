@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+# kubectl-distai_mcp — reach the MCP servers this cluster hosts from this machine.
+#
+# Install by putting this file on PATH as "kubectl-distai_mcp"; kubectl then exposes it as
+# `kubectl distai-mcp ...`. It needs bash, kubectl and curl, and nothing else.
+#
+#   kubectl distai-mcp exec -- claude -p '...' --mcp-config "$DISTAI_MCP_CONFIG"
+#   kubectl distai-mcp up | status | down | config
+#
+# The servers speak streamable HTTP inside the cluster, so a client here needs a forwarded port.
+# Which servers exist, on which port, at which path, is declared on the Services the mcp-host chart
+# renders; that contract is written where it is declared, in the chart's templates/mcps.yaml. Reading
+# it from the cluster is what lets someone add a server to the platform without editing a client.
+#
+# Local ports are this machine's business, so nothing about them is read from the cluster. They are
+# ephemeral by default, and nothing needs to know them: exec hands the command a config built from the
+# ports it actually got. Ask for a specific one with --local-port only when something outside this
+# process has to be told a port in advance.
+#
+# verbs:
+#   exec -- COMMAND...    run COMMAND with the servers reachable, then leave the tunnels as they were
+#                         found. DISTAI_MCP_CONFIG carries a --mcp-config JSON string naming every
+#                         server and DISTAI_MCP_<NAME>_URL each URL. COMMAND owns the exit code.
+#   up                    hold the tunnels open and print the URLs. Safe to repeat: a tunnel that
+#                         already answers is kept.
+#   down                  close the tunnels this machine opened.
+#   status                what is open, whether it listens, and whether it answers MCP.
+#   config                print the --mcp-config JSON, bringing the tunnels up if needed.
+#
+# options:
+#   --namespace NS        where the platform's Services live. Default "mcp".
+#   --local-port SVC=PORT ask for one local port. Repeatable. A busy port is an error rather than a
+#                         silent move, because a caller that named a port needs that port.
+#
+# not in scope: reconnecting. kubectl port-forward ends when the Pod it selected goes away, and this
+# does not watch for that. Re-run up, or let exec open a fresh tunnel for the next command.
+set -euo pipefail
+
+say() { printf '\n==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+usage() { sed -n '2,${/^[^#]/q;p;}' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+invocation() { printf 'kubectl distai-mcp'; }
+
+MCP_LABEL="app.kubernetes.io/component=mcp-host"
+PATH_ANNOTATION='mcp-host.distai.dev/path'
+DEFAULT_PATH="/mcp"
+NS="mcp"
+declare -a WANT_PORTS=()
+
+# Named for the context this run addresses rather than for kubectl's current-context, which an
+# explicit KUBE_CONTEXT overrides.
+effective_context() {
+  printf '%s' "${KUBE_CONTEXT:-$(kubectl config current-context 2>/dev/null || printf 'unknown')}"
+}
+
+k() { kubectl ${KUBE_CONTEXT:+--context "${KUBE_CONTEXT}"} "$@"; }
+
+# Keyed by context and namespace so that two clusters, or two namespaces of one cluster, forwarded at
+# once cannot overwrite each other's record. Under TMPDIR so a reboot cannot leave behind a file
+# claiming a pid that now belongs to something else.
+state_dir() {
+  local base="${TMPDIR:-/tmp}"
+  printf '%s/distai-mcp/%s/%s' "${base%/}" \
+    "$(effective_context | tr -c 'A-Za-z0-9_.-' '_')" "$(printf '%s' "${NS}" | tr -c 'A-Za-z0-9_.-' '_')"
+}
+
+want_port_for() {
+  local svc="$1" entry
+  for entry in ${WANT_PORTS[@]+"${WANT_PORTS[@]}"}; do
+    case "${entry}" in "${svc}="*) printf '%s' "${entry#*=}"; return 0 ;; esac
+  done
+  return 1
+}
+
+# One line per server: name, the port the Service declares, the path it declares. Declared values are
+# read rather than assumed, because the chart owns them and an entry may declare anything. The one
+# value assumed here is the default path, which the contract fixes at /mcp for a Service that declares
+# none.
+discover() {
+  local out err rc=0
+  err="$(mktemp)"
+  out="$(k get svc -n "${NS}" -l "${MCP_LABEL}" -o jsonpath="{range .items[*]}{.metadata.name}{' '}{.spec.ports[0].port}{' '}{.metadata.annotations.mcp-host\\.distai\\.dev/path}{'\\n'}{end}" 2>"${err}")" || rc=$?
+  if [ "${rc}" != "0" ]; then
+    # The reader's own shell is a likelier cause than a missing platform, and only kubectl knows which:
+    # an expired login, a denied list and a context typo all reach this line.
+    cat "${err}" >&2
+    rm -f "${err}"
+    die "cannot list Services in namespace ${NS} (context $(effective_context)). The error above is from kubectl: fix the connection, the login, the context or the permission (this needs to list services) first."
+  fi
+  rm -f "${err}"
+  # A row without a port would otherwise vanish here and the server would look absent, so it is named.
+  printf '%s\n' "${out}" | awk 'NF == 1 { printf "the Service %s carries the mcp-host label but declares no port; a client cannot reach it\n", $1 > "/dev/stderr"; bad = 1; next } NF >= 2 { print } END { exit bad + 0 }'
+}
+
+# Nothing labelled means one of two things, and they have different owners.
+explain_empty() {
+  local unlabelled
+  unlabelled="$(k get svc -n "${NS}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | awk 'NF' | tr '\n' ' ')"
+  if [ -n "${unlabelled}" ]; then
+    die "no Service in namespace ${NS} carries the label ${MCP_LABEL}, but these Services are there: ${unlabelled}. That is what an mcp-host chart older than this plugin leaves behind; upgrade the chart, or name another namespace with --namespace."
+  fi
+  die "namespace ${NS} has no Services at all (context $(effective_context)). Install the platform, or name the namespace it is in with --namespace."
+}
+
+# One MCP initialize round trip, read as MCP rather than as HTTP. A listening port proves the tunnel
+# exists and an HTTP 200 proves something is there; neither proves it speaks MCP, because a JSON-RPC
+# error is carried over 200 and so is any other server's index page.
+mcp_answers() {
+  local url="$1" body
+  body="$(curl -s --noproxy '127.0.0.1,localhost' --max-time 5 \
+    -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+    -X POST "${url}" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"kubectl-distai-mcp","version":"1"}}}' 2>/dev/null)" || return 1
+  case "${body}" in
+    *'"result"'*'"protocolVersion"'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Whether anything holds the port, which is a different question from whether it speaks HTTP.
+port_listening() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null || return 1
+  exec 3<&- 2>/dev/null || true
+  return 0
+}
+
+alive() {
+  local pid
+  pid="$(cat "$1" 2>/dev/null || true)"
+  [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+
+stop_one() {
+  local svc="$1" dir="$2" pid
+  pid="$(cat "${dir}/${svc}.pid" 2>/dev/null || true)"
+  if [ -n "${pid}" ]; then
+    kill "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
+  fi
+  rm -f "${dir}/${svc}.pid" "${dir}/${svc}.port" "${dir}/${svc}.path" "${dir}/${svc}.log"
+}
+
+# A requested port is tried and only that port: a caller who named one needs it, so moving to another
+# would satisfy the command and break whatever was told to expect the number.
+start_one() {
+  local svc="$1" remote="$2" want="$3" dir="$4"
+  local log="${dir}/${svc}.log" spec port pid i
+  if [ -n "${want}" ]; then spec="${want}:${remote}"; else spec=":${remote}"; fi
+  : >"${log}"
+  # kubectl directly rather than through k, because k is a shell function: backgrounding it makes $! the
+  # pid of a subshell whose child is the real kubectl, and killing the subshell leaves the tunnel up.
+  # That leak is invisible — the port keeps answering — until a later run finds the port taken.
+  kubectl ${KUBE_CONTEXT:+--context "${KUBE_CONTEXT}"} port-forward "svc/${svc}" -n "${NS}" \
+    "${spec}" >>"${log}" 2>&1 &
+  pid=$!
+  port=""
+  for i in $(seq 1 60); do
+    port="$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\).*/\1/p' "${log}" | head -1)"
+    [ -n "${port}" ] && break
+    kill -0 "${pid}" 2>/dev/null || break
+    sleep 0.25
+  done
+  if [ -n "${port}" ]; then
+    printf '%s' "${pid}" >"${dir}/${svc}.pid"
+    printf '%s' "${port}" >"${dir}/${svc}.port"
+    return 0
+  fi
+  kill "${pid}" 2>/dev/null || true
+  wait "${pid}" 2>/dev/null || true
+  if [ -n "${want}" ]; then
+    printf 'could not forward svc/%s to the local port %s that was asked for. kubectl said:\n' "${svc}" "${want}" >&2
+  else
+    printf 'could not forward svc/%s in namespace %s. kubectl said:\n' "${svc}" "${NS}" >&2
+  fi
+  sed 's/^/    /' "${log}" >&2
+  return 1
+}
+
+# Prints the services it had to start, so exec puts back exactly what it changed and a tunnel somebody
+# else opened with up survives.
+bring_up() {
+  local dir rows svc remote pth want port started="" entry seen
+  dir="$(state_dir)"
+  mkdir -p "${dir}"
+  # discover's die runs inside this command substitution, so it ends that subshell rather than the
+  # script: without checking the status here, a failed list would fall through to explain_empty and the
+  # last thing printed would be "install the platform" for a cluster that is merely unreachable.
+  rows="$(discover)" || exit 1
+  [ -n "${rows}" ] || explain_empty
+  # A --local-port naming a server that does not exist is a typo, and silently doing nothing with it
+  # leaves the caller waiting for a port that will never be held.
+  for entry in ${WANT_PORTS[@]+"${WANT_PORTS[@]}"}; do
+    seen="$(printf '%s\n' "${rows}" | awk -v s="${entry%%=*}" '$1 == s { print "y" }')"
+    [ -n "${seen}" ] || die "--local-port names ${entry%%=*}, which is not an MCP Service in namespace ${NS}. The ones there are: $(printf '%s\n' "${rows}" | awk '{ printf "%s ", $1 }')"
+  done
+  while read -r svc remote pth; do
+    [ -n "${svc}" ] || continue
+    [ -n "${pth}" ] || pth="${DEFAULT_PATH}"
+    port="$(cat "${dir}/${svc}.port" 2>/dev/null || true)"
+    if alive "${dir}/${svc}.pid" && [ -n "${port}" ] && mcp_answers "http://127.0.0.1:${port}${pth}"; then
+      printf '%s' "${pth}" >"${dir}/${svc}.path"
+      continue
+    fi
+    stop_one "${svc}" "${dir}"
+    want="$(want_port_for "${svc}" || true)"
+    start_one "${svc}" "${remote}" "${want}" "${dir}" || return 1
+    printf '%s' "${pth}" >"${dir}/${svc}.path"
+    started="${started}${svc}
+"
+    port="$(cat "${dir}/${svc}.port")"
+    mcp_answers "http://127.0.0.1:${port}${pth}" || {
+      printf 'the tunnel to svc/%s is open on port %s but nothing answered MCP at %s. An HTTP 200 is not enough here: this checks that initialize returns a result. Look at the server with:\n    kubectl -n %s logs deploy/%s\n' \
+        "${svc}" "${port}" "${pth}" "${NS}" "${svc}" >&2
+      return 1
+    }
+  done <<EOF
+${rows}
+EOF
+  printf '%s' "${started}"
+}
+
+# What is open is known here, not in the cluster. Asking the cluster would make an unreachable cluster
+# look like "nothing is open", and then down would close nothing while reporting that it had.
+open_tunnels() {
+  local dir f svc port pth
+  dir="$(state_dir)"
+  [ -d "${dir}" ] || return 0
+  for f in "${dir}"/*.pid; do
+    [ -e "${f}" ] || continue
+    svc="$(basename "${f}" .pid)"
+    alive "${f}" || continue
+    port="$(cat "${dir}/${svc}.port" 2>/dev/null || true)"
+    [ -n "${port}" ] || continue
+    pth="$(cat "${dir}/${svc}.path" 2>/dev/null || printf '%s' "${DEFAULT_PATH}")"
+    printf '%s http://127.0.0.1:%s%s\n' "${svc}" "${port}" "${pth}"
+  done
+}
+
+config_json() {
+  local first=1 svc url
+  printf '{"mcpServers":{'
+  while read -r svc url; do
+    [ -n "${svc}" ] || continue
+    [ "${first}" = "1" ] || printf ','
+    first=0
+    printf '"%s":{"type":"http","url":"%s"}' "${svc}" "${url}"
+  done <<EOF
+$(open_tunnels)
+EOF
+  printf '}}\n'
+}
+
+export_env() {
+  local svc url name cfg
+  cfg="$(config_json | tr -d '\n')"
+  export "DISTAI_MCP_CONFIG=${cfg}"
+  while read -r svc url; do
+    [ -n "${svc}" ] || continue
+    name="DISTAI_MCP_$(printf '%s' "${svc}" | tr 'a-z-' 'A-Z_')_URL"
+    export "${name}=${url}"
+  done <<EOF
+$(open_tunnels)
+EOF
+}
+
+CLOSED_COUNT=0
+close_listed() {
+  local dir svc base
+  dir="$(state_dir)"
+  while IFS= read -r svc; do
+    [ -n "${svc}" ] || continue
+    stop_one "${svc}" "${dir}"
+    CLOSED_COUNT=$((CLOSED_COUNT + 1))
+  done
+  # The leaf is per (context, namespace), so removing only it leaves the levels above as litter. Each
+  # rmdir is allowed to fail: a failure means another context or namespace still has tunnels open, and
+  # that state is not this invocation's to remove.
+  base="${TMPDIR:-/tmp}"; base="${base%/}/distai-mcp"
+  rmdir "${dir}" 2>/dev/null || true
+  rmdir "$(dirname "${dir}")" 2>/dev/null || true
+  rmdir "${base}" 2>/dev/null || true
+}
+
+declare -a PARSED=()
+parse_common() {
+  PARSED=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --namespace|-n) NS="$2"; shift 2 ;;
+      --local-port) WANT_PORTS+=("$2"); shift 2 ;;
+      *) PARSED+=("$1"); shift ;;
+    esac
+  done
+}
+
+verb="${1:-}"
+[ $# -gt 0 ] && shift || true
+declare -a cmd=()
+case "${verb}" in
+  up|down|status|config)
+    parse_common "$@"
+    [ "${#PARSED[@]}" -eq 0 ] || die "unknown argument: ${PARSED[0]}"
+    ;;
+  exec)
+    # Everything after -- is the command, verbatim; options come before it.
+    declare -a pre=()
+    seen_sep="false"
+    for a in "$@"; do
+      if [ "${seen_sep}" = "true" ]; then cmd+=("$a"); continue; fi
+      if [ "$a" = "--" ]; then seen_sep="true"; continue; fi
+      pre+=("$a")
+    done
+    parse_common ${pre[@]+"${pre[@]}"}
+    [ "${#PARSED[@]}" -eq 0 ] || die "unknown argument: ${PARSED[0]}"
+    [ "${#cmd[@]}" -gt 0 ] || die "exec needs a command: $(invocation) exec -- <command>"
+    ;;
+  -h|--help|"") usage 0 ;;
+  *) die "unknown verb: ${verb} (expected exec, up, down, status or config)" ;;
+esac
+
+case "${verb}" in
+  up)
+    bring_up >/dev/null || exit 1
+    say "MCP servers are reachable from this machine"
+    open_tunnels | while read -r svc url; do printf '    %-12s %s\n' "${svc}" "${url}"; done
+    printf '\n    register them with a client that keeps a session open:\n'
+    # The printed name is the config's key, because that is what becomes the tool name
+    # mcp__<name>__<tool> and a reader copying this line has to get the same one.
+    open_tunnels | while read -r svc url; do
+      printf '      claude mcp add --transport http %s %s\n' "${svc}" "${url}"
+    done
+    printf '\n    close them with:  %s down' "$(invocation)"
+    [ "${NS}" = "mcp" ] || printf ' --namespace %s' "${NS}"
+    printf '\n'
+    ;;
+  down)
+    close_listed <<EOF
+$(open_tunnels | awk '{ print $1 }')
+EOF
+    # The count is reported rather than assumed, because the record is per (context, namespace): saying
+    # "closed" after closing nothing is the failure this verb exists to avoid, and a tunnel opened under
+    # another context is still running whatever this one did.
+    if [ "${CLOSED_COUNT}" -gt 0 ]; then
+      say "closed ${CLOSED_COUNT} tunnel(s) for context $(effective_context), namespace ${NS}"
+    else
+      say "nothing was open for context $(effective_context), namespace ${NS}"
+      local base="${TMPDIR:-/tmp}"
+      printf '    tunnels opened under another context or namespace have their own record under %s\n' \
+        "${base%/}/distai-mcp" >&2
+    fi
+    ;;
+  status)
+    out="$(open_tunnels)"
+    if [ -z "${out}" ]; then
+      say "no tunnels are open for context $(effective_context), namespace ${NS}. Open them with: $(invocation) up"
+      exit 0
+    fi
+    printf '%s\n' "${out}" | while read -r svc url; do
+      port="${url#http://127.0.0.1:}"; port="${port%%/*}"
+      if mcp_answers "${url}"; then
+        printf '    %-12s %s  listening, answers MCP\n' "${svc}" "${url}"
+      elif port_listening "${port}"; then
+        printf '    %-12s %s  listening, no MCP answer\n' "${svc}" "${url}"
+      else
+        printf '    %-12s %s  not listening\n' "${svc}" "${url}"
+      fi
+    done
+    ;;
+  config)
+    bring_up >/dev/null || exit 1
+    config_json
+    ;;
+  exec)
+    started="$(bring_up)" || exit 1
+    export_env
+    rc=0
+    set +e
+    "${cmd[@]}"
+    rc=$?
+    set -e
+    close_listed <<EOF
+${started}
+EOF
+    exit "${rc}"
+    ;;
+esac
