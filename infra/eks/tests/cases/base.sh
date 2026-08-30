@@ -56,11 +56,13 @@ test_csi_drivers() {
 }
 
 # Accelerator device plugins: the NVIDIA GPU device plugin (GPU Operator), the EFA device
-# plugin, and the Neuron device plugin. Each is only present/scheduled when the matching pool
-# type exists, so this asserts "if the DaemonSet exists and wants pods, they are all Ready" and
-# treats a missing or zero-desired DaemonSet as not-applicable (a cluster with no GPU/EFA/Neuron
-# pool legitimately runs none of these). This closes the gap where a broken device plugin —
-# the mechanism that advertises nvidia.com/gpu / vpc.amazonaws.com/efa / aws.amazon.com/neuron —
+# plugin, the Neuron device plugin, and the opt-in gdrcopy device plugin. Each is only
+# present/scheduled when the matching pool type exists (or, for gdrcopy, when
+# var.gdrcopy_device_plugin_enabled = true), so this asserts "if the DaemonSet exists and
+# wants pods, they are all Ready" and treats a missing or zero-desired DaemonSet as
+# not-applicable (a cluster with no GPU/EFA/Neuron pool, or with gdrcopy left off, legitimately
+# runs none of these). This closes the gap where a broken device plugin — the mechanism that
+# advertises nvidia.com/gpu / vpc.amazonaws.com/efa / aws.amazon.com/neuron / gdrcopy/gdrdrv —
 # went entirely untested even though EFA dynamic derivation and Neuron support are core features.
 test_device_plugins() {
   # ns:name pairs. GPU device plugin lives in gpu-operator; EFA/Neuron plugins in kube-system.
@@ -68,7 +70,8 @@ test_device_plugins() {
     "gpu-operator:nvidia-device-plugin-daemonset" \
     "kube-system:aws-efa-k8s-device-plugin" \
     "kube-system:neuron-device-plugin-daemonset" \
-    "kube-system:neuron-device-plugin"; do
+    "kube-system:neuron-device-plugin" \
+    "kube-system:gdrcopy-device-plugin"; do
     local ns="${entry%%:*}" ds="${entry##*:}" desired ready
     desired=$(kubectl get daemonset "$ds" -n "$ns" -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "")
     # Absent DaemonSet (no such pool) or zero desired → not applicable, skip this one.
