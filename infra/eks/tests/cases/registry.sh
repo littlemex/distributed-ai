@@ -204,17 +204,6 @@ test_registry_layout_is_stated_once() {
 # cloned v0.2.0 and printed v0.2.0 back at the reader. Nothing at runtime notices, so the invariant
 # is asserted here, at the only moment it can be checked. Off a tag there is nothing to compare, and
 # the test skips.
-test_registry_release_pin_matches_the_tag_here() {
-  local script="$SCRIPT_DIR/../../scripts/check-release-pin.sh"
-  [ -x "$script" ] || return 2
-  local out rc=0
-  out="$("$script" 2>&1)" || rc=$?
-  case "$rc" in
-    0) return 0 ;;
-    3) return 2 ;;
-    *) printf '%s\n' "$out" >&2; return 1 ;;
-  esac
-}
 
 test_registry_release_pin_is_stated_once() {
   local root="$SCRIPT_DIR/../.."
@@ -235,4 +224,21 @@ test_registry_release_pin_is_stated_once() {
     printf 'docs/profiling-install.md still cds into a directory from another release (pin is %s)\n' "$ver" >&2
     return 1
   }
+}
+
+# The check above only compares the copies with each other. Whether they name the release this commit
+# is published as can only be asked when the commit is at a release tag, and that is the question the
+# one forgotten bump got wrong. infra/scripts/check-release-pin.sh holds both halves so that the CI
+# job on tag pushes and this test cannot drift apart; here it is called with no argument, so it looks
+# at the tag HEAD carries and exits 3 when there is none.
+test_registry_release_pin_matches_the_tag_here() {
+  local script="$SCRIPT_DIR/../../scripts/check-release-pin.sh"
+  [ -x "$script" ] || return 2
+  local out rc=0
+  out="$("$script" 2>&1)" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    3) return 2 ;;
+    *) printf '%s\n' "$out" >&2; return 1 ;;
+  esac
 }
