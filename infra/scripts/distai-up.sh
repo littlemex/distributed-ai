@@ -233,9 +233,10 @@ cat <<EOF
 
 Cluster ${cluster} is applied and registered.
 
-Every chapter from here starts with these four lines:
+Every chapter from here starts with these five lines:
 
   cd ${infra_dir%/infra}
+  export AWS_PROFILE=${AWS_PROFILE:-default}
   export CLUSTER_NAME=${cluster}
   export AWS_REGION=${region}
   source infra/scripts/distai-env.sh
