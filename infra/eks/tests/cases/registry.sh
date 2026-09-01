@@ -197,6 +197,27 @@ test_registry_layout_is_stated_once() {
 # the name is written out in five places across two scripts and a doc, so a bump that misses one leaves
 # a reader following the book against a tree the book was never written against. There is nothing at
 # runtime that would notice, so it is asserted here.
+# The pin above only has to agree with itself between releases: main carries the previous release's
+# name until the bump lands. The moment a release tag points at a commit, though, the pin in that
+# commit has to be that tag, or the URL a reader copies from the book installs a different tree than
+# the one it names. That happened once: a tag was cut without bumping the pin, so the v0.2.1 URL
+# cloned v0.2.0 and printed v0.2.0 back at the reader. Nothing at runtime notices, so the invariant
+# is asserted here, at the only moment it can be checked. Off a tag there is nothing to compare, and
+# the test skips.
+test_registry_release_pin_matches_the_tag_here() {
+  local root="$SCRIPT_DIR/../.."
+  command -v git >/dev/null || return 2
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || return 2
+  local tag
+  tag="$(git -C "$root" describe --exact-match --tags --match 'release/eks-distributed-ai/v*' HEAD 2>/dev/null)" || return 2
+  local pin
+  pin="$(grep -hoE 'release/eks-distributed-ai/v[0-9]+\.[0-9]+\.[0-9]+' "$root/scripts/distai-install.sh" | sort -u)"
+  [ "$pin" = "$tag" ] || {
+    printf 'HEAD is %s but the installers pin %s; bump the pin in the commit that gets tagged\n' "$tag" "$pin" >&2
+    return 1
+  }
+}
+
 test_registry_release_pin_is_stated_once() {
   local root="$SCRIPT_DIR/../.."
   local found
