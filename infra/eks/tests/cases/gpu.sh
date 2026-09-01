@@ -31,7 +31,9 @@ test_nvidia_smi() {
 test_cuda_vector_add() {
   apply_manifest gpu-vectoradd-job.yaml
   wait_for_job "$NAMESPACE" cuda-vectoradd "$TIMEOUT_GPU"
-  kubectl logs job/cuda-vectoradd -n "$NAMESPACE" 2>/dev/null | grep -q "Test PASSED"
+  local out
+  out="$(kubectl logs job/cuda-vectoradd -n "$NAMESPACE" --tail=-1 2>/dev/null || true)"
+  case "$out" in *"Test PASSED"*) ;; *) printf '%s\n' "$out" >&2; return 1 ;; esac
 }
 
 test_gpu_fsx_mount() {
