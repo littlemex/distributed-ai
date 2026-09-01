@@ -16,6 +16,14 @@
 #   PIN          git ref to clone. Only for developing this script; use the release's own URL instead.
 set -euo pipefail
 
+# An exported but empty AWS_PROFILE is not "no profile" to the AWS CLI: it looks for a profile named ""
+# and fails, and what it prints is usually about credentials or the resource being read rather than
+# about the empty string, so the symptom lands far from the cause. Treat it as unset, which is what a
+# shell that ran `export AWS_PROFILE=` meant. AWS_DEFAULT_PROFILE is the same variable for the v1 CLI
+# and for boto3, so it gets the same treatment rather than becoming the next occurrence of this.
+[ -n "${AWS_PROFILE:-}" ] || unset AWS_PROFILE
+[ -n "${AWS_DEFAULT_PROFILE:-}" ] || unset AWS_DEFAULT_PROFILE
+
 # The release this file was published with, written out rather than derived so that a copy of this
 # script fetched from anywhere still installs one known tree. It has to be the tag this file is
 # published under: a default of "main" would make the URL pin a release and the clone pin something

@@ -34,6 +34,14 @@
 # reality. Nothing here is destroyed and nothing is rolled back.
 set -euo pipefail
 
+# An exported but empty AWS_PROFILE is not "no profile" to the AWS CLI: it looks for a profile named ""
+# and fails, and what it prints is usually about credentials or the resource being read rather than
+# about the empty string, so the symptom lands far from the cause. Treat it as unset, which is what a
+# shell that ran `export AWS_PROFILE=` meant. AWS_DEFAULT_PROFILE is the same variable for the v1 CLI
+# and for boto3, so it gets the same treatment rather than becoming the next occurrence of this.
+[ -n "${AWS_PROFILE:-}" ] || unset AWS_PROFILE
+[ -n "${AWS_DEFAULT_PROFILE:-}" ] || unset AWS_DEFAULT_PROFILE
+
 # The help text is the header comment itself, up to the first line that is not a comment.
 usage() { sed -n '2,${/^[^#]/q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 say() { printf '\n==> %s\n' "$*"; }
