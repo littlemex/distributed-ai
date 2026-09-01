@@ -137,3 +137,32 @@ eks_region_from_kubeconfig() {
     sed -n 's|^arn:aws[a-z-]*:eks:\([a-z0-9-]*\):.*|\1|p')"
   printf '%s' "$from_arn"
 }
+
+# Run a command string in the named shell with this run's AWS profile in the environment. Two mistakes
+# are avoided here, and both were made. Passing AWS_PROFILE='' is not "no profile" to the AWS CLI: it
+# looks for a profile named "" and fails, with a message about credentials or the resource rather than
+# the empty string, so every run without --profile used to source distai-env.sh with an empty profile
+# and the failure looked like a broken registry. And the fix for that must not interpolate the value
+# into the command string, because a value spliced into shell text is shell code: a profile name
+# containing a quote breaks the assignment and one containing `;` runs. env passes it as data, which
+# nothing inside the string can reach. `-u` when there is no profile, so an empty one in the harness's
+# own environment is not inherited either.
+run_in_shell() {
+  local shell="$1" cmd="$2"
+  # Start from a shell that has read no startup files. A developer whose ~/.zshenv or BASH_ENV exports a
+  # profile would otherwise re-poison the child after the harness cleared it, which would make these
+  # results depend on whose machine ran them. Word splitting here is deliberate.
+  local pristine=""
+  case "$shell" in
+    *zsh)  pristine="-f" ;;
+    *bash) pristine="--noprofile --norc" ;;
+  esac
+  # AWS_DEFAULT_PROFILE travels with AWS_PROFILE: the v1 CLI and boto3 read it, so clearing only one of
+  # them leaves the same defect available under the other name.
+  if [ -n "${AWS_PROFILE_OPT:-}" ]; then
+    env -u AWS_DEFAULT_PROFILE -u BASH_ENV -u ENV AWS_PROFILE="${AWS_PROFILE_OPT}" \
+      "$shell" $pristine -c "$cmd"
+  else
+    env -u AWS_PROFILE -u AWS_DEFAULT_PROFILE -u BASH_ENV -u ENV "$shell" $pristine -c "$cmd"
+  fi
+}

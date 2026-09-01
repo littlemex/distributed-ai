@@ -49,6 +49,14 @@
 # defining `k`; DISTAI_KUBECONFIG overrides where the kubeconfig goes; DISTAI_EXPECT_RELEASE warns
 # when the cluster was last applied with another release.
 
+
+# An exported but empty AWS_PROFILE is not "no profile" to the AWS CLI: it looks for a profile named ""
+# and fails, and what it prints is usually about credentials or the resource being read rather than
+# about the empty string, so the symptom lands far from the cause. Treat it as unset, which is what a
+# shell that ran `export AWS_PROFILE=` meant. AWS_DEFAULT_PROFILE is the same variable for the v1 CLI
+# and for boto3, so it gets the same treatment rather than becoming the next occurrence of this.
+[ -n "${AWS_PROFILE:-}" ] || unset AWS_PROFILE
+[ -n "${AWS_DEFAULT_PROFILE:-}" ] || unset AWS_DEFAULT_PROFILE
 _distai_say() { printf 'distai-env: %s\n' "$*" >&2; }
 _distai_warn() { printf 'distai-env: warning: %s\n' "$*" >&2; }
 _distai_fail() { printf 'distai-env: error: %s\n' "$*" >&2; }

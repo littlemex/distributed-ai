@@ -1,0 +1,38 @@
+name: aws-profile
+
+# An exported-but-empty AWS_PROFILE is the defect this job exists to stop. It is not "no profile" to the
+# AWS CLI: the CLI looks for a profile whose name is the empty string, fails, and reports the failure as
+# missing credentials or an unreadable resource. The cause and the symptom are far apart, which is why
+# the same mistake was diagnosed three separate times before being named.
+#
+# There is deliberately no `paths:` filter. The static half scans the whole repository, so limiting the
+# trigger to infra/** would let a new script anywhere else introduce the pattern without this ever
+# running — and "it only runs when someone touched the right directory" is how a guard quietly stops
+# guarding. This job is cheap enough that running it on every pull request costs nothing worth saving.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aws-profile-${{ github.ref }}
+  # Only pull requests may be superseded. Cancelling on main would leave the last push to main with a
+  # cancelled check, which reads the same as a check that never ran.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  never-empty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # What may be written: no assignment of an empty AWS_PROFILE, no --profile '', and every script a
+      # reader runs carries the line that turns an empty one back into unset.
+      - name: no script assigns an empty AWS_PROFILE
+        run: ./infra/eks/tests/portability/no-empty-aws-profile.sh
+      # What actually happens: distai-env.sh is sourced with an empty AWS_PROFILE already exported,
+      # against a stub `aws` that fails the job if it is called with the variable still set to nothing.
+      - name: an empty AWS_PROFILE never reaches the CLI
+        run: ./infra/eks/tests/portability/empty-profile-behaviour.sh
