@@ -35,6 +35,7 @@ register_all_tests() {
   register_test registry-release-pin-tag       test_registry_release_pin_matches_the_tag_here baseline static "$TIMEOUT_STATIC" git
   register_test registry-release-pin-sites     test_registry_release_pin_sites_are_intact baseline static "$TIMEOUT_STATIC" git
   register_test bash-no-modern-constructs      test_no_reader_script_needs_a_modern_bash baseline static "$TIMEOUT_STATIC"
+  register_test tests-all-reachable            test_every_registered_test_is_reachable baseline static "$TIMEOUT_STATIC" python3
   register_test registry-preamble-kubectl       test_registry_preamble_configures_kubectl baseline static "$TIMEOUT_STATIC" kubectl
   register_test registry-stale-context-dropped  test_registry_failed_resolve_drops_context baseline static "$TIMEOUT_STATIC"
   register_test accelprof-client-latest        test_accelprof_client_resolves_newest_run baseline static "$TIMEOUT_STATIC"
