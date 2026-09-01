@@ -301,11 +301,30 @@ test_distai_mcp_exec_exports_generic_names_and_passes_the_exit_code() {
 
 # The chart is the other half of the discovery contract: without the label on the Service, the client
 # cannot find anything, so the two must change together.
+# Vendor the chart's subchart (s3files-lib) so `helm template` can render it. charts/*/charts/ is
+# gitignored, so on a fresh checkout the dependency is absent and the render fails with helm's
+# "missing in charts/ directory" rather than anything about this test. Guarded to run once per
+# process, because `helm dependency build` rewrites charts/*.tgz and Chart.lock and concurrent runs
+# would race on those files. The dependency is a local path, so this needs no network. `update` is
+# the fallback for a Chart.lock digest that no longer matches Chart.yaml.
+_mcp_ensure_deps() {
+  [ -n "${_MCP_DEPS_DONE:-}" ] && return 0
+  local chart="$1" out
+  if ! out="$(helm dependency build "$chart" 2>&1)"; then
+    out="$(helm dependency update "$chart" 2>&1)" || {
+      printf 'chart dependency vendoring failed: %s\n' "$out" >&2
+      return 1
+    }
+  fi
+  _MCP_DEPS_DONE=1
+}
+
 test_mcp_host_chart_labels_the_service() {
   local chart fails=0
   chart="$SCRIPT_DIR/../charts/mcp-host"
   [ -d "$chart" ] || return 2
   command -v helm >/dev/null || return 2
+  _mcp_ensure_deps "$chart" || return 1
   local dir rendered
   dir="$(mktemp -d)"
   rendered="$dir/rendered.yaml"
