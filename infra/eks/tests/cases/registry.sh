@@ -205,17 +205,15 @@ test_registry_layout_is_stated_once() {
 # is asserted here, at the only moment it can be checked. Off a tag there is nothing to compare, and
 # the test skips.
 test_registry_release_pin_matches_the_tag_here() {
-  local root="$SCRIPT_DIR/../.."
-  command -v git >/dev/null || return 2
-  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || return 2
-  local tag
-  tag="$(git -C "$root" describe --exact-match --tags --match 'release/eks-distributed-ai/v*' HEAD 2>/dev/null)" || return 2
-  local pin
-  pin="$(grep -hoE 'release/eks-distributed-ai/v[0-9]+\.[0-9]+\.[0-9]+' "$root/scripts/distai-install.sh" | sort -u)"
-  [ "$pin" = "$tag" ] || {
-    printf 'HEAD is %s but the installers pin %s; bump the pin in the commit that gets tagged\n' "$tag" "$pin" >&2
-    return 1
-  }
+  local script="$SCRIPT_DIR/../../scripts/check-release-pin.sh"
+  [ -x "$script" ] || return 2
+  local out rc=0
+  out="$("$script" 2>&1)" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    3) return 2 ;;
+    *) printf '%s\n' "$out" >&2; return 1 ;;
+  esac
 }
 
 test_registry_release_pin_is_stated_once() {
