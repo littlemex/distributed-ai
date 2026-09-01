@@ -16,3 +16,13 @@ test_no_reader_script_needs_a_modern_bash() {
   out="$("$script" 2>&1)" || rc=$?
   [ "$rc" = "0" ] || { printf '%s\n' "$out" >&2; return 1; }
 }
+
+# A registered test whose function is never sourced does not fail as a missing assertion: the runner
+# calls a name that does not exist and the case reports exit 127. That is what happened when the file
+# above was added — registered, written, and left out of the runner's explicit list of files to source,
+# so it counted as a failure without ever having run. The list is explicit on purpose, and this is what
+# makes forgetting it loud at the moment it happens rather than at the next full run.
+test_every_registered_test_is_reachable() {
+  command -v python3 >/dev/null || return 2
+  python3 "$SCRIPT_DIR/portability/registered-tests-are-reachable.py" "$SCRIPT_DIR" || return 1
+}
