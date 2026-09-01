@@ -163,14 +163,29 @@ spec:
 TEMPLATE
 }
 
-# A bash pattern substitution interprets both & and \ in its replacement text: & expands to the
-# matched text and a backslash escapes the next character. Every value put into the manifest goes
-# through this first, or a command containing quotes or a script containing && comes out corrupted.
-escape_replacement() {
-  local s="$1"
-  s="${s//\\/\\\\}"
-  s="${s//&/\\&}"
-  printf '%s' "$s"
+# Replaces every literal occurrence of needle in haystack with replacement, treating both as plain
+# text. This exists instead of bash's own "${haystack//needle/replacement}" because what that
+# operator does with the replacement changed under it: '&' means the matched text, and a backslash
+# escapes it, only from bash 5.2. Before that the replacement goes in verbatim, so escaping written
+# for 5.2 leaves the escape itself behind — the tools script's own "&&" arrived as "\&\&" and
+# kubectl rejected the manifest as invalid YAML. Which behaviour a reader gets is decided by whichever
+# bash /usr/bin/env finds: 3.2 on a stock macOS machine, 5.1 on Ubuntu 22.04, 5.2 or newer elsewhere,
+# and the two older ones are the common case. So the substitution happens here, where no version
+# reinterprets anything: prefix and suffix removal (%% and #) take a glob pattern rather than a
+# replacement string, and quoting the needle makes the match literal.
+replace_literal() {
+  local haystack="$1" needle="$2" replacement="$3" out="" chunk
+  while true; do
+    case "${haystack}" in
+      *"${needle}"*)
+        chunk="${haystack%%"${needle}"*}"
+        out="${out}${chunk}${replacement}"
+        haystack="${haystack#*"${needle}"}"
+        ;;
+      *) out="${out}${haystack}"; break ;;
+    esac
+  done
+  printf '%s' "${out}"
 }
 
 json_string() {
@@ -384,10 +399,10 @@ cmd_run() {
     "PROFILE_MODE=${profile}" "PROFILE_RANKS=${ranks}" "NSYS_ARGS=${nsys_args}" \
     "CHIP=${chip}" \
     "RECORD_ON_FAILURE=${record_on_fail}" "RECORDER_TIMEOUT=${recorder_timeout}"; do
-    key="${kv%%=*}"; value="$(escape_replacement "${kv#*=}")"
-    manifest="${manifest//@${key}@/${value}}"
+    key="${kv%%=*}"; value="${kv#*=}"
+    manifest="$(replace_literal "${manifest}" "@${key}@" "${value}")"
   done
-  manifest="${manifest//@COMMAND_JSON@/$(escape_replacement "${command_json}")}"
+  manifest="$(replace_literal "${manifest}" "@COMMAND_JSON@" "${command_json}")"
 
   # Optional pieces arrive as one strategic-merge patch so that the template carries no placeholder
   # for every possible Pod field, and so that anything without a flag is still reachable via --patch.
