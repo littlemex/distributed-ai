@@ -1,0 +1,94 @@
+name: bash-portability
+
+# The reader's own bash assembles the manifests the tools submit, and bash changed what a substitution
+# does with its replacement text: '&' means the matched text, and a backslash escapes it, only from 5.2.
+# Code written for one era corrupts the other, silently, on the machine of whoever has the other one.
+# That happened: `kubectl accelprof run --gpu 1` failed with "found unknown escape character" on bash
+# 3.2 (stock macOS) and 5.1 (Ubuntu 22.04) while passing for a developer whose PATH found 5.2 first.
+#
+# A version gate is not the answer — Apple ships 3.2 and does not update it, so requiring a newer bash
+# exports the problem to every Mac reader. Instead every version has to produce the same accepted
+# manifest, and that is asserted here rather than trusted.
+on:
+  pull_request:
+    paths: ["infra/scripts/**", "infra/eks/bin/**", "infra/eks/tests/portability/**", ".github/workflows/bash-portability.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/scripts/**", "infra/eks/bin/**", "infra/eks/tests/portability/**", ".github/workflows/bash-portability.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bash-portability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap and version-free: constructs that a bash older than the reader's may not have at all. bash -n
+  # does not catch these, because mapfile is a builtin looked up when it runs, not when it parses — and
+  # measured on 3.2.57, mapfile leaves the array empty and the script carries on.
+  banned-constructs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: no bash 4+ constructs in what a reader runs
+        run: ./infra/eks/tests/portability/no-modern-bash.sh
+
+  # Parse every reader-facing script with the oldest bash a reader can have. The official bash images
+  # are Alpine, so only bash itself is used here: busybox awk and BSD sed differ from GNU too, and
+  # mixing those axes in would make a failure here impossible to attribute.
+  # Parse every reader-facing script with each bash a reader can have, oldest first. The official bash
+  # images are Alpine and have no node, so actions/checkout cannot run inside them — the checkout stays
+  # on the runner and the container only reads it. Only bash itself is used here: busybox awk and BSD
+  # sed differ from GNU too, and mixing those axes in would make a failure impossible to attribute.
+  parses-on-old-bash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n every script a reader runs, under each version
+        run: |
+          set -eu
+          for v in 3.2 4.4 5.0 5.1 5.2; do
+            echo "::group::bash $v"
+            docker run --rm -v "$PWD":/w -w /w "bash:$v" bash -c '
+              bash --version | head -1
+              status=0
+              for f in infra/scripts/*.sh infra/eks/bin/kubectl-* infra/eks/scripts/*.sh; do
+                [ -f "$f" ] || continue
+                bash -n "$f" || { echo "does not parse: $f"; status=1; }
+              done
+              exit $status'
+            echo "::endgroup::"
+          done
+
+  # The manifests themselves, rendered under each bash a reader plausibly has and compared. The device
+  # cases go through `kubectl patch --local`, so a corrupted manifest fails here instead of on a
+  # reader's cluster. Ubuntu images rather than the Alpine bash ones because kubectl is glibc-linked.
+  renders-the-same-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The device cases need kubectl, and the runner having it is not something to assume.
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.31.0"
+      - name: render under each bash and compare
+        run: |
+          set -eu
+          # 22.04 carries 5.1 and 24.04 carries 5.2 — the two sides of the change that caused this.
+          for img in ubuntu:22.04 ubuntu:24.04; do
+            out="out-$(echo "$img" | tr ':.' '--')"
+            docker run --rm \
+              -v "$PWD":/w -v "$(command -v kubectl)":/usr/local/bin/kubectl:ro \
+              -w /w "$img" \
+              bash infra/eks/tests/portability/render-across-bash.sh \
+                infra/eks/bin/kubectl-accelprof "/w/$out"
+            echo "rendered with $img"
+          done
+          # Same bytes from every version, or the reader's shell decides what they submit.
+          first=""
+          for d in out-*; do
+            if [ -z "$first" ]; then first="$d"; continue; fi
+            diff -r "$first" "$d" || { echo "the manifest depends on the bash version: $first vs $d"; exit 1; }
+          done
+          echo "every bash rendered the same manifests"
