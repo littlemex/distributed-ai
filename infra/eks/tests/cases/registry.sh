@@ -233,12 +233,30 @@ test_registry_release_pin_is_stated_once() {
 # at the tag HEAD carries and exits 3 when there is none.
 test_registry_release_pin_matches_the_tag_here() {
   local script="$SCRIPT_DIR/../../scripts/check-release-pin.sh"
-  [ -x "$script" ] || return 2
+  # A missing check is repository damage, not a missing tool, so it fails rather than skips: skipping
+  # would retire the invariant along with the file that asserts it.
+  [ -x "$script" ] || { printf 'check-release-pin.sh is missing or not executable\n' >&2; return 1; }
   local out rc=0
   out="$("$script" 2>&1)" || rc=$?
   case "$rc" in
     0) return 0 ;;
-    3) return 2 ;;
+    3) printf 'skipped: %s\n' "$out" >&2; return 2 ;;
     *) printf '%s\n' "$out" >&2; return 1 ;;
   esac
+}
+
+# The test above can only compare when HEAD is at a release tag, which during development it is not, so
+# on its own it would leave the check itself unexercised until a release. This one runs the same script
+# in the mode that needs no tag: every site is parsed, they all have to agree, and no other file may
+# name a release. It is the regression test for the checker, and it runs on every commit.
+test_registry_release_pin_sites_are_intact() {
+  local script="$SCRIPT_DIR/../../scripts/check-release-pin.sh"
+  [ -x "$script" ] || { printf 'check-release-pin.sh is missing or not executable\n' >&2; return 1; }
+  local out rc=0
+  out="$("$script" --print-pin 2>&1)" || rc=$?
+  [ "$rc" = "0" ] || { printf '%s\n' "$out" >&2; return 1; }
+  printf '%s' "$out" | grep -qE 'release/eks-distributed-ai/v[0-9]+\.[0-9]+\.[0-9]+$' || {
+    printf 'the checker printed something that is not a release: %s\n' "$out" >&2
+    return 1
+  }
 }

@@ -65,7 +65,10 @@ prepare)
   git -C "${root}" switch -q -c "${branch}" origin/main
 
   say "bumping every file that carries the release name to ${ver}"
-  mapfile -t files < <("${check}" --list-files) || die "could not ask which files carry the release name"
+  # Command substitution rather than a process substitution into mapfile: mapfile reports its own
+  # success, not the failure of what fed it, so a check that died would have produced an empty list.
+  list="" ; list="$("${check}" --list-files)" || die "could not ask which files carry the release name"
+  mapfile -t files <<<"${list}"
   [ "${#files[@]}" -gt 0 ] || die "check-release-pin.sh listed no files"
   # The new name goes through the environment rather than into the program text, so that no argument
   # can end up being read as perl.
@@ -74,7 +77,15 @@ prepare)
       -e 's{distributed-ai-v[0-9]+\.[0-9]+\.[0-9]+}{distributed-ai-$ENV{VER}}g;' "${files[@]}" )
 
   say "verifying"
-  "${check}" "${ver}"
+  # Leaving a half-bumped branch checked out is a trap for the next command, so a failed verification
+  # returns the operator to where they started.
+  started_on="$(git -C "${root}" rev-parse --abbrev-ref HEAD)"
+  if ! "${check}" "${ver}"; then
+    git -C "${root}" reset -q --hard
+    git -C "${root}" switch -q -
+    git -C "${root}" branch -q -D "${branch}" || true
+    die "the bump did not verify; back on ${started_on} with ${branch} removed"
+  fi
 
   git -C "${root}" add -- "${files[@]}"
   git -C "${root}" diff --cached --quiet && die "nothing changed; the pin was already ${ver}"
@@ -92,25 +103,22 @@ tag)
     die "${tag} already exists on the remote; moving a published tag changes the tree under anyone who has it"
   say "checking that origin/main carries the pin for ${ver}"
   tmp="$(mktemp -d)"
-  trap 'rm -rf "${tmp}"' EXIT
-  # Read the files out of origin/main, and run that commit's own check, so that both the list of files
-  # and the invariant come from what is about to be tagged rather than from this working tree.
-  git -C "${root}" show "origin/main:infra/scripts/check-release-pin.sh" >"${tmp}/check.sh" ||
-    die "origin/main has no infra/scripts/check-release-pin.sh"
-  chmod +x "${tmp}/check.sh"
-  mkdir -p "${tmp}/infra/scripts"
-  install -m 755 "${tmp}/check.sh" "${tmp}/infra/scripts/check-release-pin.sh"
-  mapfile -t files < <("${tmp}/infra/scripts/check-release-pin.sh" --list-files) ||
-    die "could not ask origin/main which files carry the release name"
-  for f in "${files[@]}"; do
-    mkdir -p "${tmp}/$(dirname "${f}")"
-    git -C "${root}" show "origin/main:${f}" >"${tmp}/${f}" || die "origin/main has no ${f}"
-  done
+  # A real worktree rather than files copied out one by one: the check infers the repository root from
+  # its own location and scans the tree with git, so a bare directory of extracted files would silently
+  # skip that scan. This also means the list of files, and the check itself, come from the commit that
+  # is about to be tagged rather than from this working tree.
+  cleanup() { git -C "${root}" worktree remove --force "${tmp}" >/dev/null 2>&1 || true; rm -rf "${tmp}"; }
+  trap cleanup EXIT
+  git -C "${root}" worktree add -q --detach "${tmp}" origin/main ||
+    die "could not create a worktree at ${tmp} for origin/main"
+  [ -x "${tmp}/infra/scripts/check-release-pin.sh" ] ||
+    die "origin/main has no executable infra/scripts/check-release-pin.sh"
   "${tmp}/infra/scripts/check-release-pin.sh" "${ver}"
   say "tagging origin/main ($(git -C "${root}" rev-parse --short origin/main))"
   git -C "${root}" tag -a "${tag}" origin/main -m "eks-distributed-ai ${ver}"
   git -C "${root}" push -q origin "${tag}"
   say "pushed ${tag}. The install URL and the directory it lands in both follow ${ver}."
+  say "the release-pin workflow runs on this push; a red result there means the tag has to be corrected"
   ;;
 *) usage 1 ;;
 esac
