@@ -72,16 +72,21 @@ Ready in ${dir}.
 Create a cluster (this is the command that asks before it spends money):
 
   cd ${dir}
+  export AWS_PROFILE=${AWS_PROFILE:-default}
   export CLUSTER_NAME=${cluster_hint}
   export AWS_REGION=${region_hint}
   ./infra/scripts/distai-up.sh
 
-Then every chapter starts with these four lines, and needs nothing else. The region is one of them
+Then every chapter starts with these five lines, and needs nothing else. The profile is one of them
+because every script here reads only AWS_PROFILE to decide which credentials to use, and a shell that
+forgot it authenticates as [default] — which is how a cluster gets created by one principal and then
+refuses the kubectl of another. The region is one of them
 because a cluster is identified by account, region and name: with it unset, the AWS CLI's own default
 region decides where the cluster is looked for, and a default that differs from the cluster's is a
 lookup that fails.
 
   cd ${dir}
+  export AWS_PROFILE=${AWS_PROFILE:-default}
   export CLUSTER_NAME=${cluster_hint}
   export AWS_REGION=${region_hint}
   source infra/scripts/distai-env.sh
