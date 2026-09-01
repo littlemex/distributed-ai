@@ -31,8 +31,13 @@ test_nvidia_smi() {
 test_cuda_vector_add() {
   apply_manifest gpu-vectoradd-job.yaml
   wait_for_job "$NAMESPACE" cuda-vectoradd "$TIMEOUT_GPU"
+  # A failed `logs` call must not be read as a job that printed the wrong thing, and a warning on stderr
+  # must not be read as part of what it printed.
   local out
-  out="$(kubectl logs job/cuda-vectoradd -n "$NAMESPACE" --tail=-1 2>/dev/null || true)"
+  out="$(_kread kubectl logs job/cuda-vectoradd -n "$NAMESPACE" --tail=-1)" || {
+    printf 'reading the job log failed: %s\n' "$out" >&2
+    return 1
+  }
   case "$out" in *"Test PASSED"*) ;; *) printf '%s\n' "$out" >&2; return 1 ;; esac
 }
 
