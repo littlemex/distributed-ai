@@ -1,0 +1,28 @@
+name: release-pin
+
+# A release tag and the release name written inside the tree it points at have to agree. Nothing at
+# runtime notices when they do not: the URL a reader copies names one release, the clone is another,
+# and both look successful.
+#
+# This is detection, not prevention: a status check cannot block a tag push. What can, and is a repo
+# setting rather than a file, is a tag ruleset restricting who may create refs under
+# release/eks-distributed-ai/* — with that in place, the paved path (infra/scripts/cut-release.sh) is
+# the only way a release gets made, and this job is the net under the paths that skip it. Without it,
+# a wrong tag stays valid while this check is red, and raw.githubusercontent may serve the tree it
+# points at for minutes after a correction.
+on:
+  push:
+    tags: ["release/eks-distributed-ai/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The tag that triggered this run is known, so it is passed in rather than derived from the
+      # commit: several tags can point at one commit, and deriving would pick one of them.
+      - name: the installers must pin this release
+        run: ./infra/scripts/check-release-pin.sh "${GITHUB_REF_NAME}"

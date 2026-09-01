@@ -22,7 +22,7 @@ that release's URL, so the one-liner and the tree it installs cannot drift apart
 export CLUSTER_NAME=my-cluster
 export AWS_REGION=us-east-2
 export PRODUCER_NAMESPACES=team-a,team-b
-curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/refs/tags/release/eks-distributed-ai/v0.2.0/infra/scripts/get-profiling.sh | bash
+curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/refs/tags/release/eks-distributed-ai/v0.2.1/infra/scripts/get-profiling.sh | bash
 ```
 
 That installs the client and stops there. Running the installer from this path as well needs the
@@ -33,7 +33,7 @@ shorter way: the four-line preamble resolves the state's location from the regis
 is then one command with no state variables at all.
 
 ```bash
-cd ~/distributed-ai-v0.2.0
+cd ~/distributed-ai-v0.2.1
 export CLUSTER_NAME=my-cluster
 export AWS_REGION=us-east-2
 source infra/scripts/distai-env.sh

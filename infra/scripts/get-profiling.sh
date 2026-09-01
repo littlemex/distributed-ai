@@ -18,7 +18,7 @@
 #
 # Usage:
 #   export CLUSTER_NAME=my-cluster AWS_REGION=us-east-2 PRODUCER_NAMESPACES=team-a,team-b
-#   curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/refs/tags/release/eks-distributed-ai/v0.2.0/infra/scripts/get-profiling.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/littlemex/distributed-ai/refs/tags/release/eks-distributed-ai/v0.2.1/infra/scripts/get-profiling.sh | bash
 #
 # The URL pins the release twice over: the copy of this script is the one from that tag, and PIN
 # below is that same tag, so the tree it checks out is the tree this script was released with. To
@@ -51,7 +51,7 @@ set -euo pipefail
 
 # The release this file was published with. It is written out in full rather than derived, so that a
 # copy of this script pulled from anywhere still installs exactly one known tree.
-PIN_DEFAULT="release/eks-distributed-ai/v0.2.0"
+PIN_DEFAULT="release/eks-distributed-ai/v0.2.1"
 pin="${PIN:-${PIN_DEFAULT}}"
 repo_url="${PROFILING_REPO_URL:-https://github.com/littlemex/distributed-ai.git}"
 bin_dir="${PROFILING_BIN_DIR:-${HOME}/.local/bin}"

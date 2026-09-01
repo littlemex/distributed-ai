@@ -197,6 +197,14 @@ test_registry_layout_is_stated_once() {
 # the name is written out in five places across two scripts and a doc, so a bump that misses one leaves
 # a reader following the book against a tree the book was never written against. There is nothing at
 # runtime that would notice, so it is asserted here.
+# The pin above only has to agree with itself between releases: main carries the previous release's
+# name until the bump lands. The moment a release tag points at a commit, though, the pin in that
+# commit has to be that tag, or the URL a reader copies from the book installs a different tree than
+# the one it names. That happened once: a tag was cut without bumping the pin, so the v0.2.1 URL
+# cloned v0.2.0 and printed v0.2.0 back at the reader. Nothing at runtime notices, so the invariant
+# is asserted here, at the only moment it can be checked. Off a tag there is nothing to compare, and
+# the test skips.
+
 test_registry_release_pin_is_stated_once() {
   local root="$SCRIPT_DIR/../.."
   local found
@@ -214,6 +222,41 @@ test_registry_release_pin_is_stated_once() {
   local ver="${found##*/}"
   grep -qF "cd ~/distributed-ai-${ver}" "$root/docs/profiling-install.md" || {
     printf 'docs/profiling-install.md still cds into a directory from another release (pin is %s)\n' "$ver" >&2
+    return 1
+  }
+}
+
+# The check above only compares the copies with each other. Whether they name the release this commit
+# is published as can only be asked when the commit is at a release tag, and that is the question the
+# one forgotten bump got wrong. infra/scripts/check-release-pin.sh holds both halves so that the CI
+# job on tag pushes and this test cannot drift apart; here it is called with no argument, so it looks
+# at the tag HEAD carries and exits 3 when there is none.
+test_registry_release_pin_matches_the_tag_here() {
+  local script="$SCRIPT_DIR/../../scripts/check-release-pin.sh"
+  # A missing check is repository damage, not a missing tool, so it fails rather than skips: skipping
+  # would retire the invariant along with the file that asserts it.
+  [ -x "$script" ] || { printf 'check-release-pin.sh is missing or not executable\n' >&2; return 1; }
+  local out rc=0
+  out="$("$script" 2>&1)" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    3) printf 'skipped: %s\n' "$out" >&2; return 2 ;;
+    *) printf '%s\n' "$out" >&2; return 1 ;;
+  esac
+}
+
+# The test above can only compare when HEAD is at a release tag, which during development it is not, so
+# on its own it would leave the check itself unexercised until a release. This one runs the same script
+# in the mode that needs no tag: every site is parsed, they all have to agree, and no other file may
+# name a release. It is the regression test for the checker, and it runs on every commit.
+test_registry_release_pin_sites_are_intact() {
+  local script="$SCRIPT_DIR/../../scripts/check-release-pin.sh"
+  [ -x "$script" ] || { printf 'check-release-pin.sh is missing or not executable\n' >&2; return 1; }
+  local out rc=0
+  out="$("$script" --print-pin 2>&1)" || rc=$?
+  [ "$rc" = "0" ] || { printf '%s\n' "$out" >&2; return 1; }
+  printf '%s' "$out" | grep -qE 'release/eks-distributed-ai/v[0-9]+\.[0-9]+\.[0-9]+$' || {
+    printf 'the checker printed something that is not a release: %s\n' "$out" >&2
     return 1
   }
 }
