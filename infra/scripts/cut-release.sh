@@ -65,10 +65,18 @@ prepare)
   git -C "${root}" switch -q -c "${branch}" origin/main
 
   say "bumping every file that carries the release name to ${ver}"
-  # Command substitution rather than a process substitution into mapfile: mapfile reports its own
-  # success, not the failure of what fed it, so a check that died would have produced an empty list.
+  # Command substitution rather than a process substitution: a process substitution into a reader
+  # reports the reader's success, not the failure of what fed it, so a check that died would have
+  # produced an empty list. The lines are split with a while loop rather than mapfile, which is bash 4
+  # and absent from the 3.2 that a stock macOS machine runs — the same reason 04-teardown.sh avoids it.
   list="" ; list="$("${check}" --list-files)" || die "could not ask which files carry the release name"
-  mapfile -t files <<<"${list}"
+  files=()
+  while IFS= read -r line; do
+    [ -n "${line}" ] || continue
+    files+=("${line}")
+  done <<EOF_FILES
+${list}
+EOF_FILES
   [ "${#files[@]}" -gt 0 ] || die "check-release-pin.sh listed no files"
   # The new name goes through the environment rather than into the program text, so that no argument
   # can end up being read as perl.
