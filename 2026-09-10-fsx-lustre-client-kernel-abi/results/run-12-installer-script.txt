@@ -1,0 +1,202 @@
+===== installer run (first, clean host) =====
+===== /var/log/task-runner/02-run-installer.log =====
+++ date +%s
++ START=1789037594
++ /usr/local/sbin/lustre_installer.sh -y
+system:  Ubuntu 24.04.4 LTS (noble)
+kernel:  6.8.0-1062-aws (running: 6.8.0-1062-aws)
+mode:    dkms
+
+== Registering the FSx for Lustre client repository
+signing key already present
+repository already registered
+
+== Installing the userspace tools
+lustre-client-utils 2.15.6-1fsx34
+
+== Preparing the DKMS source tree
+lustre-source 2.15.6-1fsx34 -> DKMS version 2.15.6
+source tree already present at /usr/src/lustre-client-modules-2.15.6
+
+== Building the module with DKMS for 6.8.0-1062-aws
+already registered with DKMS
+built and installed in 3s
+DKMS will rebuild this module whenever another kernel is installed
+
+== Verifying the client
+module:  /lib/modules/6.8.0-1062-aws/updates/dkms/lustre.ko
+vermagic: 6.8.0-1062-aws SMP mod_unload modversions 
+loaded:  lustre 1171456 bytes
+client:  lctl 2.15.6
+
+== Summary
+mode:    dkms
+kernel:  6.8.0-1062-aws
+package: lustre-client-utils 2.15.6-1fsx34
+package: lustre-source 2.15.6-1fsx34
+package: lustre-utils 
+dkms:    lustre-client-modules/2.15.6, 6.8.0-1062-aws, x86_64: installed
+dkms:    lustre-client-modules/2.15.6, 6.8.0-1063-aws, x86_64: installed
+
+Mounting a file system is left to you, for example:
+  mount -t lustre -o noatime,flock <fs-dns-name>@tcp:/<mount-name> /mnt/fsx
+++ date +%s
++ echo 'installer seconds: 14'
+installer seconds: 14
+
+--- ssm status: Success (command <ssm-command-id>) ---
+===== idempotence =====
+===== /var/log/task-runner/03-idempotence.log =====
+++ date +%s
++ START=1789037608
++ /usr/local/sbin/lustre_installer.sh -y
++ tee /tmp/second-run.log
+system:  Ubuntu 24.04.4 LTS (noble)
+kernel:  6.8.0-1062-aws (running: 6.8.0-1062-aws)
+mode:    dkms
+
+== Registering the FSx for Lustre client repository
+signing key already present
+repository already registered
+
+== Installing the userspace tools
+lustre-client-utils 2.15.6-1fsx34
+
+== Preparing the DKMS source tree
+lustre-source 2.15.6-1fsx34 -> DKMS version 2.15.6
+source tree already present at /usr/src/lustre-client-modules-2.15.6
+
+== Building the module with DKMS for 6.8.0-1062-aws
+already registered with DKMS
+built and installed in 2s
+DKMS will rebuild this module whenever another kernel is installed
+
+== Verifying the client
+module:  /lib/modules/6.8.0-1062-aws/updates/dkms/lustre.ko
+vermagic: 6.8.0-1062-aws SMP mod_unload modversions 
+loaded:  lustre 1171456 bytes
+client:  lctl 2.15.6
+
+== Summary
+mode:    dkms
+kernel:  6.8.0-1062-aws
+package: lustre-client-utils 2.15.6-1fsx34
+package: lustre-source 2.15.6-1fsx34
+package: lustre-utils 
+dkms:    lustre-client-modules/2.15.6, 6.8.0-1062-aws, x86_64: installed
+dkms:    lustre-client-modules/2.15.6, 6.8.0-1063-aws, x86_64: installed
+
+Mounting a file system is left to you, for example:
+  mount -t lustre -o noatime,flock <fs-dns-name>@tcp:/<mount-name> /mnt/fsx
+++ date +%s
++ echo 'second run seconds: 10'
+second run seconds: 10
++ grep -E already /tmp/second-run.log
+signing key already present
+repository already registered
+source tree already present at /usr/src/lustre-client-modules-2.15.6
+already registered with DKMS
+
+--- ssm status: Success (command <ssm-command-id>) ---
+===== kernel update, DKMS follows =====
+===== /var/log/task-runner/05-kernel-update.log =====
++ export DEBIAN_FRONTEND=noninteractive
++ DEBIAN_FRONTEND=noninteractive
++ OTHER=6.8.0-1062-aws
+++ date +%s
++ START=1789036920
++ apt-get -o DPkg::Lock::Timeout=600 install -y linux-image-6.8.0-1062-aws linux-headers-6.8.0-1062-aws
+++ date +%s
++ echo 'kernel install seconds: 432'
+kernel install seconds: 432
++ grep -iE 'dkms|lustre' /tmp/kernel-update.log
++ head -10
+/etc/kernel/header_postinst.d/dkms:
+ * dkms: running auto installation service for kernel 6.8.0-1062-aws
+Signing module /var/lib/dkms/lustre-client-modules/2.15.6/build/lustre/fid/fid.ko
+Signing module /var/lib/dkms/lustre-client-modules/2.15.6/build/lustre/fld/fld.ko
+Signing module /var/lib/dkms/lustre-client-modules/2.15.6/build/lustre/lmv/lmv.ko
+Signing module /var/lib/dkms/lustre-client-modules/2.15.6/build/lustre/lov/lov.ko
+Signing module /var/lib/dkms/lustre-client-modules/2.15.6/build/lustre/llite/lustre.ko
+Signing module /var/lib/dkms/lustre-client-modules/2.15.6/build/lustre/mdc/mdc.ko
+Signing module /var/lib/dkms/lustre-client-modules/2.15.6/build/lustre/mgc/mgc.ko
+Signing module /var/lib/dkms/lustre-client-modules/2.15.6/build/lustre/obdclass/obdclass.ko
++ dkms status -m lustre-client-modules
+lustre-client-modules/2.15.6, 6.8.0-1062-aws, x86_64: installed
+lustre-client-modules/2.15.6, 6.8.0-1063-aws, x86_64: installed
+++ find /lib/modules/6.8.0-1062-aws -name 'lustre.ko*' -print -quit
++ test -n /lib/modules/6.8.0-1062-aws/updates/dkms/lustre.ko
++ echo 'the module for the new kernel exists without running the installer again'
+the module for the new kernel exists without running the installer again
+
+--- ssm status: Success (command <ssm-command-id>) ---
+===== mount on the new kernel =====
+===== /var/log/task-runner/07-verify-new-kernel.log =====
++ OTHER=6.8.0-1062-aws
+++ uname -r
++ test 6.8.0-1062-aws = 6.8.0-1062-aws
++ modinfo -F vermagic lustre
+6.8.0-1062-aws SMP mod_unload modversions 
+++ modinfo -F vermagic lustre
+++ awk '{print $1}'
+++ uname -r
++ test 6.8.0-1062-aws = 6.8.0-1062-aws
++ DNS=<fsx-dns-name>
++ MOUNTNAME=<mountname>
++ POINT=/mnt/fsx
++ mkdir -p /mnt/fsx
++ mount -t lustre -o noatime,flock <fsx-dns-name>@tcp:/<mountname> /mnt/fsx
++ mountpoint -q /mnt/fsx
+++ stat -f -c %T /mnt/fsx
++ test lustre = lustre
++ mount
++ grep lustre
+<private-ip>@tcp:/<mountname> on /mnt/fsx type lustre (rw,noatime,checksum,flock,nouser_xattr,lruresize,lazystatfs,nouser_fid2path,verbose,noencrypt)
++ dd if=/dev/urandom of=/tmp/probe2.bin bs=1M count=128 status=none
+++ md5sum /tmp/probe2.bin
+++ awk '{print $1}'
++ SRC=6d63dbc939329b02e4bf0129c5eecb40
+++ hostname
++ cp /tmp/probe2.bin /mnt/fsx/installer-probe2-<client-hostname>.bin
++ sync
++ echo 3
+++ awk '{print $1}'
++++ hostname
+++ md5sum /mnt/fsx/installer-probe2-<client-hostname>.bin
++ DST=6d63dbc939329b02e4bf0129c5eecb40
++ echo 'source md5: 6d63dbc939329b02e4bf0129c5eecb40'
+source md5: 6d63dbc939329b02e4bf0129c5eecb40
++ echo 'file system md5: 6d63dbc939329b02e4bf0129c5eecb40'
+file system md5: 6d63dbc939329b02e4bf0129c5eecb40
++ test 6d63dbc939329b02e4bf0129c5eecb40 = 6d63dbc939329b02e4bf0129c5eecb40
+++ hostname
++ rm -f /mnt/fsx/installer-probe2-<client-hostname>.bin /tmp/probe2.bin
++ umount /mnt/fsx
++ dkms status -m lustre-client-modules
+lustre-client-modules/2.15.6, 6.8.0-1062-aws, x86_64: installed
+lustre-client-modules/2.15.6, 6.8.0-1063-aws, x86_64: installed
++ echo 'kernel updated and the file system still mounts, with no installer run in between'
+kernel updated and the file system still mounts, with no installer run in between
+
+--- ssm status: Success (command <ssm-command-id>) ---
+===== binary mode message =====
+===== /var/log/task-runner/08-binary-mode-message.log =====
++ /usr/local/sbin/lustre_installer.sh -y --mode binary --no-verify
+system:  Ubuntu 24.04.4 LTS (noble)
+kernel:  6.8.0-1062-aws (running: 6.8.0-1062-aws)
+mode:    binary
+
+== Registering the FSx for Lustre client repository
+signing key already present
+repository already registered
+
+== Installing the userspace tools
+lustre-client-utils 2.15.6-1fsx34
+
+== Installing the published module for 6.8.0-1062-aws
+error: no lustre-client-modules-6.8.0-1062-aws package is published for noble.
+       Published modules cover only some kernel releases. Either run this installer without
+       --mode binary, which builds the module with DKMS and follows kernel updates, or boot a
+       kernel release the repository covers.
+
+--- ssm status: Success (command <ssm-command-id>) ---

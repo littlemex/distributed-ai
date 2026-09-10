@@ -11,6 +11,8 @@
         "POINT=${MOUNT_POINT:-/mnt/fsx}",
         "mkdir -p \"${POINT}\"",
         "mountpoint -q \"${POINT}\" || mount -t lustre -o noatime,flock \"${DNS}@tcp:/${MOUNTNAME}\" \"${POINT}\"",
+        "mountpoint -q \"${POINT}\"",
+        "test \"$(stat -f -c %T \"${POINT}\")\" = \"lustre\"",
         "mount | grep lustre",
         "which fio || apt-get -o DPkg::Lock::Timeout=600 install -y fio",
         "DIR=\"${POINT}/behaviour-check-$(hostname)-$(date -u +%Y%m%dT%H%M%SZ)\"",

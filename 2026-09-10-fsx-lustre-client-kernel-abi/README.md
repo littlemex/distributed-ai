@@ -35,13 +35,17 @@ suite:
 | Advisory locking | Four processes take `flock` on one file and increment a counter 50 times each | Counter reaches exactly 200; `llite` statistics record 800 `flock` operations |
 | Connection loss and recovery | Drop client traffic to port 988, keep a write in flight, restore after 90 s | Imports go to `CONNECTING` and report `Connection to ... was lost`, then `Connection restored`, all imports return to `FULL`, `lfs check servers` reports every target active, the in-flight write completes with exit 0, and checksums before and after the outage match |
 | Mount after a reboot | fstab entry with `_netdev,x-systemd.automount`, reboot, verify | Node comes back on the pinned kernel, the module is loaded, the systemd mount unit is `active` and the canary file's checksum still matches |
+| Source build | Build the module from the `lustre-source` package for the pinned kernel and load it | Produces `lustre-client-modules-6.8.0-1063-aws_2.15.6-1fsx34_amd64.deb` in about 3 minutes; the loaded module is byte-identical to the built one |
+| Installing without a per-kernel package | Register the client source with DKMS and install a second kernel release | DKMS rebuilds during `apt install`, both releases report `installed`, and the file system mounts on the second kernel with no command run in between |
+| One-command install | `lustre_installer.sh -y` on a clean host, then again | 515 s on the first run, 8 s on the second with every step reporting `already`; mount and checksum pass after each |
+| Kernel the client cannot follow | Build for the rolling `7.0.0-1012-aws` release | Fails to compile. First error is `filemap_alloc_folio_noprof` called with too few arguments in `lustre/mdc/mdc_request.c`, then `in_irq` undeclared and an `rb_root_cached` type mismatch |
 | Kernel health | Decode `/proc/sys/kernel/tainted`, scan for faults and runtime warnings | Taint bits 12 and 13 only, which are out-of-tree and unsigned module, both expected for any third-party module and attributed by the kernel to `libcfs`; no BUG, oops, call trace, lockup or hung task; no runtime warning; the only `LustreError` lines are the MGS disconnects caused by the deliberate outage |
 
 The second control matters. Without it, a successful load proves nothing about whether the
 kernel validates anything. The kernel does validate, it rejects a build from a neighbouring
 release of the same series, and it accepts the cross-suite build for the matching release.
 
-Two facts fell out of the verification and are worth stating separately.
+Three facts fell out of the verification and are worth stating separately.
 
 The current Ubuntu 24.04 AMI boots a rolling `linux-aws` kernel from a series the
 repository does not cover at all, so a freshly launched instance has no module available
@@ -51,7 +55,18 @@ rather than assuming the image's kernel.
 
 Userspace and kernel space have different constraints. `lustre-client-utils` is published
 at the same version in both suites, so only the module package needs to come from the other
-suite.
+suite. The userspace package is not optional either way: without `/sbin/mount.lustre` the
+kernel receives the raw option list and refuses the mount, which reads like a module problem
+and is not one.
+
+The per-kernel package name is avoidable. Registering the client source with DKMS makes the
+module follow kernel installs, which is how the EFA kernel module is already handled on the
+same hosts. `setup/files/lustre_installer.sh` wraps that path behind one command, and
+`setup/tasks/12-installer-script.json` is the verification. Two obstacles are worth knowing:
+`configure` needs `flex`, `bison` and the Python headers, which `lustre-source` does not
+declare, and the DKMS package the source tree can build is written for Debian, naming version
+constraints without parentheses and depending on a `linux-image` metapackage Ubuntu does not
+ship. Registering the generated tree with DKMS directly avoids both.
 
 ## Reproducing it
 

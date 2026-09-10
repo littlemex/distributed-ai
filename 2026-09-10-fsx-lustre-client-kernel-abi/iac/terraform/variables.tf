@@ -13,6 +13,12 @@ variable "file_system_security_group_ids" {
   type        = list(string)
 }
 
+variable "ami_id" {
+  description = "AMI to launch; when empty the SSM parameter below is resolved instead. Set this to verify an image that was baked with the client already installed"
+  type        = string
+  default     = ""
+}
+
 variable "ami_ssm_parameter" {
   description = "Public SSM parameter that resolves to the client AMI"
   type        = string

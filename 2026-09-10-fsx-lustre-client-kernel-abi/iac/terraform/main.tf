@@ -57,7 +57,7 @@ resource "aws_security_group" "client" {
 
 resource "aws_instance" "client" {
   # An AMI id is not a secret, so unwrap the value the SSM data source marks as sensitive.
-  ami                    = nonsensitive(data.aws_ssm_parameter.ubuntu_ami.value)
+  ami                    = var.ami_id != "" ? var.ami_id : nonsensitive(data.aws_ssm_parameter.ubuntu_ami.value)
   instance_type          = var.instance_type
   subnet_id              = var.subnet_id
   iam_instance_profile   = aws_iam_instance_profile.instance.name

@@ -1,0 +1,101 @@
+{
+  "name": "Build the client modules from the source package for a chosen kernel",
+  "tasks": [
+    {
+      "id": "01-build-dependencies",
+      "name": "Install the build dependencies and the headers of the target kernel",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "TARGET=${BUILD_KERNEL:-$(uname -r)}",
+        "apt-get -o DPkg::Lock::Timeout=600 update",
+        "# The source package Depends list is not sufficient on its own: flex, bison and the",
+        "# Python headers are needed by configure but are not listed.",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y module-assistant build-essential bzip2 debhelper libtool libyaml-dev libnl-genl-3-dev libselinux-dev libsnmp-dev libkeyutils-dev libmount-dev mpi-default-dev pkg-config autoconf automake quilt fakeroot flex bison python3-dev libssl-dev libreadline-dev",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y \"linux-headers-${TARGET}\"",
+        "test -d \"/lib/modules/${TARGET}/build\"",
+        "gcc --version | head -1",
+        "echo \"target kernel: ${TARGET}\""
+      ]
+    },
+    {
+      "id": "02-install-source-package",
+      "name": "Install the source package and unpack the tree",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y lustre-source",
+        "dpkg -s lustre-source | grep -E '^Version:'",
+        "rm -rf /usr/src/modules",
+        "tar -xjf /usr/src/lustre-*.tar.bz2 -C /usr/src",
+        "ls /usr/src/modules/lustre | head",
+        "sed -n '1,3p' /usr/src/modules/lustre/debian/changelog"
+      ]
+    },
+    {
+      "id": "03-build-binary-module-package",
+      "name": "Build the binary module package for the target kernel",
+      "commands": [
+        "TARGET=${BUILD_KERNEL:-$(uname -r)}",
+        "KSRC=\"/lib/modules/${TARGET}/build\"",
+        "test -d \"${KSRC}\"",
+        "# Optional features are off unless named in DEB_BUILD_PROFILES. flock is one of them, and a module built without it refuses a mount that asks for flock.",
+        "cd /usr/src/modules/lustre",
+        "rm -f /usr/src/lustre-client-modules-*.deb",
+        "START=$(date +%s)",
+        "# module-assistant leaves the source tree and the object tree unset, so both are",
+        "# passed explicitly. kdist_config runs configure, binary-modules builds and packages.",
+        "export KVERS=\"${TARGET}\" KSRC=\"${KSRC}\" KSRC_TREE=\"${KSRC}\" LINUX=\"${KSRC}\" LINUX_OBJ=\"${KSRC}\" DEB_BUILD_PROFILES=\"${BUILD_PROFILES:-flock}\"",
+        "fakeroot debian/rules kdist_config > \"/tmp/configure-${TARGET}.log\" 2>&1 || { echo 'CONFIGURE FAILED'; tail -25 \"/tmp/configure-${TARGET}.log\"; exit 1; }",
+        "grep -E '^(checking for Linux sources|checking for Linux objects)' \"/tmp/configure-${TARGET}.log\" | head -4",
+        "fakeroot debian/rules binary-modules > \"/tmp/build-${TARGET}.log\" 2>&1 || { echo 'BUILD FAILED'; tail -25 \"/tmp/build-${TARGET}.log\"; exit 1; }",
+        "grep -E 'Final value of EXTRAFLAGS' \"/tmp/configure-${TARGET}.log\" || true",
+        "echo \"build seconds: $(( $(date +%s) - START ))\"",
+        "ls -la /usr/src/lustre-client-modules-*.deb"
+      ],
+      "skip_if": "ls /usr/src/lustre-client-modules-${BUILD_KERNEL:-$(uname -r)}*.deb >/dev/null 2>&1"
+    },
+    {
+      "id": "04-inspect-built-package",
+      "name": "Compare the built package with the published one",
+      "commands": [
+        "TARGET=${BUILD_KERNEL:-$(uname -r)}",
+        "DEB=$(ls /usr/src/lustre-client-modules-${TARGET}*.deb | head -1)",
+        "echo \"built package: ${DEB}\"",
+        "dpkg-deb -I \"${DEB}\" | grep -E 'Package|Version|Architecture|Depends'",
+        "dpkg-deb -c \"${DEB}\" | awk '{print $6}' | grep '\\.ko$' | wc -l",
+        "rm -rf /tmp/built && mkdir -p /tmp/built && dpkg-deb -x \"${DEB}\" /tmp/built",
+        "find /tmp/built -name 'lustre.ko' -exec modinfo -F vermagic {} \\; -exec modinfo -F version {} \\;",
+        "echo \"${DEB}\" > /tmp/built-deb-path"
+      ]
+    },
+    {
+      "id": "05-install-and-load",
+      "name": "Install the built package and load it, replacing anything already resident",
+      "skip_if": "test \"${BUILD_KERNEL:-$(uname -r)}\" != \"$(uname -r)\"",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "DEB=$(cat /tmp/built-deb-path)",
+        "# The module alone is not enough: mount -t lustre needs the userspace helper from",
+        "# lustre-client-utils, otherwise the kernel receives the raw option list and refuses.",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y lustre-client-utils",
+        "test -x /sbin/mount.lustre",
+        "dpkg -i \"${DEB}\"",
+        "depmod -a",
+        "# A resident module keeps serving the old code, so everything Lustre has to come out",
+        "# first. LNet holds references until the network is taken down.",
+        "umount -a -t lustre 2>/dev/null || true",
+        "lctl network down 2>/dev/null || true",
+        "lustre_rmmod 2>/dev/null || true",
+        "if [ \"$(lsmod | grep -cE '^(lustre|lnet|libcfs)')\" != \"0\" ]; then echo 'still resident, rebooting to load from disk'; systemd-run --on-active=5 --unit=task-runner-reboot /sbin/reboot; sleep 180; fi",
+        "modprobe lustre",
+        "LOADED=$(modinfo -F filename lustre)",
+        "echo \"loaded: ${LOADED}\"",
+        "rm -rf /tmp/deb-check && mkdir -p /tmp/deb-check && dpkg-deb -x \"${DEB}\" /tmp/deb-check",
+        "FROM_DEB=$(find /tmp/deb-check -name lustre.ko | head -1)",
+        "test \"$(md5sum \"${LOADED}\" | awk '{print $1}')\" = \"$(md5sum \"${FROM_DEB}\" | awk '{print $1}')\"",
+        "echo 'the loaded module is byte-identical to the one just built'",
+        "modinfo -F vermagic lustre",
+        "lsmod | grep -E '^(lustre|lnet|libcfs)' | sort"
+      ]
+    }
+  ]
+}

@@ -68,7 +68,9 @@ PY
     fi
 
     log="${LOG_DIR}/${step_id}.log"
-    if bash -o pipefail -c "set -x; ${script}" >"${log}" 2>&1; then
+    # set -e matters: without it a step whose last command succeeds is reported as ok even
+    # when an earlier command in the same step failed, which hides real failures.
+    if bash -o pipefail -c "set -ex; ${script}" >"${log}" 2>&1; then
         status=0
     else
         status=$?

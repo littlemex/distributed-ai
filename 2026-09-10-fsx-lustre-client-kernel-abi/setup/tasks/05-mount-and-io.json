@@ -8,8 +8,12 @@
         "DNS=${FSX_DNS_NAME:?FSX_DNS_NAME must be set}",
         "MOUNTNAME=${FSX_MOUNT_NAME:?FSX_MOUNT_NAME must be set}",
         "POINT=${MOUNT_POINT:-/mnt/fsx}",
+        "OPTS=${MOUNT_OPTIONS:-noatime,flock}",
         "mkdir -p \"${POINT}\"",
-        "mount -t lustre -o noatime,flock \"${DNS}@tcp:/${MOUNTNAME}\" \"${POINT}\"",
+        "mount -t lustre -o \"${OPTS}\" \"${DNS}@tcp:/${MOUNTNAME}\" \"${POINT}\"",
+        "# assert the mount really happened: a failed mount leaves the local disk in place",
+        "mountpoint -q \"${POINT}\"",
+        "test \"$(stat -f -c %T \"${POINT}\")\" = \"lustre\"",
         "mount | grep lustre",
         "df -h \"${POINT}\""
       ]
@@ -74,10 +78,13 @@
         "POINT=${MOUNT_POINT:-/mnt/fsx}",
         "DNS=${FSX_DNS_NAME:?FSX_DNS_NAME must be set}",
         "MOUNTNAME=${FSX_MOUNT_NAME:?FSX_MOUNT_NAME must be set}",
+        "OPTS=${MOUNT_OPTIONS:-noatime,flock}",
         "DIR=$(cat /tmp/abi-check-dir)",
         "umount \"${POINT}\"",
         "mount | grep lustre || echo 'unmounted'",
-        "mount -t lustre -o noatime,flock \"${DNS}@tcp:/${MOUNTNAME}\" \"${POINT}\"",
+        "mount -t lustre -o \"${OPTS}\" \"${DNS}@tcp:/${MOUNTNAME}\" \"${POINT}\"",
+        "mountpoint -q \"${POINT}\"",
+        "test \"$(stat -f -c %T \"${POINT}\")\" = \"lustre\"",
         "md5sum \"${DIR}/abi-check.bin\"",
         "dmesg | grep -iE 'lustre|lnet' | tail -20 || true"
       ]

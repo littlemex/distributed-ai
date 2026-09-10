@@ -13,6 +13,7 @@
 #   ./runner.sh run tasks/05-mount-and-io.json --env FSX_DNS_NAME=... --env FSX_MOUNT_NAME=...
 #   ./runner.sh wait                      # wait for the node to come back after a reboot
 #   ./runner.sh logs 06                   # read back a step log from the node
+#   LOG_TAIL=100 ./runner.sh logs 03     # only the last lines, output is truncated by SSM
 #
 # Options:
 #   --instance-id <id>   overrides INSTANCE_ID
@@ -96,7 +97,10 @@ cmd_deploy() {
     require_instance
     local bundle
     # COPYFILE_DISABLE keeps macOS from adding AppleDouble ._ members to the archive.
-    bundle=$(cd "${HERE}" && COPYFILE_DISABLE=1 tar --exclude '._*' -czf - task_runner.sh tasks | base64 | tr -d '\n')
+    # files/ carries artifacts a task installs on the node, so it travels with the bundle.
+    local extra=()
+    [[ -d "${HERE}/files" ]] && extra+=(files)
+    bundle=$(cd "${HERE}" && COPYFILE_DISABLE=1 tar --exclude '._*' -czf - task_runner.sh tasks "${extra[@]}" | base64 | tr -d '\n')
     send "set -euo pipefail
 mkdir -p '${REMOTE_DIR}'
 echo '${bundle}' | base64 -d | tar -xzf - -C '${REMOTE_DIR}'
@@ -129,7 +133,7 @@ cmd_logs() {
 for log in /var/log/task-runner/${pattern}*.log; do
     [ -e \"\${log}\" ] || continue
     echo \"===== \${log} =====\"
-    cat \"\${log}\"
+    tail -n ${LOG_TAIL:-2000} \"\${log}\"
 done"
 }
 

@@ -18,6 +18,7 @@ file system, instance and address identifiers are redacted.
 | `run-08-load-and-recovery-long-pass.txt` | longer load pass | The same sequence with 8 jobs, 4 GiB verified writes at 1178 MiB/s and 180 s of mixed load moving 254 GiB at `err=0` |
 | `run-08-recovery-step-detail.txt` | recovery detail | The client's own log lines for the outage and the recovery, read back from the node because Systems Manager truncates long command output |
 | `run-09-boot-persistence.txt` | reboot | After a reboot the node is on the pinned kernel, the module is loaded, the systemd mount unit is `active` and the canary file's checksum matches |
+| `run-12-installer-script.txt` | one-command install and kernel update | `lustre_installer.sh -y` installs the client with DKMS in 515 s on a clean host and reports `already` at every step on a second run 8 s later; installing another kernel release rebuilds the module during `apt install`; the file system mounts on the new kernel with no installer run in between; `--mode binary` refuses with the reason on a release that has no published module |
 | `run-06-collect-evidence.txt` | final state | Package origins, module metadata, mount state, `lfs check servers` reporting every target active, and the client's kernel log lines |
 
 The throughput figures are incidental. They come from `dd` and `fio` on one client and are
