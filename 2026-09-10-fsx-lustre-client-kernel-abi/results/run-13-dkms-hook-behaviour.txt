@@ -1,0 +1,83 @@
+===== with the kernel filter =====
+===== /var/log/task-runner/02-with-filter-install-unsupported-kernel.log =====
++ export DEBIAN_FRONTEND=noninteractive
++ DEBIAN_FRONTEND=noninteractive
++ OTHER=7.0.0-1012-aws
++ grep -n BUILD_EXCLUSIVE_KERNEL /usr/src/lustre-client-modules-2.15.6/dkms.conf
+70:BUILD_EXCLUSIVE_KERNEL="^6\.[0-9]+\."
+++ date +%s
++ START=1789040648
++ set +e
++ apt-get -o DPkg::Lock::Timeout=600 install -y linux-image-7.0.0-1012-aws linux-headers-7.0.0-1012-aws
++ APT_RC=0
++ set -e
++ echo 'apt exit status with the filter: 0'
+apt exit status with the filter: 0
+++ date +%s
++ echo 'seconds: 0'
+seconds: 0
++ grep -iE 'dkms|lustre|error|skip' /tmp/with-filter.log
++ tail -12
++ true
++ echo '--- dpkg state of the kernel packages ---'
+--- dpkg state of the kernel packages ---
++ dpkg-query -W '-f=${Package} ${Status}\n' linux-image-7.0.0-1012-aws linux-headers-7.0.0-1012-aws
+linux-headers-7.0.0-1012-aws install ok installed
+linux-image-7.0.0-1012-aws install ok installed
++ echo '--- did dkms build anything for it ---'
+--- did dkms build anything for it ---
++ dkms status
++ grep lustre-client-modules
+lustre-client-modules/2.15.6, 6.8.0-1063-aws, x86_64: installed
++ find /lib/modules/7.0.0-1012-aws -name 'lustre.ko*' -print -quit
+
+--- ssm status: Success (command <ssm-command-id>) ---
+===== without the kernel filter =====
+===== /var/log/task-runner/03-remove-filter-and-retry.log =====
++ grep -c BUILD_EXCLUSIVE_KERNEL /usr/src/lustre-client-modules-2.15.6/dkms.conf
+0
++ echo 'filter removed'
+filter removed
+++ date +%s
++ START=1789040650
++ set +e
++ apt-get -o DPkg::Lock::Timeout=600 install --reinstall -y linux-image-7.0.0-1012-aws
++ APT_RC=100
++ set -e
++ echo 'apt exit status without the filter: 100'
+apt exit status without the filter: 100
+++ date +%s
++ echo 'seconds: 129'
+seconds: 129
++ grep -iE 'dkms|lustre|error|warning|bad exit' /tmp/without-filter.log
++ tail -15
+/etc/kernel/postinst.d/dkms:
+ * dkms: running auto installation service for kernel 7.0.0-1012-aws
+sh autogen.sh && ./configure --with-linux=/lib/modules/7.0.0-1012-aws/build --with-linux-obj=/lib/modules/7.0.0-1012-aws/build --disable-server --disable-quilt --disable-dependency-tracking --disable-doc --disable-utils --disable-iokit --disable-snmp --disable-tests --enable-quota --with-kmp-moddir=updates && make..........................................(bad exit status: 2)
+ERROR (dkms apport): binary package for lustre-client-modules: 2.15.6 not found
+Error! Bad return status for module build on kernel: 7.0.0-1012-aws (x86_64)
+Consult /var/lib/dkms/lustre-client-modules/2.15.6/build/make.log for more information.
+dkms autoinstall on 7.0.0-1012-aws/x86_64 failed for lustre-client-modules(10)
+Error! One or more modules failed to install during autoinstall.
+Refer to previous errors for more information.
+ * dkms: autoinstall for kernel 7.0.0-1012-aws
+run-parts: /etc/kernel/postinst.d/dkms exited with return code 11
+dpkg: error processing package linux-image-7.0.0-1012-aws (--configure):
+ installed linux-image-7.0.0-1012-aws package post-installation script subprocess returned error exit status 11
+Errors were encountered while processing:
+E: Sub-process /usr/bin/dpkg returned an error code (1)
++ echo '--- dpkg state after the failed build ---'
+--- dpkg state after the failed build ---
++ dpkg-query -W '-f=${Package} ${Status}\n' linux-image-7.0.0-1012-aws
+linux-image-7.0.0-1012-aws install ok half-configured
++ echo '--- is the dpkg database usable ---'
+--- is the dpkg database usable ---
++ dpkg --audit
+The following packages are only half configured, probably due to problems
+configuring them the first time.  The configuration should be retried using
+dpkg --configure <package> or the configure menu option in dselect:
+ linux-image-7.0.0-1012-aws Signed kernel image aws
+
++ apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends jq
+
+--- ssm status: Success (command <ssm-command-id>) ---

@@ -1,0 +1,70 @@
+{
+  "name": "What a DKMS build failure does to a kernel package transaction",
+  "tasks": [
+    {
+      "id": "01-install-client-with-dkms",
+      "name": "Install the client in DKMS mode",
+      "skip_if": "dkms status 2>/dev/null | grep -q lustre-client-modules",
+      "commands": [
+        "install -m 0755 /opt/task-runner/files/lustre_installer.sh /usr/local/sbin/lustre_installer.sh",
+        "/usr/local/sbin/lustre_installer.sh -y --mode dkms",
+        "dkms status | grep lustre-client-modules"
+      ]
+    },
+    {
+      "id": "02-with-filter-install-unsupported-kernel",
+      "name": "With the kernel filter in place, install a kernel the client cannot build for",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "OTHER=${UNSUPPORTED_KERNEL:?UNSUPPORTED_KERNEL must be set, for example 7.0.0-1012-aws}",
+        "grep -n 'BUILD_EXCLUSIVE_KERNEL' /usr/src/lustre-client-modules-*/dkms.conf",
+        "START=$(date +%s)",
+        "set +e",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y \"linux-image-${OTHER}\" \"linux-headers-${OTHER}\" > /tmp/with-filter.log 2>&1",
+        "APT_RC=$?",
+        "set -e",
+        "echo \"apt exit status with the filter: ${APT_RC}\"",
+        "echo \"seconds: $(( $(date +%s) - START ))\"",
+        "grep -iE 'dkms|lustre|error|skip' /tmp/with-filter.log | tail -12 || true",
+        "echo '--- dpkg state of the kernel packages ---'",
+        "dpkg-query -W -f='${Package} ${Status}\\n' \"linux-image-${OTHER}\" \"linux-headers-${OTHER}\"",
+        "echo '--- did dkms build anything for it ---'",
+        "dkms status | grep lustre-client-modules",
+        "find /lib/modules/${OTHER} -name 'lustre.ko*' -print -quit || echo 'no module for the unsupported kernel, as expected'"
+      ]
+    },
+    {
+      "id": "03-remove-filter-and-retry",
+      "name": "Remove the filter and reinstall the same kernel to see the unfiltered behaviour",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "OTHER=${UNSUPPORTED_KERNEL:?UNSUPPORTED_KERNEL must be set}",
+        "sed -i '/^BUILD_EXCLUSIVE_KERNEL=/d' /usr/src/lustre-client-modules-*/dkms.conf",
+        "grep -c 'BUILD_EXCLUSIVE_KERNEL' /usr/src/lustre-client-modules-*/dkms.conf || echo 'filter removed'",
+        "START=$(date +%s)",
+        "set +e",
+        "apt-get -o DPkg::Lock::Timeout=600 install --reinstall -y \"linux-image-${OTHER}\" > /tmp/without-filter.log 2>&1",
+        "APT_RC=$?",
+        "set -e",
+        "echo \"apt exit status without the filter: ${APT_RC}\"",
+        "echo \"seconds: $(( $(date +%s) - START ))\"",
+        "grep -iE 'dkms|lustre|error|warning|bad exit' /tmp/without-filter.log | tail -15 || true",
+        "echo '--- dpkg state after the failed build ---'",
+        "dpkg-query -W -f='${Package} ${Status}\\n' \"linux-image-${OTHER}\"",
+        "echo '--- is the dpkg database usable ---'",
+        "dpkg --audit || true",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends jq > /tmp/after.log 2>&1; echo \"a later apt install returns: $?\""
+      ]
+    },
+    {
+      "id": "04-direct-build-for-unsupported-kernel",
+      "name": "Build directly for the unsupported kernel to capture the compile error",
+      "allow_failure": true,
+      "commands": [
+        "OTHER=${UNSUPPORTED_KERNEL:?UNSUPPORTED_KERNEL must be set}",
+        "VERSION=$(ls /var/lib/dkms/lustre-client-modules | head -1)",
+        "dkms build -m lustre-client-modules -v \"${VERSION}\" -k \"${OTHER}\" 2>&1 | tail -8"
+      ]
+    }
+  ]
+}
