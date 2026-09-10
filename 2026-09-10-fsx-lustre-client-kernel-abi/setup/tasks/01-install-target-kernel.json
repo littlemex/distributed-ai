@@ -1,0 +1,63 @@
+{
+  "name": "Install the target kernel and boot into it",
+  "tasks": [
+    {
+      "id": "01-record-baseline",
+      "name": "Record the OS release and the kernel the image booted",
+      "commands": [
+        "cat /etc/os-release",
+        "uname -r",
+        "dpkg-query -W -f='${Package} ${Version}\\n' 'linux-image-*' | sort"
+      ]
+    },
+    {
+      "id": "02-install-kernel-meta",
+      "name": "Install the kernel meta package under test",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "apt-get -o DPkg::Lock::Timeout=600 update",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y ${KERNEL_META:-linux-aws-lts-24.04}",
+        "dpkg -s ${KERNEL_META:-linux-aws-lts-24.04} | grep -E '^Version:'"
+      ]
+    },
+    {
+      "id": "03-resolve-target",
+      "name": "Resolve the kernel release the verification must run on",
+      "commands": [
+        "META=${KERNEL_META:-linux-aws-lts-24.04}",
+        "VERSION=$(dpkg-query -W -f='${Version}' \"${META}\")",
+        "TARGET=${TARGET_KERNEL:-$(echo \"${VERSION}\" | sed 's/\\.[0-9]*$//')-aws}",
+        "echo \"${TARGET}\" > /etc/task-runner-target-kernel",
+        "echo \"meta package: ${META} ${VERSION}\"",
+        "echo \"target kernel: ${TARGET}\"",
+        "echo \"running kernel: $(uname -r)\"",
+        "test -f \"/boot/vmlinuz-${TARGET}\""
+      ]
+    },
+    {
+      "id": "04-select-target-in-grub",
+      "name": "Make the target kernel the default boot entry",
+      "skip_if": "test \"$(uname -r)\" = \"$(cat /etc/task-runner-target-kernel)\"",
+      "commands": [
+        "TARGET=$(cat /etc/task-runner-target-kernel)",
+        "ENTRY=$(grep -oP \"(?<=menuentry ')[^']*${TARGET}[^']*\" /boot/grub/grub.cfg | grep -v recovery | head -1)",
+        "SUBMENU=$(grep -oP \"(?<=submenu ')[^']*\" /boot/grub/grub.cfg | head -1)",
+        "test -n \"${ENTRY}\" && test -n \"${SUBMENU}\"",
+        "echo \"submenu: ${SUBMENU}\"",
+        "echo \"entry: ${ENTRY}\"",
+        "sed -i \"s/^GRUB_DEFAULT=.*/GRUB_DEFAULT=\\\"${SUBMENU}>${ENTRY}\\\"/\" /etc/default/grub",
+        "grep '^GRUB_DEFAULT' /etc/default/grub",
+        "update-grub"
+      ]
+    },
+    {
+      "id": "05-reboot-if-needed",
+      "name": "Reboot into the target kernel",
+      "skip_if": "test \"$(uname -r)\" = \"$(cat /etc/task-runner-target-kernel)\"",
+      "commands": [
+        "echo \"rebooting into $(cat /etc/task-runner-target-kernel)\"",
+        "systemd-run --on-active=5 --unit=task-runner-reboot /sbin/reboot"
+      ]
+    }
+  ]
+}

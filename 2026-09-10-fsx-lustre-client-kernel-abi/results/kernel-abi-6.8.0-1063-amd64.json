@@ -1,0 +1,39 @@
+{
+  "kernel_to_kernel": [
+    {
+      "crc_mismatch_count": 0,
+      "crc_mismatches": [],
+      "first": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-aws/linux-headers-6.8.0-1063-aws_6.8.0-1063.66_amd64.deb",
+      "only_first": [],
+      "only_second": [],
+      "second": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-aws-6.8/linux-headers-6.8.0-1063-aws_6.8.0-1063.66~22.04.1_amd64.deb",
+      "shared": 26848
+    }
+  ],
+  "kernels": [
+    {
+      "crc_mismatch_count": 0,
+      "crc_mismatches": [],
+      "exported_symbols": 26848,
+      "imports_checked": 2145,
+      "release": "6.8.0-1063-aws",
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-aws/linux-headers-6.8.0-1063-aws_6.8.0-1063.66_amd64.deb",
+      "verdict": "loadable"
+    },
+    {
+      "crc_mismatch_count": 0,
+      "crc_mismatches": [],
+      "exported_symbols": 26848,
+      "imports_checked": 2145,
+      "release": "6.8.0-1063-aws",
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/l/linux-aws-6.8/linux-headers-6.8.0-1063-aws_6.8.0-1063.66~22.04.1_amd64.deb",
+      "verdict": "loadable"
+    }
+  ],
+  "module_count": 17,
+  "module_url": "https://fsx-lustre-client-repo.s3.amazonaws.com/ubuntu/pool/jammy/l/lu/lustre-client-modules-6.8.0-1063-aws_2.15.6-1fsx34_amd64.deb",
+  "module_vermagic": [
+    "6.8.0-1063-aws SMP mod_unload modversions"
+  ],
+  "verdict": "loadable"
+}

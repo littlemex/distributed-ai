@@ -1,0 +1,19 @@
+module package: lustre-client-modules-6.8.0-1063-aws_2.15.6-1fsx34_amd64.deb
+  kernel objects: 17
+  vermagic: 6.8.0-1063-aws SMP mod_unload modversions
+kernel headers: linux-headers-6.8.0-1063-aws_6.8.0-1063.66_amd64.deb
+  release: 6.8.0-1063-aws  exported symbols: 26848
+kernel headers: linux-headers-6.8.0-1063-aws_6.8.0-1063.66~22.04.1_amd64.deb
+  release: 6.8.0-1063-aws  exported symbols: 26848
+kernel-to-kernel: linux-headers-6.8.0-1063-aws_6.8.0-1063.66_amd64.deb vs linux-headers-6.8.0-1063-aws_6.8.0-1063.66~22.04.1_amd64.deb
+  shared symbols: 26848  CRC mismatches: 0  only-first: 0  only-second: 0
+module-to-kernel: 6.8.0-1063-aws (linux-headers-6.8.0-1063-aws_6.8.0-1063.66_amd64.deb)
+  kernel symbol imports checked: 2145
+  CRC mismatches: 0
+  imports resolved inside the module package (not kernel symbols): 833
+  verdict: LOADABLE
+module-to-kernel: 6.8.0-1063-aws (linux-headers-6.8.0-1063-aws_6.8.0-1063.66~22.04.1_amd64.deb)
+  kernel symbol imports checked: 2145
+  CRC mismatches: 0
+  imports resolved inside the module package (not kernel symbols): 833
+  verdict: LOADABLE

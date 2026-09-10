@@ -1,0 +1,18 @@
+== focal (amd64)
+   kernel 5.4.0        builds: 25   highest ABI: 1069
+   kernel 5.8.0        builds: 5    highest ABI: 1042
+   kernel 5.11.0       builds: 10   highest ABI: 1028
+   kernel 5.13.0       builds: 10   highest ABI: 1031
+   kernel 5.15.0       builds: 55   highest ABI: 1084
+
+== jammy (amd64)
+   kernel 5.15.0       builds: 25   highest ABI: 1051
+   kernel 6.2.0        builds: 2    highest ABI: 1018
+   kernel 6.5.0        builds: 2    highest ABI: 1024
+   kernel 6.8.0        builds: 37   highest ABI: 1063
+
+== noble (amd64)
+   kernel 6.8.0        builds: 10   highest ABI: 1057
+   kernel 6.14.0       builds: 7    highest ABI: 1018
+   kernel 6.17.0       builds: 9    highest ABI: 1020
+

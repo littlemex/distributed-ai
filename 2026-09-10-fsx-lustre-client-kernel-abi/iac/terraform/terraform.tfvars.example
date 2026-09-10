@@ -1,0 +1,8 @@
+region                         = "<region>"
+subnet_id                      = "<subnet in the same Availability Zone as the file system>"
+file_system_security_group_ids = ["<security group of the file system>"]
+instance_type                  = "m5.large"
+
+tags = {
+  Purpose = "fsx-lustre-client-kernel-abi-verification"
+}

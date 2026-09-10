@@ -1,0 +1,102 @@
+[RUNNER] task file: /opt/task-runner/tasks/04-install-cross-suite-module.json
+[RUNNER] name: Install the module built in another suite for the same kernel release
+[RUNNER] steps: 5
+[STEP 01-add-cross-suite] Add the second suite alongside the release-matching suite
++ SUITE=jammy
++ echo 'deb [signed-by=/usr/share/keyrings/fsx-ubuntu-public-key.gpg] https://fsx-lustre-client-repo.s3.amazonaws.com/ubuntu jammy main'
++ cat /etc/apt/sources.list.d/fsxlustreclientrepo-jammy.list
+deb [signed-by=/usr/share/keyrings/fsx-ubuntu-public-key.gpg] https://fsx-lustre-client-repo.s3.amazonaws.com/ubuntu jammy main
++ apt-get -o DPkg::Lock::Timeout=600 update
+Hit:1 http://<region>.ec2.archive.ubuntu.com/ubuntu noble InRelease
+Hit:2 http://<region>.ec2.archive.ubuntu.com/ubuntu noble-updates InRelease
+Hit:3 http://<region>.ec2.archive.ubuntu.com/ubuntu noble-backports InRelease
+Hit:4 http://security.ubuntu.com/ubuntu noble-security InRelease
+Hit:5 https://fsx-lustre-client-repo.s3.amazonaws.com/ubuntu jammy InRelease
+Hit:6 https://fsx-lustre-client-repo.s3.amazonaws.com/ubuntu noble InRelease
+Reading package lists...
+[STEP 01-add-cross-suite] ok
+[STEP 02-show-candidate-origin] Show which suite provides the module for the running kernel
++ grep -E '^[a-z]|Installed:|Candidate:'
+++ uname -r
++ apt-cache policy lustre-client-modules-6.8.0-1063-aws
+lustre-client-modules-6.8.0-1063-aws:
+  Installed: 2.15.6-1fsx34
+  Candidate: 2.15.6-1fsx34
++ awk '/Candidate:/{want=$2} $1==want{getline; print "candidate comes from:", $2, $3; exit}'
+++ uname -r
++ apt-cache policy lustre-client-modules-6.8.0-1063-aws
++ apt-cache policy lustre-client-utils
++ grep -E '^[a-z]|Installed:|Candidate:'
+lustre-client-utils:
+  Installed: 2.15.6-1fsx34
+  Candidate: 2.15.6-1fsx34
+[STEP 02-show-candidate-origin] ok
+[STEP 03-install-module-and-utils] Install the module for the running kernel and the userspace tools
++ export DEBIAN_FRONTEND=noninteractive
++ DEBIAN_FRONTEND=noninteractive
+++ uname -r
++ apt-get -o DPkg::Lock::Timeout=600 install -y lustre-client-modules-6.8.0-1063-aws lustre-client-utils
+Reading package lists...
+Building dependency tree...
+Reading state information...
+lustre-client-modules-6.8.0-1063-aws is already the newest version (2.15.6-1fsx34).
+lustre-client-utils is already the newest version (2.15.6-1fsx34).
+0 upgraded, 0 newly installed, 0 to remove and 6 not upgraded.
++ dpkg -l
++ grep -E lustre
+ii  lustre-client-modules-6.8.0-1063-aws 2.15.6-1fsx34                                    amd64        Lustre Linux kernel module (kernel 6.8.0-1063-aws)
+ii  lustre-client-utils                  2.15.6-1fsx34                                    amd64        Userspace utilities for the Lustre filesystem (client)
+[STEP 03-install-module-and-utils] ok
+[STEP 04-inspect-module] Compare the module vermagic with the running kernel
++ modinfo lustre
++ head -20
+filename:       /lib/modules/6.8.0-1063-aws/updates/kernel/fs/lustre.ko
+license:        GPL
+version:        2.15.6
+description:    Lustre Client File System
+author:         OpenSFS, Inc. <http://www.lustre.org/>
+alias:          fs-lustre
+srcversion:     E0D169A5593F23E1E1CAF6C
+depends:        obdclass,ptlrpc,libcfs,lmv,lnet,lov,mdc
+retpoline:      Y
+name:           lustre
+vermagic:       6.8.0-1063-aws SMP mod_unload modversions 
+++ uname -r
++ echo 'running kernel: 6.8.0-1063-aws'
+running kernel: 6.8.0-1063-aws
+++ modinfo -F vermagic lustre
++ echo 'module vermagic: 6.8.0-1063-aws SMP mod_unload modversions '
+module vermagic: 6.8.0-1063-aws SMP mod_unload modversions 
+++ modinfo -F vermagic lustre
+++ awk '{print $1}'
+++ uname -r
++ test 6.8.0-1063-aws = 6.8.0-1063-aws
+[STEP 04-inspect-module] ok
+[STEP 05-load-module] Load the Lustre modules into the running kernel
++ modprobe lnet
++ modprobe lustre
++ lsmod
++ grep -E '^(lustre|lnet|ptlrpc|obdclass|libcfs)'
++ sort
+libcfs                237568  12 fld,lnet,osc,fid,obdclass,ptlrpc,mgc,ksocklnd,lov,mdc,lmv,lustre
+lnet                  827392  8 osc,obdclass,ptlrpc,mgc,ksocklnd,lmv,lustre
+lustre               1171456  40
+obdclass             3420160  38 fld,osc,fid,ptlrpc,mgc,lov,mdc,lmv,lustre
+ptlrpc               1560576  8 fld,osc,fid,mgc,lov,mdc,lmv,lustre
++ lctl network up
+LNET configured
++ lctl list_nids
+<private-ip>@tcp
++ dmesg
++ grep -iE 'lustre|lnet'
++ tail -20
+[  181.215969] Lustre: Lustre: Build Version: 2.15.6
+[  181.269347] LNet: Added LNI <private-ip>@tcp [8/256/0/180]
+[  181.269410] LNet: Accept secure, port 988
+[  253.616086] Lustre: Mounted <mountname>-client
+[  261.836234] Lustre: Unmounted <mountname>-client
+[  261.887288] Lustre: Mounted <mountname>-client
+[STEP 05-load-module] ok
+[RUNNER] result: ok
+
+--- ssm status: Success (command <ssm-command-id>) ---

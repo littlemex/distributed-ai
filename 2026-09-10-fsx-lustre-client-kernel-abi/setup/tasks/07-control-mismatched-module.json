@@ -1,0 +1,57 @@
+{
+  "name": "Control: a module built for a different kernel release must be rejected",
+  "tasks": [
+    {
+      "id": "01-install-mismatched-package",
+      "name": "Install a module package built for another kernel release",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "OTHER=${OTHER_KERNEL:?OTHER_KERNEL must be set, for example 6.8.0-1057-aws}",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y \"lustre-client-modules-${OTHER}\"",
+        "ls /lib/modules/${OTHER}/updates/kernel/net/ /lib/modules/${OTHER}/updates/kernel/fs/"
+      ]
+    },
+    {
+      "id": "02-compare-vermagic",
+      "name": "Compare the vermagic of both builds with the running kernel",
+      "commands": [
+        "OTHER=${OTHER_KERNEL:?OTHER_KERNEL must be set}",
+        "echo \"running kernel:   $(uname -r)\"",
+        "echo \"matched build:    $(modinfo -F vermagic /lib/modules/$(uname -r)/updates/kernel/net/libcfs.ko)\"",
+        "echo \"mismatched build: $(modinfo -F vermagic /lib/modules/${OTHER}/updates/kernel/net/libcfs.ko)\""
+      ]
+    },
+    {
+      "id": "03-attempt-load",
+      "name": "Attempt to load the mismatched build into the running kernel",
+      "allow_failure": true,
+      "commands": [
+        "OTHER=${OTHER_KERNEL:?OTHER_KERNEL must be set}",
+        "rmmod lustre lmv mdc lov osc fid fld ptlrpc obdclass ksocklnd lnet libcfs 2>/dev/null || true",
+        "lsmod | grep -cE '^(lustre|lnet|libcfs)' || true",
+        "insmod \"/lib/modules/${OTHER}/updates/kernel/net/libcfs.ko\""
+      ]
+    },
+    {
+      "id": "04-report-rejection",
+      "name": "Report why the kernel rejected the mismatched build",
+      "commands": [
+        "dmesg | tail -5",
+        "echo '--- the matched build still loads ---'",
+        "modprobe lustre",
+        "lsmod | grep -E '^(lustre|lnet|libcfs)' | sort",
+        "modinfo -F vermagic lustre"
+      ]
+    },
+    {
+      "id": "05-remove-mismatched-package",
+      "name": "Remove the mismatched package",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "OTHER=${OTHER_KERNEL:?OTHER_KERNEL must be set}",
+        "apt-get -o DPkg::Lock::Timeout=600 purge -y \"lustre-client-modules-${OTHER}\"",
+        "dpkg-query -W -f='${Package} ${Version}\\n' 'lustre*' | sort"
+      ]
+    }
+  ]
+}

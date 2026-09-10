@@ -1,0 +1,224 @@
+[RUNNER] task file: /opt/task-runner/tasks/08-load-and-recovery.json
+[RUNNER] name: Concurrent load with data verification, lock contention and connection recovery
+[RUNNER] steps: 9
+[STEP 01-prepare] Mount the file system and install the load generator
++ export DEBIAN_FRONTEND=noninteractive
++ DEBIAN_FRONTEND=noninteractive
++ DNS=<fsx-dns-name>
++ MOUNTNAME=<mountname>
++ POINT=/mnt/fsx
++ mkdir -p /mnt/fsx
++ mountpoint -q /mnt/fsx
++ mount
++ grep lustre
+<private-ip>@tcp:/<mountname> on /mnt/fsx type lustre (rw,noatime,checksum,flock,nouser_xattr,lruresize,lazystatfs,nouser_fid2path,verbose,noencrypt)
++ which fio
+/usr/bin/fio
+++ hostname
+++ date -u +%Y%m%dT%H%M%SZ
++ DIR=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ mkdir -p /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ echo /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ echo /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
+/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
+[STEP 01-prepare] ok
+[STEP 02-concurrent-write-verify] Concurrent direct writes with checksum verification
+++ cat /tmp/behaviour-dir
++ DIR=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ fio --name=write-verify --directory=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z --rw=write --bs=1M --size=128M --numjobs=4 --direct=1 --ioengine=libaio --iodepth=8 --verify=crc32c --do_verify=1 --verify_fatal=1 --group_reporting --output-format=normal
++ grep -E 'WRITE:|READ:|err=|verify|Run status|Disk stats'
++ head -20
+write-verify: (g=0): rw=write, bs=(R) 1024KiB-1024KiB, (W) 1024KiB-1024KiB, (T) 1024KiB-1024KiB, ioengine=libaio, iodepth=8
+write-verify: Laying out IO file (1 file / 128MiB)
+write-verify: Laying out IO file (1 file / 128MiB)
+write-verify: Laying out IO file (1 file / 128MiB)
+write-verify: Laying out IO file (1 file / 128MiB)
+write-verify: (groupid=0, jobs=4): err= 0: pid=2018: Thu Sep 10 04:58:01 2026
+Run status group 0 (all jobs):
+   READ: bw=1191MiB/s (1249MB/s), 1191MiB/s-1191MiB/s (1249MB/s-1249MB/s), io=512MiB (537MB), run=430-430msec
+  WRITE: bw=1185MiB/s (1243MB/s), 1185MiB/s-1185MiB/s (1243MB/s-1243MB/s), io=512MiB (537MB), run=432-432msec
+[STEP 02-concurrent-write-verify] ok
+[STEP 03-mixed-random-load] Sustained mixed random load
+++ cat /tmp/behaviour-dir
++ DIR=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ fio --name=randrw --directory=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z --rw=randrw --rwmixread=70 --bs=64k --size=512M --numjobs=4 --direct=1 --ioengine=libaio --iodepth=16 --time_based --runtime=60 --group_reporting --output-format=normal
++ grep -E 'read:|write:|IOPS|err=|Run status'
++ head -20
+randrw: (groupid=0, jobs=4): err= 0: pid=2042: Thu Sep 10 04:59:06 2026
+  read: IOPS=16.6k, BW=1035MiB/s (1086MB/s)(60.7GiB/60003msec)
+  write: IOPS=7127, BW=445MiB/s (467MB/s)(26.1GiB/60003msec); 0 zone resets
+Run status group 0 (all jobs):
+[STEP 03-mixed-random-load] ok
+[STEP 04-lock-contention] Advisory lock contention across processes
+++ cat /tmp/behaviour-dir
++ DIR=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ echo 0
++ set +x
+++ cat /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/counter
++ echo 'counter after 4 processes x 50 increments: 200'
+counter after 4 processes x 50 increments: 200
+++ cat /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/counter
++ test 200 = 200
+[STEP 04-lock-contention] ok
+[STEP 05-canary-before-outage] Write a canary file before interrupting the connection
+++ cat /tmp/behaviour-dir
++ DIR=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ dd if=/dev/urandom of=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/canary.bin bs=1M count=64 status=none conv=fsync
++ md5sum /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/canary.bin
++ tee /tmp/canary-md5
+04aabeb43ee81317284be98af596a8ab  /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/canary.bin
+[STEP 05-canary-before-outage] ok
+[STEP 06-interrupt-connection] Block Lustre traffic on the client and observe the client reaction
+++ cat /tmp/behaviour-dir
++ DIR=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ iptables -I OUTPUT -p tcp --dport 988 -j DROP
++ iptables -S OUTPUT
++ head -3
+-P OUTPUT ACCEPT
+-A OUTPUT -p tcp -m tcp --dport 988 -j DROP
++ sleep 90
++ dd if=/dev/urandom of=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/during-outage.bin bs=1M count=64 conv=fsync status=none
++ dmesg
++ grep -iE 'lustre|lnet'
++ tail -12
+[  246.776705] Lustre: 1027:0:(client.c:2329:ptlrpc_expire_one_request()) @@@ Request sent has timed out for slow reply: [sent 1789016024/real 1789016024]  req@000000007e43b72f x1875919279046016/t0(0) o400->MGC<private-ip>@tcp@<private-ip>@tcp:26/25 lens 224/224 e 0 to 1 dl 1789016048 ref 1 fl Rpc:XNQr/0/ffffffff rc 0/-1 job:''
+[  246.776722] LustreError: 166-1: MGC<private-ip>@tcp: Connection to MGS (at <private-ip>@tcp) was lost; in progress operations using this service will fail
+[  250.616708] Lustre: <mountname>-OST0000-osc-ffff8a99ce492800: Connection to <mountname>-OST0000 (at <private-ip>@tcp) was lost; in progress operations using this service will wait for recovery to complete
+[  301.561338] Lustre: MGC<private-ip>@tcp: Connection restored to <private-ip>@tcp (at <private-ip>@tcp)
+[  574.454470] Lustre: 2691:0:(client.c:2329:ptlrpc_expire_one_request()) @@@ Request sent has timed out for slow reply: [sent 1789016349/real 1789016349]  req@00000000adee7057 x1875919456642880/t0(0) o101-><mountname>-MDT0000-mdc-ffff8a99ce492800@<private-ip>@tcp:12/10 lens 1056/33944 e 0 to 1 dl 1789016376 ref 2 fl Rpc:XPQr/0/ffffffff rc 0/-1 job:''
+[  574.454476] Lustre: 2691:0:(client.c:2329:ptlrpc_expire_one_request()) Skipped 4 previous similar messages
+[  574.454490] Lustre: <mountname>-MDT0000-mdc-ffff8a99ce492800: Connection to <mountname>-MDT0000 (at <private-ip>@tcp) was lost; in progress operations using this service will wait for recovery to complete
+[  586.486402] Lustre: 1021:0:(client.c:2329:ptlrpc_expire_one_request()) @@@ Request sent has failed due to network error: [sent 1789016372/real 1789016388]  req@000000007ca1f90c x1875919456643264/t0(0) o400-><mountname>-OST0002-osc-ffff8a99ce492800@<private-ip>@tcp:28/4 lens 224/224 e 0 to 1 dl 1789016396 ref 1 fl Rpc:eXNQr/0/ffffffff rc 0/-1 job:''
+[  586.486407] Lustre: 1021:0:(client.c:2329:ptlrpc_expire_one_request()) Skipped 3 previous similar messages
+[  586.486418] Lustre: <mountname>-OST0002-osc-ffff8a99ce492800: Connection to <mountname>-OST0002 (at <private-ip>@tcp) was lost; in progress operations using this service will wait for recovery to complete
+[  586.486420] Lustre: Skipped 3 previous similar messages
+[  589.302382] LustreError: 166-1: MGC<private-ip>@tcp: Connection to MGS (at <private-ip>@tcp) was lost; in progress operations using this service will fail
++ echo '--- import states while blocked ---'
+--- import states while blocked ---
++ lctl get_param -n 'osc.*.state'
++ grep -E current_state
++ sort
++ uniq -c
+      4 current_state: CONNECTING
+[STEP 06-interrupt-connection] ok
+[STEP 07-restore-connection] Restore traffic and confirm the client recovers
+++ cat /tmp/behaviour-dir
++ DIR=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ iptables -D OUTPUT -p tcp --dport 988 -j DROP
++ sleep 90
++ dmesg
++ grep -iE 'lustre|lnet'
++ tail -15
+[  235.512802] Lustre: Skipped 2 previous similar messages
+[  246.776705] Lustre: 1027:0:(client.c:2329:ptlrpc_expire_one_request()) @@@ Request sent has timed out for slow reply: [sent 1789016024/real 1789016024]  req@000000007e43b72f x1875919279046016/t0(0) o400->MGC<private-ip>@tcp@<private-ip>@tcp:26/25 lens 224/224 e 0 to 1 dl 1789016048 ref 1 fl Rpc:XNQr/0/ffffffff rc 0/-1 job:''
+[  246.776722] LustreError: 166-1: MGC<private-ip>@tcp: Connection to MGS (at <private-ip>@tcp) was lost; in progress operations using this service will fail
+[  250.616708] Lustre: <mountname>-OST0000-osc-ffff8a99ce492800: Connection to <mountname>-OST0000 (at <private-ip>@tcp) was lost; in progress operations using this service will wait for recovery to complete
+[  301.561338] Lustre: MGC<private-ip>@tcp: Connection restored to <private-ip>@tcp (at <private-ip>@tcp)
+[  574.454470] Lustre: 2691:0:(client.c:2329:ptlrpc_expire_one_request()) @@@ Request sent has timed out for slow reply: [sent 1789016349/real 1789016349]  req@00000000adee7057 x1875919456642880/t0(0) o101-><mountname>-MDT0000-mdc-ffff8a99ce492800@<private-ip>@tcp:12/10 lens 1056/33944 e 0 to 1 dl 1789016376 ref 2 fl Rpc:XPQr/0/ffffffff rc 0/-1 job:''
+[  574.454476] Lustre: 2691:0:(client.c:2329:ptlrpc_expire_one_request()) Skipped 4 previous similar messages
+[  574.454490] Lustre: <mountname>-MDT0000-mdc-ffff8a99ce492800: Connection to <mountname>-MDT0000 (at <private-ip>@tcp) was lost; in progress operations using this service will wait for recovery to complete
+[  586.486402] Lustre: 1021:0:(client.c:2329:ptlrpc_expire_one_request()) @@@ Request sent has failed due to network error: [sent 1789016372/real 1789016388]  req@000000007ca1f90c x1875919456643264/t0(0) o400-><mountname>-OST0002-osc-ffff8a99ce492800@<private-ip>@tcp:28/4 lens 224/224 e 0 to 1 dl 1789016396 ref 1 fl Rpc:eXNQr/0/ffffffff rc 0/-1 job:''
+[  586.486407] Lustre: 1021:0:(client.c:2329:ptlrpc_expire_one_request()) Skipped 3 previous similar messages
+[  586.486418] Lustre: <mountname>-OST0002-osc-ffff8a99ce492800: Connection to <mountname>-OST0002 (at <private-ip>@tcp) was lost; in progress operations using this service will wait for recovery to complete
+[  586.486420] Lustre: Skipped 3 previous similar messages
+[  589.302382] LustreError: 166-1: MGC<private-ip>@tcp: Connection to MGS (at <private-ip>@tcp) was lost; in progress operations using this service will fail
+[  638.454970] Lustre: MGC<private-ip>@tcp: Connection restored to <private-ip>@tcp (at <private-ip>@tcp)
+[  638.454975] Lustre: Skipped 5 previous similar messages
++ echo '--- import states after restore ---'
+--- import states after restore ---
++ lctl get_param -n 'osc.*.state'
++ grep -E current_state
++ sort
++ uniq -c
+      4 current_state: FULL
++ lfs check servers
+<mountname>-OST0000-osc-ffff8a99ce492800 active.
+<mountname>-OST0001-osc-ffff8a99ce492800 active.
+<mountname>-OST0002-osc-ffff8a99ce492800 active.
+<mountname>-OST0003-osc-ffff8a99ce492800 active.
+<mountname>-MDT0000-mdc-ffff8a99ce492800 active.
+MGC<private-ip>@tcp active.
++ cat /tmp/outage-write-status
+background write exit: 0
++ echo '--- canary intact? ---'
+--- canary intact? ---
++ md5sum -c /tmp/canary-md5
+/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/canary.bin: OK
++ echo '--- new traffic after recovery ---'
+--- new traffic after recovery ---
++ dd if=/dev/urandom of=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/after-recovery.bin bs=1M count=64 status=none conv=fsync
++ echo 3
++ md5sum /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/after-recovery.bin
++ md5sum -c /tmp/after-md5
+/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z/after-recovery.bin: OK
+[STEP 07-restore-connection] ok
+[STEP 08-health-scan] Decode the kernel taint and scan for client faults
+++ cat /proc/sys/kernel/tainted
++ TAINT=12288
++ echo 'kernel tainted value: 12288'
+kernel tainted value: 12288
++ python3 -c 'import sys; bits={0:'\''proprietary module'\'',1:'\''forced module load'\'',2:'\''cpu out of spec'\'',3:'\''forced rmmod'\'',4:'\''machine check'\'',5:'\''bad page'\'',6:'\''user set'\'',7:'\''died recently'\'',9:'\''warning issued'\'',10:'\''staging driver'\'',11:'\''firmware workaround'\'',12:'\''out-of-tree module'\'',13:'\''unsigned module'\'',14:'\''soft lockup'\''}; v=int(sys.argv[1]); print('\''taint bits set:'\'', '\'', '\''.join(f'\''{k} ({n})'\'' for k,n in bits.items() if v>>k & 1) or '\''none'\'')' 12288
+taint bits set: 12 (out-of-tree module), 13 (unsigned module)
++ echo '--- out-of-tree and unsigned taint origin ---'
+--- out-of-tree and unsigned taint origin ---
++ dmesg
++ grep -iE 'taints kernel|module verification failed'
++ head -5
+[  147.165942] libcfs: loading out-of-tree module taints kernel.
+[  147.165951] libcfs: module verification failed: signature and/or required key missing - tainting kernel
++ echo '--- client faults: BUG, oops, call trace, lockup ---'
+--- client faults: BUG, oops, call trace, lockup ---
++ dmesg
++ grep -iE 'BUG:|Oops|Call Trace|general protection|NULL pointer dereference|soft lockup|hung task'
++ echo none
+none
++ echo '--- kernel warnings raised at runtime, boot-time CPU notices excluded ---'
+--- kernel warnings raised at runtime, boot-time CPU notices excluded ---
++ dmesg
++ grep -E WARNING:
++ grep -viE 'RETBleed|Spectre|i8042|IMA'
++ echo none
+none
++ echo '--- LustreError lines by kind ---'
+--- LustreError lines by kind ---
++ dmesg
++ grep -o 'LustreError: [0-9-]*[:-][^:]*'
++ sort
++ uniq -c
++ sort -rn
++ head -10
+      2 LustreError: 166-1: MGC<private-ip>@tcp
++ echo '--- client statistics ---'
+--- client statistics ---
++ lctl get_param -n 'llite.*.stats'
++ head -16
+snapshot_time             1789016532.594625062 secs.nsecs
+start_time                1789015950.569333889 secs.nsecs
+elapsed_time              582.025291173 secs.nsecs
+read_bytes                18836 samples [bytes] 2 32768 603981172 19791209304932
+write_bytes               66322 samples [bytes] 2 1048576 4697621868 703687441781572
+read                      18836 samples [usec] 3 32438 4405368 8150250428
+write                     66322 samples [usec] 18 4103071 7790967 16835644634349
+open                      1263 samples [usec] 1 653 185160 81046682
+close                     1263 samples [usec] 1 593 18870 5760942
+seek                      10 samples [usec] 0 1 7 7
+fsync                     14 samples [usec] 292095 1197586 7152882 4390346965132
+readdir                   4 samples [usec] 0 841 976 725506
+truncate                  408 samples [usec] 439 38412 313535 3086067269
+flock                     800 samples [usec] 147 82599 4530692 62479141058
+getattr                   465 samples [usec] 1 1051 248513 146203745
+unlink                    14 samples [usec] 198 1009 4684 2106192
+[STEP 08-health-scan] ok
+[STEP 09-cleanup] Remove the load test data
+++ cat /tmp/behaviour-dir
++ DIR=/mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ rm -rf /mnt/fsx/behaviour-check-<client-hostname>-20260910T045800Z
++ tail -1
+++ cat /tmp/behaviour-dir
+++ xargs dirname
++ df -h /mnt/fsx
+<private-ip>@tcp:/<mountname>  4.5T  2.7G  4.5T   1% /mnt/fsx
+[STEP 09-cleanup] ok
+[RUNNER] result: ok
+
+--- ssm status: Success (command <ssm-command-id>) ---

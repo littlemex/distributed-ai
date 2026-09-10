@@ -1,0 +1,54 @@
+{
+  "name": "Install the module built in another suite for the same kernel release",
+  "tasks": [
+    {
+      "id": "01-add-cross-suite",
+      "name": "Add the second suite alongside the release-matching suite",
+      "commands": [
+        "SUITE=${CROSS_SUITE:?CROSS_SUITE must be set, for example jammy}",
+        "echo \"deb [signed-by=/usr/share/keyrings/fsx-ubuntu-public-key.gpg] https://fsx-lustre-client-repo.s3.amazonaws.com/ubuntu ${SUITE} main\" > /etc/apt/sources.list.d/fsxlustreclientrepo-${SUITE}.list",
+        "cat /etc/apt/sources.list.d/fsxlustreclientrepo-${SUITE}.list",
+        "apt-get -o DPkg::Lock::Timeout=600 update"
+      ]
+    },
+    {
+      "id": "02-show-candidate-origin",
+      "name": "Show which suite provides the module for the running kernel",
+      "commands": [
+        "apt-cache policy \"lustre-client-modules-$(uname -r)\" | grep -E '^[a-z]|Installed:|Candidate:'",
+        "apt-cache policy lustre-client-utils | grep -E '^[a-z]|Installed:|Candidate:'"
+      ]
+    },
+    {
+      "id": "03-install-module-and-utils",
+      "name": "Install the module for the running kernel and the userspace tools",
+      "commands": [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "apt-get -o DPkg::Lock::Timeout=600 install -y \"lustre-client-modules-$(uname -r)\" lustre-client-utils",
+        "dpkg -l | grep -E 'lustre' || true"
+      ]
+    },
+    {
+      "id": "04-inspect-module",
+      "name": "Compare the module vermagic with the running kernel",
+      "commands": [
+        "modinfo lustre | head -20",
+        "echo \"running kernel: $(uname -r)\"",
+        "echo \"module vermagic: $(modinfo -F vermagic lustre)\"",
+        "test \"$(modinfo -F vermagic lustre | awk '{print $1}')\" = \"$(uname -r)\""
+      ]
+    },
+    {
+      "id": "05-load-module",
+      "name": "Load the Lustre modules into the running kernel",
+      "commands": [
+        "modprobe lnet",
+        "modprobe lustre",
+        "lsmod | grep -E '^(lustre|lnet|ptlrpc|obdclass|libcfs)' | sort",
+        "lctl network up || true",
+        "lctl list_nids || true",
+        "dmesg | grep -iE 'lustre|lnet' | tail -20 || true"
+      ]
+    }
+  ]
+}

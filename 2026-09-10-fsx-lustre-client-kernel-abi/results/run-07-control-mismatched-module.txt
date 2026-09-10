@@ -1,0 +1,189 @@
+[RUNNER] task file: /opt/task-runner/tasks/07-control-mismatched-module.json
+[RUNNER] name: Control: a module built for a different kernel release must be rejected
+[RUNNER] steps: 5
+[STEP 01-install-mismatched-package] Install a module package built for another kernel release
++ export DEBIAN_FRONTEND=noninteractive
++ DEBIAN_FRONTEND=noninteractive
++ OTHER=6.8.0-1057-aws
++ apt-get -o DPkg::Lock::Timeout=600 install -y lustre-client-modules-6.8.0-1057-aws
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following NEW packages will be installed:
+  lustre-client-modules-6.8.0-1057-aws
+0 upgraded, 1 newly installed, 0 to remove and 6 not upgraded.
+Need to get 25.5 MB of archives.
+After this operation, 129 MB of additional disk space will be used.
+Get:1 https://fsx-lustre-client-repo.s3.amazonaws.com/ubuntu jammy/main amd64 lustre-client-modules-6.8.0-1057-aws amd64 2.15.6-1fsx32 [25.5 MB]
+Fetched 25.5 MB in 3s (8215 kB/s)
+Selecting previously unselected package lustre-client-modules-6.8.0-1057-aws.
+(Reading database ... 
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 115545 files and directories currently installed.)
+Preparing to unpack .../lustre-client-modules-6.8.0-1057-aws_2.15.6-1fsx32_amd64.deb ...
+Unpacking lustre-client-modules-6.8.0-1057-aws (2.15.6-1fsx32) ...
+Setting up lustre-client-modules-6.8.0-1057-aws (2.15.6-1fsx32) ...
+depmod: WARNING: could not open modules.order at /lib/modules/6.8.0-1057-aws: No such file or directory
+depmod: WARNING: could not open modules.builtin at /lib/modules/6.8.0-1057-aws: No such file or directory
+depmod: WARNING: could not open modules.builtin.modinfo at /lib/modules/6.8.0-1057-aws: No such file or directory
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
++ ls /lib/modules/6.8.0-1057-aws/updates/kernel/net/ /lib/modules/6.8.0-1057-aws/updates/kernel/fs/
+/lib/modules/6.8.0-1057-aws/updates/kernel/fs/:
+fid.ko
+fld.ko
+lmv.ko
+lov.ko
+lustre.ko
+mdc.ko
+mgc.ko
+obdclass.ko
+obdecho.ko
+osc.ko
+ptlrpc.ko
+
+/lib/modules/6.8.0-1057-aws/updates/kernel/net/:
+kefalnd.ko
+ko2iblnd.ko
+ksocklnd.ko
+libcfs.ko
+lnet.ko
+lnet_selftest.ko
+[STEP 01-install-mismatched-package] ok
+[STEP 02-compare-vermagic] Compare the vermagic of both builds with the running kernel
++ OTHER=6.8.0-1057-aws
+++ uname -r
++ echo 'running kernel:   6.8.0-1063-aws'
+running kernel:   6.8.0-1063-aws
++++ uname -r
+++ modinfo -F vermagic /lib/modules/6.8.0-1063-aws/updates/kernel/net/libcfs.ko
++ echo 'matched build:    6.8.0-1063-aws SMP mod_unload modversions '
+matched build:    6.8.0-1063-aws SMP mod_unload modversions 
+++ modinfo -F vermagic /lib/modules/6.8.0-1057-aws/updates/kernel/net/libcfs.ko
++ echo 'mismatched build: 6.8.0-1057-aws SMP mod_unload modversions '
+mismatched build: 6.8.0-1057-aws SMP mod_unload modversions 
+[STEP 02-compare-vermagic] ok
+[STEP 03-attempt-load] Attempt to load the mismatched build into the running kernel
++ OTHER=6.8.0-1057-aws
++ rmmod lustre lmv mdc lov osc fid fld ptlrpc obdclass ksocklnd lnet libcfs
++ true
++ lsmod
++ grep -cE '^(lustre|lnet|libcfs)'
+3
++ insmod /lib/modules/6.8.0-1057-aws/updates/kernel/net/libcfs.ko
+insmod: ERROR: could not insert module /lib/modules/6.8.0-1057-aws/updates/kernel/net/libcfs.ko: Invalid module format
+[STEP 03-attempt-load] exit 1 (allow_failure)
+[STEP 04-report-rejection] Report why the kernel rejected the mismatched build
++ dmesg
++ tail -5
+[  257.929730] bash (3267): drop_caches: 3
+[  260.855714] bash (3302): drop_caches: 3
+[  261.836234] Lustre: Unmounted <mountname>-client
+[  261.887288] Lustre: Mounted <mountname>-client
+[  353.206636] libcfs: disagrees about version of symbol module_layout
++ echo '--- the matched build still loads ---'
+--- the matched build still loads ---
++ modprobe lustre
++ lsmod
++ grep -E '^(lustre|lnet|libcfs)'
++ sort
+libcfs                237568  12 fld,lnet,osc,fid,obdclass,ptlrpc,mgc,ksocklnd,lov,mdc,lmv,lustre
+lnet                  827392  8 osc,obdclass,ptlrpc,mgc,ksocklnd,lmv,lustre
+lustre               1171456  40
++ modinfo -F vermagic lustre
+6.8.0-1063-aws SMP mod_unload modversions 
+[STEP 04-report-rejection] ok
+[STEP 05-remove-mismatched-package] Remove the mismatched package
++ export DEBIAN_FRONTEND=noninteractive
++ DEBIAN_FRONTEND=noninteractive
++ OTHER=6.8.0-1057-aws
++ apt-get -o DPkg::Lock::Timeout=600 purge -y lustre-client-modules-6.8.0-1057-aws
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following packages will be REMOVED:
+  lustre-client-modules-6.8.0-1057-aws*
+0 upgraded, 0 newly installed, 1 to remove and 6 not upgraded.
+After this operation, 129 MB disk space will be freed.
+(Reading database ... 
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 115569 files and directories currently installed.)
+Removing lustre-client-modules-6.8.0-1057-aws (2.15.6-1fsx32) ...
+(Reading database ... 
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 115544 files and directories currently installed.)
+Purging configuration files for lustre-client-modules-6.8.0-1057-aws (2.15.6-1fsx32) ...
+dpkg: warning: while removing lustre-client-modules-6.8.0-1057-aws, directory '/lib/modules/6.8.0-1057-aws' not empty so not removed
++ dpkg-query -W '-f=${Package} ${Version}\n' 'lustre*'
++ sort
+lustre-client-modules 
+lustre-client-modules-6.8.0-1063-aws 2.15.6-1fsx34
+lustre-client-utils 2.15.6-1fsx34
+lustre-utils 
+[STEP 05-remove-mismatched-package] ok
+[RUNNER] result: ok
+
+--- ssm status: Success (command <ssm-command-id>) ---
