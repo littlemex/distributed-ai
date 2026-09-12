@@ -1,0 +1,139 @@
+# Default values for vllm-serving.
+# One release serves exactly one model on one GPU node (single-node tensor parallel).
+# Per-model values live in serving/vllm/overlays/<normalized-model>.yaml and are layered
+# on top of these defaults with `-f`. Model facts (the source of these tuning choices)
+# live in serving/models/<normalized-model>.yaml.
+
+# --- container image (SDK-pinned; upstream unless a model needs a newer kernel) ---
+image: vllm/vllm-openai:v0.27.1
+imagePullPolicy: IfNotPresent
+
+# --- model ---
+# model is the Hugging Face repo id (model_id). servedModelName defaults to it.
+model: Qwen/Qwen3.8-27B
+servedModelName: ""
+
+# --- node selection (capability is encoded in the pool NAME, not the instance type) ---
+# The chart selects the pool by its node-role label. The infra module owns which
+# instance types back that pool (see infra/eks accelerator_pools). The chart never
+# hardcodes an instance type.
+nodeRole: gpu-l40s
+
+# --- accelerator + parallelism ---
+gpuCount: 4            # whole GPUs requested (== tensorParallelSize * pipelineParallelSize)
+tensorParallelSize: 4
+pipelineParallelSize: 1
+
+# --- serving tuning ---
+maxModelLen: 32768          # model native is 262144; capped for a first bring-up
+gpuMemoryUtilization: 0.85  # hybrid linear-attention state is accounted separately from KV
+maxNumSeqs: 16              # conservative: recurrent state caps concurrency, avoid preemption
+dtype: bfloat16
+# Online quantization (vLLM --quantization). "fp8" halves weight bytes read per decode token on
+# Ada/L40S (near-lossless, no checkpoint needed); leave empty to serve the checkpoint's native dtype.
+# Note: keep `model` as the base repo (it carries the MTP head); the official FP8 checkpoint would
+# change the derived deploy/service name and break the agents, so we quantize online instead.
+quantization: ""
+# Cap multimodal items per request (vLLM --limit-mm-per-prompt, JSON). Guards GPU memory against a
+# runaway number of images/video frames. Example: '{"image": 2, "video": 1}'. Empty = vLLM default.
+limitMmPerPrompt: ""
+# Whether to reuse the KV of a shared prompt prefix across requests. Both branches are rendered as an
+# explicit flag, and that is the fix for a bug that cost this project a wrong published conclusion: the
+# template used to emit `--no-enable-prefix-caching` when false and NOTHING when true, and vLLM's
+# `enable_prefix_caching` argument defaults to None meaning "take the model's default". For a hybrid
+# attention model that default is off — vLLM's own comment is "Hybrid models support prefix caching but
+# keep it opt-in for now while the feature matures" — so setting this to true changed nothing, the engine
+# kept reporting False, and that was written up as the architecture being incapable. It is not; it is
+# opt-in, and an opt-in needs the flag.
+enablePrefixCaching: false
+enforceEager: false         # set true if cudagraph capture fails on a new architecture
+extraArgs: []               # escape hatch; keep empty and justified in the overlay
+
+# --- tool calling (an agent backend needs structured tool calls, not just chat) ---
+# Pick the parser that matches the model's chat_template tool-call format:
+#   qwen3_coder -> <tool_call><function=..><parameter=..> XML (Qwen3.x)
+#   hermes      -> <tool_call>{json}</tool_call>
+enableAutoToolChoice: false
+toolCallParser: ""
+
+# --- chat template kwargs (server-side default; a per-request chat_template_kwargs overrides) ---
+# For thinking models, serve in non-thinking mode by default: '{"enable_thinking": false}'.
+# Qwen3-family thinking + greedy/low-temp decoding is a known endless-repetition trap, and a
+# coding-agent backend does not want a reasoning preamble on every turn, so we default it off.
+chatTemplateKwargs: ""
+
+# --- HF config overrides (e.g. RoPE/YaRN scaling to extend context) ---
+# JSON string passed to vLLM --hf-overrides. For YaRN:
+#   '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":262144}}'
+# Set maxModelLen = original * factor. YaRN trades some accuracy for length.
+hfOverrides: ""
+
+# --- speculative decoding (JSON string for vLLM --speculative-config) ---
+# Qwen3.8-27B ships a 1-layer MTP head (config text_config.mtp_num_hidden_layers=1), so MTP
+# self-speculation needs NO separate draft model and is lossless (target-verified). Example:
+#   '{"method": "mtp", "num_speculative_tokens": 3}'
+# num_speculative_tokens > 1 reuses the single MTP layer autoregressively (measured 1.42x at 1,
+# 1.69x at 3 vs no-spec, FP8/random). Leave empty to disable speculative decoding.
+# Tokens the scheduler may put through in one step. Empty lets vLLM choose, which is right
+# until speculative decoding is on: with MTP the engine derates this to 2048 and says so in
+# a startup warning, and that becomes the throughput ceiling long before the KV cache does.
+maxNumBatchedTokens: ""
+
+# How much of ONE request may enter a single scheduler step. This is not the same knob as
+# maxNumBatchedTokens, and the difference is the whole reason it is here: that one is the step's
+# total budget, so shrinking it shrinks the step for every request including decodes, while this one
+# caps a single long prefill's share and leaves the rest of the budget for everyone else
+# (vllm/v1/core/sched/scheduler.py: `if 0 < long_prefill_token_threshold < num_new_tokens`).
+# 0 disables it, which is vLLM's default and the behaviour every measurement so far was taken under.
+longPrefillTokenThreshold: 0
+
+# Let the engine account for its own model-FLOP and memory-bandwidth utilisation
+# (`vllm:estimated_flops_per_gpu`, `estimated_read_bytes_per_gpu`, `estimated_write_bytes_per_gpu`).
+# Off by default in vLLM, and the counters read a flat 0.0 until it is on, which is indistinguishable from
+# an idle engine. Worth having permanently: a throughput number is only a hardware limit if MFU or MBU is
+# near the roof, and without these it takes a back-of-envelope guess at active parameters to find out.
+enableMfuMetrics: true
+
+# Report per-request cached prompt tokens in the OpenAI usage block
+# (`usage.prompt_tokens_details.cached_tokens`). Off by default in vLLM, and a benchmark that cannot
+# see it has to fall back to saying "no cache reporting" — which is indistinguishable from "no cache".
+# AgentX prints exactly that complaint when it is missing, and on this box the answer happens to be
+# zero either way, so the flag is what makes the zero a measurement.
+promptTokensDetails: true
+
+# fcfs or priority. With priority, a request's `priority` field orders admission and preemption
+# (lower runs first), which is what lets one family run only in the slack another leaves. Requires
+# clients to set it: any non-zero priority against an fcfs engine is an error, not a hint.
+schedulingPolicy: ""
+
+speculativeConfig: ""
+
+# --- extra container env (e.g. VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 for YaRN-extended context) ---
+extraEnv: {}
+
+# --- resources (host RAM + shared memory, NOT VRAM) ---
+cpu: "8"
+memory: 64Gi
+shmSize: 16Gi               # /dev/shm for NCCL / TP worker tensor exchange (emptyDir Memory)
+
+# --- weights / HF cache ---
+# emptyDir: weights re-download on every pod start (fine for a toy / single model).
+# existingClaim: bind a pre-created static RWX PVC to persist the cache across pods.
+storage:
+  hfCache:
+    type: emptyDir            # emptyDir | existingClaim
+    existingClaimName: ""
+    sizeLimit: 120Gi
+
+# --- optional Hugging Face token (gated models). Qwen3.8-27B is ungated. ---
+hfTokenSecret: ""            # name of a Secret with key `token`
+
+# --- service ---
+port: 8000
+replicas: 1
+
+# Cold start on a new architecture = node launch + image pull + 54GiB download + compile.
+# startupProbe budget = periodSeconds * failureThreshold.
+startupPeriodSeconds: 30
+startupFailureThreshold: 80  # ~40 min
+progressDeadlineSeconds: 3000

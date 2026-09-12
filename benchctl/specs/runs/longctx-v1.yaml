@@ -1,0 +1,89 @@
+# The family the economics favour: tens of thousands of input tokens, one letter out. The box's input is a
+# quarter of the cheapest API's and its output is barely cheaper, so the saving per request scales with the
+# input -- which is why this run exists and the classification one was only the plumbing.
+id: 2026-08-27-longctx-v1
+serving_ref: sha256:PLACEHOLDER-set-by-deploy
+
+# Every api layer's rates are resolved from the gateway's own card, `specs/gateway-rates.json`,
+# keyed on the model alias. None are written here on purpose: `gemma-4` was carried at $0.30
+# input against the card's $5.00 and published as the cheapest layer on two frontiers, and
+# nothing about a wrong price looks wrong. `benchctl validate` refuses a literal that disagrees.
+layers:
+  - id: box-qwen36-tp2x2
+    kind: self_hosted
+    model: Qwen/Qwen3.6-35B-A3B
+    endpoint: http://qwen-serving.qwen-trial.svc.cluster.local:8000/v1/chat/completions
+    hourly_usd: 15.2174
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+    input_usd_per_mtok: 0.236
+    # Measured, not assumed: benchctl/cached_prefill_rate.py, 2026-08-28, 224,620 tok/s of cached prefill
+    # against 18,417 fresh at 16 in flight, which is 8.2% of a fresh token. Without this the box pays the
+    # fresh rate for tokens its prefix cache served, which is a bias against it worth 72.5% of the prompt
+    # on the traffic that shares a prefix.
+    cache_read_usd_per_mtok: 0.0188
+    output_usd_per_mtok: 4.12
+    pricing_status: measured
+  - id: api-haiku-4-5
+    kind: api
+    model: claude-haiku-4-5
+    endpoint: https://d8b03j8erit4k.cloudfront.net/v1/chat/completions
+
+suites:
+  - id: longctx-mc-v1
+    family: long_context_choice
+    items: specs/items/longctx-mc-v1.jsonl
+    items_provenance: public-benchmark   # LongBench-v2, filtered to fit the 262k window
+    task_plugin: tasks.longctx_mc
+    scorer: scorers.exact_label
+    baseline_layer: api-haiku-4-5
+    floor:
+      kind: paired_non_inferiority
+      metric: exact_choice
+      margin_pp: 4.0        # wider than classification: 24 items cannot resolve two points
+      confidence: 0.80
+    length_bins: [20000, 60000, 100000]
+
+policies:
+  - id: direct
+    steps:
+      - layer_ref: box-qwen36-tp2x2
+
+operation_points:
+  - id: quality-c1
+    cell_kind: quality
+    concurrency: 1
+    input_tokens: 24000
+    output_tokens: 6
+    ephemeral_storage: 8Gi
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+  # Sixteen, not sixty-four: at this input length prefill is compute-bound and saturates early, so a
+  # higher number would only add queueing. The classification family's shape saturated at sixty-four.
+  - id: perf-c16
+    cell_kind: perf
+    concurrency: 16
+    input_tokens: 24000
+    output_tokens: 6
+    ephemeral_storage: 30Gi
+    serving_ref: sha256:PLACEHOLDER-set-by-deploy
+    replicas: 2
+    tensor_parallel: 2
+
+cells:
+  - id: lc-box-quality
+    suite: longctx-mc-v1
+    layer: box-qwen36-tp2x2
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260827
+  - id: lc-baseline-quality
+    suite: longctx-mc-v1
+    layer: api-haiku-4-5
+    policy: direct
+    operation_point: quality-c1
+    seed: 20260827
+  - id: lc-box-perf
+    suite: longctx-mc-v1
+    layer: box-qwen36-tp2x2
+    policy: direct
+    operation_point: perf-c16
+    seed: 20260827

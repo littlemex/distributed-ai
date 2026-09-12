@@ -1,0 +1,71 @@
+[WARNING] context window and capabilities are unverified for: sclv/claude-fable-5, sclv/claude-opus-5, sclv/claude-sonnet-5, sclv/gpt-5.6-sol, sclv/gpt-5.6-terra, sclv/grok-4.6, sclv/gemma-4, sclv/nemotron-super-3-120b, sclv/qwen3-next-80b
+[INFO] 10 arms; 484 complete on calibration, 693 on test
+[INFO] this is a screen on the model axis: v1 holds no cell for a member at a non-default effort, so it can reject a design but cannot clear one
+[INFO] re-ask flip rate measured on 10 arms, worst local/qwen3.8-27b at 20.0%
+
+== lambda = 0 ==
+    strongest on calibration: sclv/claude-fable-5, sclv/claude-opus-5, sclv/grok-4.6, sclv/gpt-5.6-sol, sclv/claude-sonnet-5
+
+    discordance among the 5 strongest arms (accuracy only)
+    pair                                                       discordant     net
+    sclv/gpt-5.6-sol / sclv/claude-sonnet-5                        11.8%   +2.3%
+    sclv/grok-4.6 / sclv/claude-sonnet-5                           11.5%   +4.3%
+    sclv/claude-opus-5 / sclv/claude-sonnet-5                      11.1%   +7.1%
+    sclv/claude-fable-5 / sclv/claude-sonnet-5                     10.7%   +6.6%
+    sclv/claude-fable-5 / sclv/gpt-5.6-sol                          8.9%   +4.3%
+    sclv/claude-opus-5 / sclv/grok-4.6                              7.6%   +2.7%
+    sclv/claude-opus-5 / sclv/gpt-5.6-sol                           7.6%   +4.8%
+    sclv/claude-fable-5 / sclv/grok-4.6                             7.5%   +2.3%
+    sclv/grok-4.6 / sclv/gpt-5.6-sol                                6.6%   +2.0%
+    sclv/claude-fable-5 / sclv/claude-opus-5                        5.3%   -0.4%
+    range 5.3% to 11.8%, median 8.9%
+
+    closed-form screen, paired binary, 5% two-sided at 80% power
+    most discordant pair    d=11.8%  MDE at n=693:  3.66%   n for 1%:   9,288   n for 2%:   2,322
+    median pair             d= 8.9%  MDE at n=693:  3.18%   n for 1%:   7,023   n for 2%:   1,756
+    least discordant pair   d= 5.3%  MDE at n=693:  2.46%   n for 1%:   4,191   n for 2%:   1,048
+
+    simulated on the two strongest (sclv/claude-fable-5 vs sclv/claude-opus-5), observed paired difference -0.0043, sd 0.2312
+    of that variance 0.0292 is re-asking (disagreement 1.7% and 4.2%) and 0.0243 is the arms differing
+    1 sample(s)/cell, Δ=1%: power at n=693 is 23%; 80% needs n≈4,193
+    1 sample(s)/cell, Δ=2%: power at n=693 is 64%; 80% needs n≈1,193
+    3 sample(s)/cell, Δ=1%: power at n=693 is 31%; 80% needs n≈2,693
+    3 sample(s)/cell, Δ=2%: power at n=693 is 81%; 80% needs n≈693
+
+== lambda = 20 ==
+    strongest on calibration: sclv/grok-4.6, sclv/gpt-5.6-sol, sclv/gpt-5.6-terra, sclv/claude-opus-5, sclv/claude-sonnet-5
+
+    discordance among the 5 strongest arms (accuracy only)
+    pair                                                       discordant     net
+    sclv/gpt-5.6-terra / sclv/claude-sonnet-5                      14.4%   -0.6%
+    sclv/gpt-5.6-sol / sclv/claude-sonnet-5                        11.8%   +2.3%
+    sclv/grok-4.6 / sclv/claude-sonnet-5                           11.5%   +4.3%
+    sclv/claude-opus-5 / sclv/claude-sonnet-5                      11.1%   +7.1%
+    sclv/gpt-5.6-terra / sclv/claude-opus-5                        10.2%   -7.6%
+    sclv/grok-4.6 / sclv/gpt-5.6-terra                              9.5%   +4.9%
+    sclv/grok-4.6 / sclv/claude-opus-5                              7.6%   -2.7%
+    sclv/gpt-5.6-sol / sclv/claude-opus-5                           7.6%   -4.8%
+    sclv/gpt-5.6-sol / sclv/gpt-5.6-terra                           7.5%   +2.9%
+    sclv/grok-4.6 / sclv/gpt-5.6-sol                                6.6%   +2.0%
+    range 6.6% to 14.4%, median 10.2%
+
+    closed-form screen, paired binary, 5% two-sided at 80% power
+    most discordant pair    d=14.4%  MDE at n=693:  4.04%   n for 1%:  11,326   n for 2%:   2,832
+    median pair             d=10.2%  MDE at n=693:  3.41%   n for 1%:   8,042   n for 2%:   2,011
+    least discordant pair   d= 6.6%  MDE at n=693:  2.74%   n for 1%:   5,210   n for 2%:   1,303
+
+    simulated on the two strongest (sclv/grok-4.6 vs sclv/gpt-5.6-sol), observed paired difference +0.0255, sd 0.2888
+    of that variance 0.0335 is re-asking (disagreement 5.0% and 1.7%) and 0.0498 is the arms differing
+    1 sample(s)/cell, Δ=1%: power at n=693 is 14%; 80% needs n≈6,193
+    1 sample(s)/cell, Δ=2%: power at n=693 is 45%; 80% needs n≈1,693
+    3 sample(s)/cell, Δ=1%: power at n=693 is 19%; 80% needs n≈4,943
+    3 sample(s)/cell, Δ=2%: power at n=693 is 58%; 80% needs n≈1,193
+
+== what a design that passes would cost ==
+      693 questions x 19 arms x 1 asks =  13,167 calls   ~$53
+      693 questions x 19 arms x 3 asks =  39,501 calls   ~$158
+     1200 questions x 19 arms x 3 asks =  68,400 calls   ~$274
+     2700 questions x 19 arms x 3 asks = 153,900 calls   ~$617
+    priced at v1's measured tokens per member, so it is a floor: a higher effort level spends more, and by how much is one of the things the pilot is for
+
+[INFO] the pilot the screen cannot replace: the effort axis needs its own discordance, measured on a member against its own higher levels. To pin a discordance near 10% to within half its value takes about 140 questions per pair; to within a quarter, about 550.

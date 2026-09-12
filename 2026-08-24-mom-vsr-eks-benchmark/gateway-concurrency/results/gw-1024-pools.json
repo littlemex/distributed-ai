@@ -1,0 +1,141 @@
+{
+  "config": {
+    "target": "gateway",
+    "base_url": "https://d8b03j8erit4k.cloudfront.net",
+    "api_key_file": "/root/gw-pools/.sclv-key",
+    "model": "gemma-4",
+    "direct_transport": "mantle",
+    "direct_bedrock_model_id": "google.gemma-4-31b",
+    "direct_region": "us-east-2",
+    "concurrency": [
+      1,
+      8,
+      64,
+      256,
+      512,
+      1024
+    ],
+    "requests_multiplier": 2,
+    "min_requests_per_stage": 8,
+    "max_requests_per_stage": 1024,
+    "max_tokens": 16,
+    "stream": false,
+    "prompt": "Reply with a single short sentence about the weather.",
+    "timeout": 180.0,
+    "stage_gap_s": 8.0,
+    "out": "/root/gw-pools/gw-1024-pools.json"
+  },
+  "stages": [
+    {
+      "concurrency": 1,
+      "n_requests": 8,
+      "duration_s": 6.008,
+      "n_ok": 8,
+      "n_error": 0,
+      "throughput_ok_req_s": 1.33,
+      "attempted_req_s": 1.33,
+      "lat_p50_ms": 704,
+      "lat_p95_ms": 1576,
+      "lat_max_ms": 1576,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 8
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 8,
+      "n_requests": 16,
+      "duration_s": 1.393,
+      "n_ok": 16,
+      "n_error": 0,
+      "throughput_ok_req_s": 11.49,
+      "attempted_req_s": 11.49,
+      "lat_p50_ms": 512,
+      "lat_p95_ms": 773,
+      "lat_max_ms": 773,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 16
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 64,
+      "n_requests": 128,
+      "duration_s": 1.589,
+      "n_ok": 128,
+      "n_error": 0,
+      "throughput_ok_req_s": 80.58,
+      "attempted_req_s": 80.58,
+      "lat_p50_ms": 435,
+      "lat_p95_ms": 708,
+      "lat_max_ms": 918,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 128
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 256,
+      "n_requests": 512,
+      "duration_s": 2.784,
+      "n_ok": 512,
+      "n_error": 0,
+      "throughput_ok_req_s": 183.9,
+      "attempted_req_s": 183.9,
+      "lat_p50_ms": 811,
+      "lat_p95_ms": 1611,
+      "lat_max_ms": 1935,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 512
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 512,
+      "n_requests": 1024,
+      "duration_s": 10.414,
+      "n_ok": 1024,
+      "n_error": 0,
+      "throughput_ok_req_s": 98.33,
+      "attempted_req_s": 98.33,
+      "lat_p50_ms": 1356,
+      "lat_p95_ms": 2841,
+      "lat_max_ms": 10369,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 1024
+      },
+      "err_counts": {}
+    },
+    {
+      "concurrency": 1024,
+      "n_requests": 1024,
+      "duration_s": 4.492,
+      "n_ok": 1018,
+      "n_error": 6,
+      "throughput_ok_req_s": 226.61,
+      "attempted_req_s": 227.94,
+      "lat_p50_ms": 3326,
+      "lat_p95_ms": 3988,
+      "lat_max_ms": 4373,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 1018,
+        "None": 6
+      },
+      "err_counts": {
+        "client_error:ClientConnectorError": 6
+      }
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+# Mixture-of-Models pool for the VSR benchmark.
+#
+# This file declares WHICH models take part and WHAT ROLE each one plays. It
+# deliberately does not carry addresses, credentials or prices:
+#
+#   - prices and Bedrock model ids come from the gateway's own registry and rate
+#     table (backend/mvp/defaults/{models,pricing}.json in the stratoclave repo),
+#     so the router charges what the gateway charges;
+#   - addresses come from the environment, because they differ per deployment.
+#
+# `build_config.py` joins the three and emits the router and Envoy configs.
+
+schema_version: mom-bench/pool/v1
+
+# How a member is reached. `gateway` members are resolved against the gateway's
+# registry by alias; `direct` members are OpenAI-compatible servers we run.
+#
+# No chat path is declared: Envoy forwards the client's own path to whichever
+# upstream the router selected, and both surfaces serve /v1/chat/completions.
+# Declaring one would turn the backend into a provider-profile endpoint, whose
+# address must then come from a base_url instead of the address Envoy dials.
+transports:
+  gateway:
+    # Host and port of the OpenAI-compatible gateway, from the environment.
+    host_env: STRATOCLAVE_HOST
+    port_env: STRATOCLAVE_PORT
+    protocol: https
+    api_key_env: STRATOCLAVE_API_KEY
+    # Router-internal names are prefixed so Envoy can route on one header match.
+    name_prefix: sclv/
+  direct:
+    protocol: http
+    name_prefix: local/
+
+members:
+  # --- frontier tier, reached through the gateway ---------------------------
+  - alias: claude-fable-5
+    transport: gateway
+    roles: [frontier, terminal_context, panel]
+    facts:
+      capabilities: [chat, reasoning, code, tools, vision, long-context]
+      context_window: 200000
+      source: unverified
+
+  - alias: claude-opus-5
+    transport: gateway
+    roles: [frontier, terminal_context, panel, confidence]
+    facts:
+      capabilities: [chat, reasoning, code, tools, vision, long-context]
+      context_window: 200000
+      source: unverified
+
+  - alias: claude-sonnet-5
+    transport: gateway
+    roles: [balanced, confidence, interactive]
+    facts:
+      capabilities: [chat, reasoning, code, tools, vision, long-context]
+      context_window: 200000
+      source: unverified
+
+  - alias: gpt-5.6-sol
+    transport: gateway
+    roles: [frontier, panel, terminal_context]
+    facts:
+      capabilities: [chat, reasoning, code, tools]
+      context_window: 400000
+      source: unverified
+
+  - alias: gpt-5.6-terra
+    transport: gateway
+    roles: [balanced, confidence, interactive]
+    facts:
+      capabilities: [chat, reasoning, code, tools]
+      context_window: 400000
+      source: unverified
+
+  - alias: grok-4.6
+    transport: gateway
+    roles: [balanced, panel, interactive]
+    facts:
+      capabilities: [chat, reasoning, code, tools]
+      context_window: 256000
+      source: unverified
+
+  - alias: gemma-4
+    transport: gateway
+    roles: [interactive, vision, multimodal_guard]
+    facts:
+      capabilities: [chat, reasoning, vision, multimodal]
+      context_window: 128000
+      source: unverified
+
+  - alias: nemotron-super-3-120b
+    transport: gateway
+    roles: [balanced, panel]
+    facts:
+      capabilities: [chat, reasoning, code, tools]
+      context_window: 128000
+      source: unverified
+
+  - alias: qwen3-next-80b
+    transport: gateway
+    roles: [balanced, panel]
+    facts:
+      capabilities: [chat, reasoning, code, tools, long-context]
+      context_window: 262144
+      source: unverified
+
+  # --- self-hosted member, reached in-cluster -------------------------------
+  # The economy lane and the only member whose serving parameters we control.
+  # Its rate is the gateway's `vllm` row, so a self-hosted call is priced on the
+  # same scale as a Bedrock one.
+  - alias: qwen3.8-27b
+    transport: direct
+    endpoint_env: QWEN_LOCAL_ENDPOINT
+    upstream_model_id: Qwen/Qwen3.8-27B
+    pricing_key: vllm
+    roles: [economy, private, vision, multimodal_guard]
+    facts:
+      capabilities: [chat, reasoning, code, tools, vision, multimodal, long-context]
+      # Measured from the running deployment's --max-model-len.
+      context_window: 1048576
+      source: serving-args
+      # vLLM is started with --max-num-seqs=2, so this member saturates at two
+      # concurrent sequences. Any concurrency the harness drives above that
+      # queues here rather than at the gateway.
+      max_concurrent_sequences: 2
+
+# Reasoning effort levels each member accepts, which turn one member into several
+# arms. Declared per member because the supported set differs by provider and there is
+# no common scale: GPT-5.6 takes none/low/medium/high/xhigh and rejects "minimal",
+# Grok takes "minimal". The levels are therefore never compared across providers as
+# levels — only the measured cost, accuracy and latency of the resulting arms are
+# compared, which is a fact about points in a plane and needs no shared unit.
+#
+# `default` means "send no reasoning_effort field", which is the only setting every
+# member accepts and the one v1 measured. An arm whose level a provider rejects is
+# dropped when the arms are generated rather than failing mid-run, and a level that
+# starts being rejected during a run is recorded as the arm dying, not as missing data:
+# providers change these without notice.
+effort_levels:
+  default: [default]
+  gpt-5.6-sol: [default, none, low, high]
+  gpt-5.6-terra: [default, none, low, high]
+  grok-4.6: [default, minimal, low, high]
+
+# The domain classifier's label set, and the MMLU-Pro categories each label
+# covers. The evaluation is MMLU-Pro, so declaring one domain per category keeps
+# every scored request inside a decision rather than falling through to the
+# default model, which would silently turn a routed arm into a pinned one.
+domains:
+  - biology
+  - business
+  - chemistry
+  - computer science
+  - economics
+  - engineering
+  - health
+  - history
+  - law
+  - math
+  - philosophy
+  - physics
+  - psychology
+  - other
+
+# Quality is what the benchmark measures, so the router must not be seeded with
+# invented quality numbers. Until a calibration run exists, the prior is the
+# operator's own price ordering: the rate table is a statement about which model
+# is expected to be worth more. `build_config.py --quality-from <summary.json>`
+# replaces it with measured per-member accuracy.
+quality:
+  source: price-prior
+  # Rank-normalised over the pool, highest output rate first.
+  range: [0.70, 0.97]

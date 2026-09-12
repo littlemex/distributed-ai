@@ -1,0 +1,25 @@
+[INFO] session: 60 steps, context 20,000 -> 197,000 tokens, 500 output/step
+[INFO] fable: fresh in $10.00/Mtok, cache read $1.000 (10x cheaper), cache write $12.50, out $50.00
+
+== fable baseline vs gpt-5.6-terra with one escalation ==
+    premium all the way            $9.8100
+    cheap all the way              $2.2242   (77% less, quality unknown)
+    best switch point              step 60 of 60 -> $4.6852 (52% less)
+    escalating beats the baseline  steps 9-60 (100% of the way in at the latest)
+    switch tax at the midpoint     $1.3375   = 8.3 warm premium steps
+
+== fable baseline vs grok with one escalation ==
+    premium all the way            $9.8100
+    cheap all the way              $4.1745   (57% less, quality unknown)
+    best switch point              step 60 of 60 -> $6.5738 (33% less)
+    escalating beats the baseline  steps 11-60 (100% of the way in at the latest)
+    switch tax at the midpoint     $1.3375   = 8.3 warm premium steps
+
+== fable baseline vs haiku with one escalation ==
+    premium all the way            $9.8100
+    cheap all the way              $0.9810   (90% less, quality unknown)
+    best switch point              step 60 of 60 -> $3.4733 (65% less)
+    escalating beats the baseline  steps 7-60 (100% of the way in at the latest)
+    switch tax at the midpoint     $1.3375   = 8.3 warm premium steps
+
+[INFO] the tax is paid once per switch, so a trigger that fires k times pays it k times; a policy that escalates and returns pays it on every return too.

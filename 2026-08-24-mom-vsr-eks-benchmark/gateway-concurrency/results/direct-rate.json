@@ -1,0 +1,120 @@
+{
+  "config": {
+    "target": "direct",
+    "base_url": null,
+    "api_key_file": "~/tmp/mom-bench/.sclv-key",
+    "model": "gemma-4",
+    "direct_transport": "mantle",
+    "direct_bedrock_model_id": "google.gemma-4-31b",
+    "direct_region": "us-east-2",
+    "concurrency": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "rate": [
+      25.0,
+      50.0,
+      100.0,
+      200.0
+    ],
+    "rate_duration": 20.0,
+    "requests_multiplier": 3,
+    "min_requests_per_stage": 8,
+    "max_requests_per_stage": 60,
+    "max_tokens": 16,
+    "stream": false,
+    "prompt": "Reply with a single short sentence about the weather.",
+    "timeout": 180.0,
+    "stage_gap_s": 10.0,
+    "out": "/root/gw-rate/direct-rate.json"
+  },
+  "stages": [
+    {
+      "concurrency": 25.0,
+      "n_requests": 501,
+      "duration_s": 56.868,
+      "n_ok": 499,
+      "n_error": 2,
+      "throughput_ok_req_s": 8.77,
+      "attempted_req_s": 8.81,
+      "lat_p50_ms": 230,
+      "lat_p95_ms": 1062,
+      "lat_max_ms": 11217,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 499,
+        "500": 2
+      },
+      "err_counts": {
+        "http_500:unknown": 2
+      },
+      "offered_rate": 25.0
+    },
+    {
+      "concurrency": 50.0,
+      "n_requests": 1001,
+      "duration_s": 52.402,
+      "n_ok": 1000,
+      "n_error": 1,
+      "throughput_ok_req_s": 19.08,
+      "attempted_req_s": 19.1,
+      "lat_p50_ms": 222,
+      "lat_p95_ms": 988,
+      "lat_max_ms": 43099,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 1000,
+        "500": 1
+      },
+      "err_counts": {
+        "http_500:unknown": 1
+      },
+      "offered_rate": 50.0
+    },
+    {
+      "concurrency": 100.0,
+      "n_requests": 2001,
+      "duration_s": 20.507,
+      "n_ok": 2001,
+      "n_error": 0,
+      "throughput_ok_req_s": 97.57,
+      "attempted_req_s": 97.57,
+      "lat_p50_ms": 225,
+      "lat_p95_ms": 681,
+      "lat_max_ms": 5030,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 2001
+      },
+      "err_counts": {},
+      "offered_rate": 100.0
+    },
+    {
+      "concurrency": 200.0,
+      "n_requests": 4001,
+      "duration_s": 40.299,
+      "n_ok": 4001,
+      "n_error": 0,
+      "throughput_ok_req_s": 99.28,
+      "attempted_req_s": 99.28,
+      "lat_p50_ms": 227,
+      "lat_p95_ms": 575,
+      "lat_max_ms": 21903,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "status_counts": {
+        "200": 4001
+      },
+      "err_counts": {},
+      "offered_rate": 200.0
+    }
+  ]
+}
