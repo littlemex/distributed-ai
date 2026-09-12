@@ -1,0 +1,1 @@
+ansible/roles/aws_lustre/files/lustre_installer.sh

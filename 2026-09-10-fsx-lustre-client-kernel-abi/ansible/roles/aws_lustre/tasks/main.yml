@@ -1,0 +1,64 @@
+---
+- name: Select the tasks for the OS family
+  ansible.builtin.include_tasks: "{{ ansible_os_family | lower }}.yml"
+
+- name: Verify the client module matches the running kernel
+  ansible.builtin.command: modinfo -F vermagic lustre
+  register: aws_lustre_vermagic
+  changed_when: false
+
+- name: Require the module to be built for the running kernel
+  ansible.builtin.assert:
+    that: aws_lustre_vermagic.stdout.split()[0] == ansible_kernel
+    fail_msg: >-
+      The installed Lustre module reports {{ aws_lustre_vermagic.stdout.split()[0] }}
+      but the running kernel is {{ ansible_kernel }}. The kernel refuses a module built for
+      another release, so the image would ship a client that cannot load.
+
+- name: Read the loaded module list before loading
+  ansible.builtin.command: lsmod
+  register: aws_lustre_lsmod_before
+  changed_when: false
+
+- name: Load the client module
+  ansible.builtin.command: modprobe lustre
+  changed_when: aws_lustre_lsmod_before.stdout is not search('^lustre ', multiline=True)
+
+- name: Read the loaded module list
+  ansible.builtin.command: lsmod
+  register: aws_lustre_lsmod
+  changed_when: false
+
+- name: Require the client stack to be resident
+  ansible.builtin.assert:
+    that: aws_lustre_lsmod.stdout is search('^' ~ item, multiline=True)
+    fail_msg: "{{ item | trim }} did not load"
+  loop:
+    - "libcfs "
+    - "lnet "
+    - "lustre "
+
+- name: Verify the mount helper
+  ansible.builtin.stat:
+    path: /sbin/mount.lustre
+  register: aws_lustre_mount_helper
+
+- name: Require the mount helper
+  ansible.builtin.assert:
+    that:
+      - aws_lustre_mount_helper.stat.exists
+      - aws_lustre_mount_helper.stat.executable | default(false)
+    fail_msg: >-
+      /sbin/mount.lustre is missing. Without it the kernel receives the raw option list and
+      refuses the mount, so the module alone is not enough.
+
+- name: Report the client version
+  ansible.builtin.command: lctl --version
+  register: aws_lustre_version
+  changed_when: false
+
+- name: Show what the image now carries
+  ansible.builtin.debug:
+    msg: >-
+      Lustre client {{ aws_lustre_version.stdout }} for kernel {{ ansible_kernel }};
+      mounting a file system is left to runtime configuration.

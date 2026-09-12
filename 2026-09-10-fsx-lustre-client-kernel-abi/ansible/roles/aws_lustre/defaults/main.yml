@@ -1,0 +1,31 @@
+---
+# Kernel line to pin before the client is installed, or "" to keep whatever kernel the parent image
+# booted. Empty is the default because the client is built from source here, so which exact releases
+# the repository publishes a module for stops deciding anything. Pin a line when the kernel's own
+# support lifecycle is the reason, for example "linux-aws-lts-24.04" to stay on the LTS line rather
+# than the rolling one. Pinning adds a reboot to the image build.
+aws_lustre_kernel_meta: ""
+
+# build, dkms or binary. An image wants build, because the module then belongs to the artefact and
+# a failed build fails the build. See the header of files/lustre_installer.sh for the trade-off.
+aws_lustre_mode: "build"
+
+# Kernels DKMS may build for, used by the dkms mode only. Empty means the installer derives this
+# from the kernel series the repository publishes modules for, which is what keeps a newly
+# supported series working without a change here. Set a regex only to be stricter than that.
+aws_lustre_kernel_filter: ""
+
+# Install a systemd unit that reports at boot whether the running kernel has a usable client. In
+# build mode a kernel update leaves the image's module behind; in dkms mode an excluded or failed
+# rebuild does the same. Either way the absence is otherwise invisible until a mount fails.
+aws_lustre_install_check_unit: true
+
+# Repository suite; empty means the codename of the running system.
+aws_lustre_repo_suite: ""
+
+# Where the installer is placed on the host.
+aws_lustre_installer_path: "/usr/local/sbin/lustre_installer.sh"
+
+# Amazon Linux 2023 ships the client module inside the kernel package, so only the userspace
+# package is installed there.
+aws_lustre_dnf_package: "lustre-client"

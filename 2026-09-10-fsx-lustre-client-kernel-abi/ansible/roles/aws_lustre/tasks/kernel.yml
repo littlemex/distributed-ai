@@ -1,0 +1,77 @@
+---
+# Entry point used before the image reboots: install the kernel line the client is supported on
+# and make it the default boot entry. Amazon Linux 2023 needs none of this because the module
+# travels inside the kernel package.
+- name: Pin the kernel line
+  when:
+    - ansible_os_family == "Debian"
+    - aws_lustre_kernel_meta | length > 0
+  block:
+    - name: Install the kernel meta package
+      ansible.builtin.apt:
+        name: "{{ aws_lustre_kernel_meta }}"
+        state: present
+        update_cache: true
+
+    # The kernel meta package depends on the image meta package, and only that one names the
+    # concrete release, so the release is read from there rather than guessed from a version.
+    - name: Read what the image meta package depends on
+      ansible.builtin.command: >-
+        dpkg-query -W -f=${Depends}
+        {{ aws_lustre_kernel_meta | regex_replace('^linux-', 'linux-image-') }}
+      register: aws_lustre_kernel_meta_depends
+      changed_when: false
+
+    - name: Derive the kernel release to boot
+      ansible.builtin.set_fact:
+        # regex_search raises when a capture group finds no match, so findall is used and an
+        # empty string is appended to keep first() defined.
+        aws_lustre_target_kernel: >-
+          {{ ((aws_lustre_kernel_meta_depends.stdout
+               | regex_findall('linux-image-([0-9][^, ]*)')) + ['']) | first }}
+
+    - name: Require the release to be resolvable
+      ansible.builtin.assert:
+        that: aws_lustre_target_kernel | length > 0
+        fail_msg: >-
+          could not read a concrete kernel release from what
+          {{ aws_lustre_kernel_meta | regex_replace('^linux-', 'linux-image-') }} depends on:
+          {{ aws_lustre_kernel_meta_depends.stdout }}
+
+    - name: Require the kernel image to be installed
+      ansible.builtin.stat:
+        path: "/boot/vmlinuz-{{ aws_lustre_target_kernel }}"
+      register: aws_lustre_target_image
+
+    - name: Fail without the kernel image
+      ansible.builtin.assert:
+        that: aws_lustre_target_image.stat.exists
+        fail_msg: >-
+          /boot/vmlinuz-{{ aws_lustre_target_kernel }} is missing after installing
+          {{ aws_lustre_kernel_meta }}
+
+    # The images boot the newest installed kernel, which is the rolling one, so the entry has to
+    # be named explicitly. The setting goes into a drop-in because /etc/default/grub.d is sourced
+    # after /etc/default/grub, so anything set there would otherwise win.
+    - name: Select the target kernel as the default boot entry
+      when: ansible_kernel != aws_lustre_target_kernel
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          submenu=$(grep -oP "(?<=submenu ')[^']*" /boot/grub/grub.cfg | head -1)
+          target='{{ aws_lustre_target_kernel | regex_replace('\\.', '\\\\.') }}'
+          entry=$(grep -oP "(?<=menuentry ')[^']*${target}[^']*" /boot/grub/grub.cfg \
+                  | grep -v recovery | head -1)
+          test -n "${submenu}" && test -n "${entry}"
+          printf 'GRUB_DEFAULT="%s>%s"\n' "${submenu}" "${entry}" > /etc/default/grub.d/99-lustre-kernel.cfg
+          cat /etc/default/grub.d/99-lustre-kernel.cfg
+          update-grub
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Report the kernel the image will boot
+      ansible.builtin.debug:
+        msg: >-
+          Target kernel {{ aws_lustre_target_kernel }};
+          running {{ ansible_kernel }};
+          reboot required: {{ ansible_kernel != aws_lustre_target_kernel }}

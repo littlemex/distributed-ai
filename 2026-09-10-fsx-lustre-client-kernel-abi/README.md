@@ -1,173 +1,175 @@
-# FSx for Lustre client modules across Ubuntu suites: kernel ABI verification
+# FSx for Lustre client on Ubuntu: a reference implementation
 
-The FSx for Lustre Ubuntu repository publishes one binary client module per exact kernel
-release, and it publishes those packages per Ubuntu suite. The published sets differ: a
-kernel release can be covered in one suite and absent from another, even when both suites
-ship that same kernel release. Ubuntu 24.04 carries the 6.8 kernel as its GA kernel, and
-Ubuntu 22.04 carries the same 6.8 kernel as a hardware-enablement kernel, so the two
-suites overlap over the whole 6.8 series.
+The Amazon FSx for Lustre client is a kernel module, and the packaged modules are published per
+exact kernel release. The documented install therefore names the running kernel in the package it
+asks for:
 
-This directory answers one question with evidence: **when the repository has no module for
-the kernel release a host is running, but another suite has a module for that exact
-release, does that module work?**
+```bash
+apt install lustre-client-modules-$(uname -r)
+```
 
-It answers it twice, once statically from package contents and once on a running client
-with real file system traffic. It includes the two controls that make the positive result
-meaningful, and it goes past a smoke test: concurrent verified I/O, advisory locking under
-contention, loss and recovery of the connection to the servers, mounting again after a
-reboot, and a scan of the kernel for faults.
+That command fails whenever the repository carries no module for the release the host booted, and
+which releases those are changes over time. This directory builds the client from the published
+source instead, so the kernel release stops being part of what has to be available, and offers the
+two shapes that matters for: a module baked into an image, and a module that follows kernel updates
+on a long-lived host.
 
-## What the answer is
+Everything here is a reference implementation, not an AWS-supported artefact. It uses only public
+packages from the FSx for Lustre client repository.
 
-For kernel release `6.8.0-1063-aws` on Ubuntu 24.04, using the module built in the 22.04
-suite:
+## What is here
 
-| Check | Method | Result |
+| Path | What it is |
+| --- | --- |
+| [`lustre_installer.sh`](lustre_installer.sh) | The whole procedure in one script. Runs standalone on any Ubuntu host and needs no other file from this directory |
+| [`ansible/roles/aws_lustre/`](ansible/roles/aws_lustre) | A role that stages the script, calls it, and then asserts on the host that the module matches the running kernel and that a mount would work |
+| [`ansible/playbook-lustre.yml`](ansible/playbook-lustre.yml) | Applies that role |
+| [`ansible/playbook-lustre-kernel.yml`](ansible/playbook-lustre-kernel.yml) | Pins a kernel line and makes it the default boot entry, for an image build that wants a kernel other than the parent image's |
+| [`packer/lustre-ami.pkr.hcl`](packer/lustre-ami.pkr.hcl) | Bakes the client into an AMI, two stages with a reboot between them |
+
+The script is the only implementation. The role calls it rather than repeating it, so a host outside
+any automation runs exactly what an image build runs.
+
+## The three modes
+
+```bash
+sudo ./lustre_installer.sh -y                # build, the default
+sudo ./lustre_installer.sh -y --mode dkms
+sudo ./lustre_installer.sh -y --mode binary
+```
+
+| Mode | What it does | Right for |
 | --- | --- | --- |
-| Kernel-to-kernel ABI | Compare `Module.symvers` of both `linux-headers` packages | 26,848 exported symbols on both sides, 0 CRC differences, no symbol present on only one side |
-| Module-to-kernel ABI | Parse `vermagic` and the `__versions` records of all 17 objects, compare against the running kernel's symbol table | `vermagic` matches the kernel release; 2,145 kernel symbol imports checked, 0 CRC mismatches |
-| Module loads | `modprobe lustre` on the running kernel | Loaded, `Lustre: Build Version: 2.15.6`, LNet accepting on port 988 |
-| File system works | Mount, 512 MiB write and read back, 200 metadata operations, unmount and mount again | Checksums identical, 751 MB/s sequential write, 816 MB/s sequential read, data intact across the remount |
-| Control: release-matching suite alone | Follow the documented install on the same host with only the 24.04 suite registered | `E: Unable to locate package lustre-client-modules-6.8.0-1063-aws`; the module meta package resolves to a build for a different kernel release |
-| Control: mismatched build | `insmod` a module built for `6.8.0-1057-aws` into the same running kernel | Rejected: `Invalid module format`, `libcfs: disagrees about version of symbol module_layout` |
-| Concurrent load with data verification | `fio`, 8 jobs, direct I/O, 4 GiB written and read back with `crc32c` verification and `verify_fatal=1` | `err=0`, no verification failure, 1178 MiB/s write and 1117 MiB/s read |
-| Sustained mixed load | `fio` random 70/30 read and write, 8 jobs, 180 s, 254 GiB moved | `err=0`, 16.2k read IOPS and 7.0k write IOPS throughout |
-| Advisory locking | Four processes take `flock` on one file and increment a counter 50 times each | Counter reaches exactly 200; `llite` statistics record 800 `flock` operations |
-| Connection loss and recovery | Drop client traffic to port 988, keep a write in flight, restore after 90 s | Imports go to `CONNECTING` and report `Connection to ... was lost`, then `Connection restored`, all imports return to `FULL`, `lfs check servers` reports every target active, the in-flight write completes with exit 0, and checksums before and after the outage match |
-| Mount after a reboot | fstab entry with `_netdev,x-systemd.automount`, reboot, verify | Node comes back on the pinned kernel, the module is loaded, the systemd mount unit is `active` and the canary file's checksum still matches |
-| Source build | Build the module from the `lustre-source` package for the pinned kernel and load it | Produces `lustre-client-modules-6.8.0-1063-aws_2.15.6-1fsx34_amd64.deb` in about 3 minutes; the loaded module is byte-identical to the built one |
-| Installing without a per-kernel package | Register the client source with DKMS and install a second kernel release | DKMS rebuilds during `apt install`, both releases report `installed`, and the file system mounts on the second kernel with no command run in between |
-| One-command install | `lustre_installer.sh -y` on a clean host, then again | 515 s on the first run, 8 s on the second with every step reporting `already`; mount and checksum pass after each |
-| Kernel the client cannot follow | Build for the rolling `7.0.0-1012-aws` release | Fails to compile. First error is `filemap_alloc_folio_noprof` called with too few arguments in `lustre/mdc/mdc_request.c`, then `in_irq` undeclared and an `rb_root_cached` type mismatch |
-| What that failure costs inside a kernel install | Install `linux-image-7.0.0-1012-aws` on a host with the client registered with DKMS, with and without a kernel filter in `dkms.conf` | Without the filter `apt` returns 100 and the kernel package is left `half-configured`; with the filter `apt` returns 0, DKMS skips the kernel, and no module is produced for it |
-| Kernel health | Decode `/proc/sys/kernel/tainted`, scan for faults and runtime warnings | Taint bits 12 and 13 only, which are out-of-tree and unsigned module, both expected for any third-party module and attributed by the kernel to `libcfs`; no BUG, oops, call trace, lockup or hung task; no runtime warning; the only `LustreError` lines are the MGS disconnects caused by the deliberate outage |
+| `build` | Compiles the module for one kernel release and installs it as a package | An image. The module belongs to the artefact, a failed build fails the build, and nothing is compiled later on the running fleet |
+| `dkms` | Registers the source with DKMS, so the module is rebuilt whenever a matching kernel is installed | A host that updates kernels in place, at the price of compiling on that host |
+| `binary` | Installs the published module for the running kernel | A release the repository already covers. It reports and stops when there is none |
 
-The second control matters. Without it, a successful load proves nothing about whether the
-kernel validates anything. The kernel does validate, it rejects a build from a neighbouring
-release of the same series, and it accepts the cross-suite build for the matching release.
+In `dkms` mode the kernel release disappears from everything an operator writes, which is what makes
+it behave like the EFA installer: one entry point, and kernel updates are followed without anyone
+naming a release.
 
-Three facts fell out of the verification and are worth stating separately.
-
-The current Ubuntu 24.04 AMI boots a rolling `linux-aws` kernel from a series the
-repository does not cover at all, so a freshly launched instance has no module available
-under any suite until a kernel is chosen deliberately. `iac/` and
-`setup/tasks/01-install-target-kernel.json` therefore pin the kernel release under test
-rather than assuming the image's kernel.
-
-Userspace and kernel space have different constraints. `lustre-client-utils` is published
-at the same version in both suites, so only the module package needs to come from the other
-suite. The userspace package is not optional either way: without `/sbin/mount.lustre` the
-kernel receives the raw option list and refuses the mount, which reads like a module problem
-and is not one.
-
-The per-kernel package name is avoidable. Registering the client source with DKMS makes the
-module follow kernel installs, which is how the EFA kernel module is already handled on the
-same hosts. `setup/files/lustre_installer.sh` wraps that path behind one command, and
-`setup/tasks/12-installer-script.json` is the verification. Two obstacles are worth knowing:
-`configure` needs `flex`, `bison` and the Python headers, which `lustre-source` does not
-declare, and the DKMS package the source tree can build is written for Debian, naming version
-constraints without parentheses and depending on a `linux-image` metapackage Ubuntu does not
-ship. Registering the generated tree with DKMS directly avoids both.
-
-## Reproducing it
-
-### Static check, no infrastructure
+## Installing on a running host
 
 ```bash
-./scripts/list-repo-kernels.sh
-./scripts/compare-kernel-abi.py \
-    --module-url https://fsx-lustre-client-repo.s3.amazonaws.com/ubuntu/pool/jammy/l/lu/lustre-client-modules-6.8.0-1063-aws_2.15.6-1fsx34_amd64.deb \
-    --headers-url http://archive.ubuntu.com/ubuntu/pool/main/l/linux-aws/linux-headers-6.8.0-1063-aws_6.8.0-1063.66_amd64.deb \
-    --headers-url http://archive.ubuntu.com/ubuntu/pool/main/l/linux-aws-6.8/linux-headers-6.8.0-1063-aws_6.8.0-1063.66~22.04.1_amd64.deb \
-    --json results/kernel-abi-6.8.0-1063-amd64.json
+curl -fsSLO https://raw.githubusercontent.com/littlemex/distributed-ai/main/2026-09-10-fsx-lustre-client-kernel-abi/ansible/roles/aws_lustre/files/lustre_installer.sh
+chmod +x lustre_installer.sh
+sudo ./lustre_installer.sh -y --mode dkms --install-check-unit
 ```
 
-`list-repo-kernels.sh` prints, per suite and architecture, the highest module build for
-each kernel series. `compare-kernel-abi.py` exits non-zero when a module would not load,
-so it can gate a pipeline.
+The first run compiles the module and takes several minutes on a general purpose instance. Running
+it again is safe and reports what it skipped.
 
-### On a client instance
-
-The client runs in a private subnet, is reached only through AWS Systems Manager, and joins
-the security groups of the file system so the self-referencing Lustre rules apply. Every
-command on the node comes from a JSON task definition.
+Then mount a file system:
 
 ```bash
-cd iac/terraform
-cp terraform.tfvars.example terraform.tfvars   # fill in region, subnet, file system security group
-terraform init
-terraform apply
-
-export AWS_REGION=<region>
-export INSTANCE_ID=$(terraform output -raw instance_id)
-cd ../../setup
-
-./runner.sh wait
-./runner.sh deploy
-./runner.sh run tasks/01-install-target-kernel.json     # pins and boots the kernel under test
-./runner.sh wait                                       # the step above reboots the node
-./runner.sh run tasks/01-install-target-kernel.json     # idempotent, confirms the running kernel
-./runner.sh run tasks/02-add-release-suite-repo.json
-./runner.sh run tasks/03-control-release-suite-only.json
-./runner.sh run tasks/04-install-cross-suite-module.json --env CROSS_SUITE=jammy
-./runner.sh run tasks/05-mount-and-io.json \
-    --env FSX_DNS_NAME=<file system DNS name> \
-    --env FSX_MOUNT_NAME=<mount name> \
-    --env IO_SIZE_MB=512
-./runner.sh run tasks/07-control-mismatched-module.json --env OTHER_KERNEL=6.8.0-1057-aws
-./runner.sh run tasks/06-collect-evidence.json
-
-# behaviour under load, during a connection outage, and across a reboot
-./runner.sh run tasks/08-load-and-recovery.json --timeout 2400 \
-    --env FSX_DNS_NAME=<file system DNS name> \
-    --env FSX_MOUNT_NAME=<mount name> \
-    --env FIO_JOBS=8 --env FIO_SIZE=512M --env LOAD_SECONDS=180 \
-    --env OUTAGE_SECONDS=120 --env RECOVERY_SECONDS=90
-./runner.sh run tasks/09-boot-persistence.json --timeout 300 \
-    --env FSX_DNS_NAME=<file system DNS name> \
-    --env FSX_MOUNT_NAME=<mount name>   # this run ends when the node reboots
-./runner.sh wait
-./runner.sh run tasks/09-boot-persistence.json \
-    --env FSX_DNS_NAME=<file system DNS name> \
-    --env FSX_MOUNT_NAME=<mount name>   # verifies the mount that came back
-./runner.sh logs 08                     # read a step log back from the node
+sudo mkdir -p /mnt/fsx
+sudo mount -t lustre -o noatime,flock <file-system-dns-name>@tcp:/<mount-name> /mnt/fsx
 ```
 
-Task 8 interrupts Lustre traffic with a local `iptables` rule on the client, so it affects
-only that client and needs no change on the server side. Systems Manager truncates command
-output, which is why `runner.sh logs` exists: `task_runner.sh` keeps one log file per step
-on the node.
+`lustre-client-utils` is installed as part of the run and is not optional. Without
+`/sbin/mount.lustre` the kernel receives the raw option list and refuses the mount, which reads like
+a module problem and is not one.
 
-Destroy the client when finished:
+## Which kernels DKMS may build for
+
+DKMS builds from the kernel package's post-install hook. A build that fails there can leave the
+kernel package unconfigured, which blocks later package operations until `dpkg --configure` runs. So
+the client is not offered every kernel: the installer reads the repository index, keeps the kernel
+series it publishes modules for in `/etc/lustre-installer/supported-kernels`, and copies that pattern
+into the DKMS configuration.
 
 ```bash
-cd ../iac/terraform && terraform destroy
+sudo ./lustre_installer.sh --refresh-policy    # re-read the repository and update the registration
+sudo ./lustre_installer.sh --refresh-policy --kernel-filter '^6\.8\.'   # be stricter than that
 ```
 
-Task state lives on the node under `/var/log/task-runner/<step>.log`, and each step declares
-`skip_if` so a task can be re-run without repeating work. Terraform state for this stack is
-local, because the stack is one throwaway instance.
+`--refresh-policy` rebuilds nothing and re-registers nothing, so it is safe from cron or a
+configuration run. It is also the only thing that changes the policy: editing
+`/etc/lustre-installer/supported-kernels` by hand does nothing until a refresh copies it into the
+registration. The indirection that would have made a hand edit take effect immediately was removed
+on purpose, because it made every later kernel installation depend on reading a mutable path from
+inside a root-run package hook.
 
-## Layout
+A kernel outside the policy is skipped rather than attempted, so package management stays healthy and
+the host boots without a client instead. That absence is otherwise invisible until a mount fails,
+which is what the boot-time check is for:
+
+```bash
+sudo ./lustre_installer.sh --install-check-unit   # adds lustre-client-check.service
+systemctl status lustre-client-check              # after a reboot
+sudo ./lustre_installer.sh --check                # the same question, now
+```
+
+The unit reports and does not block boot. Wiring its result into scheduling, for example a taint
+applied by a node agent, is left to whatever manages the fleet.
+
+## Baking it into an AMI
+
+```bash
+cd packer
+packer init lustre-ami.pkr.hcl
+packer build -var parent_ami_ssm=/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id lustre-ami.pkr.hcl
+```
+
+The build runs Ansible twice with a reboot between them. That reboot only matters when
+`lustre_kernel_meta` names a kernel line to pin: the module has to be compiled against the kernel the
+image will actually boot, so that kernel has to be running when the client is installed. With the
+variable left empty the first stage and the reboot do nothing, and the image keeps the kernel its
+parent booted.
+
+Pinning is a choice about the kernel's own support lifecycle, not a workaround for module
+availability. Building from source already removed the dependence on which exact releases are
+published.
+
+## Options
 
 ```
-iac/terraform/   client instance, its instance profile and its egress security group
-setup/           runner.sh (Systems Manager transport), task_runner.sh (JSON task engine), tasks/
-scripts/         static repository and ABI checks that need no AWS account
-results/         captured output of the runs described above
+-y, --yes                 do not ask for confirmation
+-m, --mode MODE           build (default), dkms, or binary
+-k, --kernel REL          kernel release to install for; defaults to the running kernel
+-s, --suite NAME          repository suite; defaults to this system's codename
+    --key-fingerprint FPR expected fingerprint of the repository signing key
+-n, --no-verify           skip the post-install verification
+-u, --uninstall           remove every Lustre client on this host
+-c, --check               exit 0 when the running kernel has a loadable, mountable module
+    --install-check-unit  also install the systemd unit that runs --check at boot
+    --kernel-filter REGEX kernels DKMS may build for; derived from the repository by default
+    --refresh-policy      refresh that derived list and exit
+-q, --quiet               less output
+-v, --version             print the installer version and exit
+-h, --help                print the help and exit
 ```
 
-## Scope and limits
+`--help` prints the same list with the reasoning behind each mode.
 
-The verification covers `amd64` and the kernel release named above, on a single client. It
-says nothing about combinations it did not run: another kernel series, `arm64`, the 64 KB
-page size variants, several clients sharing files at once, EFA rather than TCP for LNet, a
-run measured in days rather than minutes, or the behaviour of a kernel upgrade that moves
-the host off the pinned release. `compare-kernel-abi.py` answers those cheaply, and the module packages for
-`arm64` exist in the same suites.
+## A release the repository has no suite for
 
-Installing a module package from a suite other than the one that matches the OS release is
-not part of the documented installation procedure. The evidence here says the artefact is
-ABI-compatible and works; it does not make the combination a supported configuration.
+The repository carries a suite per Ubuntu LTS, and a new one appears some months after the release
+it is for. Until it does, point at a suite that exists and build locally, which works because the
+module is compiled against this host's kernel either way:
 
-Identifiers in `results/` are redacted.
+```bash
+sudo ./lustre_installer.sh -y --mode dkms --suite noble
+```
+
+The userspace tools then also come from that suite. Check that they run before relying on them.
+
+## Requirements and boundaries
+
+- Ubuntu. On Amazon Linux 2023 the kernel package provides the module, so `dnf install -y lustre-client` is all that is needed and none of this applies.
+- Root, for every action including `--check`, which answers its question by loading the module.
+- Network access to the FSx for Lustre client repository. The signing key is pinned by fingerprint and a substituted key is refused rather than trusted.
+- `dkms` and `build` modes compile on the host, so they need the build dependencies the script installs, including three the source package does not declare.
+- Verified on x86-64. arm64 and 64 KB page kernels are handled by the same code paths but have not been exercised.
+- Removing the client is host-wide: `--uninstall` removes every Lustre module, DKMS registration, source tree and module package it finds, not only the ones this script created.
+
+## Uninstalling
+
+```bash
+sudo ./lustre_installer.sh --uninstall -y
+```
+
+It unmounts, unloads, deregisters, removes the packages, removes the boot-time check and its own
+copy, and reports anything it could not finish rather than exiting quietly. The repository
+registration and its signing key are left in place, because they are apt configuration an
+administrator may have adopted.

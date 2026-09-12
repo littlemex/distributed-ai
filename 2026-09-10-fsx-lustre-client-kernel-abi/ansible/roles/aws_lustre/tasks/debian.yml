@@ -1,0 +1,74 @@
+---
+# The installer carries the whole Debian-family procedure so that a host outside this
+# repository can run exactly what the image build runs. The role stages it and calls it, in
+# the same shape as the EFA role calling efa_installer.sh.
+- name: Install the client installer
+  ansible.builtin.copy:
+    src: lustre_installer.sh
+    dest: "{{ aws_lustre_installer_path }}"
+    mode: "0755"
+
+- name: Check the pinned kernel line
+  when: aws_lustre_kernel_meta | length > 0
+  block:
+    # The kernel meta package depends on the image meta package, and only that one names the
+    # concrete release, so the release is read from there rather than guessed from a version.
+    - name: Read what the image meta package depends on
+      ansible.builtin.command: >-
+        dpkg-query -W -f=${Depends}
+        {{ aws_lustre_kernel_meta | regex_replace('^linux-', 'linux-image-') }}
+      register: aws_lustre_kernel_meta_depends
+      changed_when: false
+      failed_when: false
+
+    - name: Require the kernel line to be installed
+      ansible.builtin.assert:
+        that: aws_lustre_kernel_meta_depends.rc == 0
+        fail_msg: >-
+          {{ aws_lustre_kernel_meta }} is not installed, so the kernel line was never pinned.
+          Run this role's kernel entry point first and reboot; the build template does that
+          between two Ansible stages.
+
+    - name: Derive the kernel release the image must run
+      ansible.builtin.set_fact:
+        # regex_search raises when a capture group finds no match, so findall is used and an
+        # empty string is appended to keep first() defined.
+        aws_lustre_target_kernel: >-
+          {{ ((aws_lustre_kernel_meta_depends.stdout
+               | regex_findall('linux-image-([0-9][^, ]*)')) + ['']) | first }}
+
+    - name: Require the release to be resolvable
+      ansible.builtin.assert:
+        that: aws_lustre_target_kernel | length > 0
+        fail_msg: >-
+          could not read a concrete kernel release from what
+          {{ aws_lustre_kernel_meta | regex_replace('^linux-', 'linux-image-') }} depends on:
+          {{ aws_lustre_kernel_meta_depends.stdout }}
+
+    - name: Require the target kernel to be the running kernel
+      ansible.builtin.assert:
+        that: ansible_kernel == aws_lustre_target_kernel
+        fail_msg: >-
+          The image booted {{ ansible_kernel }} but {{ aws_lustre_kernel_meta }} provides
+          {{ aws_lustre_target_kernel }}. Select that kernel as the default boot entry and
+          reboot before this role runs.
+
+- name: Install the FSx for Lustre client
+  ansible.builtin.command:
+    cmd: >-
+      {{ aws_lustre_installer_path }} -y
+      --mode {{ aws_lustre_mode }}
+      --kernel {{ ansible_kernel }}
+      {{ ("--kernel-filter '" ~ aws_lustre_kernel_filter ~ "'") if aws_lustre_kernel_filter | length > 0 else '' }}
+      {{ ('--suite ' ~ aws_lustre_repo_suite) if aws_lustre_repo_suite | length > 0 else '' }}
+      {{ '--install-check-unit' if aws_lustre_install_check_unit else '' }}
+      --no-verify
+  register: aws_lustre_install
+  # In dkms mode the installer says when it found the module already built, which is the one case
+  # where a repeat run changes nothing. A build-mode run always compiles, so it always changed.
+  changed_when: >-
+    'already installed for' not in aws_lustre_install.stdout
+
+- name: Show what the installer did
+  ansible.builtin.debug:
+    var: aws_lustre_install.stdout_lines
