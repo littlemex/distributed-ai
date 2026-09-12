@@ -1,9 +1,10 @@
 // Bake the FSx for Lustre client into an AMI.
 //
 // The build has two stages with a reboot between them, and the reboot is only needed when a kernel
-// line is pinned: the module has to be compiled against the kernel the image will actually boot, so
-// that kernel has to be running when the client is installed. Leave lustre_kernel_meta empty and the
-// first stage and the reboot do nothing.
+// line is pinned. A module can be built for a kernel that is not running, given its headers; the
+// reboot is here because the installer targets the running kernel by default, and because it lets
+// the image prove the module loads on the kernel the image actually boots. Leave lustre_kernel_meta
+// empty and the first stage and the reboot do nothing.
 //
 //   packer init lustre-ami.pkr.hcl
 //   packer build -var parent_ami_ssm=/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id lustre-ami.pkr.hcl

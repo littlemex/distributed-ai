@@ -112,10 +112,11 @@ packer build -var parent_ami_ssm=/aws/service/canonical/ubuntu/server/24.04/stab
 ```
 
 The build runs Ansible twice with a reboot between them. That reboot only matters when
-`lustre_kernel_meta` names a kernel line to pin: the module has to be compiled against the kernel the
-image will actually boot, so that kernel has to be running when the client is installed. With the
-variable left empty the first stage and the reboot do nothing, and the image keeps the kernel its
-parent booted.
+`lustre_kernel_meta` names a kernel line to pin. A module can be built for a kernel that is not
+running, given its headers, and `--kernel` does exactly that; the reboot is here because the
+installer targets the running kernel by default, and because it lets the image prove that the module
+it carries loads on the kernel the image actually boots. With the variable left empty the first stage
+and the reboot do nothing, and the image keeps the kernel its parent booted.
 
 Pinning is a choice about the kernel's own support lifecycle, not a workaround for module
 availability. Building from source already removed the dependence on which exact releases are
