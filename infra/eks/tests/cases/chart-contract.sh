@@ -134,6 +134,116 @@ test_static_gpu_serving_contract() {
   printf '%s\n' "$render" | grep -q '^        node-role: test-pool$' || { echo "nodeRole not wired"; return 1; }
 }
 
+# extraArgs: engine flags the chart does not know about, appended after the ones it renders. All three serving
+# templates take them through one helper, so all three are checked here.
+#
+# Four properties, each with its own failure mode:
+#
+#   1. a values file that does NOT set them renders byte-identically to one that sets an empty list, which is the
+#      property that makes this key safe to add to a chart people already use. Compared as whole manifests rather than
+#      as an arg list: the first version of the helper wrote a blank line of indentation when the list was empty, which
+#      no arg-level comparison sees;
+#   2. a supplied flag arrives, in order, AFTER the chart's own -- the position the values comment promises;
+#   3. a bare string is refused, because `range` over a string iterates characters and the container would start with
+#      one argument per letter;
+#   4. an empty element is refused, because it renders `- ""` and the engine dies at startup on an argparse error that
+#      names nothing an operator can find.
+#
+# 3 and 4 are the ones worth the lines: both render SUCCESSFULLY and fail somewhere else.
+_cc_args_of() {  # _cc_args_of <render>   -> one container arg per line, in order, unquoted
+  printf '%s\n' "$1" | awk '
+    /^          args:$/ { inargs = 1; next }
+    inargs && /^          [^ ]/ { inargs = 0 }
+    inargs && /^            - / { sub(/^            - /, ""); gsub(/^"|"$/, ""); print }
+  '
+}
+
+test_static_gpu_serving_extra_args() {
+  local tmpl=gpu-serving-vllm.yaml key=gpuServingVllm
+  local unset_render empty_render set_render out want
+  local base=(--set "$key.enabled=true" --set "$key.nodeRole=test-pool")
+
+  # 1. Unset and empty must be the same manifest, byte for byte.
+  unset_render="$(_cc_render "$tmpl" "${base[@]}")" || return 1
+  empty_render="$(_cc_render "$tmpl" "${base[@]}" --set-json "$key.extraArgs=[]")" || return 1
+  [ "$unset_render" = "$empty_render" ] || {
+    echo "an empty extraArgs changes the manifest:"; diff <(printf '%s\n' "$unset_render") <(printf '%s\n' "$empty_render") || true
+    return 1; }
+
+  # 2. Supplied flags land after the chart's own, in the order given.
+  want="$(_cc_args_of "$unset_render")"
+  set_render="$(_cc_render "$tmpl" "${base[@]}" \
+    --set-json "$key.extraArgs=[\"--enable-auto-tool-choice\",\"--tool-call-parser=hermes\"]")" || return 1
+  [ "$(_cc_args_of "$set_render")" = "$want
+--enable-auto-tool-choice
+--tool-call-parser=hermes" ] || {
+    echo "extraArgs did not render as the chart's own flags followed by the supplied ones:"
+    _cc_args_of "$set_render"; return 1; }
+  # And no blank line between them. The extractor above skips blank lines, so without this a helper that emits one
+  # (dropping `trim` at the call site does exactly that) passes every other assertion here.
+  if printf '%s\n' "$set_render" | awk '
+      /^          args:$/ { inargs = 1; next }
+      inargs && /^          [^ ]/ { inargs = 0 }
+      inargs && /^[[:space:]]*$/ { found = 1 }
+      END { exit !found }'; then
+    echo "the rendered args block contains a blank line"; printf '%s\n' "$set_render" | sed -n '/args:/,/env:/p'; return 1
+  fi
+
+  # 3. A bare string, and the refusal has to say how to pass a list -- forgetting the --set braces is the mistake.
+  if out="$(_cc_render "$tmpl" "${base[@]}" --set "$key.extraArgs=--flag" 2>&1)"; then
+    echo "a bare string was accepted for extraArgs"; return 1; fi
+  case "$out" in *"must be a list of strings"*) ;; *) echo "refused a string without saying why: $out"; return 1 ;; esac
+  case "$out" in *"--set"*) ;; *) echo "the refusal does not say how to pass a list: $out"; return 1 ;; esac
+
+  # 4. An empty element.
+  if out="$(_cc_render "$tmpl" "${base[@]}" --set-json "$key.extraArgs=[\"--flag\",\"\"]" 2>&1)"; then
+    echo "an empty extraArgs element was accepted"; return 1; fi
+  case "$out" in *"empty element"*) ;; *) echo "refused an empty element without saying why: $out"; return 1 ;; esac
+
+  # 5. Repeating a flag the chart renders itself. The chart puts `port` into the Service and the readiness probe as well,
+  #    so an override that reaches only the engine leaves the Pod NotReady with nothing in its log about why. Refused
+  #    rather than documented, and checked for EVERY flag the default render contains rather than for one of them: a
+  #    guard verified on a single member of a set silently permits removing the rest.
+  local flag
+  while read -r flag; do
+    [ -n "$flag" ] || continue
+    flag="${flag%%=*}"
+    if out="$(_cc_render "$tmpl" "${base[@]}" --set-json "$key.extraArgs=[\"$flag=x\"]" 2>&1)"; then
+      echo "extraArgs was allowed to repeat $flag, which the chart renders itself"; return 1; fi
+    case "$out" in *"may not set $flag"*) ;; *) echo "refusing $flag did not name it: $out"; return 1 ;; esac
+  done <<EOF
+$(_cc_args_of "$unset_render")
+EOF
+}
+
+# The same knob on the Neuron serving workloads. The 400 a request carrying tools gets is produced by the
+# OpenAI-compatible server layer, which is the same code whichever accelerator is underneath, so a chart that opens the
+# door on one and not the other hands an operator a contract that changes when they move between them.
+test_static_neuron_serving_extra_args() {
+  local tmpl key unset_render set_render want
+  for pair in "neuron-serving-vllm.yaml neuronServingVllm" "neuron-serving-vllm-plugin.yaml neuronVllmPlugin"; do
+    set -- $pair; tmpl="$1"; key="$2"
+    unset_render="$(_cc_render "$tmpl" --set "$key.enabled=true")" || return 1
+    [ "$unset_render" = "$(_cc_render "$tmpl" --set "$key.enabled=true" --set-json "$key.extraArgs=[]")" ] || {
+      echo "$key: an empty extraArgs changes the manifest"; return 1; }
+    want="$(_cc_args_of "$unset_render")"
+    set_render="$(_cc_render "$tmpl" --set "$key.enabled=true" --set-json "$key.extraArgs=[\"--flag=1\"]")" || return 1
+    [ "$(_cc_args_of "$set_render")" = "$want
+--flag=1" ] || { echo "$key: extraArgs did not append after the chart's own flags"; _cc_args_of "$set_render"; return 1; }
+    # And every flag this template renders itself is refused, for the same reason as on the GPU side.
+    local flag out
+    while read -r flag; do
+      [ -n "$flag" ] || continue
+      flag="${flag%%=*}"
+      if out="$(_cc_render "$tmpl" --set "$key.enabled=true" --set-json "$key.extraArgs=[\"$flag=x\"]" 2>&1)"; then
+        echo "$key: extraArgs was allowed to repeat $flag"; return 1; fi
+      case "$out" in *"may not set $flag"*) ;; *) echo "$key: refusing $flag did not name it: $out"; return 1 ;; esac
+    done <<EOF
+$(_cc_args_of "$unset_render")
+EOF
+  done
+}
+
 # neuronVllmPlugin (Basic09): renders nothing by default; with enabled it is a Neuron vLLM plugin
 # Deployment that requests the whole device and uses the Recreate strategy.
 test_static_neuron_plugin_contract() {

@@ -50,6 +50,7 @@ spec:
             - --max-model-len=4096
             - --device=neuron
             - --port=8000
+            {{- with $v.extraArgs }}{{- include "experiments.extraArgs" (dict "args" . "key" "neuronServingVllm.extraArgs" "owned" (list "--model" "--tensor-parallel-size" "--max-num-seqs" "--max-model-len" "--device" "--port")) | trim | nindent 12 }}{{- end }}
           env:
             - { name: VLLM_NEURON_FRAMEWORK, value: "neuronx-distributed-inference" }
             - { name: NEURON_COMPILED_ARTIFACTS, value: "/mnt/neuron-cache" }
