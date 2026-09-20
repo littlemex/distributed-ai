@@ -49,6 +49,7 @@ spec:
             - --max-model-len={{ $v.maxModelLen | default 4096 }}
             - --gpu-memory-utilization={{ $v.gpuMemoryUtilization | default "0.85" }}
             - --port={{ $v.port | default 8000 }}
+            {{- with $v.extraArgs }}{{- include "experiments.extraArgs" (dict "args" . "key" "gpuServingVllm.extraArgs" "owned" (list "--model" "--tensor-parallel-size" "--max-model-len" "--gpu-memory-utilization" "--port")) | trim | nindent 12 }}{{- end }}
           env:
             # HF token for gated models (optional; ungated models need no token).
             - name: HF_TOKEN

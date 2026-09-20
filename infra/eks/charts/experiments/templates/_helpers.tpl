@@ -203,3 +203,45 @@ Expects the neuronDdp values map as the context (.).
 - { name: NEURON_RT_DBG_ZEROCOPY, value: "0" }
 {{- end }}
 {{- end -}}
+
+{{/*
+Render a workload's caller-supplied engine arguments, appended after the ones its template writes.
+Call as:
+  {{- with $v.extraArgs }}{{- include "experiments.extraArgs" (dict "args" . "key" "gpuServingVllm.extraArgs") | trim | nindent 12 }}{{- end }}
+
+`trim` matters: the helper's body begins on a new line, so without it `nindent` writes one blank line of
+indentation before the first argument -- harmless YAML that still makes the rendered manifest differ.
+
+`owned` is the list of flags the calling template renders itself. Repeating one of them is REFUSED rather than
+documented as discouraged: the chart wires those same values into the Service and the readiness probe, so an override
+reaching only the engine leaves the Pod permanently NotReady with nothing in its log to say why. The static contract test
+asserts `owned` equals the flags the default render actually contains, so it cannot drift from the template above it.
+
+Three guards, and all three exist because the mistake renders SUCCESSFULLY and fails somewhere else:
+
+  * a bare string (`--set ...extraArgs=--flag`, forgetting the list braces) makes `range` iterate
+    characters, so the container starts with one argument per letter;
+  * an empty or null element renders `- ""`, which the engine rejects at startup with an argparse
+    error nobody traces back to a values file;
+  * a flag the chart already renders starts an engine that disagrees with the manifest around it.
+
+Values are quoted because a flag's value may contain a character YAML would otherwise read (a colon,
+a comma, a leading digit).
+*/}}
+{{- define "experiments.extraArgs" -}}
+{{- with .args }}
+{{- if not (kindIs "slice" .) }}
+{{- fail (printf "%s must be a list of strings, got %s. With --set, use braces: --set '%s={--enable-auto-tool-choice,--tool-call-parser=hermes}'" $.key (kindOf .) $.key) }}
+{{- end }}
+{{- range . }}
+{{- if not (toString . | trim) }}
+{{- fail (printf "%s contains an empty element; the engine would refuse to start on it" $.key) }}
+{{- end }}
+{{- $flag := first (splitList "=" (toString . | trim)) }}
+{{- if has $flag $.owned }}
+{{- fail (printf "%s may not set %s: the chart renders that flag from its own value and wires the SAME value into the Service and the readiness probe. Passing it here changes only the engine, so the Pod never becomes Ready and its log says nothing about why. Set the chart's own value instead." $.key $flag) }}
+{{- end }}
+- {{ toString . | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}

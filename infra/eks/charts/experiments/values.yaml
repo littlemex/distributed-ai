@@ -443,6 +443,16 @@ gpuServingVllm:
   maxModelLen: 4096
   gpuMemoryUtilization: "0.85"
   port: 8000
+  # Engine flags appended verbatim after the ones above; a list of strings. Empty by default, so a values file that does
+  # not set it renders the same Deployment as before this key existed. Tool calling needs two of them, and the parser
+  # name is per model family (see the vLLM docs):
+  #
+  #   extraArgs: ["--enable-auto-tool-choice", "--tool-call-parser=hermes"]
+  #
+  # Do NOT use it to repeat a flag the template renders. `--port` in particular is also wired into the Service and the
+  # readiness probe from `port` above, so overriding it here leaves the Pod permanently NotReady with nothing in the
+  # engine log to say why.
+  extraArgs: []
   readinessInitialDelaySeconds: 60
   readinessPeriodSeconds: 10
   readinessFailureThreshold: 90

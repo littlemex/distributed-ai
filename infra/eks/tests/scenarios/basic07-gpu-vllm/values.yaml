@@ -7,3 +7,12 @@ gpuServingVllm:
   memory: 8Gi
   shmSize: 2Gi
   cpu: "2"
+  # Exercise extraArgs on real hardware rather than only in the render test: verify.sh sends a request carrying `tools`,
+  # which an engine started without these two flags rejects with 400. A regression that drops extraArgs from the
+  # template therefore shows up here, not as a rendering difference nobody reads.
+  #
+  # The parser and the model above are a PAIR -- `hermes` is the Qwen2.5 family's parser. Change one and change the
+  # other, which is why the model is pinned in this file instead of inherited from the chart's default: inheriting it
+  # would put half of a coupling in another file, and a default bumped to another family would break this scenario for a
+  # reason that looks nothing like its cause.
+  extraArgs: ["--enable-auto-tool-choice", "--tool-call-parser=hermes"]
