@@ -1,0 +1,1 @@
+{"requests": 1280, "output_tokens": 163840, "window_s": 103.28334267100013, "output_tok_s": 1586.3158159191041, "median_ttft_ms": 903.8794440000402, "median_tpot_ms": 73.27716986614227, "start_epoch": 1790331918.892439, "end_epoch": 1790332022.1757817}

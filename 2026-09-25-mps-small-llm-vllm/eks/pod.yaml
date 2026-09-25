@@ -1,0 +1,28 @@
+# One Pod that runs mps_bench.sh on a single L4 (g6.2xlarge) and keeps the results until deleted.
+# The script is mounted from a ConfigMap; see ../README.md for the commands.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mps-bench
+  namespace: mps-bench
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    node.kubernetes.io/instance-type: g6.2xlarge
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+  containers:
+    - name: bench
+      image: vllm/vllm-openai:v0.30.0
+      command: ["bash", "-c", "OUT_DIR=/results bash /work/mps_bench.sh && echo DONE || echo FAILED; sleep infinity"]
+      resources:
+        limits: { nvidia.com/gpu: 1 }
+        requests: { cpu: "6", memory: 24Gi }
+      volumeMounts:
+        - { name: script, mountPath: /work }
+        - { name: results, mountPath: /results }
+        - { name: shm, mountPath: /dev/shm }
+  volumes:
+    - { name: script, configMap: { name: mps-bench-script } }
+    - { name: results, emptyDir: {} }
+    - { name: shm, emptyDir: { medium: Memory, sizeLimit: 8Gi } }
