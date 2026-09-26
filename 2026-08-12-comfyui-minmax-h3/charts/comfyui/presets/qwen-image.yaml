@@ -1,0 +1,47 @@
+# Preset: image generation with the Qwen-Image family (all Apache-2.0) plus BiRefNet (MIT).
+#
+#   Qwen-Image 2512 (text to image) and Qwen-Image-Edit 2511 (edit with up to three reference
+#   images: keeps a character consistent across pictures), as fp8 checkpoints with the Lightning
+#   LoRA merged in (4 steps), the shared text encoder and VAE, and BiRefNet weights for the
+#   in-image BiRefNetRemoveBackground node. About 51 GB in total.
+#
+#   helm template comfyui ./charts/comfyui -n comfyui -f charts/comfyui/presets/qwen-image.yaml \
+#     -s templates/model-fetch.yaml --set modelFetch.enabled=true --set comfyui.image=$ECR_URL:v3 | kubectl apply -f -
+#
+# Measured on one L40S (g6e.4xlarge): a warm 1.3 MP image takes 7-10 s (text to image) or 16-21 s
+# (edit). The first use of each checkpoint reads 20 GB from the shared filesystem (4-6 min); after
+# that, switching between the two costs about 20 s with the flags below.
+sharedStorage:
+  modelsSubPath: qwen/models
+  outputSubPath: qwen/output
+  inputSubPath: qwen/input
+  userSubPath: qwen/user
+modelSets:
+  - repo: lightx2v/Qwen-Image-2512-Lightning
+    revision: main
+    files:
+      - { file: qwen_image_2512_fp8_e4m3fn_scaled_comfyui_4steps_v1.0.safetensors, targetDir: diffusion_models }
+  - repo: lightx2v/Qwen-Image-Edit-2511-Lightning
+    revision: main
+    files:
+      - { file: qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_comfyui_4steps_v1.0.safetensors, targetDir: diffusion_models }
+  - repo: Comfy-Org/Qwen-Image_ComfyUI
+    revision: main
+    files:
+      - { file: split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors, targetDir: text_encoders }
+      - { file: split_files/vae/qwen_image_vae.safetensors, targetDir: vae }
+  - repo: ZhengPeng7/BiRefNet
+    revision: main
+    files:
+      - { file: config.json, targetDir: birefnet }
+      - { file: BiRefNet_config.py, targetDir: birefnet }
+      - { file: birefnet.py, targetDir: birefnet }
+      - { file: model.safetensors, targetDir: birefnet }
+comfyui:
+  # Two 20 GB checkpoints plus the text encoder stay resident in host RAM, so switching models
+  # does not re-read them from the shared filesystem. g6e.4xlarge has 128 GB.
+  memory: 110Gi
+  cpu: "14"
+  # Load weights fully instead of memory-mapping them over NFS with on-demand paging: with the
+  # defaults every model switch re-read the checkpoint (about 4 min each); with these, 20 s.
+  extraArgs: "--disable-dynamic-vram --disable-mmap"

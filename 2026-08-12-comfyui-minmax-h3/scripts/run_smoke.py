@@ -26,6 +26,7 @@ import os
 import sys
 import time
 import urllib.request
+import uuid
 import urllib.parse
 import urllib.error
 
@@ -41,6 +42,21 @@ def http_json(url, payload=None, timeout=30):
 def http_bytes(url, timeout=120):
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return r.read()
+
+
+def upload_image(server, path):
+    """POST a local image to ComfyUI's /upload/image; returns the stored file name."""
+    boundary = uuid.uuid4().hex
+    fname = os.path.basename(path)
+    with open(path, "rb") as f:
+        data = f.read()
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{fname}\"\r\n"
+            f"Content-Type: application/octet-stream\r\n\r\n").encode() + data + \
+        f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(f"{server}/upload/image", data=body,
+                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(r.read())["name"]
 
 
 def find_text_and_seed_nodes(wf):
@@ -74,6 +90,9 @@ def main():
     ap.add_argument("--list-text-nodes", action="store_true",
                     help="print the candidate text/seed nodes in the workflow and exit")
     ap.add_argument("--seed", type=int, default=None, help="override the sampler seed")
+    ap.add_argument("--input-image", action="append", default=[],
+                    help="upload an image and feed it to the workflow's LoadImage nodes, in node-id order "
+                         "(repeat for several references, e.g. an edit workflow with image1..image3)")
     ap.add_argument("--timeout", type=int, default=3600, help="max seconds to wait for the run (default 1h)")
     ap.add_argument("--poll", type=float, default=3.0, help="history poll interval seconds")
     args = ap.parse_args()
@@ -126,6 +145,15 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     server = args.server.rstrip("/")
+
+    if args.input_image:
+        loaders = sorted((nid for nid, n in wf.items() if n.get("class_type") == "LoadImage"), key=lambda x: int(x) if x.isdigit() else x)
+        if len(loaders) < len(args.input_image):
+            sys.exit(f"--input-image given {len(args.input_image)} times but the workflow has {len(loaders)} LoadImage node(s)")
+        for nid, path in zip(loaders, args.input_image):
+            name = upload_image(server, path)
+            wf[nid]["inputs"]["image"] = name
+            print(f"[set ] image {path} -> node {nid} ({name})")
 
     # Submit.
     print(f"[post] {server}/prompt")

@@ -103,6 +103,15 @@ RUN if [ "${COMFYUI_MANAGER}" = "true" ]; then \
 # fetched once. We just create the base tree here so the image stays storage-agnostic;
 # the Deployment overlays the mounts. input/ and user/ are also mount candidates when
 # running I2V (input images) or persisting saved workflows.
+# Background removal inside the graph: a small in-repo node (custom_nodes/birefnet_rmbg) running
+# BiRefNet (MIT). Its extra Python deps are baked like everything else; set BIREFNET=false to omit.
+# transformers, einops and kornia already come with ComfyUI's requirements.
+ARG BIREFNET=true
+ARG BIREFNET_PIP="timm==1.0.30"
+COPY custom_nodes/birefnet_rmbg /opt/ComfyUI/custom_nodes/birefnet_rmbg
+RUN if [ "${BIREFNET}" = "true" ]; then python -m pip install ${BIREFNET_PIP}; \
+    else rm -rf /opt/ComfyUI/custom_nodes/birefnet_rmbg; fi
+
 RUN mkdir -p /opt/ComfyUI/models /opt/ComfyUI/output /opt/ComfyUI/input /opt/ComfyUI/user
 
 EXPOSE 8188

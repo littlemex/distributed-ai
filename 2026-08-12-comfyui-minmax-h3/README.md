@@ -143,6 +143,48 @@ produce one for image-to-video / reference-to-video.
 
 ---
 
+## Generating images (Qwen-Image)
+
+The same cluster also serves still-image work with the Qwen-Image family: Qwen-Image 2512 for text to image and Qwen-Image-Edit 2511 for edits that take up to three reference images, which keeps one character consistent across many pictures. Both are Apache-2.0, run as fp8 checkpoints with the Lightning LoRA merged in (4 steps), and need only ComfyUI core nodes. The image also bakes a small in-repo node, `BiRefNetRemoveBackground` (`image/comfyui/custom_nodes/birefnet_rmbg`, BiRefNet under MIT), so a workflow can cut a figure out of its background and save a transparent PNG.
+
+```bash
+helm template comfyui ./charts/comfyui -n comfyui -f charts/comfyui/presets/qwen-image.yaml \
+  -s templates/model-fetch.yaml --set modelFetch.enabled=true --set comfyui.image="$ECR_URL:v3" | kubectl apply -f -
+helm template comfyui ./charts/comfyui -n comfyui -f charts/comfyui/presets/qwen-image.yaml \
+  -s templates/comfyui.yaml --set comfyui.enabled=true --set comfyui.image="$ECR_URL:v3" \
+  --set comfyui.nodeRole="$POOL" | kubectl apply -f -
+
+python3 scripts/run_smoke.py workflows/image_qwen_t2i_cutout.api.json --out ./out --prompt-node 6 \
+  --prompt "a cute paper lantern spirit, glossy 3D collectible figure, full body, plain white background"
+python3 scripts/run_smoke.py workflows/image_qwen_edit_cutout.api.json --out ./out --prompt-node 6 \
+  --input-image ./out/cutout_00001_.png --prompt "The same character, waving happily, plain white background"
+```
+
+The preset fetches about 51 GB into `qwen/models` on the shared volume. `modelSets` in a values file lists any number of Hugging Face repos for the model-fetch Job; without it the Job fetches the MiniMax-H3 set as before.
+
+| Measured on one L40S (g6e.4xlarge) | Time |
+|---|---|
+| Warm text to image, 1.3 MP, 4 steps | 7 to 10 s |
+| Warm edit with one reference | 16 to 21 s |
+| First use of a checkpoint (20 GB read from OpenZFS) | 4 to 6 min |
+| Switching between the two checkpoints afterwards | about 20 s |
+
+The switch time depends on `--disable-dynamic-vram --disable-mmap` (set in the preset); with ComfyUI's defaults each switch re-read the checkpoint over NFS and took about 4 minutes. Put work for the same checkpoint together.
+
+### On a desktop GPU (for example an RTX 4090)
+
+The same image and weights run on a single 24 GB card. Qwen-Image's fp8 checkpoint (20 GB) plus its text encoder (9 GB) do not fit in 24 GB at once; ComfyUI loads the text encoder, encodes, then swaps in the diffusion model, so plan on 64 GB of system RAM and keep one checkpoint per session where you can.
+
+```bash
+docker build -t comfyui-qwen image/comfyui
+uv run scripts/fetch_models_local.py charts/comfyui/presets/qwen-image.yaml ~/comfyui/models
+docker run --rm --gpus all -p 8188:8188 \
+  -v ~/comfyui/models:/opt/ComfyUI/models -v ~/comfyui/output:/opt/ComfyUI/output \
+  comfyui-qwen --disable-dynamic-vram --disable-mmap
+```
+
+`scripts/fetch_models_local.py` reads the preset's `modelSets`, so a home machine and the cluster use identical files. `scripts/run_smoke.py` and the workflows above work unchanged against `http://localhost:8188`.
+
 ## Cost
 
 The EKS control plane, NAT gateways, system nodes, and the OpenZFS filesystem bill
