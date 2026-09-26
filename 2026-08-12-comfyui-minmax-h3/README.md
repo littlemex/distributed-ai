@@ -175,6 +175,8 @@ The switch time depends on `--disable-dynamic-vram --disable-mmap` (set in the p
 
 The same image and weights run on a single 24 GB card. Qwen-Image's fp8 checkpoint (20 GB) plus its text encoder (9 GB) do not fit in 24 GB at once; ComfyUI loads the text encoder, encodes, then swaps in the diffusion model, so plan on 64 GB of system RAM and keep one checkpoint per session where you can.
 
+Verified on a 24 GB NVIDIA L4 (g6.4xlarge, 64 GB RAM) with the v3 image, the preset flags and the two workflows above, including the BiRefNet cut-out: warm text to image 22 s, warm edit 42 s, and 5 to 7 minutes for the first use of each checkpoint (read from the shared filesystem). An RTX 4090 has roughly two to three times the L4's compute, so expect shorter times there.
+
 ```bash
 docker build -t comfyui-qwen image/comfyui
 uv run scripts/fetch_models_local.py charts/comfyui/presets/qwen-image.yaml ~/comfyui/models
