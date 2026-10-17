@@ -1,0 +1,17 @@
+system,model,gpu,gpu_count,rollout_share_min_pct,rollout_share_max_pct,kind,source_url,notes
+Seer,Moonlight,H800,32,84,84,reported,https://arxiv.org/abs/2511.14617,"Table1実測値(Training14%/WeightUpdate2%)。Table3の構成(Reqs/Iter3200,GroupSize8,AvgGenLength22386)。同期colocated方式"
+Seer,Qwen2-VL-72B,H800,128,63,63,reported,https://arxiv.org/abs/2511.14617,Table1実測値。TP8で128GPU。長尾(最後10%のリクエストが全体時間最大50%)が確認された2構成のうちの1つ
+Seer,Kimi-K2,H800,256,87,87,reported,https://arxiv.org/abs/2511.14617,Table1実測値。DP32×EP32で256GPU、AvgGenLength38959(3構成中最長)。WeightUpdate3%
+APRIL,Qwen3-4B/8B,H100/MI300,8,90,90,reported,https://arxiv.org/abs/2509.18521,"単一ノード8GPU構成。本文見出しの主張""more than 90%""(下限のみ報告、上限記載なし)"
+Laminar,Qwen2.5 7B/32B/72B,H800,1024,83.1,83.1,reported,https://arxiv.org/abs/2510.12633,"""up to 83.1%""。最大128台×8=1024GPU構成、reasoningタスクで観測"
+HybridFlow baseline (NeMo-Aligner),LLaMA 7B-70B,A100,,81.2,81.2,reported,https://arxiv.org/abs/2409.19256,HybridFlow論文内で比較対象NeMo-Aligner(異なるシステム)の値として引用。16〜128台A100の範囲のためgpu_countは空欄。HybridFlow自身の値は58.9%(actor training+generationの合計でrolloutのみではないため本表には採らず)
+OpenRLHF,(記載なし、一般論),,,90,90,reported,https://arxiv.org/abs/2405.11143,"Introductionの一般的な主張""over 90%""。特定の実験表に基づく値ではなく、モデル/GPU構成の記載なし"
+ROLL Flash,(記載なし、一般論),,,70,70,reported,https://arxiv.org/abs/2510.11345,"""the rollout stage typically accounts for over 70% of total training time""。RollPacker(Gao et al. 2025)とRhymeRL(He et al. 2025)の引用で自己実測ではない"
+RollPacker,Qwen2.5-14B (Mathタスク),H800,128,72,72,reported,https://arxiv.org/abs/2509.21009,Table1実測
+RollPacker,Qwen2.5-14B (Codeタスク),H800,128,66,66,reported,https://arxiv.org/abs/2509.21009,Table1実測
+RollPacker,Qwen2.5-14B (Judgeタスク),H800,128,71,71,reported,https://arxiv.org/abs/2509.21009,Table1実測
+verl (DistFlow baseline),Qwen2.5-7B,,32,21.9,21.9,computed,https://arxiv.org/abs/2507.13833,DistFlow論文Table1。GSM8K・8k入出力長・8応答/プロンプトという短めの設定
+DistFlow,Qwen2.5-7B,,32,31.8,31.8,computed,https://arxiv.org/abs/2507.13833,同上Table1。rolloutよりactor_update(学習の重み更新)の方が時間を占める逆転例と論文自身が明記
+ReSpec,Qwen 3B-14B,,,75,75,reported,https://arxiv.org/abs/2510.26475,"MLSys2026。""generation stage...can consume over 75% of the training time""。具体的なGPU構成は本文で確認できず"
+Jet-RL,(記載なし、一般論),,,70,70,reported,https://arxiv.org/abs/2601.14243,"""the rollout phase accounting for over 70% of total training time""という前提の記述。自己実測ではなく既存システムの一般的傾向として引用"
+MiMo-V2.6-Pro (async),MiMo-V2.6-Pro,,,43.8,43.8,reported,https://arxiv.org/abs/2610.11959,"""rollout consumes 43.8% and training 43.5%, while the grader takes the remaining 12.7%"" (RL 全体の時間配分、fully asynchronous)"

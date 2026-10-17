@@ -1,0 +1,103 @@
+model,field,csv_value,primary_value,verdict,source_url,quote
+Phi-4,total_b,14.0,"14.0 (""phi-4, a 14-billion parameter language model"")",ok,https://arxiv.org/html/2412.08905,"phi-4, a 14-billion parameter language model"
+Phi-4,active_b,14.0,"14.0 (dense model, no MoE routing mentioned)",ok,https://arxiv.org/html/2412.08905,"phi-4, a 14-billion parameter language model"
+Phi-4,tokens_t,9.8,"9.8T (HFカード) / ""approximately 10T tokens"" (論文)",ok,https://huggingface.co/microsoft/phi-4,9.8T tokens
+Phi-4,arch,dense,dense (MoEの記述なし、standard transformer),ok,https://arxiv.org/html/2412.08905,"phi-4, a 14-billion parameter language model"
+Phi-4,gpu,H100,H100-80G,ok,https://huggingface.co/microsoft/phi-4,1920 H100-80G
+Phi-4,gpu_hours_m,0.96768,0.96768M(計算値=1920GPU x 21日 x 24h。公式は直接のGPU時間を報告せずGPU台数と日数のみ),ok,https://huggingface.co/microsoft/phi-4,1920 H100-80G; Training time: 21 days
+IBM Granite 3.0 2B,total_b,2.5,2.5B,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Parameters 2.5B 8.1B 1.3B 3.3B
+IBM Granite 3.0 2B,active_b,2.5,2.5B(dense、totalと同一),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Active Parameters 2.5B 8.1B 400M 800M
+IBM Granite 3.0 2B,tokens_t,12.0,12T(dense、2Bと8Bは合計12兆トークン),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"Dense Models: 2B and 8B parameter models, trained on 12 trillion tokens in total."
+IBM Granite 3.0 2B,arch,dense,dense,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,Dense Models: 2B and 8B parameter models
+IBM Granite 3.0 2B,gpu,H100,NVIDIA H100 SXM5 80GB(Blue Velaクラスタ、256GPU使用),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"Each node in Blue Vela consists of dual 48-core processors, 8x NVIDIA H100 SXM5 80GB"
+IBM Granite 3.0 2B,gpu_hours_m,0.19203,"0.19203M(報告値=192,030時間、Table7)",ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"Granite 3.0 2B 700W 192,030"
+IBM Granite 3.0 8B,total_b,8.1,8.1B,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Parameters 2.5B 8.1B 1.3B 3.3B
+IBM Granite 3.0 8B,active_b,8.1,8.1B(dense、totalと同一),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Active Parameters 2.5B 8.1B 400M 800M
+IBM Granite 3.0 8B,tokens_t,12.0,12T(dense、2Bと8Bは合計12兆トークン),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"Dense Models: 2B and 8B parameter models, trained on 12 trillion tokens in total."
+IBM Granite 3.0 8B,arch,dense,dense,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,Dense Models: 2B and 8B parameter models
+IBM Granite 3.0 8B,gpu,H100,NVIDIA H100 SXM5 80GB(768GPU使用),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,the 8B dense model is trained on 768 GPUs
+IBM Granite 3.0 8B,gpu_hours_m,0.832102,"0.832102M(報告値=832,102時間、Table7)",ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"Granite 3.0 8B 700W 832,102"
+IBM Granite 3.0 1B-A400M,total_b,1.3,1.3B,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Parameters 2.5B 8.1B 1.3B 3.3B
+IBM Granite 3.0 1B-A400M,active_b,0.4,400M=0.4B,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Active Parameters 2.5B 8.1B 400M 800M
+IBM Granite 3.0 1B-A400M,tokens_t,10.0,10T(stage1 8T + stage2 2T、MoEはstage1が8Tでdenseの10Tと異なる),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"In stage 1, our dense and MoE models are trained on 10 trillion and 8 trillion tokens, respectively. ... In stage 2, we train on a mixture of 2 trillion tokens of data."
+IBM Granite 3.0 1B-A400M,arch,moe,moe,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Active Parameters 2.5B 8.1B 400M 800M
+IBM Granite 3.0 1B-A400M,gpu,H100,NVIDIA H100 SXM5 80GB(128-256GPU使用),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,They are trained using 128 and 256 GPUs
+IBM Granite 3.0 1B-A400M,gpu_hours_m,0.071171,"0.071171M(報告値=71,171時間、Table7)",ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"Granite 3.0 1B-400M 700W 71,171"
+IBM Granite 3.0 3B-A800M,total_b,3.3,3.3B,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Parameters 2.5B 8.1B 1.3B 3.3B
+IBM Granite 3.0 3B-A800M,active_b,0.8,800M=0.8B,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Active Parameters 2.5B 8.1B 400M 800M
+IBM Granite 3.0 3B-A800M,tokens_t,10.0,10T(stage1 8T + stage2 2T),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"In stage 1, our dense and MoE models are trained on 10 trillion and 8 trillion tokens, respectively. ... In stage 2, we train on a mixture of 2 trillion tokens of data."
+IBM Granite 3.0 3B-A800M,arch,moe,moe,ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,#Active Parameters 2.5B 8.1B 400M 800M
+IBM Granite 3.0 3B-A800M,gpu,H100,NVIDIA H100 SXM5 80GB(128-256GPU使用),ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,They are trained using 128 and 256 GPUs
+IBM Granite 3.0 3B-A800M,gpu_hours_m,0.133308,"0.133308M(報告値=133,308時間、Table7)",ok,https://github.com/ibm-granite/granite-3.0-language-models/blob/main/paper.pdf,"Granite 3.0 3B-800M 700W 133,308"
+Databricks DBRX,total_b,132.0,132B,ok,https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm,132B total parameters of which 36B parameters are active on any input
+Databricks DBRX,active_b,36.0,36B,ok,https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm,132B total parameters of which 36B parameters are active on any input
+Databricks DBRX,tokens_t,12.0,12T,ok,https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm,pre-trained on 12T tokens of text and code data
+Databricks DBRX,arch,moe,moe(16 experts中4選択),ok,https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm,16 experts and chooses 4
+Databricks DBRX,gpu,H100,NVIDIA H100(3072枚),ok,https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm,DBRX was trained on 3072 NVIDIA H100s connected by 3.2Tbps Infiniband.
+Databricks DBRX,gpu_hours_m,6.63552,不明(公式は事前学習単独のGPU時間を非公開。公式記載の『3ヶ月』はpretraining+post-training+評価+red-teamingの全体期間であり、3072GPU x 3ヶ月フル稼働という計算は事前学習のみの時間として過大評価の可能性が高い),wrong,https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm,"The main process of building DBRX - including pretraining, post-training, evaluation, red-teaming, and refining - took place over the course of three months."
+Gemma 2 (27B),total_b,26.05,"26.047B(non-embeddingパラメータ、Table2の26,047,480,320)",ok,https://arxiv.org/html/2408.00118,"27B non-embedding parameters: 26,047,480,320 (Table 2)"
+Gemma 2 (27B),active_b,26.05,26.05B(dense、totalと同一),ok,https://arxiv.org/html/2408.00118,"27B non-embedding parameters: 26,047,480,320 (Table 2)"
+Gemma 2 (27B),tokens_t,13.0,13T,ok,https://arxiv.org/html/2408.00118,We train Gemma 2 27B on 13 trillion tokens of primarily-English data
+Gemma 2 (27B),arch,dense,dense,ok,https://arxiv.org/html/2408.00118,We train Gemma 2 27B on 13 trillion tokens of primarily-English data
+Gemma 2 (27B),gpu,TPUv5p,TPUv5p、6144チップ,ok,https://arxiv.org/html/2408.00118,"TPUv5p, 6144 chips (Table 3, 27B行)"
+OLMo 3 7B,total_b,7.0,7.0(命名規則どおり),ok,https://arxiv.org/abs/2512.13961,7B and 32B parameter scales
+OLMo 3 7B,active_b,7.0,7.0(dense),ok,https://arxiv.org/abs/2512.13961,We adopt a decoder-only transformer architecture based on Vaswani et al. (2017).
+OLMo 3 7B,tokens_t,5.9,5.9T,ok,https://arxiv.org/abs/2512.13961,train Olmo 3 Base on Dolma 3 Mix... up to 5.9T tokens
+OLMo 3 7B,arch,dense,dense,ok,https://arxiv.org/abs/2512.13961,decoder-only transformer architecture (MoEの記述なし)
+OLMo 3 7B,gpu,H100,H100(最大1024枚),ok,https://allenai.org/blog/olmo3,"We pretrained Olmo 3 on a cluster of up to 1,024 H100 GPUs"
+OLMo 3 7B,gpu_hours_m,0.2135,計算値0.2128〜0.2139M(トークン数とスループットから算出、GPU台数は式中で相殺),ok(計算値),https://allenai.org/blog/olmo3,we train the 7B model at 7700 tokens per second per GPU
+INTELLECT-1,total_b,10.0,10.0B,ok,https://arxiv.org/abs/2412.01152,the first 10 billion parameter language model collaboratively trained across the globe
+INTELLECT-1,active_b,10.0,10.0B(dense),ok,https://arxiv.org/abs/2412.01152,MoE構造の記載なし、dense model
+INTELLECT-1,tokens_t,1.0,1.0T,ok,https://arxiv.org/abs/2412.01152,INTELLECT-1 was trained on 1 trillion tokens
+INTELLECT-1,arch,dense,dense,ok,https://arxiv.org/abs/2412.01152,MoE構造の記載なし
+INTELLECT-1,gpu,H100,H100(最大112枚),ok,https://arxiv.org/abs/2412.01152,up to 112 H100 GPUs simultaneously
+INTELLECT-1,gpu_hours_m,0.112896,計算値0.112896M(112GPU x 42日 x 24h、ピーク値使用の上限推定で実際は4〜14ノードで変動),ok(計算値、過大評価の可能性),https://arxiv.org/abs/2412.01152,up to 112 H100 GPUs simultaneously; pre-training of intellect-1 for 1 trillion tokens took place over 42 days
+Apertus 70B,total_b,70.0,70.0B,ok,https://arxiv.org/abs/2509.14233,Released at 8B and 70B scales
+Apertus 70B,active_b,70.0,70.0B(dense),ok,https://arxiv.org/abs/2509.14233,The Apertus architecture is a dense decoder-only Transformer
+Apertus 70B,tokens_t,15.0,15T,ok,https://arxiv.org/abs/2509.14233,training on 15T tokens from over 1800 languages
+Apertus 70B,arch,dense,dense,ok,https://arxiv.org/abs/2509.14233,The Apertus architecture is a dense decoder-only Transformer
+Apertus 70B,gpu,GH200,"NVIDIA Grace-Hopper GH200(10,752枚)",ok,https://arxiv.org/abs/2509.14233,"10,752 NVIDIA Grace-Hopper (GH200) GPUs (four per node)"
+Apertus 70B,gpu_hours_m,6.0,6.0M(報告値、論文自身が過小評価の可能性を明記),ok,https://arxiv.org/abs/2509.14233,the main run has consumed around 6 million GPU hours
+Marin 535B-A23B,total_b,535.0,535.0B,ok,https://marin.community/blog/2026/09/02/huang-foundation-marin-535b-training-run/,a 535B total parameter... mixture of experts model
+Marin 535B-A23B,active_b,23.0,23.0B,ok,https://marin.community/blog/2026/09/02/huang-foundation-marin-535b-training-run/,535B total parameters and 23B active
+Marin 535B-A23B,tokens_t,18.0,18T,ok,https://marin.community/blog/2026/09/02/huang-foundation-marin-535b-training-run/,with 18 trillion tokens of data; pretrain for about 3 months on 18 trillion tokens
+Marin 535B-A23B,arch,moe,moe,ok,https://marin.community/blog/2026/09/02/huang-foundation-marin-535b-training-run/,mixture of experts model
+Moonlight,total_b,16.0,16B(abstract)/15.29B(GitHub表の精密値),ok,https://arxiv.org/abs/2502.16982,a 3B/16B-parameter Mixture-of-Expert (MoE) model
+Moonlight,active_b,3.0,3B(abstract)/2.24B(GitHub表の精密値),ok,https://github.com/MoonshotAI/Moonlight,Activated Param 2.24B
+Moonlight,tokens_t,5.7,5.7T,ok,https://arxiv.org/abs/2502.16982,trained with 5.7T tokens
+Moonlight,arch,moe,moe,ok,https://arxiv.org/abs/2502.16982,a 3B/16B-parameter Mixture-of-Expert (MoE) model
+Yi-6B,total_b,6.0,6B(厳密値は論文に明記なし),ok,https://arxiv.org/abs/2403.04652,6B and 34B pretrained language models
+Yi-6B,active_b,6.0,6B(dense、totalと同一),ok,https://arxiv.org/abs/2403.04652,6B and 34B pretrained language models
+Yi-6B,tokens_t,3.1,3.1T(6B/34B共通コーパス。長文継続事前学習の5Bトークンは別枠で含まれない),ok,https://arxiv.org/abs/2403.04652,we construct 3.1 trillion tokens of English and Chinese corpora
+Yi-6B,arch,dense,dense,ok,https://arxiv.org/abs/2403.04652,6B and 34B pretrained language models
+PLaMo 2 8B,total_b,8.0,8B(呼称のみ、論文に厳密な総パラメータ数の明記なし),unverifiable,https://arxiv.org/abs/2509.04897,PLaMo 2 8B
+PLaMo 2 8B,active_b,8.0,8B(dense、totalと同一),ok,https://arxiv.org/abs/2509.04897,PLaMo 2 8B
+PLaMo 2 8B,tokens_t,6.0,6T,ok,https://arxiv.org/abs/2509.04897,PLaMo 2 8Bの学習トークン数(表6)=6T
+PLaMo 2 8B,arch,dense,dense,ok,https://arxiv.org/abs/2509.04897,PLaMo 2 8B
+MiniMax-M2,total_b,230.0,229.9B,ok(丸め),https://arxiv.org/abs/2605.26494,The flagship M2 contains 229.9B total parameters with only 9.8B activated per token.
+MiniMax-M2,active_b,10.0,9.8B,ok(丸め),https://arxiv.org/abs/2605.26494,229.9B total parameters with only 9.8B activated per token
+MiniMax-M2,tokens_t,29.2,29.2T(19.9T+9.3T),ok,https://arxiv.org/abs/2605.26494,Pre-training on 29.2T tokens establishes the base
+MiniMax-M2,arch,moe,moe,ok,https://arxiv.org/abs/2605.26494,MoE記述多数
+Trinity Large,total_b,400.0,400B,ok,https://www.arcee.ai/blog/trinity-large,Trinity-Large is a 400B parameter sparse MoE
+Trinity Large,active_b,13.0,13B,ok,https://www.arcee.ai/blog/trinity-large,13B active parameters per token
+Trinity Large,tokens_t,17.0,17T(10T+4T+3T),ok,https://www.arcee.ai/blog/trinity-large,trained on 17T tokens of data
+Trinity Large,arch,moe,moe,ok,https://www.arcee.ai/blog/trinity-large,Trinity-Large is a 400B parameter sparse MoE
+Trinity Large,gpu,B300,NVIDIA B300(2048枚),ok,https://www.arcee.ai/blog/trinity-large,We trained on 2048 Nvidia B300 GPUs
+Trinity Large,gpu_hours_m,1.622016,1.622016M(計算値=2048GPU x 33日 x 24h),ok(計算値),https://www.arcee.ai/blog/trinity-large,2048 Nvidia B300 GPUs; finished in 33 days
+StarCoder2-15B,total_b,15.0,15B,ok,https://arxiv.org/abs/2402.19173,"We train StarCoder2 models with 3B, 7B, and 15B parameters"
+StarCoder2-15B,active_b,15.0,15B(dense、totalと同一),ok,https://arxiv.org/abs/2402.19173,"We train StarCoder2 models with 3B, 7B, and 15B parameters"
+StarCoder2-15B,tokens_t,4.3,4.1T(Table 7、15B単体の実測値),wrong,https://arxiv.org/html/2402.19173,StarCoder2-15B ... n tokens 4.1T ... n epochs 4.49 (Table 7)
+StarCoder2-15B,arch,dense,dense,ok,https://arxiv.org/abs/2402.19173,"We train StarCoder2 models with 3B, 7B, and 15B parameters"
+DeepSeek-V4.1-Flash,total_b,552.0,552B(backbone),ok,https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash,a multimodal Mixture-of-Experts (MoE) model with 552B backbone parameters
+DeepSeek-V4.1-Flash,tokens_t,45.0,45T,ok,https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash,trained from scratch on a multimodal corpus comprising 45T tokens
+DeepSeek-V4.1-Flash,arch,moe,moe,ok,https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash,a multimodal Mixture-of-Experts (MoE) model
+HyperCLOVA X THINK 32B,total_b,32.0,"本文に厳密値の明記なし。HF公式配布名は""HyperCLOVAX-SEED-Think-32B""(タグは33B)",ok(呼称一致、厳密値は未確認),https://huggingface.co/naver-hyperclovax,HyperCLOVAX-SEED-Think-32B
+HyperCLOVA X THINK 32B,active_b,32.0,32B(dense前提、同上の留保あり),ok(同上),https://huggingface.co/naver-hyperclovax,HyperCLOVAX-SEED-Think-32B
+HyperCLOVA X THINK 32B,tokens_t,6.0,6T,ok,https://arxiv.org/html/2506.22403,pre-trained on roughly six trillion tokens
+HyperCLOVA X THINK 32B,arch,dense,dense(Peri-LN Transformer、MoE記述なし),ok,https://arxiv.org/html/2506.22403,Peri-LN Transformerアーキテクチャ、MoEの記述なし
+HyperCLOVA X THINK 32B,gpu,A100,本文中のA100はFigure6キャプション(GPU時間の正規化単位)としてのみ出現、学習ハードウェアの明記なし,unverifiable,https://arxiv.org/html/2506.22403,Figure 6: Training Efficiency (GPU Hours / A100 / MFU 50%)
+HyperCLOVA X THINK 32B,gpu_hours_m,2.0,図(画像)内の数値で本文テキストから抽出不能,unverifiable,https://arxiv.org/html/2506.22403,Figure 6 (画像内データ、テキスト抽出不可)
+Qwen3-235B-A22B(MoE),total_b,235.0,235B,ok,https://arxiv.org/html/2505.09388,"the flagship model, Qwen3-235B-A22B, is an MoE model with a total of 235 billion parameters"
+Qwen3-235B-A22B(MoE),active_b,22.0,22B,ok,https://arxiv.org/html/2505.09388,22 billion activated ones per token
+Qwen3-235B-A22B(MoE),tokens_t,36.0,36T,ok,https://arxiv.org/html/2505.09388,with a total of 36 trillion tokens
+Qwen3-235B-A22B(MoE),arch,moe,moe,ok,https://arxiv.org/html/2505.09388,"the flagship model, Qwen3-235B-A22B, is an MoE model"
