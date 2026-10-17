@@ -1,0 +1,115 @@
+model,field,csv_value,primary_value,verdict,source_url,quote
+Llama 2 70B,arch,dense,"dense (standard transformer, GQA)",ok,https://arxiv.org/abs/2307.09288,We use the standard transformer architecture ... 70B ... use Grouped-Query Attention (GQA)
+Llama 2 70B,total_b,70.0,70B,ok,https://arxiv.org/abs/2307.09288,Table 1: Llama 2 ... 70B
+Llama 2 70B,active_b,70.0,"70B (dense, all params active)",ok,https://arxiv.org/abs/2307.09288,"dense model, no MoE described"
+Llama 2 70B,tokens_t,2.0,2.0T,ok,https://arxiv.org/abs/2307.09288,70B 4k GQA 2.0T ... Token counts refer to pretraining data only
+Llama 2 70B,gpu,A100-80GB,A100-80GB,ok,https://arxiv.org/abs/2307.09288,A cumulative of 3.3M GPU hours of computation was performed on hardware of type A100-80GB
+Llama 2 70B,gpu_hours_m,1.72032,"1,720,320 GPU hours",ok,https://arxiv.org/abs/2307.09288,Table 2: 70B 1720320 (GPU hours)
+Llama 3.1 405B,arch,dense,dense Transformer,ok,https://arxiv.org/abs/2407.21783,Our largest model is dense Transformer with 405B parameters
+Llama 3.1 405B,total_b,405.0,405B,ok,https://arxiv.org/abs/2407.21783,we pre-trained a flagship model with 405B trainable parameters
+Llama 3.1 405B,active_b,405.0,405B (dense),ok,https://arxiv.org/abs/2407.21783,"dense Transformer, no MoE"
+Llama 3.1 405B,tokens_t,15.6,15.6T,ok,https://arxiv.org/abs/2407.21783,a flagship model with 405B trainable parameters on 15.6T text tokens
+Llama 3.1 405B,gpu,H100-80GB,H100 80GB HBM3,ok,https://arxiv.org/abs/2407.21783,"Llama 3 405B is trained on up to 16K H100 GPUs, each running at 700W TDP with 80GB HBM3"
+Llama 3.1 405B,gpu_hours_m,30.84,30.84M GPU hours,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_1/MODEL_CARD.md,"Llama 3.1 405B | 30.84M | 700 | 8,930 | 0"
+Llama 4 Scout,arch,moe,"MoE, 16 experts",ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,"The Llama 4 models ... use a mixture-of-experts (MoE) architecture ... Llama 4 Scout, a 17 billion parameter model with 16 experts"
+Llama 4 Scout,total_b,109.0,109B total,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,Llama 4 Scout (17Bx16E) | 17B (Activated) 109B (Total)
+Llama 4 Scout,active_b,17.0,17B active,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,17B (Activated) 109B (Total)
+Llama 4 Scout,tokens_t,40.0,~40T,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,Llama 4 Scout was pretrained on ~40 trillion tokens
+Llama 4 Scout,gpu,H100-80GB,H100-80GB,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,Model pre-training utilized a cumulative of 7.38M GPU hours of computation on H100-80GB (TDP of 700W) type hardware
+Llama 4 Scout,gpu_hours_m,5.0,5.0M,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,"Llama 4 Scout | 5.0M | 700 | 1,354 | 0"
+Llama 3.1 8B,arch,dense,dense,ok,https://arxiv.org/abs/2407.21783,"a herd of three multilingual ... language models with 8B, 70B, and 405B parameters ... standard dense Transformer"
+Llama 3.1 8B,total_b,8.0,8B,ok,https://arxiv.org/abs/2407.21783,"8B, 70B, and 405B parameters"
+Llama 3.1 8B,active_b,8.0,8B (dense),ok,https://arxiv.org/abs/2407.21783,dense Transformer architecture
+Llama 3.1 8B,tokens_t,15.0,15T+ (family-wide table value; no 8B-specific figure found),unverifiable,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_1/MODEL_CARD.md,Llama 3.1 (text only) | ... | 8B | ... | 15T+ | December 2023 (rowspan covers 8B/70B/405B jointly; only 405B has a separate precise figure of 15.6T in the paper)
+Llama 3.1 8B,gpu,H100-80GB,H100-80GB,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_1/MODEL_CARD.md,Training utilized a cumulative of 39.3M GPU hours of computation on H100-80GB (TDP of 700W) type hardware
+Llama 3.1 8B,gpu_hours_m,1.46,1.46M,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_1/MODEL_CARD.md,Llama 3.1 8B | 1.46M | 700 | 420 | 0
+Llama 3.1 70B,arch,dense,dense,ok,https://arxiv.org/abs/2407.21783,standard dense Transformer model architecture
+Llama 3.1 70B,total_b,70.0,70B,ok,https://arxiv.org/abs/2407.21783,"8B, 70B, and 405B parameters"
+Llama 3.1 70B,active_b,70.0,70B (dense),ok,https://arxiv.org/abs/2407.21783,dense Transformer architecture
+Llama 3.1 70B,tokens_t,15.0,15T+ (family-wide; no 70B-specific figure found),unverifiable,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_1/MODEL_CARD.md,Llama 3.1 (text only) | ... | 70B | ... | 15T+ | December 2023 (rowspan shared with 8B/405B)
+Llama 3.1 70B,gpu,H100-80GB,H100-80GB,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_1/MODEL_CARD.md,on H100-80GB (TDP of 700W) type hardware
+Llama 3.1 70B,gpu_hours_m,7.0,7.0M,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_1/MODEL_CARD.md,"Llama 3.1 70B | 7.0M | 700 | 2,040 | 0"
+Llama 3.2 1B,arch,dense,dense (pruned+distilled),ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,Llama 3.2 is an auto-regressive language model that uses an optimized transformer architecture
+Llama 3.2 1B,total_b,1.23,1.23B,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,1B (1.23B)
+Llama 3.2 1B,active_b,1.23,1.23B (dense),ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,1B (1.23B)
+Llama 3.2 1B,tokens_t,9.0,Up to 9T tokens,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,Llama 3.2 was pretrained on up to 9 trillion tokens of data from publicly available sources
+Llama 3.2 1B,gpu,H100-80GB,H100-80GB,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,Training utilized a cumulative of 916k GPU hours of computation on H100-80GB (TDP of 700W) type hardware
+Llama 3.2 1B,gpu_hours_m,0.37,370k = 0.37M,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,Llama 3.2 1B | 370k | - | 700 | 107 | 0
+Llama 3.2 3B,arch,dense,dense (pruned+distilled),ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,Llama 3.2 is an auto-regressive language model that uses an optimized transformer architecture
+Llama 3.2 3B,total_b,3.21,3.21B,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,3B (3.21B)
+Llama 3.2 3B,active_b,3.21,3.21B (dense),ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,3B (3.21B)
+Llama 3.2 3B,tokens_t,9.0,Up to 9T tokens,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,Llama 3.2 was pretrained on up to 9 trillion tokens of data from publicly available sources
+Llama 3.2 3B,gpu,H100-80GB,H100-80GB,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,on H100-80GB (TDP of 700W) type hardware
+Llama 3.2 3B,gpu_hours_m,0.46,460k = 0.46M,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_2/MODEL_CARD.md,Llama 3.2 3B | 460k | - | 700 | 133 | 0
+Llama 3.3 70B,arch,dense,"dense, GQA",ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_3/MODEL_CARD.md,Llama 3.3 is an auto-regressive language model that uses an optimized transformer architecture
+Llama 3.3 70B,total_b,70.0,70B,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_3/MODEL_CARD.md,Llama 3.3 (text only) | ... | 70B
+Llama 3.3 70B,active_b,70.0,70B (dense),ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_3/MODEL_CARD.md,"70B ... GQA Yes (dense, no MoE mentioned)"
+Llama 3.3 70B,tokens_t,15.0,"15T+ (open-ended floor, same wording as 3.1)",unverifiable,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_3/MODEL_CARD.md,Llama 3.3 (text only) | ... | 128k | Yes | 15T+ | December 2023
+Llama 3.3 70B,gpu,H100-80GB,H100-80GB,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_3/MODEL_CARD.md,on H100-80GB (TDP of 700W) type hardware
+Llama 3.3 70B,gpu_hours_m,7.0,"7.0M (per-model table row; note the card's lead sentence wrongly says cumulative 39.3M, a copy-paste artifact from the 3.1 card)",ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama3_3/MODEL_CARD.md,Llama 3.3 70B | 7.0M | 700 | 12.9 | 0
+Llama 4 Maverick,arch,moe,"MoE, 128 experts",ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,"Llama 4 Maverick, a 17 billion parameter model with 128 experts"
+Llama 4 Maverick,total_b,400.0,400B total,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,Llama 4 Maverick (17Bx128E) | 17B (Activated) 400B (Total)
+Llama 4 Maverick,active_b,17.0,17B active,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,17B (Activated) 400B (Total)
+Llama 4 Maverick,tokens_t,22.0,~22T,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,Llama 4 Maverick was pretrained on ~22 trillion tokens
+Llama 4 Maverick,gpu,H100-80GB,H100-80GB,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,Model pre-training utilized a cumulative of 7.38M GPU hours of computation on H100-80GB (TDP of 700W) type hardware
+Llama 4 Maverick,gpu_hours_m,2.38,2.38M,ok,https://raw.githubusercontent.com/meta-llama/llama-models/main/models/llama4/MODEL_CARD.md,Llama 4 Maverick | 2.38M | 700 | 645 | 0
+DeepSeek-V3,arch,moe,MoE (DeepSeekMoE + MLA),ok,https://arxiv.org/abs/2412.19437,"We present DeepSeek-V3, a strong Mixture-of-Experts (MoE) language model with 671B total parameters with 37B activated for each token."
+DeepSeek-V3,total_b,671.0,671B total,ok,https://arxiv.org/abs/2412.19437,671B total parameters with 37B activated for each token
+DeepSeek-V3,active_b,37.0,37B activated,ok,https://arxiv.org/abs/2412.19437,671B total parameters with 37B activated for each token
+DeepSeek-V3,tokens_t,14.8,14.8T pretraining tokens,ok,https://arxiv.org/abs/2412.19437,"During pre-training, we train DeepSeek-V3 on 14.8T high-quality and diverse tokens."
+DeepSeek-V3,gpu,H800,H800,ok,https://arxiv.org/abs/2412.19437,"Despite its excellent performance, DeepSeek-V3 requires only 2.788M H800 GPU hours for its full training."
+DeepSeek-V3,gpu_hours_m,2.664,"2664K = 2.664M (pretraining stage only, excludes context extension 119K and post-training 5K)",ok,https://arxiv.org/abs/2412.19437,"our pre-training stage is completed in less than two months and costs 2664K GPU hours. Combined with 119K GPU hours for the context length extension and 5K GPU hours for post-training, DeepSeek-V3 costs only 2.788M GPU hours for its full training."
+DeepSeek-V2,arch,moe,MoE (DeepSeekMoE + MLA),ok,https://arxiv.org/abs/2405.04434,"We present DeepSeek-V2, a strong Mixture-of-Experts (MoE) language model characterized by economical training and efficient inference."
+DeepSeek-V2,total_b,236.0,236B total,ok,https://arxiv.org/abs/2405.04434,"It comprises 236B total parameters, of which 21B are activated for each token"
+DeepSeek-V2,active_b,21.0,21B activated,ok,https://arxiv.org/abs/2405.04434,"236B total parameters, of which 21B are activated for each token"
+DeepSeek-V2,tokens_t,8.1,8.1T pretraining tokens,ok,https://arxiv.org/abs/2405.04434,We pretrain DeepSeek-V2 on a high-quality and multi-source corpus consisting of 8.1T tokens
+DeepSeek-V2,gpu,H800,H800,ok,https://arxiv.org/abs/2405.04434,We conduct all experiments on a cluster equipped with NVIDIA H800 GPUs.
+DeepSeek-V2,gpu_hours_m,1.3997,"calculated: 172.8K GPU hours/T-token x 8.1T = 1,399.68K = 1.39968M (paper gives only the per-trillion-token rate, not an explicit total pretraining GPU-hour figure)",ok,https://arxiv.org/abs/2405.04434,"During our practical training on the H800 cluster, for training on each trillion tokens, DeepSeek 67B requires 300.6K GPU hours, while DeepSeek-V2 needs only 172.8K GPU hours"
+Kimi-K2,arch,moe,"MoE (ultra-sparse, MLA, similar to DeepSeek-V3)",ok,https://arxiv.org/abs/2507.20534,"Kimi K2, a 1.04 trillion-parameter Mixture-of-Experts (MoE) LLM with 32 billion activated parameters"
+Kimi-K2,total_b,1040.0,1.04 trillion = 1040B total,ok,https://arxiv.org/abs/2507.20534,Kimi K2 is a 1.04 trillion-parameter Mixture-of-Experts (MoE) transformer model with 32 billion activated parameters.
+Kimi-K2,active_b,32.0,32B activated,ok,https://arxiv.org/abs/2507.20534,32 billion activated parameters and 1 trillion total parameters
+Kimi-K2,tokens_t,15.5,15.5T pretraining tokens,ok,https://arxiv.org/abs/2507.20534,K2 was pre-trained on 15.5 trillion tokens with zero loss spike ... processing a total of 15.5T tokens.
+Kimi-K2,gpu,H800,H800,ok,https://arxiv.org/abs/2507.20534,Kimi K2 was trained on a cluster equipped with NVIDIA H800 GPUs.
+Nemotron-4 340B,arch,dense,"dense, standard decoder-only Transformer",ok,https://arxiv.org/abs/2406.11704,"It is a standard decoder-only Transformer architecture (Vaswani et al., 2017), with causal attention masks"
+Nemotron-4 340B,total_b,340.0,"~341.0B (9.4B embedding + 331.6B non-embedding), named 340B",ok,https://arxiv.org/abs/2406.11704,It has 9.4 billion embedding parameters and 331.6 billion non-embedding parameters.
+Nemotron-4 340B,active_b,340.0,"340B (dense, all params active)",ok,https://arxiv.org/abs/2406.11704,standard decoder-only Transformer architecture ... (no MoE/sparsity described)
+Nemotron-4 340B,tokens_t,9.0,9T tokens total (8T formal pretraining + 1T continued pretraining),ok,https://arxiv.org/abs/2406.11704,"We train for a total of 9T tokens on this data, with the first 8T taking place as formal pretraining phase and the last 1T in a continued pretraining phase."
+Nemotron-4 340B,gpu,H100,H100 80GB SXM5 (768 DGX H100 nodes x 8 GPUs),ok,https://arxiv.org/abs/2406.11704,Nemotron-4-340B-Base was trained using 768 DGX H100 nodes; each node contains 8 H100 80GB SXM5 GPUs
+Nemotron-4 340B,gpu_hours_m,12.57,"未公開(論文はGPU時間の合計を明記せず、Table 2 の3段階のみ公開)。Table 2 の GPUs/iteration time/batch/tokens から自分で計算すると、8T分の formal pretraining だけで約11.56M GPU時間(stage1 1536GPU*10.3s*63,576iter/3600=約279,552、stage2 3072GPU*10.3s*31,788iter/3600=約279,431、stage3 6144GPU*8.0s*805,558iter/3600=約11,000,935、合計約11,559,918)。残り1Tの continued pretraining 分は Table 2 に記載が無く算出不能。6ND/(MFU×ピーク)の近似(MFU平均41-42%、H100 bf16ピーク989TFLOP/s、9T全体)では約12.5Mになり、CSVの12.57Mに近いが、どちらも論文の直接記載値ではなく計算値",unverifiable,https://arxiv.org/abs/2406.11704,Table 2: Batch size rampup schedule ... 16 1536 10.3 42.4% 768 200 / 32 3072 10.3 42.3% 1536 200 / 64 6144 8.0 41.0% 2304 7600 (総GPU時間は論文に明記なし)
+OLMo 3 32B,arch,dense,dense,ok,https://allenai.org/blog/olmo3,"Olmo 3 is a family of compact, dense models at 7 billion and 32 billion parameters"
+OLMo 3 32B,total_b,32.0,32B,ok,https://allenai.org/blog/olmo3,"Olmo 3 is a family of compact, dense models at 7 billion and 32 billion parameters"
+OLMo 3 32B,active_b,32.0,"32B (dense, all params active)",ok,https://allenai.org/blog/olmo3,"compact, dense models at 7 billion and 32 billion parameters (no MoE)"
+OLMo 3 32B,tokens_t,5.9,"5.9T (Dolma 3 Mix, the pretraining mix; distinct from 100B mid-training and ~50B long-context tokens)",ok,https://allenai.org/blog/olmo3,"Olmo 3 is pretrained on Dolma 3, a new ~9.3-trillion-token corpus ... From this pool, we construct Dolma 3 Mix, a 5.9-trillion-token (~6T) pretraining mix ... Dolma 3 Dolmino is our mid-training mix: 100B training tokens ... Dolma 3 Longmino is our long-context mix: ~50B training tokens"
+OLMo 3 32B,gpu,H100,H100,ok,https://allenai.org/blog/olmo3,"We pretrained Olmo 3 on a cluster of up to 1,024 H100 GPUs"
+SmolLM3,arch,dense,"dense (decoder-only transformer, GQA+NoPE)",ok,https://huggingface.co/HuggingFaceTB/SmolLM3-3B,3B parameter language model ... decoder-only transformer using GQA and NoPE (with 3:1 ratio)
+SmolLM3,total_b,3.0,3B,ok,https://huggingface.co/HuggingFaceTB/SmolLM3-3B,3B parameter language model
+SmolLM3,active_b,3.0,"3B (dense, all params active)",ok,https://huggingface.co/HuggingFaceTB/SmolLM3-3B,3B parameter language model ... decoder-only transformer (no MoE)
+SmolLM3,tokens_t,11.2,11.2T,ok,https://huggingface.co/blog/smollm3,We train SmolLM3 on 11.2T tokens using a three-stage training strategy
+SmolLM3,gpu,H100,H100 (384 GPUs),ok,https://huggingface.co/blog/smollm3,trained on 384 H100 GPUs for 24 days
+SmolLM3,gpu_hours_m,0.221184,"計算値: 384 GPU x 24日 x 24時間 = 221,184 GPU時間 = 0.221184M(本文に直接『GPU時間』という記載はないが、384 GPUと24日という2つの一次情報から機械的に導ける値で、CSVの値と完全一致)",ok,https://huggingface.co/blog/smollm3,trained on 384 H100 GPUs for 24 days
+PLaMo-100B,arch,dense,"dense, decoder-only transformer",ok,https://arxiv.org/abs/2410.07563,"The model's architecture is based on a decoder-only transformer (Vaswani et al., 2017), incorporating advanced techniques such as QK Normalization ... and Z-Loss"
+PLaMo-100B,total_b,100.0,100B,ok,https://arxiv.org/abs/2410.07563,"we developed PLaMo-100B, a 100 billion parameter LLM"
+PLaMo-100B,active_b,100.0,"100B (dense, all params active)",ok,https://arxiv.org/abs/2410.07563,decoder-only transformer ... (no MoE/sparsity described)
+PLaMo-100B,tokens_t,2.0,2T (paper's own definition of 'the pre-training process' = 1.5T initial pre-training + 0.5T continued pre-training combined),ok,https://arxiv.org/abs/2410.07563,"The pre-training process for PLaMo-100B used 2 trillion tokens, with 1.5 trillion for initial pre-training and 0.5 trillion for continued pre-training."
+PLaMo-100B,gpu,H100,NVIDIA H100 GPUs,ok,https://arxiv.org/abs/2410.07563,using NVIDIA H100 GPUs for computation
+GPT-3 175B,arch,dense,"dense (not MoE; uses alternating dense/locally-banded sparse attention patterns, which is an attention-pattern detail, not a mixture-of-experts layer)",ok,https://arxiv.org/abs/2005.14165,"we use alternating dense and locally banded sparse attention patterns in the layers of the transformer, similar to the Sparse Transformer. NOTE: CSV の source 列 (https://arxiv.org/abs/2203.15556) は実際には Chinchilla 論文 (Hoffmann et al.) の URL であり、GPT-3 の論文ではない。GPT-3 の正しい一次資料は Brown et al. 2020, arXiv:2005.14165 'Language Models are Few-Shot Learners'。この行の検証はその正しい論文を使って行った。"
+GPT-3 175B,total_b,175.0,175 billion parameters,ok,https://arxiv.org/abs/2005.14165,"we train GPT-3, an autoregressive language model with 175 billion parameters"
+GPT-3 175B,active_b,175.0,"175B (dense, all parameters active)",ok,https://arxiv.org/abs/2005.14165,"nparams is the total number of trainable parameters ... GPT-3 175B or 'GPT-3' (Table 2.1, single dense model, no expert routing)"
+GPT-3 175B,tokens_t,0.3,300 billion tokens = 0.3T,ok,https://arxiv.org/abs/2005.14165,All models were trained for a total of 300 billion tokens.
+Chinchilla 70B,arch,dense,"dense (same architecture/setup as Gopher, no MoE)",ok,https://arxiv.org/abs/2203.15556,Chinchilla uses the same model architecture and training setup as Gopher with the exception of the differences listed below.
+Chinchilla 70B,total_b,70.0,70B,ok,https://arxiv.org/abs/2203.15556,"We test this hypothesis by training a more compute-optimal 70B model, called Chinchilla, on 1.4 trillion tokens."
+Chinchilla 70B,active_b,70.0,"70B (dense, all parameters active)",ok,https://arxiv.org/abs/2203.15556,a model on the larger end of this range—70B parameters—for 1.4T tokens
+Chinchilla 70B,tokens_t,1.4,1.4 trillion tokens,ok,https://arxiv.org/abs/2203.15556,"We verify this by training a more compute-optimal 70B model, called Chinchilla, on 1.4 trillion tokens."
+Chinchilla 70B,gpu,"TPU v3,TPU v4",TPUv3/TPUv4,ok,https://arxiv.org/abs/2203.15556,"All models in this analysis have been trained on TPUv3/TPUv4 (Jouppi et al., 2017) with JAX (Bradbury et al., 2018) and Haiku (Hennigan et al., 2020)."
+Phi-3-medium,arch,dense,dense decoder-only Transformer,ok,https://huggingface.co/microsoft/Phi-3-medium-4k-instruct,Architecture: Phi-3-Medium-4K-Instruct has 14B parameters and is a dense decoder-only Transformer model.
+Phi-3-medium,total_b,14.0,14B parameters,ok,https://arxiv.org/html/2404.14219,"we also trained phi-3-medium, a model with 14B parameters using the same tokenizer and architecture of phi-3-mini"
+Phi-3-medium,active_b,14.0,"14B (dense, all parameters active)",ok,https://arxiv.org/html/2404.14219,"phi-3-medium, a model with 14B parameters ... (dense architecture, same as phi-3-mini; MoE variant is the separate phi-3.5-MoE model)"
+Phi-3-medium,tokens_t,4.8,4.8T tokens,ok,https://arxiv.org/html/2404.14219,trained on the same data for slightly more epochs (4.8T tokens total as for phi-3-small)
+Phi-3-medium,gpu,H100,512 H100-80G,ok,https://huggingface.co/microsoft/Phi-3-medium-4k-instruct,GPUs: 512 H100-80G / Training time: 42 days / Training data: 4.8T tokens
+Phi-3-medium,gpu_hours_m,0.516096,"512 GPUs x 42 days x 24h = 516,096 GPU hours = 0.516096M (計算値。model card は 'GPUs: 512 H100-80G' と 'Training time: 42 days' を別々に記載しており、GPU時間そのものの単一の数字は明記されていない)",ok,https://huggingface.co/microsoft/Phi-3-medium-4k-instruct,GPUs: 512 H100-80G / Training time: 42 days
+Reflection AI Beam-1.0-501B-A23B,arch,moe,sparse Mixture-of-Experts,ok,https://www.reflection.ai/beam,"sparse Mixture-of-Experts model with 501 billion total parameters, 23 billion active ... fine-grained routed experts"
+Reflection AI Beam-1.0-501B-A23B,total_b,501.0,501 billion total parameters,ok,https://www.reflection.ai/beam,"sparse Mixture-of-Experts model with 501 billion total parameters, 23 billion active"
+Reflection AI Beam-1.0-501B-A23B,active_b,23.0,23 billion active,ok,https://www.reflection.ai/beam,"501 billion total parameters, 23 billion active"
+Reflection AI Beam-1.0-501B-A23B,tokens_t,23.8,23.8 trillion tokens,ok,https://www.reflection.ai/beam,"pretrained on 23.8 trillion diverse, curated, high-quality tokens from the web and proprietary licensed datasets"
+Reflection AI Beam-1.0-501B-A23B,gpu,GB300 NVL72,NVIDIA GB300 NVL72,ok,https://www.reflection.ai/beam,"pretrained end-to-end in under four weeks on a cluster of 6,144 NVIDIA GB300 NVL72 GPUs"
+Reflection AI Beam-1.0-501B-A23B,gpu_hours_m,4.128768,"上限の計算値: 6,144 GPU x 4週間(28日)x 24h = 4,128,768 GPU時間 = 4.128768M。ただし本文は「under four weeks(4週間未満)」と明記しており、ちょうど4週間ではなく上限近似。実際のGPU時間はこれより少ない可能性があり、CSVの値を一次資料から一意に確認することはできない",unverifiable,https://www.reflection.ai/beam,"pretrained end-to-end in under four weeks on a cluster of 6,144 NVIDIA GB300 NVL72 GPUs (別文: 'generated over 100 million rollouts on 10.5K NVIDIA GB300 GPUs over 4 weeks' はRLロールアウトの文脈で、事前学習とは別の数字)"

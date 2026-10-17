@@ -1,0 +1,82 @@
+model,field,csv_value,primary_value,verdict,source_url,quote
+Sarashina2.2-3B,arch,dense,"dense (LlamaForCausalLM, no MoE fields)",ok,https://huggingface.co/sbintuitions/sarashina2.2-3b/raw/main/config.json,"""architectures"": [""LlamaForCausalLM""], ""model_type"": ""llama"""
+Sarashina2.2-3B,total_b,3.0,3.0,ok,https://huggingface.co/sbintuitions/sarashina2.2-3b,about 3 billion parameters (excluding embeddings and the LM head)
+Sarashina2.2-3B,active_b,3.0,3.0 (dense),ok,https://huggingface.co/sbintuitions/sarashina2.2-3b,about 3 billion parameters (excluding embeddings and the LM head)
+Sarashina2.2-3B,tokens_t,10.0,10.0,ok,https://huggingface.co/sbintuitions/sarashina2.2-3b,"trained the model on 10 trillion tokens, including Japanese, English, and code data"
+LongCat-Flash-Chat,arch,moe,moe,ok,https://arxiv.org/abs/2509.01322,a 560-billion-parameter Mixture-of-Experts (MoE) language model
+LongCat-Flash-Chat,total_b,560.0,560.0,ok,https://arxiv.org/abs/2509.01322,a 560-billion-parameter Mixture-of-Experts (MoE) language model
+LongCat-Flash-Chat,active_b,27.0,"18.6B-31.3B, average 27B",ok,https://arxiv.org/abs/2509.01322,activates 18.6B-31.3B (27B on average) per token
+LongCat-Flash-Chat,tokens_t,20.0,>20 trillion tokens,ok,https://arxiv.org/abs/2509.01322,we complete model training on more than 20 trillion tokens within 30 days
+IBM Granite 4.0 H-Small,arch,moe,moe (decoder-only MoE transformer),ok,https://huggingface.co/ibm-granite/granite-4.0-h-small,"decoder-only MoE transformer architecture featuring GQA, Mamba2, MoEs with shared experts"
+IBM Granite 4.0 H-Small,total_b,32.0,32.0,ok,https://huggingface.co/ibm-granite/granite-4.0-h-small,# Parameters: 32B
+IBM Granite 4.0 H-Small,active_b,9.0,9.0,ok,https://huggingface.co/ibm-granite/granite-4.0-h-small,# Active parameters: 9B
+IBM Granite 4.0 H-Small,tokens_t,23.0,~23.0 (15T+5T+2T+0.5T),ok,https://huggingface.co/ibm-granite/granite-4.0-h-small-base,"trained from scratch on approximately 23 trillion tokens following a four-stage training strategy: 15T, 5T, 2T, 0.5T"
+IBM Granite 4.0 H-Small,gpu,GB200 NVL72,GB200 NVL72,ok,https://huggingface.co/ibm-granite/granite-4.0-h-small-base,We trained the Granite 4.0 Language Models utilizing an NVIDIA GB200 NVL72 cluster hosted in CoreWeave.
+EXAONE 4.0 32B,arch,dense,dense (no MoE fields in Table 1),ok,https://arxiv.org/abs/2507.11407,"Table 1 lists standard transformer config (d_model, layers, GQA) with no experts/MoE"
+EXAONE 4.0 32B,total_b,32.0,32.0,ok,https://arxiv.org/abs/2507.11407,Total Params ... 32.0 B (Table 3)
+EXAONE 4.0 32B,active_b,32.0,32.0 (dense),ok,https://arxiv.org/abs/2507.11407,Total Params ... 32.0 B; no separate active-parameter figure (dense)
+EXAONE 4.0 32B,tokens_t,14.0,14.0,ok,https://arxiv.org/abs/2507.11407,the EXAONE 4.0 32B model ... utilizing 14 trillion tokens for pretraining
+Falcon-7B,arch,dense,dense (causal decoder-only),ok,https://arxiv.org/abs/2311.16867,"We introduce the Falcon series: 7B, 40B, and 180B parameters causal decoder-only models"
+Falcon-7B,total_b,7.0,7.0,ok,https://arxiv.org/abs/2311.16867,"Falcon series: 7B, 40B, and 180B parameters causal decoder-only models"
+Falcon-7B,active_b,7.0,7.0 (dense),ok,https://arxiv.org/abs/2311.16867,7B parameters causal decoder-only model
+Falcon-7B,tokens_t,1.5,"1.5 (1,500B)",ok,https://arxiv.org/abs/2311.16867,"Table 1: Pretraining [tokens] Falcon-7B 1,500B"
+Falcon-7B,gpu,A100,A100,ok,https://arxiv.org/abs/2311.16867,Table 1: Training [A100s] Falcon-7B 384
+GLM-5(論文版),arch,moe,moe (256 experts),ok,https://arxiv.org/abs/2602.15763,GLM-5 scales to 256 experts ... This results in a 744B parameter model (40B active parameters)
+GLM-5(論文版),total_b,744.0,744.0,ok,https://arxiv.org/abs/2602.15763,This results in a 744B parameter model (40B active parameters)
+GLM-5(論文版),active_b,40.0,40.0,ok,https://arxiv.org/abs/2602.15763,This results in a 744B parameter model (40B active parameters)
+GLM-5(論文版),tokens_t,28.5,28.5,ok,https://arxiv.org/abs/2602.15763,totaling 28.5 trillion tokens for the base model
+Seed-OSS-36B,arch,dense,dense,ok,https://huggingface.co/ByteDance-Seed/Seed-OSS-36B-Instruct,"Seed-OSS adopts the popular causal language model architecture with RoPE, GQA, RMSNorm, SwiGLU"
+Seed-OSS-36B,total_b,36.0,36.0,ok,https://huggingface.co/ByteDance-Seed/Seed-OSS-36B-Instruct,Parameters 36B
+Seed-OSS-36B,active_b,36.0,36.0 (dense),ok,https://huggingface.co/ByteDance-Seed/Seed-OSS-36B-Instruct,"Parameters 36B (dense, no separate active figure)"
+Seed-OSS-36B,tokens_t,12.0,12.0,ok,https://huggingface.co/ByteDance-Seed/Seed-OSS-36B-Instruct,"Although trained with only 12T tokens, Seed-OSS achieves excellent performance"
+Hunyuan-TurboS,arch,hybrid,hybrid (Mamba-Transformer MoE),ok,https://arxiv.org/abs/2505.15431,a novel large hybrid Transformer-Mamba Mixture of Experts (MoE) model
+Hunyuan-TurboS,total_b,560.0,560.0,ok,https://arxiv.org/abs/2505.15431,56B activated (560B total) parameter model
+Hunyuan-TurboS,active_b,56.0,56.0,ok,https://arxiv.org/abs/2505.15431,56B activated (560B total) parameter model
+Hunyuan-TurboS,tokens_t,16.0,16.0,ok,https://arxiv.org/abs/2505.15431,Pre-trained on 16T high-quality tokens
+Qwen3-Next-80B-A3B,arch,moe,moe (512 experts/10 activated),ok,https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct,High-Sparsity MoE ... Number of Experts: 512 / Number of Activated Experts: 10
+Qwen3-Next-80B-A3B,total_b,80.0,80.0,ok,https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct,Number of Parameters: 80B in total and 3B activated
+Qwen3-Next-80B-A3B,active_b,3.0,3.0,ok,https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct,Number of Parameters: 80B in total and 3B activated
+Qwen3-Next-80B-A3B,tokens_t,15.0,15.0 (gspoブログは根拠にならず、HF model cardが根拠),ok,https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct,Training Stage: Pretraining (15T tokens) & Post-training
+OLMo 2 7B,arch,dense,dense,ok,https://arxiv.org/abs/2501.00656,"a family of dense autoregressive language models at 7B, 13B and 32B scales"
+OLMo 2 7B,total_b,7.0,7.0,ok,https://arxiv.org/abs/2501.00656,"dense autoregressive language models at 7B, 13B and 32B scales"
+OLMo 2 7B,active_b,7.0,7.0 (dense),ok,https://arxiv.org/abs/2501.00656,"dense model, no separate activated-parameter figure"
+OLMo 2 7B,tokens_t,4.05,4.05,ok,https://arxiv.org/abs/2501.00656,OLMo 2 7B is trained on 4.05 trillion tokens (3.90 trillion for pretraining stage)
+OLMo 2 7B,gpu,H100,H100,ok,https://arxiv.org/abs/2501.00656,"1,024 NVIDIA H100 GPUs ... Jupiter is a 128-node GPU cluster"
+Qwen-1.8B,arch,dense,dense,ok,https://arxiv.org/abs/2309.16609,"modified version of the Transformer architecture, LLaMA-like"
+Qwen-1.8B,total_b,1.8,1.8,ok,https://arxiv.org/abs/2309.16609,Table 1: # of Params 1.8B ... Training tokens 2.2T
+Qwen-1.8B,active_b,1.8,1.8 (dense),ok,https://arxiv.org/abs/2309.16609,"Table 1, 1.8B row, no MoE routing described"
+Qwen-1.8B,tokens_t,2.2,2.2,ok,https://arxiv.org/abs/2309.16609,Table 1: 1.8B ... Training tokens 2.2T
+Sarashina2-70B,arch,dense,dense (Llama2-style),ok,https://huggingface.co/sbintuitions/sarashina2-70b,70B | 102400 | 2.1T | Llama2 | RoPE | 80 | 8192 | 64
+Sarashina2-70B,total_b,70.0,70.0,ok,https://huggingface.co/sbintuitions/sarashina2-70b,70B | 102400 | 2.1T | Llama2
+Sarashina2-70B,active_b,70.0,70.0 (dense),ok,https://huggingface.co/sbintuitions/sarashina2-70b,"Llama2 dense architecture, no MoE column"
+Sarashina2-70B,tokens_t,2.1,2.1,ok,https://huggingface.co/sbintuitions/sarashina2-70b,70B | 102400 | 2.1T (Training tokens column)
+Hunyuan-A13B,arch,moe,moe,ok,https://github.com/Tencent-Hunyuan/Hunyuan-A13B/raw/main/report/Hunyuan_A13B_Technical_Report.pdf,"Hunyuan-A13B, an open-source large language model employing a Mixture-of-Experts (MoE) architecture"
+Hunyuan-A13B,total_b,80.0,80.0,ok,https://github.com/Tencent-Hunyuan/Hunyuan-A13B/raw/main/report/Hunyuan_A13B_Technical_Report.pdf,leverages 80 billion total parameters while activating only 13 billion parameters
+Hunyuan-A13B,active_b,13.0,13.0,ok,https://github.com/Tencent-Hunyuan/Hunyuan-A13B/raw/main/report/Hunyuan_A13B_Technical_Report.pdf,13 billion active parameters within a total of 80 billion
+Hunyuan-A13B,tokens_t,20.0,20.0,ok,https://github.com/Tencent-Hunyuan/Hunyuan-A13B/raw/main/report/Hunyuan_A13B_Technical_Report.pdf,pretrained on a rigorously filtered 20T token corpus
+Qwen2-7B,arch,dense,dense,ok,https://arxiv.org/abs/2407.10671,Table 1: 0.5B 1.5B 7B 72B 57B-A14B (only 57B-A14B is MoE)
+Qwen2-7B,total_b,7.0,7.0,ok,https://arxiv.org/abs/2407.10671,"Qwen2 series ... Qwen2-0.5B, Qwen2-1.5B, Qwen2-7B, Qwen2-57B-A14B, and Qwen2-72B"
+Qwen2-7B,active_b,7.0,7.0 (dense),ok,https://arxiv.org/abs/2407.10671,dense columns incl. 7B have no active/total split (active=total)
+Qwen2-7B,tokens_t,7.0,7.0,ok,https://arxiv.org/abs/2407.10671,"Trained Tokens: 0.5B=12T, 1.5B=7T, 7B=7T, 72B=7T, 57B-A14B=4.5T"
+LLM-jp-3 MoE 8x1.8B,arch,moe,MoE (Mixture of Experts),ok,https://llm-jp.nii.ac.jp/blog/blog-603/,LLM-jpでは初のMoE（Mixture of Experts）モデルシリーズとなる8×1.8Bと8x13Bの2つのモデルを新たにリリースします
+LLM-jp-3 MoE 8x1.8B,total_b,9.2,9.2,ok,https://llm-jp.nii.ac.jp/blog/blog-603/,"8×1.8Bは総パラメータ9.2B, アクティブパラメータ2.9Bながらも7.2Bモデルに匹敵する性能を実現"
+LLM-jp-3 MoE 8x1.8B,active_b,2.9,2.9,ok,https://llm-jp.nii.ac.jp/blog/blog-603/,"8×1.8Bは総パラメータ9.2B, アクティブパラメータ2.9B"
+LLM-jp-3 MoE 8x1.8B,tokens_t,2.1,unverifiable (2.1Tは8x13Bの学習規模),wrong,https://llm-jp.nii.ac.jp/blog/blog-603/,2.1Tトークンもの大規模データでの学習においても...Drop-Upcyclingはスクラッチからの学習を性能面で上回る、は8x13Bの文脈で、8x1.8B自体のトークン数は記事に明記なし(モデル取り違えの疑い)
+Qwen3-30B-A3B(MoE),arch,moe,MoE,ok,https://arxiv.org/abs/2505.09388,Qwen3 series includes models of both dense and Mixture-of-Expert (MoE) architectures
+Qwen3-30B-A3B(MoE),total_b,30.5,30.5,ok,https://huggingface.co/Qwen/Qwen3-30B-A3B,Number of Parameters: 30.5B in total and 3.3B activated
+Qwen3-30B-A3B(MoE),active_b,3.3,3.3,ok,https://huggingface.co/Qwen/Qwen3-30B-A3B,Number of Parameters: 30.5B in total and 3.3B activated
+Qwen3-30B-A3B(MoE),tokens_t,36.0,36,ok,https://arxiv.org/abs/2505.09388,Qwen3 has been pre-trained on 36 trillion tokens covering up to 119 languages and dialects
+AI2 Olmo 3.1 Think 32B,arch,dense,dense,ok,https://arxiv.org/abs/2512.13961,Olmo 3 Base closely follows OLMo 2 in that it is a dense model at 7B and 32B
+AI2 Olmo 3.1 Think 32B,total_b,32.0,32,ok,https://arxiv.org/abs/2512.13961,Olmo 3 Base is the best fully-open model at 32B parameters
+AI2 Olmo 3.1 Think 32B,active_b,32.0,32 (dense),ok,https://arxiv.org/abs/2512.13961,it is a dense model at 7B and 32B
+AI2 Olmo 3.1 Think 32B,tokens_t,9.3,5.93 (実際の6T mix)。9.31Tは重複除去前の候補プール,wrong,https://arxiv.org/abs/2512.13961,"Table 4: 9T Pool Tokens 9.31T / 6T Mix Tokens 5.93T (100%)。We first train Olmo 3 Base on Dolma 3 Mix, our 6T token pretraining data mix"
+AI2 Olmo 3.1 Think 32B,gpu,H100,H100,ok,https://arxiv.org/abs/2512.13961,on a cluster with 1024 H100 GPUs dedicated to Olmo 3
+AI2 Olmo 3.1 Think 32B,gpu_hours_m,0.976896,976896 (計算値: 9.5日x512GPUx24h + 35日x1024GPUx24h = 116736+860160),ok,https://arxiv.org/abs/2512.13961,"The initial pretraining phase on 5.5T tokens took about 9.5 days on 512 GPUs, followed by an additional 35 days on 1024 GPUs"
+Gemma 3n E2B,total_b,5.0,5 (Googleブログ) / 6 (HF E2B-itカード) で一次資料間に不一致。CSV引用元のE4B-itページは別モデル(8B),unverifiable,https://huggingface.co/google/gemma-3n-E2B-it ; https://developers.googleblog.com/en/introducing-gemma-3n/,"HF E2B-it: ""the raw parameter count of this model is 6B"" / Googleブログ: ""the raw parameter count is 5B and 8B""(5BがE2B)。CSVのsource欄はE4B-itページで本来E2Bの資料ではない"
+Gemma 3n E2B,active_b,2.0,1.91 (just under 2 billion),ok,https://ai.google.dev/gemma/docs/gemma-3n,"using parameter skipping and PLE caching techniques, this model can be operated with an effective memory load of just under 2 billion (1.91B) parameters"
+Gemma 3n E2B,tokens_t,11.0,11,ok,https://huggingface.co/google/gemma-3n-E2B-it,These models were trained on a dataset that includes a wide variety of sources totalling approximately 11 trillion tokens
+Gemma 3n E2B,arch,hybrid,unverifiable (公式分類語はMatFormer/Matryoshka Transformer、hybridという語は確認できず),unverifiable,https://ai.google.dev/gemma/docs/gemma-3n,Gemma 3n models use a Matryoshka Transformer or MatFormer model architecture
+DeepSeek-V4-Flash,arch,moe,MoE,ok,https://arxiv.org/abs/2606.19348,two Mixture-of-Experts (MoE) language models - DeepSeek-V4-Pro with 1.6T parameters (49B activated) and DeepSeek-V4-Flash with 284B parameters (13B activated)
+DeepSeek-V4-Flash,total_b,284.0,284,ok,https://arxiv.org/abs/2606.19348,DeepSeek-V4-Flash with 284B parameters (13B activated)
+DeepSeek-V4-Flash,active_b,13.0,13,ok,https://arxiv.org/abs/2606.19348,DeepSeek-V4-Flash with 284B parameters (13B activated)
+DeepSeek-V4-Flash,tokens_t,32.0,32,ok,https://arxiv.org/abs/2606.19348,"During pre-training, we train DeepSeek-V4-Flash on 32T tokens and DeepSeek-V4-Pro on 33T tokens"
