@@ -1,10 +1,12 @@
-"""Build the five data charts from data/models.csv, data/llm_extra.csv and data/rollout_share.csv into figures/."""
+"""Build the six data charts from data/models.csv, data/llm_extra.csv and data/rollout_share.csv into figures/."""
 import csv, math, re, sys, os
+import statistics as st
 from datetime import date
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.ticker
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = os.path.join(ROOT, "data")
@@ -32,6 +34,11 @@ def rel(x):
     return date(int(m.group(1)), int(m.group(2)), 15) if m else None
 
 
+def year(x):
+    m = re.match(r"(\d{4})", str(x or ""))
+    return int(m.group(1)) if m else None
+
+
 def norm(name):
     return re.sub(r"[^a-z0-9.+]", "", name.lower().replace("llama-", "llama").replace("meta", ""))
 
@@ -42,7 +49,7 @@ rows = {}
 for r in csv.DictReader(open(f"{D}/models.csv")):
     if EXCLUDE.search(r["model"]) or NOTEX.search(r.get("notes") or ""):
         continue
-    rows[norm(r["model"])] = dict(model=r["model"], release=rel(r["release"]), arch=(r["arch"] or "").lower(),
+    rows[norm(r["model"])] = dict(model=r["model"], release=rel(r["release"]), year=year(r["release"]), arch=(r["arch"] or "").lower(),
                                   total=num(r["total_b"]), active=num(r["active_b"]) or (num(r["total_b"]) if (r["arch"] or "").lower() == "dense" else None),
                                   tokens=num(r["pretrain_tokens_t"]), gpuh=num(r["pretrain_gpu_hours_m"]), gpu=r["pretrain_gpu"],
                                   src="primary", rl=num(r["rl_gpu_hours_k"]), rlkind=r["rl_gpu_hours_kind"], rlgpu=r["rl_gpu"], rlcount=r["rl_gpu_count"])
@@ -53,7 +60,7 @@ for r in csv.DictReader(open(f"{D}/llm_extra.csv")):
     if r["source_kind"] == "epoch" and ((num(r["total_b"]) or 0) < 1 or (num(r["tokens_t"]) or 0) < 0.05):
         continue
     arch = (r["arch"] or "").lower()
-    rows[k] = dict(model=r["model"], release=rel(r["release"]), arch=arch, total=num(r["total_b"]),
+    rows[k] = dict(model=r["model"], release=rel(r["release"]), year=year(r["release"]), arch=arch, total=num(r["total_b"]),
                    active=num(r["active_b"]) or (num(r["total_b"]) if arch in ("dense", "") else None),
                    tokens=num(r["tokens_t"]), gpuh=num(r["gpu_hours_m"]), gpu=r["gpu"],
                    src="epoch" if r["source_kind"] == "epoch" else "primary", rl=None)
@@ -99,12 +106,35 @@ def is_moe(p):
     return "hybrid" in a and p["active"] and p["total"] and p["active"] < p["total"] * 0.9
 
 
+def moe_with_tokens(points):
+    return [p for p in points if p["src"] == "primary" and is_moe(p) and p["active"] and p["total"] and p["tokens"] and p["year"]]
+
+
 def series(points):
     prim = [p for p in points if p["src"] == "primary" and p["arch"]]
     moe = [p for p in prim if is_moe(p)]
     dense = [p for p in prim if not is_moe(p)]
     other = [p for p in points if p["src"] == "epoch" or not p["arch"]]
     return dense, moe, other
+
+
+# RL post-training GPU-hours (thousands) drawn in chart 4
+RL = []
+for r in csv.DictReader(open(f"{D}/models.csv")):
+    v = num(r["rl_gpu_hours_k"])
+    if not v or v < 1 or re.search(r"sea-lion|phi-4|t\u00fclu 3 8b|tulu 3 8b|olmo 3 32b$|vision|\u84b8\u7559|nemotron 3.5", r["model"], re.I):
+        continue
+    kind = "reported" if r["rl_gpu_hours_kind"] == "reported" else "computed"
+    name = r["model"]
+    cnt = r["rl_gpu_count"]
+    if name.startswith("INTELLECT-3"):
+        cnt = "512 (allocation)"
+    if "Olmo 3.1" in name:
+        name = "Olmo 3.1 Think 32B (extra 21 days)"
+    if name == "DeepSeek-V3":
+        name = "DeepSeek-V3 (all post-training)"
+    RL.append(dict(model=name, rl=v, rlkind=kind, rlgpu=r["rl_gpu"], rlcount=cnt))
+RL.sort(key=lambda r: r["rl"])
 
 
 # ---------------- 1. total params vs tokens
@@ -179,22 +209,6 @@ ax.legend(loc="upper left", frameon=False, fontsize=12)
 save(fig, "compute-vs-gpu-hours")
 
 # ---------------- 4. RL GPU-hours
-RL = []
-for r in csv.DictReader(open(f"{D}/models.csv")):
-    v = num(r["rl_gpu_hours_k"])
-    if not v or v < 1 or re.search(r"sea-lion|phi-4|t\u00fclu 3 8b|tulu 3 8b|olmo 3 32b$|vision|\u84b8\u7559|nemotron 3.5", r["model"], re.I):
-        continue
-    kind = "reported" if r["rl_gpu_hours_kind"] == "reported" else "computed"
-    name = r["model"]
-    cnt = r["rl_gpu_count"]
-    if name.startswith("INTELLECT-3"):
-        cnt = "512 (allocation)"
-    if "Olmo 3.1" in name:
-        name = "Olmo 3.1 Think 32B (extra 21 days)"
-    if name == "DeepSeek-V3":
-        name = "DeepSeek-V3 (all post-training)"
-    RL.append(dict(model=name, rl=v, rlkind=kind, rlgpu=r["rl_gpu"], rlcount=cnt))
-RL.sort(key=lambda r: r["rl"])
 fig, ax = plt.subplots(figsize=(13.4, 7.4))
 ys = range(len(RL))
 cols = [INK if r["rlkind"] == "reported" else AQUA for r in RL]
@@ -241,3 +255,25 @@ ax.set_xlim(0, 105); ax.set_xlabel("rollout share of RL iteration time (%)")
 style(ax, "Rollout share of RL step time by system", "Filled: measured or computed setting. Hollow: bound or general statement quoted in the paper")
 ax.grid(axis="y", visible=False)
 save(fig, "rollout-share")
+
+
+# ---------------- 6. MoE active share by release year
+M = moe_with_tokens(R)
+years = (2024, 2025, 2026)
+fig, ax = plt.subplots(figsize=(13.4, 6.8))
+for i, y in enumerate(years):
+    v = [p["active"] / p["total"] * 100 for p in sorted((p for p in M if p["year"] == y), key=lambda p: p["model"])]
+    xs = [i + ((j * 0.618) % 1 - 0.5) * 0.5 for j in range(len(v))]
+    ax.scatter(xs, v, s=80, color=ORANGE, edgecolors=BG, linewidths=1.5, zorder=3)
+    med = st.median(v)
+    ax.plot([i - 0.32, i + 0.32], [med, med], color=INK, linewidth=2.5, zorder=4)
+    ax.text(i + 0.36, med, f"median {med:.1f}%  (n={len(v)})", va="center", fontsize=13, color=INK, zorder=5, bbox=dict(boxstyle="round,pad=0.2", fc=BG, ec="none"))
+ax.set_yscale("log")
+ax.set_yticks([2, 5, 10, 20, 50]); ax.set_yticklabels(["2%", "5%", "10%", "20%", "50%"])
+ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+ax.set_xticks(range(len(years))); ax.set_xticklabels([str(y) for y in years], color=INK)
+ax.set_xlim(-0.6, len(years) - 0.1); ax.set_ylim(1.5, 60)
+ax.set_ylabel("active / total parameters")
+style(ax, "MoE models activate a shrinking share of their parameters", "MoE models with disclosed pre-training tokens, primary sources, by release year")
+ax.grid(axis="x", visible=False)
+save(fig, "moe-active-share-by-year")

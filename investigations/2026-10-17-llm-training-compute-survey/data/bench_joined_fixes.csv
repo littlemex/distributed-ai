@@ -1,0 +1,4 @@
+model,field,old,new,evidence_url
+cerebras/btlm-3b-8k-base,tokens_t,627.0,0.627,https://huggingface.co/cerebras/btlm-3b-8k-base
+openlm-research/open_llama_7b_v2,active_b,13.0,7.0,https://huggingface.co/openlm-research/open_llama_7b_v2
+Kimi K2.5,tokens_t,15.0,30.5,https://huggingface.co/moonshotai/Kimi-K2-Instruct;https://arxiv.org/abs/2602.02276

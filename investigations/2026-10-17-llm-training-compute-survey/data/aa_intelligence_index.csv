@@ -1,0 +1,68 @@
+name,release_date,intelligence_index,retrieved,source
+GPT-3.5 Turbo,2022-11-30,5.49,2026-10-17,https://artificialanalysis.ai/models/open-source
+Llama 65B,2023-02-24,5.03,2026-10-17,https://artificialanalysis.ai/models/open-source
+GPT-4,2023-03-14,6.70,2026-10-17,https://artificialanalysis.ai/models/open-source
+Llama 2 Chat 70B,2023-07-18,5.30,2026-10-17,https://artificialanalysis.ai/models/open-source
+Llama 2 Chat 7B,2023-07-18,5.71,2026-10-17,https://artificialanalysis.ai/models/open-source
+Mistral 7B Instruct,2023-09-27,5.03,2026-10-17,https://artificialanalysis.ai/models/open-source
+Solar Mini,2024-01-25,6.41,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude 3 Opus,2024-03-04,8.72,2026-10-17,https://artificialanalysis.ai/models/open-source
+Llama 3.1 Instruct 405B,2024-07-23,7.29,2026-10-17,https://artificialanalysis.ai/models/open-source
+Mistral Large 2 (Jul '24),2024-07-24,6.80,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek-V2.5,2024-09-06,6.55,2026-10-17,https://artificialanalysis.ai/models/open-source
+o1-preview,2024-09-12,11.38,2026-10-17,https://artificialanalysis.ai/models/open-source
+Qwen2.5 Instruct 72B,2024-09-19,7.73,2026-10-17,https://artificialanalysis.ai/models/open-source
+Mistral Large 2 (Nov '24),2024-11-18,7.56,2026-10-17,https://artificialanalysis.ai/models/open-source
+QwQ 32B-Preview,2024-11-27,7.59,2026-10-17,https://artificialanalysis.ai/models/open-source
+o1,2024-12-05,15.23,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek R1 (Jan '25),2025-01-20,11.41,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude 3.7 Sonnet (Reasoning),2025-02-24,17.71,2026-10-17,https://artificialanalysis.ai/models/open-source
+Llama 4 Maverick,2025-04-05,9.30,2026-10-17,https://artificialanalysis.ai/models/open-source
+o3,2025-04-16,20.20,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude 4 Opus (Reasoning),2025-05-22,20.64,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek R1 0528 (May '25),2025-05-28,13.12,2026-10-17,https://artificialanalysis.ai/models/open-source
+o3-pro,2025-06-10,21.87,2026-10-17,https://artificialanalysis.ai/models/open-source
+Kimi K2,2025-07-11,12.72,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude 4.1 Opus (Reasoning),2025-08-05,22.85,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek V3.1 (Non-reasoning),2025-08-21,13.71,2026-10-17,https://artificialanalysis.ai/models/open-source
+Kimi K2 0905,2025-09-05,15.29,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek V3.1 Terminus (Reasoning),2025-09-22,14.76,2026-10-17,https://artificialanalysis.ai/models/open-source
+GPT-5 Codex (High),2025-09-23,24.88,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek V3.2 Exp (Reasoning),2025-09-29,16.58,2026-10-17,https://artificialanalysis.ai/models/open-source
+GLM-4.6 (Reasoning),2025-09-30,18.53,2026-10-17,https://artificialanalysis.ai/models/open-source
+Kimi K2 Thinking,2025-11-06,22.02,2026-10-17,https://artificialanalysis.ai/models/open-source
+Gemini 3 Pro Preview (High),2025-11-18,27.96,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude Opus 4.5 (Reasoning),2025-11-24,29.10,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek V3.2 (Reasoning),2025-12-01,21.49,2026-10-17,https://artificialanalysis.ai/models/open-source
+GPT-5.2 (Xhigh),2025-12-11,30.45,2026-10-17,https://artificialanalysis.ai/models/open-source
+MiMo-V2-Flash (Feb 2026),2025-12-16,22.44,2026-10-17,https://artificialanalysis.ai/models/open-source
+Kimi K2.5 (Reasoning),2026-01-27,23.46,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude Opus 4.6 (Max),2026-02-05,31.95,2026-10-17,https://artificialanalysis.ai/models/open-source
+GPT-5.3 Codex (Xhigh),2026-02-05,32.50,2026-10-17,https://artificialanalysis.ai/models/open-source
+GLM-5 (Reasoning),2026-02-11,27.91,2026-10-17,https://artificialanalysis.ai/models/open-source
+GPT-5.4 (Xhigh),2026-03-05,38.98,2026-10-17,https://artificialanalysis.ai/models/open-source
+MiniMax-M2.7,2026-03-18,22.76,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude Opus 4.7 (Max),2026-04-16,40.69,2026-10-17,https://artificialanalysis.ai/models/open-source
+Kimi K2.6 (Reasoning),2026-04-20,26.98,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek V4 Pro 0424 (High),2026-04-24,30.11,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude Opus 4.8 (Max),2026-05-28,41.79,2026-10-17,https://artificialanalysis.ai/models/open-source
+MiniMax-M3,2026-06-01,29.22,2026-10-17,https://artificialanalysis.ai/models/open-source
+"Claude Fable 5 (Max, Opus 4.8 Fallback)",2026-06-09,49.63,2026-10-17,https://artificialanalysis.ai/models/open-source
+GLM-5.2 (Max),2026-06-16,33.71,2026-10-17,https://artificialanalysis.ai/models/open-source
+Inkling (Xhigh),2026-07-15,24.98,2026-10-17,https://artificialanalysis.ai/models/open-source
+Kimi K3 (Low),2026-07-16,30.07,2026-10-17,https://artificialanalysis.ai/models/open-source
+Kimi K3 (Max),2026-07-16,43.59,2026-10-17,https://artificialanalysis.ai/models/open-source
+Claude Opus 5 (Max),2026-07-24,50.78,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek V4 Pro 0813 (Max),2026-08-13,36.00,2026-10-17,https://artificialanalysis.ai/models/open-source
+Qwen3.8 27B (Xhigh),2026-08-14,33.68,2026-10-17,https://artificialanalysis.ai/models/open-source
+GLM-5.3 (Max),2026-08-18,44.78,2026-10-17,https://artificialanalysis.ai/models/open-source
+GLM-5.3-Flash,2026-08-26,41.81,2026-10-17,https://artificialanalysis.ai/models/open-source
+"Claude Fable 5.1 (Max, Default Fallback)",2026-09-01,53.35,2026-10-17,https://artificialanalysis.ai/models/open-source
+K2 Horizon 375B A23B,2026-09-03,30.50,2026-10-17,https://artificialanalysis.ai/models/open-source
+DeepSeek V4.1 Flash (Max),2026-09-10,39.46,2026-10-17,https://artificialanalysis.ai/models/open-source
+Step 5 Preview,2026-09-18,43.73,2026-10-17,https://artificialanalysis.ai/models/open-source
+MiMo-V2.6-Pro,2026-09-21,46.32,2026-10-17,https://artificialanalysis.ai/models/open-source
+"Claude Opus 5.5 (Max, Default Fallback)",2026-09-22,57.62,2026-10-17,https://artificialanalysis.ai/models/open-source
+Muse Spark Open (Xhigh),2026-10-15,38.87,2026-10-17,https://artificialanalysis.ai/models/open-source
+Nemotron 3.5 Super VL,2026-10-15,26.49,2026-10-17,https://artificialanalysis.ai/models/open-source
+Beam 1.0,2026-10-16,30.33,2026-10-17,https://artificialanalysis.ai/models/open-source
