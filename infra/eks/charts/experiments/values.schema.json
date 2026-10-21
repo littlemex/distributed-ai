@@ -36,8 +36,10 @@
       "additionalProperties": false,
       "properties": {
         "enabled": { "type": "boolean" },
+        "name": { "type": "string" },
         "numNodes": { "type": ["integer", "string"] },
         "nodeRole": { "type": "string" },
+        "queueName": { "type": "string" },
         "nprocPerNode": { "type": ["integer", "string"] },
         "gpu": {
           "type": "object",

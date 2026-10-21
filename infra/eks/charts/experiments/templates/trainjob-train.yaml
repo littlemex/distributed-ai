@@ -34,6 +34,20 @@ Render + apply (GPU, 2 nodes x 1 GPU, long enough to watch):
   NOTE the knob is trainjobTrain.totalEpochs, NOT torchrunTrain.totalEpochs. The two workloads
   keep symmetric ddp knobs (values.yaml explains why), and passing one to the other used to be
   silently dropped — the render now fails instead (experiments.failOnStrayDdpKnobs).
+
+Render + apply several concurrent jobs through Kueue (see manifests/kueue-reference/ for the
+ClusterQueue/LocalQueue this needs first): --set trainjobTrain.name gives each job its own TrainJob
+object (the default "ddp-trainjob" is a single fixed name, which a second render would just
+overwrite in place rather than run alongside); --set trainjobTrain.queueName opts the job into that
+LocalQueue, and --set trainjobTrain.outputSubdir keeps concurrent runs on the same nodeRole from
+resuming each other's snapshot (see that field's comment below).
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set trainjobTrain.enabled=true --set trainjobTrain.image=$IMG \
+    --set trainjobTrain.nodeRole=gpu-ddp --set trainjobTrain.gpu.enabled=true \
+    --set trainjobTrain.gpu.count=1 --set trainjobTrain.nprocPerNode=1 \
+    --set trainjobTrain.name=ddp-trainjob-a --set trainjobTrain.queueName=gpu-ddp \
+    --set trainjobTrain.outputSubdir=trainjob-gpu-ddp-a \
+    --set sharedStorage.existingClaimName=shared-claim | kubectl apply -f -
 Verify (JobSet-based pod naming; there is no "master"/"worker" split anymore):
   kubectl -n $NS get trainjob ddp-trainjob
   kubectl -n $NS logs -f -l jobset.sigs.k8s.io/jobset-name=ddp-trainjob   # rank-0 is node-0-0
@@ -46,8 +60,12 @@ Verify (JobSet-based pod naming; there is no "master"/"worker" split anymore):
 apiVersion: trainer.kubeflow.org/v1alpha1
 kind: TrainJob
 metadata:
-  name: ddp-trainjob
+  name: {{ $v.name | default "ddp-trainjob" | quote }}
   namespace: {{ include "experiments.namespace" . }}
+  {{- if $v.queueName }}
+  labels:
+    kueue.x-k8s.io/queue-name: {{ $v.queueName | quote }}
+  {{- end }}
 spec:
   runtimeRef:
     apiGroup: trainer.kubeflow.org
