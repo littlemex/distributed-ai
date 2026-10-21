@@ -115,6 +115,8 @@ source "$SCRIPT_DIR/cases/base.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/gpu.sh"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/cases/kueue.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/neuron.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/cases/image-build.sh"

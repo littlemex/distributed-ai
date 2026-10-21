@@ -1,0 +1,11 @@
+# Advanced03 scenario values: three TrainJobs, same shape as Basic04's GPU DDP run, each going
+# through Kueue instead of straight to the default scheduler. image/nodeRole/queueName are
+# cluster-specific and passed at deploy time (same reason Basic07's gpuServingVllm.nodeRole is).
+trainjobTrain:
+  enabled: true
+  numNodes: 2
+  nprocPerNode: 1
+  gpu:
+    enabled: true
+    count: 1
+  totalEpochs: 3   # short on purpose: this scenario asserts queueing behavior, not model quality
