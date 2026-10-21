@@ -36,11 +36,13 @@ Render + apply (GPU, 2 nodes x 1 GPU, long enough to watch):
   silently dropped — the render now fails instead (experiments.failOnStrayDdpKnobs).
 
 Render + apply several concurrent jobs through Kueue (see manifests/kueue-reference/ for the
-ClusterQueue/LocalQueue this needs first): --set trainjobTrain.name gives each job its own TrainJob
-object (the default "ddp-trainjob" is a single fixed name, which a second render would just
-overwrite in place rather than run alongside); --set trainjobTrain.queueName opts the job into that
-LocalQueue, and --set trainjobTrain.outputSubdir keeps concurrent runs on the same nodeRole from
-resuming each other's snapshot (see that field's comment below).
+ClusterQueue/LocalQueue this needs first -- its GPU_QUOTA has to cover numNodes x gpu.count for
+ONE of these jobs, 2 here, not 1, or the Workload never admits): --set trainjobTrain.name gives
+each job its own TrainJob object (the default "ddp-trainjob" is a single fixed name, which a
+second render would just overwrite in place rather than run alongside); --set
+trainjobTrain.queueName opts the job into that LocalQueue, and --set trainjobTrain.outputSubdir
+keeps concurrent runs on the same nodeRole from resuming each other's snapshot (see that field's
+comment below). Repeat with -b/-c (and a distinct outputSubdir each) for more than one job.
   helm template exp ./charts/experiments --set namespace=$NS \
     --set trainjobTrain.enabled=true --set trainjobTrain.image=$IMG \
     --set trainjobTrain.nodeRole=gpu-ddp --set trainjobTrain.gpu.enabled=true \
@@ -48,7 +50,12 @@ resuming each other's snapshot (see that field's comment below).
     --set trainjobTrain.name=ddp-trainjob-a --set trainjobTrain.queueName=gpu-ddp \
     --set trainjobTrain.outputSubdir=trainjob-gpu-ddp-a \
     --set sharedStorage.existingClaimName=shared-claim | kubectl apply -f -
-Verify (JobSet-based pod naming; there is no "master"/"worker" split anymore):
+  Verify: kubectl -n $NS get workloads (ADMITTED shows which of several submitted jobs is
+  actually running vs. held) and kubectl -n $NS get trainjob ddp-trainjob-a -- note the -a, this
+  example's --set trainjobTrain.name, not the fixed name the next block below verifies.
+Verify (CPU/GPU examples above, JobSet-based pod naming; there is no "master"/"worker" split
+anymore -- this is the FIXED default name, "ddp-trainjob", not any --set trainjobTrain.name used
+above):
   kubectl -n $NS get trainjob ddp-trainjob
   kubectl -n $NS logs -f -l jobset.sigs.k8s.io/jobset-name=ddp-trainjob   # rank-0 is node-0-0
 */ -}}
