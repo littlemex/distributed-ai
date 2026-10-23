@@ -1,0 +1,41 @@
+# shared-claim for scenarios that run a chapter's TrainJob in the test namespace. The PVC name is not
+# a value the scenario can choose: it is fixed in the shared torch-distributed-eks
+# ClusterTrainingRuntime (charts/experiments, sharedStorage.existingClaimName), so the namespace needs
+# a claim by exactly that name. It is backed by its own test-owned PV on the same OpenZFS filesystem,
+# because a PV binds one claim and the harness's openzfs-claim-test already holds the other one.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${SHARED_TEST_PV_NAME}
+  labels:
+    app.kubernetes.io/managed-by: eks-regression-tests
+spec:
+  capacity:
+    storage: 256Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  claimRef:
+    namespace: ${NAMESPACE}
+    name: shared-claim
+  csi:
+    driver: fsx.openzfs.csi.aws.com
+    volumeHandle: ${OPENZFS_VOLUME_HANDLE}-shared-test
+    volumeAttributes:
+      DNSName: ${OPENZFS_DNS_NAME}
+      ResourceType: "filesystem"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-claim
+  namespace: ${NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 256Gi
+  volumeName: ${SHARED_TEST_PV_NAME}
+  storageClassName: ""
