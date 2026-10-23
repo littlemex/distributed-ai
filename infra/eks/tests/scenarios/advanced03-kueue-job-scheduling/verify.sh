@@ -6,14 +6,15 @@
 set -euo pipefail
 ns="${NAMESPACE:?set NAMESPACE}"
 role="${NODE_ROLE:?set NODE_ROLE}"
+run_prefix="${RUN_ID:+${RUN_ID}-}"
 
 for n in ddp-trainjob-a ddp-trainjob-b ddp-trainjob-c; do
   suffix="${n##*-}"
   log="$(kubectl -n "$ns" logs -l "jobset.sigs.k8s.io/jobset-name=$n,batch.kubernetes.io/job-completion-index=0" --tail=-1)"
   case "$log" in
-    *"trainjob-$role-$suffix/snapshot.pt"*"done"*) ;;
+    *"trainjob-$role-${run_prefix}$suffix/snapshot.pt"*"done"*) ;;
     *) echo "=== $n log ===" >&2; printf '%s\n' "$log" >&2
-       echo "$n: expected its own outputSubdir (trainjob-$role-$suffix) and a final 'done' line" >&2
+       echo "$n: expected its own outputSubdir (trainjob-$role-${run_prefix}$suffix) and a final 'done' line" >&2
        exit 1 ;;
   esac
 done

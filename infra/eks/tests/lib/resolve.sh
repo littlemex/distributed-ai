@@ -83,7 +83,7 @@ safe_name() {
 test_pv_names() {
   local suffix
   suffix="$(safe_name "$NAMESPACE")"
-  printf '%s %s\n' "${suffix}-fsx-test-pv" "${suffix}-openzfs-test-pv"
+  printf '%s %s %s\n' "${suffix}-fsx-test-pv" "${suffix}-openzfs-test-pv" "${suffix}-shared-test-pv"
 }
 
 assert_test_pv_free() {

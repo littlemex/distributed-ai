@@ -8,7 +8,10 @@
 #
 # Env: NAMESPACE, NODE_ROLE (the accelerator_pools key / NodePool name — same meaning as the GPU
 # serving scenario's NODE_ROLE), IMAGE (ddp-sample ECR URL incl. tag). CHART, GPU_QUOTA,
-# ROLLOUT_TIMEOUT optional.
+# ROLLOUT_TIMEOUT optional. RUN_ID, when set, goes into each outputSubdir so a rerun on the same
+# filesystem starts fresh instead of resuming the previous run's snapshot; verify.sh reads it too.
+# The jobs mount the PVC named in the shared torch-distributed-eks ClusterTrainingRuntime
+# (shared-claim), so NAMESPACE must already have a PVC by that name.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 eks_root="$(cd "$here/../../.." && pwd)"
@@ -16,6 +19,7 @@ chart="${CHART:-$eks_root/charts/experiments}"
 ns="${NAMESPACE:?set NAMESPACE}"
 role="${NODE_ROLE:?set NODE_ROLE (the GPU pool key)}"
 image="${IMAGE:?set IMAGE (ddp-sample ECR URL:tag)}"
+run_prefix="${RUN_ID:+${RUN_ID}-}"
 quota="${GPU_QUOTA:-2}"   # 2 == exactly one job's worth (numNodes=2 x gpu.count=1), the chapter's own number
 rollout_timeout="${ROLLOUT_TIMEOUT:-15m}"
 
@@ -27,15 +31,18 @@ sed -e "s/__NAMESPACE__/$ns/g" -e "s/__NODEPOOL_NAME__/$role/g" -e "s/__GPU_QUOT
   "$eks_root/manifests/kueue-reference/queue.yaml.tmpl" | kubectl apply -f -
 
 # Step 4: submit all three at once, each its own TrainJob name, queue-name label, and output
-# subdirectory (so ddp.py never resumes from another job's snapshot — see values.yaml).
+# subdirectory (so ddp.py never resumes from another job's snapshot — see values.yaml). The chart
+# also renders the shared torch-distributed-eks ClusterTrainingRuntime; -l applies only the
+# queue-labelled TrainJob, as the chapter does, so the run never rewrites the runtime other
+# chapters use.
 helm dependency build "$chart" 2>/dev/null || helm dependency update "$chart"
 for n in "${names[@]}"; do
   helm template exp "$chart" -f "$here/values.yaml" --set namespace="$ns" \
     --set trainjobTrain.image="$image" --set trainjobTrain.nodeRole="$role" \
     --set trainjobTrain.name="$n" --set trainjobTrain.queueName="$role" \
-    --set trainjobTrain.outputSubdir="trainjob-$role-${n##*-}" \
+    --set trainjobTrain.outputSubdir="trainjob-$role-${run_prefix}${n##*-}" \
     --set sharedStorage.existingClaimName=shared-claim \
-  | kubectl apply -f -
+  | kubectl apply -l kueue.x-k8s.io/queue-name="$role" -f -
 done
 
 # The chapter's central claim, checked while it is still checkable: poll the ClusterQueue's own
