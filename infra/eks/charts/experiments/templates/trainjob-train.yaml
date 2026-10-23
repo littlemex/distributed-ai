@@ -34,7 +34,28 @@ Render + apply (GPU, 2 nodes x 1 GPU, long enough to watch):
   NOTE the knob is trainjobTrain.totalEpochs, NOT torchrunTrain.totalEpochs. The two workloads
   keep symmetric ddp knobs (values.yaml explains why), and passing one to the other used to be
   silently dropped — the render now fails instead (experiments.failOnStrayDdpKnobs).
-Verify (JobSet-based pod naming; there is no "master"/"worker" split anymore):
+
+Render + apply several concurrent jobs through Kueue (see manifests/kueue-reference/ for the
+ClusterQueue/LocalQueue this needs first -- its GPU_QUOTA has to cover numNodes x gpu.count for
+ONE of these jobs, 2 here, not 1, or the Workload never admits): --set trainjobTrain.name gives
+each job its own TrainJob object (the default "ddp-trainjob" is a single fixed name, which a
+second render would just overwrite in place rather than run alongside); --set
+trainjobTrain.queueName opts the job into that LocalQueue, and --set trainjobTrain.outputSubdir
+keeps concurrent runs on the same nodeRole from resuming each other's snapshot (see that field's
+comment below). Repeat with -b/-c (and a distinct outputSubdir each) for more than one job.
+  helm template exp ./charts/experiments --set namespace=$NS \
+    --set trainjobTrain.enabled=true --set trainjobTrain.image=$IMG \
+    --set trainjobTrain.nodeRole=gpu-ddp --set trainjobTrain.gpu.enabled=true \
+    --set trainjobTrain.gpu.count=1 --set trainjobTrain.nprocPerNode=1 \
+    --set trainjobTrain.name=ddp-trainjob-a --set trainjobTrain.queueName=gpu-ddp \
+    --set trainjobTrain.outputSubdir=trainjob-gpu-ddp-a \
+    --set sharedStorage.existingClaimName=shared-claim | kubectl apply -f -
+  Verify: kubectl -n $NS get workloads (ADMITTED shows which of several submitted jobs is
+  actually running vs. held) and kubectl -n $NS get trainjob ddp-trainjob-a -- note the -a, this
+  example's --set trainjobTrain.name, not the fixed name the next block below verifies.
+Verify (CPU/GPU examples above, JobSet-based pod naming; there is no "master"/"worker" split
+anymore -- this is the FIXED default name, "ddp-trainjob", not any --set trainjobTrain.name used
+above):
   kubectl -n $NS get trainjob ddp-trainjob
   kubectl -n $NS logs -f -l jobset.sigs.k8s.io/jobset-name=ddp-trainjob   # rank-0 is node-0-0
 */ -}}
@@ -46,8 +67,12 @@ Verify (JobSet-based pod naming; there is no "master"/"worker" split anymore):
 apiVersion: trainer.kubeflow.org/v1alpha1
 kind: TrainJob
 metadata:
-  name: ddp-trainjob
+  name: {{ $v.name | default "ddp-trainjob" | quote }}
   namespace: {{ include "experiments.namespace" . }}
+  {{- if $v.queueName }}
+  labels:
+    kueue.x-k8s.io/queue-name: {{ $v.queueName | quote }}
+  {{- end }}
 spec:
   runtimeRef:
     apiGroup: trainer.kubeflow.org

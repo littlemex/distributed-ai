@@ -1,0 +1,72 @@
+# Kueue reference example: one ClusterQueue over one existing NodePool, one LocalQueue in the
+# namespace that opts in. Copy this file, substitute the three placeholders, and `kubectl apply -f`.
+# This is deliberately NOT applied by `terraform apply` — it is as workload-shape-specific as
+# accelerator-pools.auto.tfvars, and belongs with the workshop step that uses it, not with the
+# always-on controller install in kueue.tf.
+#
+# Deliberately no Namespace object here, even though __NAMESPACE__ needs the managed-by-kueue
+# label (see README.md's "Opting a namespace in" for the `kubectl label namespace` command that
+# does it): this file's natural inverse is `kubectl delete -f` on the same rendered output, and a
+# Namespace manifest in that path would delete the whole namespace — including things this
+# template never created, like a shared PVC applied in an earlier workshop step.
+#
+# Placeholders:
+#   __NAMESPACE__      the namespace this queue serves (must carry managed-by-kueue=true, see
+#                      README.md; this file assumes the namespace already exists)
+#   __NODEPOOL_NAME__  the Karpenter NodePool this ResourceFlavor targets (e.g. gpu-ddp). In this
+#                      repo, accelerator_pools' map key IS the NodePool's own metadata.name (not
+#                      just a label on it) -- verified live (`kubectl get nodepool gpu-ddp`
+#                      resolves directly) -- so the accelerator_pools key is what goes here.
+#   __GPU_QUOTA__      how many nvidia.com/gpu this ClusterQueue may admit at once, in total across
+#                      every LocalQueue that points at it (there is no cohort in this example, so
+#                      that is every namespace using this NodePool, not a share of some larger
+#                      pool -- see README.md's "No per-namespace isolation" note). Set this to what
+#                      the NodePool can actually give you right now, not to how many GPUs you wish
+#                      it had: Kueue's admission has no idea whether the NodePool's instance types,
+#                      AZ, or Spot availability can back this number. A quota Karpenter cannot fill
+#                      behaves exactly like an ordinary unschedulable-pod wait -- Workloads admit,
+#                      their Pods stay Pending, and nothing in Kueue itself will tell you why (check
+#                      NodeClaims/Karpenter's own logs the same way Basic04's troubleshooting
+#                      section does). The cpu/memory quotas below are fixed at values that fit this
+#                      repo's own gpu-ddp instance types; raise them if your workloads request more
+#                      of either -- they gate admission exactly the same way the GPU quota does.
+
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: __NODEPOOL_NAME__
+spec:
+  # Matches nodes Karpenter launched from this NodePool. karpenter.sh/nodepool is a label
+  # Karpenter sets on every node it manages, not something this NodePool's definition has to
+  # request -- but the VALUE here has to be the NodePool's real metadata.name, which this repo's
+  # accelerator_pools convention makes identical to the pool's map key (see the placeholder note
+  # above). A Pod Kueue admits under this flavor carries this as a nodeSelector; if the real
+  # NodePool is named differently, those Pods are admitted but stay unschedulable.
+  nodeLabels:
+    karpenter.sh/nodepool: __NODEPOOL_NAME__
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: __NODEPOOL_NAME__-cq
+spec:
+  namespaceSelector: {}   # which namespaces may attach a LocalQueue to this ClusterQueue; {} = any
+  resourceGroups:
+    - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+      flavors:
+        - name: __NODEPOOL_NAME__
+          resources:
+            - name: "cpu"
+              nominalQuota: "32"
+            - name: "memory"
+              nominalQuota: "128Gi"
+            - name: "nvidia.com/gpu"
+              nominalQuota: "__GPU_QUOTA__"
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: __NODEPOOL_NAME__
+  namespace: __NAMESPACE__
+spec:
+  clusterQueue: __NODEPOOL_NAME__-cq

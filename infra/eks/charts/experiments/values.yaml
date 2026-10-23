@@ -371,8 +371,20 @@ trainjobTrain:
   # old pytorchjobTrain (PyTorchJob). References the cluster runtime torch-distributed-eks, which
   # holds the antiAffinity / tolerations / shared PVC / shm / do-not-disrupt scaffolding; this
   # block sets only the per-job knobs.
+  # TrainJob object name. Kept at the historical default so existing single-job workflows are
+  # unaffected; override to run more than one trainjobTrain-based TrainJob at once (e.g. to
+  # demonstrate Kueue queueing several jobs against one NodePool) — each needs its own name, and
+  # its own outputSubdir if they share a nodeRole (see that field's comment below for why).
+  name: ddp-trainjob
   numNodes: 2          # training nodes; the torch plugin injects PET_NNODES = this
   nodeRole: cpu        # accelerator_pools key (cpu for gloo DDP; e.g. gpu-ddp for nccl)
+  # Kueue queue-name label (kueue.x-k8s.io/queue-name). Empty = unlabelled = this TrainJob bypasses
+  # Kueue entirely and goes straight to the default scheduler, exactly as before this field
+  # existed. Set it to a LocalQueue name in this namespace to have Kueue hold/admit it instead
+  # (see infra/eks/manifests/kueue-reference/). The namespace also needs the managed-by-kueue=true
+  # label kueue.tf's opt-in scoping requires — queueName alone, in an unlabelled namespace, is
+  # inert (Kueue's webhooks never see it).
+  queueName: ""
   # processes PER node. Set explicitly — never "auto" (on CPU the plugin would derive it from the
   # CPU request). Keep == gpu.count on GPU (one proc per GPU); 1 on CPU.
   nprocPerNode: 1

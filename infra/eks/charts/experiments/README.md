@@ -58,6 +58,7 @@ Every workload's failure mode for a missing prerequisite is the same: the Pod/Jo
 | any GPU workload | a `device_plugin="nvidia"` accelerator pool exists in `accelerator_pools` (terraform.tfvars) | `kubectl get nodepool` | Pod stays Pending, no matching node-role |
 | any Neuron workload | a `device_plugin="neuron"` accelerator pool exists | `kubectl get nodepool` | Pod stays Pending |
 | `trainjobTrain` | Kubeflow Trainer v2 control plane (installed by `trainer.tf`, `trainer_enabled=true`) | `kubectl get pods -n kubeflow-system` | TrainJob created but never schedules Pods |
+| `trainjobTrain.queueName` | Kueue installed (`kueue.tf`, always on) AND the target namespace labelled `managed-by-kueue=true` AND a LocalQueue of that name in it (`manifests/kueue-reference/`) | `kubectl -n <ns> get localqueue <queueName>` | with the namespace unlabelled: the label is inert, the TrainJob runs immediately, unqueued — not Pending, the opposite of what setting this field is meant to do. With the namespace labelled but no matching LocalQueue: `kubectl -n <ns> get workloads` shows the Workload stuck with no `ADMITTED` value at all |
 
 ### Toleration ↔ NodePool taint mismatch
 

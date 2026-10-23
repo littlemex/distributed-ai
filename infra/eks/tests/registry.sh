@@ -88,6 +88,7 @@ register_all_tests() {
   register_test cuda-vector-add  test_cuda_vector_add  full gpu "$TIMEOUT_GPU"
   register_test gpu-fsx-mount    test_gpu_fsx_mount    full gpu "$TIMEOUT_GPU"
   register_test gpu-serving-vllm test_gpu_serving_vllm full gpu 1200 helm
+  register_test kueue-job-scheduling test_kueue_job_scheduling full gpu 1200 helm
 
   # Standalone Trainium suite (never in baseline/coverage/full). Runs only under `--suite neuron`;
   # self-skips when no Trainium node is present. 40 min timeout covers the first-run NEFF compile.
