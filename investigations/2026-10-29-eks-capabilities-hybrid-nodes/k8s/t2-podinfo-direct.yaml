@@ -1,0 +1,18 @@
+# T2: ask the managed Argo CD to deploy straight to the non-EKS cluster by API URL.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: podinfo-direct
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://stefanprodan.github.io/podinfo
+    chart: podinfo
+    targetRevision: 6.17.0
+  destination:
+    name: other-k3s
+    namespace: podinfo-direct
+  syncPolicy:
+    automated: {}
+    syncOptions: [CreateNamespace=true]
