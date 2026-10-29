@@ -35,7 +35,7 @@ wait_for() { # <seconds> <command...>: retry until the command succeeds
 app_status() { $K -n "$1" get application "$2" -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null; }
 app_ok() { [ "$(app_status "$1" "$2")" = Synced/Healthy ]; }
 
-# ── access to the private endpoint ────────────────────────────────────────────
+# ---- access to the private endpoint ----
 nc -z 127.0.0.1 "$LOCAL_PORT" 2>/dev/null && { echo "[FAIL] setup: port $LOCAL_PORT is in use; set LOCAL_PORT to a free port"; exit 1; }
 "$HERE/port-forward.sh" >/tmp/ekscap-port-forward.log 2>&1 &
 PF=$!
@@ -43,7 +43,7 @@ trap 'pkill -P $PF 2>/dev/null; kill $PF 2>/dev/null' EXIT
 wait_for 60 nc -z 127.0.0.1 "$LOCAL_PORT" || { echo "port forward did not open"; exit 1; }
 wait_for 60 $K get --raw /readyz || { echo "API server not reachable through the port forward"; exit 1; }
 
-# ── hybrid node and its CNI ──────────────────────────────────────────────────
+# ---- hybrid node and its CNI ----
 hybrid_node() { $K get nodes -l eks.amazonaws.com/compute-type=hybrid -o jsonpath='{.items[0].metadata.name}' 2>/dev/null; }
 has_hybrid_node() { [ -n "$(hybrid_node)" ]; }
 wait_for 900 has_hybrid_node
@@ -57,7 +57,7 @@ echo "[INFO] hybrid node $NODE is Ready"
 # The Argo CD CRDs exist before anything here installs a second Argo CD.
 echo "[INFO] CRD applications.argoproj.io created $($K get crd applications.argoproj.io -o jsonpath='{.metadata.creationTimestamp}'), managed Argo CD $(aws eks describe-capability --region "$AWS_REGION" --cluster-name "$CLUSTER_NAME" --capability-name argocd --query capability.version --output text)"
 
-# ── the managed Argo CD sees the hub cluster by its ARN ──────────────────────
+# ---- the managed Argo CD sees the hub cluster by its ARN ----
 $K apply -f - >/dev/null <<YAML
 apiVersion: v1
 kind: Secret
@@ -72,7 +72,7 @@ stringData:
   project: default
 YAML
 
-# ── T1 ───────────────────────────────────────────────────────────────────────
+# ---- T1 ----
 $K apply -f "$ROOT/k8s/t1-podinfo-onprem.yaml" >/dev/null
 if wait_for 300 app_ok argocd podinfo-onprem; then
   PLACEMENT=$($K -n podinfo-onprem get pods -o jsonpath='{range .items[*]}{.spec.nodeName}={.status.podIP} {end}')
@@ -90,7 +90,7 @@ else
   fail T1 "Application status $(app_status argocd podinfo-onprem)"
 fi
 
-# ── T2 ───────────────────────────────────────────────────────────────────────
+# ---- T2 ----
 "$HERE/register-k3s.sh" argocd >/dev/null
 $K apply -f "$ROOT/k8s/t2-podinfo-direct.yaml" >/dev/null
 t2_conditions() { $K -n argocd get application podinfo-direct -o jsonpath='{.status.conditions[*].message}'; }
@@ -110,7 +110,7 @@ fi
 $K -n argocd delete application podinfo-direct --wait=false >/dev/null
 $K -n argocd delete secret other-k3s >/dev/null
 
-# ── T3 ───────────────────────────────────────────────────────────────────────
+# ---- T3 ----
 $K apply -f "$ROOT/k8s/t3-tier2-argocd.yaml" >/dev/null
 "$HERE/register-k3s.sh" argocd-edge >/dev/null
 k3s_ready() { on_k3s "k3s kubectl -n podinfo-other get deploy podinfo-other -o jsonpath='{.status.readyReplicas}' 2>/dev/null" | tr -d '\n'; }
@@ -122,7 +122,7 @@ else
   fail T3 "tier2-argocd $(app_status argocd tier2-argocd), tier2-apps $(app_status argocd tier2-apps), podinfo-other $(app_status argocd-edge podinfo-other), k3s readyReplicas=$(k3s_ready)"
 fi
 
-# ── T4 ───────────────────────────────────────────────────────────────────────
+# ---- T4 ----
 # Change only two Applications on the managed Argo CD: podinfo-onprem, and tier2-apps
 # (the argocd-apps values that hold the k3s Application). A target is done when the
 # Deployment has rolled out every replica and each Pod, asked by its own IP, returns
@@ -158,7 +158,7 @@ else
   fail T4 "on-prem [$P_ONPREM] t=${T_ONPREM:-timeout}; k3s [$P_K3S] t=${T_K3S:-timeout}"
 fi
 
-# ── T5 ───────────────────────────────────────────────────────────────────────
+# ---- T5 ----
 # Both times come from the k3s machine's clock: when the delete was issued, and the
 # creationTimestamp of the Deployment the second Argo CD put back.
 DELETED_AT=$(on_k3s "date -u +%FT%TZ; k3s kubectl -n podinfo-other delete deploy podinfo-other >/dev/null" | head -1)
@@ -169,7 +169,7 @@ else
   fail T5 "not recreated after [$DELETED_AT]"
 fi
 
-# ── T6 ───────────────────────────────────────────────────────────────────────
+# ---- T6 ----
 PEERS=$("$HERE/ssm-run.sh" "$NODE" "ss -tnp | grep kubelet | awk '\$5 ~ /:443\$/ {print \$5}' | sort -u" | tr '\n' ' ')
 if [ -n "$PEERS" ] && ! echo "$PEERS" | tr ' ' '\n' | grep -v '^$' | grep -vq '^10\.0\.'; then
   pass T6 "kubelet connects to $PEERS (hub VPC private addresses)"
