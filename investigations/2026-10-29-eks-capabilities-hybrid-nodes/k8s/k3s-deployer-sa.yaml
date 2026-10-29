@@ -1,0 +1,29 @@
+# Identity the hub's Argo CD uses on the non-EKS cluster: a ServiceAccount with a
+# long-lived token. cluster-admin keeps the test short; scope it down in real use.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-deployer
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: argocd-deployer
+    namespace: kube-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-deployer-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: argocd-deployer
+type: kubernetes.io/service-account-token

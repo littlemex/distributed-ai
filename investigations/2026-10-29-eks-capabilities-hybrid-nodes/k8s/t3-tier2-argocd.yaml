@@ -1,0 +1,77 @@
+# T3 stage 1: the managed Argo CD installs a second, self-managed Argo CD on the hub
+# cluster's cloud nodes. The capability already owns the Argo CD CRDs, so the chart
+# does not install them.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tier2-argocd
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    targetRevision: 10.2.2
+    helm:
+      valuesObject:
+        crds:
+          install: false
+        global:
+          affinity:
+            nodeAffinity:
+              type: hard
+              matchExpressions:
+                - key: eks.amazonaws.com/compute-type
+                  operator: NotIn
+                  values: [hybrid]
+        dex:
+          enabled: false
+        notifications:
+          enabled: false
+        applicationSet:
+          replicas: 1
+  destination:
+    name: hub
+    namespace: argocd-edge
+  syncPolicy:
+    automated: {}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+# T3 stage 2: Applications owned by the second Argo CD, targeting the non-EKS cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tier2-apps
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argocd-apps
+    targetRevision: 2.0.7
+    helm:
+      valuesObject:
+        applications:
+          podinfo-other:
+            namespace: argocd-edge
+            project: default
+            source:
+              repoURL: https://stefanprodan.github.io/podinfo
+              chart: podinfo
+              targetRevision: 6.17.0
+              helm:
+                valuesObject:
+                  ui:
+                    message: "deployed by a second Argo CD that the EKS Capabilities Argo CD installed"
+            destination:
+              name: other-k3s
+              namespace: podinfo-other
+            syncPolicy:
+              automated:
+                selfHeal: true
+              syncOptions: [CreateNamespace=true]
+  destination:
+    name: hub
+    namespace: argocd-edge
+  syncPolicy:
+    automated: {}

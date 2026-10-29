@@ -1,0 +1,31 @@
+# Cilium runs only on hybrid nodes; cloud nodes keep the VPC CNI.
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: eks.amazonaws.com/compute-type
+              operator: In
+              values: [hybrid]
+ipam:
+  mode: cluster-pool
+  operator:
+    clusterPoolIPv4MaskSize: 25
+    clusterPoolIPv4PodCIDRList: [10.81.0.0/16]
+operator:
+  replicas: 1
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: eks.amazonaws.com/compute-type
+                operator: In
+                values: [hybrid]
+  unmanagedPodWatcher:
+    restart: false
+loadBalancer:
+  serviceTopology: true
+envoy:
+  enabled: false
+kubeProxyReplacement: "false"
