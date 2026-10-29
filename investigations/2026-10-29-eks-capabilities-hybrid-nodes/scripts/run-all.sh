@@ -20,7 +20,8 @@ terraform -chdir="$TFDIR" init -input=false \
   -backend-config="key=eks/${TF_VAR_cluster_name:-ekscap-hub}/terraform.tfstate" \
   -backend-config="region=$TF_STATE_REGION" || exit 3
 # The final destroy removes everything in this state, so it must start empty.
-if [ -n "$(terraform -chdir="$TFDIR" state list 2>/dev/null)" ]; then
+STATE_LIST=$(terraform -chdir="$TFDIR" state list) || { echo "[ERROR] could not read the state"; exit 3; }
+if [ -n "$STATE_LIST" ]; then
   echo "[ERROR] state key eks/${TF_VAR_cluster_name:-ekscap-hub}/terraform.tfstate is not empty; set TF_VAR_cluster_name to a new name or run cleanup.sh for it"
   exit 4
 fi

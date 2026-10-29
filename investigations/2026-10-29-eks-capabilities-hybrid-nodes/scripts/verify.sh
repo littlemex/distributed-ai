@@ -133,10 +133,10 @@ $K -n argocd patch application tier2-apps --type json -p '[
   {"op":"add","path":"/spec/source/helm/valuesObject/applications/podinfo-other/source/helm/valuesObject/replicaCount","value":2},
   {"op":"replace","path":"/spec/source/helm/valuesObject/applications/podinfo-other/source/helm/valuesObject/ui/message","value":"v2 k3s"}]' >/dev/null
 # Prints "<ready>/<updated>/<replicas> <messages from each pod IP>", run on the node itself.
-PROBE='set -- $(KUBECTL -n NS get deploy NAME -o jsonpath="{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}"); printf "%s" "$1"; for ip in $(KUBECTL -n NS get pods -l app.kubernetes.io/name=NAME --field-selector=status.phase=Running -o jsonpath="{.items[*].status.podIP}"); do printf " %s" "$(curl -s -m 5 $ip:9898 | grep -o "\"message\": \"[^\"]*\"" | cut -d\" -f4 | tr " " _)"; done'
+PROBE='set -- $(KUBECTL -n NS get deploy NAME -o jsonpath="{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}"); printf "%s" "$1"; for ip in $(KUBECTL -n NS get pods -l app.kubernetes.io/name=NAME --field-selector=status.phase=Running -o jsonpath="{.items[*].status.podIP}"); do printf " %s" "$(curl -sf -m 5 $ip:9898 | grep -o "\"message\": \"[^\"]*\"" | cut -d\" -f4 | tr " " _)"; done'
 onprem_probe() { $K -n podinfo-onprem get deploy podinfo-onprem -o jsonpath='{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}'
   for ip in $($K -n podinfo-onprem get pods -l app.kubernetes.io/name=podinfo-onprem --field-selector=status.phase=Running -o jsonpath='{.items[*].status.podIP}'); do
-    printf ' %s' "$("$HERE/ssm-run.sh" "$NODE" "curl -s -m 5 $ip:9898" | grep -o '"message": "[^"]*"' | cut -d'"' -f4 | tr ' ' _)"; done; }
+    printf ' %s' "$("$HERE/ssm-run.sh" "$NODE" "curl -sf -m 5 $ip:9898" | grep -o '"message": "[^"]*"' | cut -d'"' -f4 | tr ' ' _)"; done; }
 k3s_probe() { $ON_K3S "$(echo "$PROBE" | sed 's/KUBECTL/k3s kubectl/g; s/NS/podinfo-other/g; s/NAME/podinfo-other/g')"; }
 all_new() { # <probe output> <replicas> <message>
   set -- $1 "$2" "$3"; local counts=$1; shift; local want=${@: -2:1} msg=${@: -1}; local n=$(( $# - 2 ))

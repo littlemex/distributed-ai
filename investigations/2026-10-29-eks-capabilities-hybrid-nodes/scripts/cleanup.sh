@@ -9,7 +9,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 TFDIR="$HERE/../terraform"
 DEREG=0
 # After a partial build the output may not exist yet; destroy must still run.
+# Without the output, fall back to the role name prefix (the filter matches prefixes).
 ROLE=$(terraform -chdir="$TFDIR" output -raw hybrid_node_role_name 2>/dev/null || true)
+ROLE=${ROLE:-${TF_VAR_cluster_name:-ekscap-hub}-hybrid-node}
 if [ -n "$ROLE" ]; then
   IDS=$(aws ssm describe-instance-information --region "$AWS_REGION" \
     --filters "Key=IamRole,Values=$ROLE" --query 'InstanceInformationList[].InstanceId' --output text) || DEREG=1
