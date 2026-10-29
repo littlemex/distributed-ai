@@ -49,9 +49,12 @@ wait_for 900 has_hybrid_node
 NODE=$(hybrid_node)
 [ -n "$NODE" ] || { fail setup "no hybrid node joined"; exit 1; }
 helm upgrade --install cilium oci://public.ecr.aws/eks/cilium/cilium --version 1.18.3-0 \
-  --kube-context "$CLUSTER_NAME" -n kube-system -f "$ROOT/k8s/cilium-values.yaml" --wait --timeout 10m >/dev/null
-$K wait node "$NODE" --for=condition=Ready --timeout=5m >/dev/null
+  --kube-context "$CLUSTER_NAME" -n kube-system -f "$ROOT/k8s/cilium-values.yaml" --wait --timeout 10m >/dev/null \
+  || { fail setup "Cilium install failed"; exit 1; }
+$K wait node "$NODE" --for=condition=Ready --timeout=5m >/dev/null || { fail setup "hybrid node $NODE not Ready"; exit 1; }
 echo "[INFO] hybrid node $NODE is Ready"
+# The Argo CD CRDs exist before anything here installs a second Argo CD.
+echo "[INFO] CRD applications.argoproj.io created $($K get crd applications.argoproj.io -o jsonpath='{.metadata.creationTimestamp}'), managed Argo CD $(aws eks describe-capability --region "$AWS_REGION" --cluster-name "$CLUSTER_NAME" --capability-name argocd --query capability.version --output text)"
 
 # ── the managed Argo CD sees the hub cluster by its ARN ──────────────────────
 $K apply -f - >/dev/null <<YAML
@@ -107,19 +110,21 @@ $K -n argocd delete secret other-k3s >/dev/null
 
 # ── T3 ───────────────────────────────────────────────────────────────────────
 $K apply -f "$ROOT/k8s/t3-tier2-argocd.yaml" >/dev/null
-wait_for 600 app_ok argocd tier2-argocd
 "$HERE/register-k3s.sh" argocd-edge >/dev/null
 k3s_ready() { $ON_K3S "k3s kubectl -n podinfo-other get deploy podinfo-other -o jsonpath='{.status.readyReplicas}' 2>/dev/null" | tr -d '\n'; }
 k3s_ready_is() { [ "$(k3s_ready)" = "$1" ]; }
-if wait_for 300 app_ok argocd-edge podinfo-other && wait_for 120 k3s_ready_is 1; then
-  pass T3 "tier2-argocd $(app_status argocd tier2-argocd), podinfo-other $(app_status argocd-edge podinfo-other), k3s readyReplicas=$(k3s_ready)"
+if wait_for 600 app_ok argocd tier2-argocd && wait_for 300 app_ok argocd tier2-apps &&
+   wait_for 300 app_ok argocd-edge podinfo-other && wait_for 120 k3s_ready_is 1; then
+  pass T3 "tier2-argocd $(app_status argocd tier2-argocd), tier2-apps $(app_status argocd tier2-apps), podinfo-other $(app_status argocd-edge podinfo-other), k3s readyReplicas=$(k3s_ready)"
 else
-  fail T3 "tier2-argocd $(app_status argocd tier2-argocd), podinfo-other $(app_status argocd-edge podinfo-other), k3s readyReplicas=$(k3s_ready)"
+  fail T3 "tier2-argocd $(app_status argocd tier2-argocd), tier2-apps $(app_status argocd tier2-apps), podinfo-other $(app_status argocd-edge podinfo-other), k3s readyReplicas=$(k3s_ready)"
 fi
 
 # ── T4 ───────────────────────────────────────────────────────────────────────
-# Change only the Applications on the managed Argo CD: the on-prem one directly, and
-# the k3s one through the argocd-apps values. Done means the new message is served.
+# Change only two Applications on the managed Argo CD: podinfo-onprem, and tier2-apps
+# (the argocd-apps values that hold the k3s Application). A target is done when the
+# Deployment has rolled out every replica and each Pod, asked by its own IP, returns
+# the new message. Both targets are polled in the same loop from the first patch.
 T0=$(date +%s)
 $K -n argocd patch application podinfo-onprem --type json -p '[
   {"op":"replace","path":"/spec/source/helm/valuesObject/replicaCount","value":3},
@@ -127,21 +132,28 @@ $K -n argocd patch application podinfo-onprem --type json -p '[
 $K -n argocd patch application tier2-apps --type json -p '[
   {"op":"add","path":"/spec/source/helm/valuesObject/applications/podinfo-other/source/helm/valuesObject/replicaCount","value":2},
   {"op":"replace","path":"/spec/source/helm/valuesObject/applications/podinfo-other/source/helm/valuesObject/ui/message","value":"v2 k3s"}]' >/dev/null
-ONPREM_SVC=$($K -n podinfo-onprem get svc podinfo-onprem -o jsonpath='{.spec.clusterIP}')
-onprem_done() {
-  [ "$($K -n podinfo-onprem get deploy podinfo-onprem -o jsonpath='{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}')" = 3/3/3 ] &&
-  "$HERE/ssm-run.sh" "$NODE" "curl -s $ONPREM_SVC:9898" | grep -q '"message": "v2 on-prem"'
+# Prints "<ready>/<updated>/<replicas> <messages from each pod IP>", run on the node itself.
+PROBE='set -- $(KUBECTL -n NS get deploy NAME -o jsonpath="{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}"); printf "%s" "$1"; for ip in $(KUBECTL -n NS get pods -l app.kubernetes.io/name=NAME --field-selector=status.phase=Running -o jsonpath="{.items[*].status.podIP}"); do printf " %s" "$(curl -s -m 5 $ip:9898 | grep -o "\"message\": \"[^\"]*\"" | cut -d\" -f4 | tr " " _)"; done'
+onprem_probe() { $K -n podinfo-onprem get deploy podinfo-onprem -o jsonpath='{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}'
+  for ip in $($K -n podinfo-onprem get pods -l app.kubernetes.io/name=podinfo-onprem --field-selector=status.phase=Running -o jsonpath='{.items[*].status.podIP}'); do
+    printf ' %s' "$("$HERE/ssm-run.sh" "$NODE" "curl -s -m 5 $ip:9898" | grep -o '"message": "[^"]*"' | cut -d'"' -f4 | tr ' ' _)"; done; }
+k3s_probe() { $ON_K3S "$(echo "$PROBE" | sed 's/KUBECTL/k3s kubectl/g; s/NS/podinfo-other/g; s/NAME/podinfo-other/g')"; }
+all_new() { # <probe output> <replicas> <message>
+  set -- $1 "$2" "$3"; local counts=$1; shift; local want=${@: -2:1} msg=${@: -1}; local n=$(( $# - 2 ))
+  [ "$counts" = "$want/$want/$want" ] || return 1
+  [ "$n" = "$want" ] || return 1
+  for m in "${@:1:$n}"; do [ "$m" = "$msg" ] || return 1; done
 }
-k3s_done() {
-  k3s_ready_is 2 &&
-  $ON_K3S "curl -s \$(k3s kubectl -n podinfo-other get svc podinfo-other -o jsonpath='{.spec.clusterIP}'):9898" | grep -q '"message": "v2 k3s"'
-}
-wait_for 300 onprem_done; T_ONPREM=$(( $(date +%s)-T0 ))
-wait_for 300 k3s_done; T_K3S=$(( $(date +%s)-T0 ))
-if onprem_done && k3s_done; then
-  pass T4 "on-prem: 3 ready replicas serving \"v2 on-prem\" within ${T_ONPREM}s; k3s: 2 ready replicas serving \"v2 k3s\" within ${T_K3S}s (from the first patch, polling included)"
+T_ONPREM=; T_K3S=
+while [ $(( $(date +%s) - T0 )) -lt 300 ] && { [ -z "$T_ONPREM" ] || [ -z "$T_K3S" ]; }; do
+  [ -z "$T_ONPREM" ] && P_ONPREM=$(onprem_probe) && all_new "$P_ONPREM" 3 v2_on-prem && T_ONPREM=$(( $(date +%s) - T0 ))
+  [ -z "$T_K3S" ] && P_K3S=$(k3s_probe) && all_new "$P_K3S" 2 v2_k3s && T_K3S=$(( $(date +%s) - T0 ))
+  sleep 5
+done
+if [ -n "$T_ONPREM" ] && [ -n "$T_K3S" ]; then
+  pass T4 "on-prem [$P_ONPREM] within ${T_ONPREM}s; k3s [$P_K3S] within ${T_K3S}s (ready/updated/replicas, then the message from each Pod IP; from the first patch, polling included)"
 else
-  fail T4 "on-prem done=$(onprem_done && echo yes || echo no), k3s done=$(k3s_done && echo yes || echo no)"
+  fail T4 "on-prem [$P_ONPREM] t=${T_ONPREM:-timeout}; k3s [$P_K3S] t=${T_K3S:-timeout}"
 fi
 
 # ── T5 ───────────────────────────────────────────────────────────────────────

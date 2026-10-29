@@ -8,9 +8,9 @@ EKS Capabilities のマネージド Argo CD を 1 か所に置き、オンプレ
 |---|---|---|
 | T1 | マネージド Argo CD が、Hybrid Nodes として参加したオンプレミス役のサーバーに Helm chart を配る | 配れる。Pod はそのノードの上で、オンプレミス側の Pod CIDR の IP で動く。AWS 側のノードの Pod から送ったリクエストに応答する |
 | T2 | マネージド Argo CD に、EKS ではないクラスタを API サーバーの URL とトークンで登録する | 登録できない。Application の condition に `server should be specified as a cluster ARN` が出て、k3s に namespace は作られない |
-| T3 | マネージド Argo CD が 2 段目の Argo CD を EKS に入れ、2 段目が EKS ではないクラスタ (k3s) に配る | 配れる |
-| T4 | マネージド Argo CD の上の 2 つの Application (オンプレミス向けと、2 段目向けの `argocd-apps`) だけを変える | 両方の配り先で、新しいレプリカ数と新しいメッセージが返る |
-| T5 | EKS ではないクラスタで手で消したワークロードが、2 段目の Argo CD で戻る | 戻る |
+| T3 | マネージド Argo CD が 2 段目の Argo CD を EKS に入れ、2 段目が EKS ではないクラスタ (k3s) に配る | 配れる。マネージド側の 2 つの Application (`tier2-argocd` と `tier2-apps`) と、2 段目の Application が Synced と Healthy になる |
+| T4 | マネージド Argo CD の上の 2 つの Application (`podinfo-onprem` と `tier2-apps`) の値だけを変える | 両方のデプロイ先で、Deployment が全レプリカを更新し、各 Pod が自分の IP で新しいメッセージを返す |
+| T5 | EKS ではないクラスタで手で消した Deployment が、2 段目の Argo CD で作り直される | 作り直される |
 | T6 | クラスタの API の入口を private だけにして、Hybrid ノードの kubelet の接続先を見る | hub VPC の private アドレスに接続する |
 
 マネージド Argo CD の配り先は EKS クラスタ ARN だけである。オンプレミスは Hybrid Nodes で EKS クラスタの一部にすれば直接配れる。EKS ではないクラスタには、マネージド Argo CD が入れた 2 段目の Argo CD を経由して配る。
@@ -63,23 +63,27 @@ EKS Hybrid Nodes を EC2 や他社クラウドで動かすことは [AWS のサ�
 ```bash
 export AWS_REGION=us-east-2
 export IDC_REGION=us-east-1
-export IDC_ADMIN_USER_NAME=$(aws identitystore list-users --no-paginate --region "$IDC_REGION" --identity-store-id "$(aws sso-admin list-instances --no-paginate --region "$IDC_REGION" --query 'Instances[0].IdentityStoreId' --output text)" --query 'Users[0].UserName' --output text)
+export IDC_ADMIN_USER_NAME=$(aws identitystore list-users --no-paginate --region "$IDC_REGION" --identity-store-id "$(aws sso-admin list-instances --no-paginate --region "$IDC_REGION" --query 'Instances[0].IdentityStoreId' --output text)" --query 'Users[].UserName' --output text)
 export TF_STATE_BUCKET=your-terraform-state-bucket
 export TF_STATE_REGION=$(aws s3api get-bucket-location --bucket "$TF_STATE_BUCKET" --query LocationConstraint --output text | sed 's/None/us-east-1/')
 export TF_VAR_region=$AWS_REGION TF_VAR_idc_region=$IDC_REGION TF_VAR_idc_admin_user_name=$IDC_ADMIN_USER_NAME
 ```
 
-`IDC_ADMIN_USER_NAME` は Identity Center の最初のユーザーを取る。別のユーザーを Argo CD の管理者にするなら、そのユーザー名を入れる。
+`IDC_ADMIN_USER_NAME` には Identity Center のユーザー名がすべて入る。ユーザーが 1 人ならそのユーザーが Argo CD の管理者になる。複数いると `run-all.sh` は名前の一覧を出して止まるので、`export TF_VAR_idc_admin_user_name=` に管理者にするユーザーの名前を 1 つ入れ直す。
 
 続けて、構築、検証、削除を流す。構築に 20 分ほど、検証に 15 分ほどかかる。
 
 ```bash
-git clone https://github.com/littlemex/distributed-ai.git
-cd distributed-ai/investigations/2026-10-29-eks-capabilities-hybrid-nodes
-./scripts/run-all.sh
+git clone https://github.com/littlemex/distributed-ai.git && cd distributed-ai/investigations/2026-10-29-eks-capabilities-hybrid-nodes && ./scripts/run-all.sh
 ```
 
-`run-all.sh` は、上の値が空か `None` なら何も作らずに止まる。値がそろっていれば、`terraform apply`、`verify.sh`、`cleanup.sh` の順に流す。構築や検証が途中で失敗しても `cleanup.sh` は必ず流れ、すべてを削除する。`verify.sh` は T1〜T6 の 1 行ずつに `[PASS]` か `[FAIL]` を出し、同じ内容を `results/verify.log` に書く。最後の行が `build=0 verify=0 cleanup=0` で終了コードが 0 なら、構築、全項目、削除のすべてが通った。
+`run-all.sh` は、上の値が空か `None` のとき、Identity Center のユーザーが複数いるとき、同じ state のキー (`eks/ekscap-hub/terraform.tfstate`) に何かが残っているときは、何も作らずに止まる。そうでなければ `terraform apply`、`verify.sh`、`cleanup.sh` の順に流す。構築や検証が途中で失敗しても `cleanup.sh` は必ず流れる。`verify.sh` は T1〜T6 の 1 行ずつに `[PASS]` か `[FAIL]` を出し、同じ内容を `results/verify.log` に書く。最後の行が `build=0 verify=0 cleanup=0` で終了コードが 0 なら、構築、全項目、削除のすべてが通った。
+
+流している間は、EKS クラスタ、マネージド Argo CD、EC2 3 台 (managed node group、Hybrid Node、k3s)、Hybrid Node の vCPU あたりの料金、NAT Gateway、Transit Gateway と 3 つの接続が課金される。`cleanup` が 0 以外で終わったら、残ったものがあるので、同じシェルで次を流す。最後の行が `deregister=0 destroy=0 resources left in state=0` になれば消えている。
+
+```bash
+./scripts/cleanup.sh
+```
 
 ## 各項目が何を示すか
 
@@ -89,7 +93,7 @@ cd distributed-ai/investigations/2026-10-29-eks-capabilities-hybrid-nodes
 
 **T3** は、EKS ではないクラスタに配る道を示す。マネージド Argo CD は、hub クラスタに通常の Argo CD (Helm chart `argo-cd`) を入れ、その Argo CD が持つ Application (Helm chart `argocd-apps`) も配る。2 段目の Argo CD は通常の Argo CD なので、API サーバーの URL とトークンで k3s を登録できる。CRD はマネージド Argo CD が入れたものを共有するので、2 段目では `crds.install: false` にし、Argo CD の版をマネージド側 (3.4 系) にそろえる。
 
-**T4** は、配る内容を変えるときに触るのがマネージド Argo CD の Application だけで済むことを示す。2 段目の Application も、マネージド Argo CD が `argocd-apps` の値として配るからである。ただし、k3s を登録する cluster secret (トークン) は `register-k3s.sh` が 2 段目の namespace に直接置き、マネージド Argo CD は配らない。秒数は最初の patch から、新しいメッセージが返るのを確かめるまでで、5 秒ごとの確認と SSM Run Command の往復を含む上限である。
+**T4** は、配る内容を変えるときに触るのがマネージド Argo CD の Application だけで済むことを示す。2 段目の Application も、マネージド Argo CD が `argocd-apps` の値として配るからである。ただし、k3s を登録する cluster secret (トークン) は `register-k3s.sh` が 2 段目の namespace に直接置き、マネージド Argo CD は配らない。完了は、Deployment の ready、updated、replicas がすべて新しいレプリカ数になり、Running の Pod のそれぞれが自分の IP で新しいメッセージを返すこととする。2 つのデプロイ先は同じループで 5 秒ごとに確かめるので、秒数は最初の patch から、確認の間隔と SSM Run Command の往復を含む上限である。
 
 **T5** は、2 段目の Argo CD が配り先のずれを検知して戻すことを示す。削除した時刻と作り直された Deployment の `creationTimestamp` は、どちらも k3s のマシンの時計で取る。
 

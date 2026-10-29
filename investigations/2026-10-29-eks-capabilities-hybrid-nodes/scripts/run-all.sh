@@ -10,11 +10,20 @@ for v in AWS_REGION TF_STATE_BUCKET TF_STATE_REGION TF_VAR_region TF_VAR_idc_reg
   val=${!v:-}
   if [ -z "$val" ] || [ "$val" = None ]; then echo "[ERROR] $v is empty or None"; exit 2; fi
 done
+# The admin lookup returns every user name; refuse to guess which one is meant.
+case $TF_VAR_idc_admin_user_name in
+  *[[:space:]]*) echo "[ERROR] several Identity Center users found; set TF_VAR_idc_admin_user_name to one of: $TF_VAR_idc_admin_user_name"; exit 2 ;;
+esac
 
 terraform -chdir="$TFDIR" init -input=false \
   -backend-config="bucket=$TF_STATE_BUCKET" \
   -backend-config="key=eks/${TF_VAR_cluster_name:-ekscap-hub}/terraform.tfstate" \
   -backend-config="region=$TF_STATE_REGION" || exit 3
+# The final destroy removes everything in this state, so it must start empty.
+if [ -n "$(terraform -chdir="$TFDIR" state list 2>/dev/null)" ]; then
+  echo "[ERROR] state key eks/${TF_VAR_cluster_name:-ekscap-hub}/terraform.tfstate is not empty; set TF_VAR_cluster_name to a new name or run cleanup.sh for it"
+  exit 4
+fi
 
 BUILD=0; VERIFY=1
 terraform -chdir="$TFDIR" apply -auto-approve -input=false || BUILD=$?
