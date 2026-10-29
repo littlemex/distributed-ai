@@ -1,7 +1,0 @@
-[INFO] hybrid node mi-04cb2d294f58fd222 is Ready
-[PASS] T1: pods mi-04cb2d294f58fd222=10.81.0.59 mi-04cb2d294f58fd222=10.81.0.51 ; a pod on a cloud node got "message": "deployed by EKS Capabilities Argo CD to the on-prem hybrid node"
-[PASS] T2: refused with "server should be specified as a cluster ARN"; nothing created on k3s
-[PASS] T3: tier2-argocd Synced/Healthy, podinfo-other Synced/Healthy, k3s readyReplicas=1
-[PASS] T4: on-prem 3/3 within 9s and serves "message": "changed on the managed Argo CD"; k3s 2 replicas within 28s (both include polling)
-[PASS] T5: deleted at 2026-10-29T09:00:22Z, recreated at 2026-10-29T09:00:25Z with 2 ready replicas
-[PASS] T6: kubelet connects to 10.0.8.213:443   (hub VPC private addresses)

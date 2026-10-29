@@ -88,13 +88,19 @@ fi
 # ── T2 ───────────────────────────────────────────────────────────────────────
 "$HERE/register-k3s.sh" argocd >/dev/null
 $K apply -f "$ROOT/k8s/t2-podinfo-direct.yaml" >/dev/null
-t2_refused() { $K -n argocd get application podinfo-direct -o jsonpath='{.status.conditions[*].message}' | grep -q 'server should be specified as a cluster ARN'; }
+t2_conditions() { $K -n argocd get application podinfo-direct -o jsonpath='{.status.conditions[*].message}'; }
+t2_refused() { t2_conditions | grep -q 'server should be specified as a cluster ARN'; }
 if wait_for 180 t2_refused; then
-  DEPLOYED=$($ON_K3S "k3s kubectl get ns podinfo-direct -o name 2>/dev/null" | tr -d '\n')
-  [ -z "$DEPLOYED" ] && pass T2 "refused with \"server should be specified as a cluster ARN\"; nothing created on k3s" \
-                     || fail T2 "refused, but $DEPLOYED exists on k3s"
+  echo "[INFO] T2 conditions: $(t2_conditions)"
+  if NAMESPACES=$($ON_K3S "k3s kubectl get namespaces -o name"); then
+    echo "$NAMESPACES" | grep -qx 'namespace/podinfo-direct' \
+      && fail T2 "refused, but namespace podinfo-direct exists on k3s" \
+      || pass T2 "refused with \"server should be specified as a cluster ARN\"; no namespace podinfo-direct on k3s"
+  else
+    fail T2 "refused, but listing namespaces on k3s failed"
+  fi
 else
-  fail T2 "no refusal; conditions: $($K -n argocd get application podinfo-direct -o jsonpath='{.status.conditions[*].message}')"
+  fail T2 "no refusal; conditions: $(t2_conditions)"
 fi
 $K -n argocd delete application podinfo-direct --wait=false >/dev/null
 $K -n argocd delete secret other-k3s >/dev/null
@@ -112,31 +118,41 @@ else
 fi
 
 # ── T4 ───────────────────────────────────────────────────────────────────────
+# Change only the Applications on the managed Argo CD: the on-prem one directly, and
+# the k3s one through the argocd-apps values. Done means the new message is served.
+T0=$(date +%s)
 $K -n argocd patch application podinfo-onprem --type json -p '[
   {"op":"replace","path":"/spec/source/helm/valuesObject/replicaCount","value":3},
-  {"op":"replace","path":"/spec/source/helm/valuesObject/ui/message","value":"changed on the managed Argo CD"}]' >/dev/null
+  {"op":"replace","path":"/spec/source/helm/valuesObject/ui/message","value":"v2 on-prem"}]' >/dev/null
 $K -n argocd patch application tier2-apps --type json -p '[
-  {"op":"add","path":"/spec/source/helm/valuesObject/applications/podinfo-other/source/helm/valuesObject/replicaCount","value":2}]' >/dev/null
-T0=$(date +%s)
-onprem_ready() { [ "$($K -n podinfo-onprem get deploy podinfo-onprem -o jsonpath='{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}')" = 3/3/3 ]; }
-wait_for 300 onprem_ready; T_ONPREM=$(( $(date +%s)-T0 ))
-wait_for 300 k3s_ready_is 2; T_K3S=$(( $(date +%s)-T0 ))
-SVC_IP=$($K -n podinfo-onprem get svc podinfo-onprem -o jsonpath='{.spec.clusterIP}')
-ONPREM_MSG=$("$HERE/ssm-run.sh" "$NODE" "curl -s $SVC_IP:9898" | grep -o '"message": "[^"]*"')
-if onprem_ready && [ "$(k3s_ready)" = 2 ] && echo "$ONPREM_MSG" | grep -q 'changed on the managed'; then
-  pass T4 "on-prem 3/3 within ${T_ONPREM}s and serves $ONPREM_MSG; k3s 2 replicas within ${T_K3S}s (both include polling)"
+  {"op":"add","path":"/spec/source/helm/valuesObject/applications/podinfo-other/source/helm/valuesObject/replicaCount","value":2},
+  {"op":"replace","path":"/spec/source/helm/valuesObject/applications/podinfo-other/source/helm/valuesObject/ui/message","value":"v2 k3s"}]' >/dev/null
+ONPREM_SVC=$($K -n podinfo-onprem get svc podinfo-onprem -o jsonpath='{.spec.clusterIP}')
+onprem_done() {
+  [ "$($K -n podinfo-onprem get deploy podinfo-onprem -o jsonpath='{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}')" = 3/3/3 ] &&
+  "$HERE/ssm-run.sh" "$NODE" "curl -s $ONPREM_SVC:9898" | grep -q '"message": "v2 on-prem"'
+}
+k3s_done() {
+  k3s_ready_is 2 &&
+  $ON_K3S "curl -s \$(k3s kubectl -n podinfo-other get svc podinfo-other -o jsonpath='{.spec.clusterIP}'):9898" | grep -q '"message": "v2 k3s"'
+}
+wait_for 300 onprem_done; T_ONPREM=$(( $(date +%s)-T0 ))
+wait_for 300 k3s_done; T_K3S=$(( $(date +%s)-T0 ))
+if onprem_done && k3s_done; then
+  pass T4 "on-prem: 3 ready replicas serving \"v2 on-prem\" within ${T_ONPREM}s; k3s: 2 ready replicas serving \"v2 k3s\" within ${T_K3S}s (from the first patch, polling included)"
 else
-  fail T4 "on-prem ready=$(onprem_ready && echo yes || echo no) msg=[$ONPREM_MSG], k3s readyReplicas=$(k3s_ready)"
+  fail T4 "on-prem done=$(onprem_done && echo yes || echo no), k3s done=$(k3s_done && echo yes || echo no)"
 fi
 
 # ── T5 ───────────────────────────────────────────────────────────────────────
-DELETED_AT=$(date -u +%FT%TZ)
-$ON_K3S "k3s kubectl -n podinfo-other delete deploy podinfo-other" >/dev/null
+# Both times come from the k3s machine's clock: when the delete was issued, and the
+# creationTimestamp of the Deployment the second Argo CD put back.
+DELETED_AT=$($ON_K3S "date -u +%FT%TZ; k3s kubectl -n podinfo-other delete deploy podinfo-other >/dev/null" | head -1)
 created_after() { C=$($ON_K3S "k3s kubectl -n podinfo-other get deploy podinfo-other -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null" | tr -d '\n'); [ -n "$C" ] && [[ "$C" > "$DELETED_AT" || "$C" == "$DELETED_AT" ]]; }
-if wait_for 300 created_after && wait_for 120 k3s_ready_is 2; then
-  pass T5 "deleted at $DELETED_AT, recreated at $C with 2 ready replicas"
+if [ -n "$DELETED_AT" ] && wait_for 300 created_after && wait_for 120 k3s_ready_is 2; then
+  pass T5 "deleted at $DELETED_AT, recreated at $C (k3s clock, UTC), 2 ready replicas"
 else
-  fail T5 "not recreated after $DELETED_AT"
+  fail T5 "not recreated after [$DELETED_AT]"
 fi
 
 # ── T6 ───────────────────────────────────────────────────────────────────────
