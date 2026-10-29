@@ -1,6 +1,6 @@
 # EKS Capabilities の Argo CD から、オンプレミスの Hybrid Nodes と EKS 以外の Kubernetes に配る
 
-EKS Capabilities のマネージド Argo CD を 1 か所に置き、オンプレミスのサーバーと、EKS ではない Kubernetes クラスタ (AKS、GKE、自前構築など) の両方に Helm chart を配れるかを、実機で確かめた。Zenn の記事「EKS Hybrid Nodes と EKS Capabilities でオンプレミスの Kubernetes にデプロイする」の数値とログは、すべてこのディレクトリのコードで再現できる。
+EKS Capabilities のマネージド Argo CD を 1 か所に置き、オンプレミスのサーバーと、EKS ではない Kubernetes クラスタ (AKS、GKE、自前構築など) の両方に Helm chart を配れるかを、実機で確かめた。Zenn の記事「EKS Hybrid Nodes と EKS Capabilities の Argo CD でオンプレミスのサーバーにデプロイする」の数値とログは、すべてこのディレクトリのコードで再現できる。
 
 ## 結論
 
@@ -109,3 +109,4 @@ git clone https://github.com/littlemex/distributed-ai.git && cd distributed-ai/i
 - 2 段目の Argo CD の保守 (版の更新、可用性) は利用者の責任になる。マネージドなのは 1 段目だけである。
 - T4 の秒数は確認の間隔と SSM Run Command の往復を含む上限で、Argo CD が反映するまでの時間そのものではない。
 - EKS ではないクラスタへの配布は k3s で確かめた。AKS や GKE では試していない。
+- T2 は、マネージド Argo CD が出すエラーの文言で合否を決める。AWS が文言を変えると、拒否されていても FAIL になる。
