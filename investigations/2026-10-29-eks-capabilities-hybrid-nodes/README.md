@@ -1,6 +1,6 @@
 # EKS Capabilities の Argo CD から、オンプレミスの Hybrid Nodes と EKS 以外の Kubernetes に配る
 
-EKS Capabilities のマネージド Argo CD を 1 か所に置き、オンプレミスのサーバーと、EKS ではない Kubernetes クラスタ (AKS、GKE、自前構築など) の両方に Helm chart を配れるかを、実機で確かめた。Zenn の記事「EKS Hybrid Nodes & Capabilities による BYOM へのデプロイ管理」の数値とログは、すべてこのディレクトリのコードで再現できる。
+EKS Capabilities のマネージド Argo CD を 1 か所に置き、オンプレミスのサーバーと、EKS ではない Kubernetes クラスタ (AKS、GKE、自前構築など) の両方に Helm chart を配れるかを、実機で確かめた。Zenn の記事「EKS Hybrid Nodes & Capabilities による BYOI デプロイ管理」の数値とログは、すべてこのディレクトリのコードで再現できる。
 
 ## 結論
 
