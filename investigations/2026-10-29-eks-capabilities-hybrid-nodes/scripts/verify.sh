@@ -16,15 +16,15 @@ TF="terraform -chdir=$ROOT/terraform output -raw"
 mkdir -p "$ROOT/results"
 exec > >(tee "$ROOT/results/verify.log") 2>&1
 
-export CLUSTER_NAME=$($TF cluster_name)
-CLUSTER_ARN=$($TF cluster_arn)
-export K3S_INSTANCE_ID=$($TF other_instance_id)
-export K3S_PRIVATE_IP=$($TF other_private_ip)
+CLUSTER_NAME=$($TF cluster_name) && CLUSTER_ARN=$($TF cluster_arn) &&
+  K3S_INSTANCE_ID=$($TF other_instance_id) && K3S_PRIVATE_IP=$($TF other_private_ip) ||
+  { echo "[FAIL] setup: terraform outputs are missing"; exit 1; }
+export CLUSTER_NAME K3S_INSTANCE_ID K3S_PRIVATE_IP
 export RELAY_INSTANCE_ID=$K3S_INSTANCE_ID
-LOCAL_PORT=${LOCAL_PORT:-8443}
+export LOCAL_PORT=${LOCAL_PORT:-8443}
 
 K="kubectl --context $CLUSTER_NAME"
-ON_K3S="$HERE/ssm-run.sh $K3S_INSTANCE_ID"
+on_k3s() { "$HERE/ssm-run.sh" "$K3S_INSTANCE_ID" "$@"; }
 FAILED=0
 pass() { echo "[PASS] $1: $2"; }
 fail() { echo "[FAIL] $1: $2"; FAILED=1; }
@@ -36,6 +36,7 @@ app_status() { $K -n "$1" get application "$2" -o jsonpath='{.status.sync.status
 app_ok() { [ "$(app_status "$1" "$2")" = Synced/Healthy ]; }
 
 # ── access to the private endpoint ────────────────────────────────────────────
+nc -z 127.0.0.1 "$LOCAL_PORT" 2>/dev/null && { echo "[FAIL] setup: port $LOCAL_PORT is in use; set LOCAL_PORT to a free port"; exit 1; }
 "$HERE/port-forward.sh" >/tmp/ekscap-port-forward.log 2>&1 &
 PF=$!
 trap 'pkill -P $PF 2>/dev/null; kill $PF 2>/dev/null' EXIT
@@ -79,7 +80,8 @@ if wait_for 300 app_ok argocd podinfo-onprem; then
   REPLY=$($K run t1-curl --rm -i --restart=Never --quiet --image=public.ecr.aws/docker/library/busybox:1.37 \
     --overrides='{"spec":{"affinity":{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"eks.amazonaws.com/compute-type","operator":"NotIn","values":["hybrid"]}]}]}}}}}' \
     -- wget -qO- -T10 http://podinfo-onprem.podinfo-onprem:9898/ 2>/dev/null | grep -o '"message": "[^"]*"')
-  if [ "$OFF_NODE" = 0 ] && [ -n "$REPLY" ]; then
+  PODS=$(echo "$PLACEMENT" | tr ' ' '\n' | grep -c . || true)
+  if [ "$PODS" = 2 ] && [ "$OFF_NODE" = 0 ] && [ -n "$REPLY" ]; then
     pass T1 "pods $PLACEMENT; a pod on a cloud node got $REPLY"
   else
     fail T1 "placement=[$PLACEMENT] reply=[$REPLY]"
@@ -95,7 +97,7 @@ t2_conditions() { $K -n argocd get application podinfo-direct -o jsonpath='{.sta
 t2_refused() { t2_conditions | grep -q 'server should be specified as a cluster ARN'; }
 if wait_for 180 t2_refused; then
   echo "[INFO] T2 conditions: $(t2_conditions)"
-  if NAMESPACES=$($ON_K3S "k3s kubectl get namespaces -o name"); then
+  if NAMESPACES=$(on_k3s "k3s kubectl get namespaces -o name"); then
     echo "$NAMESPACES" | grep -qx 'namespace/podinfo-direct' \
       && fail T2 "refused, but namespace podinfo-direct exists on k3s" \
       || pass T2 "refused with \"server should be specified as a cluster ARN\"; no namespace podinfo-direct on k3s"
@@ -111,7 +113,7 @@ $K -n argocd delete secret other-k3s >/dev/null
 # ── T3 ───────────────────────────────────────────────────────────────────────
 $K apply -f "$ROOT/k8s/t3-tier2-argocd.yaml" >/dev/null
 "$HERE/register-k3s.sh" argocd-edge >/dev/null
-k3s_ready() { $ON_K3S "k3s kubectl -n podinfo-other get deploy podinfo-other -o jsonpath='{.status.readyReplicas}' 2>/dev/null" | tr -d '\n'; }
+k3s_ready() { on_k3s "k3s kubectl -n podinfo-other get deploy podinfo-other -o jsonpath='{.status.readyReplicas}' 2>/dev/null" | tr -d '\n'; }
 k3s_ready_is() { [ "$(k3s_ready)" = "$1" ]; }
 if wait_for 600 app_ok argocd tier2-argocd && wait_for 300 app_ok argocd tier2-apps &&
    wait_for 300 app_ok argocd-edge podinfo-other && wait_for 120 k3s_ready_is 1; then
@@ -137,7 +139,7 @@ PROBE='set -- $(KUBECTL -n NS get deploy NAME -o jsonpath="{.status.readyReplica
 onprem_probe() { $K -n podinfo-onprem get deploy podinfo-onprem -o jsonpath='{.status.readyReplicas}/{.status.updatedReplicas}/{.status.replicas}'
   for ip in $($K -n podinfo-onprem get pods -l app.kubernetes.io/name=podinfo-onprem --field-selector=status.phase=Running -o jsonpath='{.items[*].status.podIP}'); do
     printf ' %s' "$("$HERE/ssm-run.sh" "$NODE" "curl -sf -m 5 $ip:9898" | grep -o '"message": "[^"]*"' | cut -d'"' -f4 | tr ' ' _)"; done; }
-k3s_probe() { $ON_K3S "$(echo "$PROBE" | sed 's/KUBECTL/k3s kubectl/g; s/NS/podinfo-other/g; s/NAME/podinfo-other/g')"; }
+k3s_probe() { on_k3s "$(echo "$PROBE" | sed 's/KUBECTL/k3s kubectl/g; s/NS/podinfo-other/g; s/NAME/podinfo-other/g')"; }
 all_new() { # <probe output> <replicas> <message>
   set -- $1 "$2" "$3"; local counts=$1; shift; local want=${@: -2:1} msg=${@: -1}; local n=$(( $# - 2 ))
   [ "$counts" = "$want/$want/$want" ] || return 1
@@ -159,8 +161,8 @@ fi
 # ── T5 ───────────────────────────────────────────────────────────────────────
 # Both times come from the k3s machine's clock: when the delete was issued, and the
 # creationTimestamp of the Deployment the second Argo CD put back.
-DELETED_AT=$($ON_K3S "date -u +%FT%TZ; k3s kubectl -n podinfo-other delete deploy podinfo-other >/dev/null" | head -1)
-created_after() { C=$($ON_K3S "k3s kubectl -n podinfo-other get deploy podinfo-other -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null" | tr -d '\n'); [ -n "$C" ] && [[ "$C" > "$DELETED_AT" || "$C" == "$DELETED_AT" ]]; }
+DELETED_AT=$(on_k3s "date -u +%FT%TZ; k3s kubectl -n podinfo-other delete deploy podinfo-other >/dev/null" | head -1)
+created_after() { C=$(on_k3s "k3s kubectl -n podinfo-other get deploy podinfo-other -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null" | tr -d '\n'); [ -n "$C" ] && [[ "$C" > "$DELETED_AT" || "$C" == "$DELETED_AT" ]]; }
 if [ -n "$DELETED_AT" ] && wait_for 300 created_after && wait_for 120 k3s_ready_is 2; then
   pass T5 "deleted at $DELETED_AT, recreated at $C (k3s clock, UTC), 2 ready replicas"
 else

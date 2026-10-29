@@ -57,7 +57,7 @@ EKS Hybrid Nodes を EC2 や他社クラウドで動かすことは [AWS のサ�
 
 ## 再現の手順
 
-必要なもの: Terraform 1.9 以降、AWS CLI v2 と Session Manager プラグイン、kubectl、Helm 3.8 以降、Python 3、nc。AWS アカウントには IAM Identity Center のインスタンスとユーザーが要る。マネージド Argo CD はログインに Identity Center を使うからである。Identity Center は別のリージョンにあってよい。
+必要なもの: Terraform 1.9 以降、AWS CLI v2 と Session Manager プラグイン、kubectl、Helm 3.8 以降、Python 3、nc。AWS CLI は、VPC、EKS、EC2、IAM、Systems Manager、S3 を作って消せる権限で認証しておく。認証の有効期限は、構築から削除まで (1 時間ほど) 残っている必要がある。AWS アカウントには IAM Identity Center のインスタンスとユーザーが要る。`env.sh` は、道具とその版、AWS CLI の認証を最初に確かめ、足りなければ何も作らずに止まる。マネージド Argo CD はログインに Identity Center を使うからである。Identity Center は別のリージョンにあってよい。
 
 最初に環境ごとの値を 3 つ設定する。`AWS_REGION` は環境を作るリージョン、`IDC_REGION` は IAM Identity Center のあるリージョン、`TF_STATE_BUCKET` は Terraform の state を置く自分の S3 バケットである。
 
@@ -77,11 +77,15 @@ git clone https://github.com/littlemex/distributed-ai.git && cd distributed-ai/i
 
 `run-all.sh` は、値が足りないか引けないとき、Identity Center のユーザーが複数いるとき、state を読めないとき、同じ state のキー (`eks/ekscap-hub/terraform.tfstate`) に何かが残っているときは、何も作らずに止まる。そうでなければ `terraform apply`、`verify.sh`、`cleanup.sh` の順に流す。構築や検証が途中で失敗しても `cleanup.sh` は必ず流れる。`verify.sh` は T1〜T6 の 1 行ずつに `[PASS]` か `[FAIL]` を出し、同じ内容を `results/verify.log` に書く。最後の行が `build=0 verify=0 cleanup=0` で終了コードが 0 なら、構築、全項目、削除のすべてが通った。
 
+`verify.sh` は手元の 8443 番ポートで EKS の API エンドポイントにつなぐ。使われていれば止まるので、`export LOCAL_PORT=` に空いているポートを入れて流し直す。途中で Ctrl-C を押すと、`run-all.sh` はそこまでに作ったものを `cleanup.sh` で消してから終わる。
+
 流している間は、EKS クラスタ、マネージド Argo CD、EC2 3 台 (managed node group、Hybrid Node、k3s)、Hybrid Node の vCPU あたりの料金、NAT Gateway、Transit Gateway と 3 つの接続が課金される。`cleanup` が 0 以外で終わったら、残ったものがあるので、同じシェルで次を流す。最後の行が `deregister=0 destroy=0 resources left in state=0` になれば消えている。
 
 ```bash
 ./scripts/cleanup.sh
 ```
+
+新しいシェルから消すときは、最初の 3 つの `export` (と、指定したなら `TF_VAR_idc_admin_user_name`) を流してから、clone したディレクトリで `./scripts/cleanup.sh` を流す。
 
 ## 各項目が何を示すか
 

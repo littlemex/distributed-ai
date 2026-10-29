@@ -7,11 +7,11 @@ set -euo pipefail
 : "${AWS_REGION:?}" "${CLUSTER_NAME:?}" "${K3S_INSTANCE_ID:?}" "${K3S_PRIVATE_IP:?}"
 NS=$1
 HERE=$(cd "$(dirname "$0")" && pwd)
-RUN="$HERE/ssm-run.sh $K3S_INSTANCE_ID"
+run() { "$HERE/ssm-run.sh" "$K3S_INSTANCE_ID" "$@"; }
 
-$RUN "echo $(base64 < "$HERE/../k8s/k3s-deployer-sa.yaml" | tr -d '\n') | base64 -d | k3s kubectl apply -f -" >/dev/null
-TOKEN=$($RUN "k3s kubectl -n kube-system get secret argocd-deployer-token -o jsonpath='{.data.token}' | base64 -d" | tr -d '\n') \
-CA=$($RUN "k3s kubectl -n kube-system get secret argocd-deployer-token -o jsonpath='{.data.ca\.crt}'" | tr -d '\n') \
+run "echo $(base64 < "$HERE/../k8s/k3s-deployer-sa.yaml" | tr -d '\n') | base64 -d | k3s kubectl apply -f -" >/dev/null
+TOKEN=$(run "k3s kubectl -n kube-system get secret argocd-deployer-token -o jsonpath='{.data.token}' | base64 -d" | tr -d '\n') \
+CA=$(run "k3s kubectl -n kube-system get secret argocd-deployer-token -o jsonpath='{.data.ca\.crt}'" | tr -d '\n') \
 NS=$NS SERVER="https://$K3S_PRIVATE_IP:6443" python3 -c '
 import json, os
 print(json.dumps({
