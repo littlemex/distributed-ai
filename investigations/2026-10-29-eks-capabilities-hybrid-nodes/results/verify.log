@@ -1,8 +1,9 @@
-[INFO] hybrid node mi-0537f2fdebe348ffc is Ready
-[PASS] T1: pods mi-0537f2fdebe348ffc=10.81.0.57 mi-0537f2fdebe348ffc=10.81.0.100 ; a pod on a cloud node got "message": "deployed by EKS Capabilities Argo CD to the on-prem hybrid node"
-[INFO] T2 conditions: Failed to load live state: failed to get cluster info for "https://10.90.0.32:6443": error getting cluster: error getting cluster RESTConfig: server should be specified as a cluster ARN Failed to load target state: failed to get cluster version for cluster "https://10.90.0.32:6443": failed to get cluster info for "https://10.90.0.32:6443": error getting cluster: error getting cluster RESTConfig: server should be specified as a cluster ARN error getting cluster: error getting cluster RESTConfig: server should be specified as a cluster ARN
+[INFO] hybrid node mi-0fcb2322084a9a4f8 is Ready
+[INFO] CRD applications.argoproj.io created 2026-10-29T10:26:21Z, managed Argo CD 3.4.7-eks-1
+[PASS] T1: pods mi-0fcb2322084a9a4f8=10.81.0.109 mi-0fcb2322084a9a4f8=10.81.0.88 ; a pod on a cloud node got "message": "deployed by EKS Capabilities Argo CD to the on-prem hybrid node"
+[INFO] T2 conditions: Failed to load live state: failed to get cluster info for "https://10.90.0.190:6443": error getting cluster: error getting cluster RESTConfig: server should be specified as a cluster ARN Failed to load target state: failed to get cluster version for cluster "https://10.90.0.190:6443": failed to get cluster info for "https://10.90.0.190:6443": error getting cluster: error getting cluster RESTConfig: server should be specified as a cluster ARN error getting cluster: error getting cluster RESTConfig: server should be specified as a cluster ARN
 [PASS] T2: refused with "server should be specified as a cluster ARN"; no namespace podinfo-direct on k3s
-[PASS] T3: tier2-argocd Synced/Healthy, podinfo-other Synced/Healthy, k3s readyReplicas=1
-[PASS] T4: on-prem: 3 ready replicas serving "v2 on-prem" within 22s; k3s: 2 ready replicas serving "v2 k3s" within 35s (from the first patch, polling included)
-[PASS] T5: deleted at 2026-10-29T09:52:09Z, recreated at 2026-10-29T09:52:09Z (k3s clock, UTC), 2 ready replicas
-[PASS] T6: kubelet connects to 10.0.31.245:443   (hub VPC private addresses)
+[PASS] T3: tier2-argocd Synced/Healthy, tier2-apps Synced/Healthy, podinfo-other Synced/Healthy, k3s readyReplicas=1
+[PASS] T4: on-prem [3/3/3 v2_on-prem v2_on-prem v2_on-prem] within 83s; k3s [2/2/2 v2_k3s v2_k3s] within 52s (ready/updated/replicas, then the message from each Pod IP; from the first patch, polling included)
+[PASS] T5: deleted at 2026-10-29T10:38:45Z, recreated at 2026-10-29T10:38:46Z (k3s clock, UTC), 2 ready replicas
+[PASS] T6: kubelet connects to 10.0.12.42:443   (hub VPC private addresses)
