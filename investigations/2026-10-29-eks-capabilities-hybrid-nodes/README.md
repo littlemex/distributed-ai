@@ -44,6 +44,7 @@ EKS Hybrid Nodes を EC2 や他社クラウドで動かすことは [AWS のサ�
 │   └── k3s-deployer-sa.yaml     k3s 側で Argo CD が使う ServiceAccount
 ├── scripts/
 │   ├── run-all.sh               構築、検証、削除を順に流す。失敗しても削除は必ず流す
+│   ├── env.sh                   3 つの値からほかの値を求める (run-all.sh と cleanup.sh が読む)
 │   ├── verify.sh                T1〜T6 を流し、項目ごとに [PASS] か [FAIL] を出す
 │   ├── port-forward.sh          private な API の入口に SSM のポート転送で入る
 │   ├── register-k3s.sh          k3s を Argo CD のクラスタとして登録する
@@ -58,18 +59,15 @@ EKS Hybrid Nodes を EC2 や他社クラウドで動かすことは [AWS のサ�
 
 必要なもの: Terraform 1.9 以降、AWS CLI v2 と Session Manager プラグイン、kubectl、Helm 3.8 以降、Python 3、nc。AWS アカウントには IAM Identity Center のインスタンスとユーザーが要る。マネージド Argo CD はログインに Identity Center を使うからである。Identity Center は別のリージョンにあってよい。
 
-最初に環境ごとの値を設定する。`TF_STATE_BUCKET` は Terraform の state を置く S3 バケットである。
+最初に環境ごとの値を 3 つ設定する。`AWS_REGION` は環境を作るリージョン、`IDC_REGION` は IAM Identity Center のあるリージョン、`TF_STATE_BUCKET` は Terraform の state を置く自分の S3 バケットである。
 
 ```bash
 export AWS_REGION=us-east-2
 export IDC_REGION=us-east-1
-export IDC_ADMIN_USER_NAME=$(aws identitystore list-users --no-paginate --region "$IDC_REGION" --identity-store-id "$(aws sso-admin list-instances --no-paginate --region "$IDC_REGION" --query 'Instances[0].IdentityStoreId' --output text)" --query 'Users[].UserName' --output text)
 export TF_STATE_BUCKET=your-terraform-state-bucket
-export TF_STATE_REGION=$(aws s3api get-bucket-location --bucket "$TF_STATE_BUCKET" --query LocationConstraint --output text | sed 's/None/us-east-1/')
-export TF_VAR_region=$AWS_REGION TF_VAR_idc_region=$IDC_REGION TF_VAR_idc_admin_user_name=$IDC_ADMIN_USER_NAME
 ```
 
-`IDC_ADMIN_USER_NAME` には Identity Center のユーザー名がすべて入る。ユーザーが 1 人ならそのユーザーが Argo CD の管理者になる。複数いると `run-all.sh` は名前の一覧を出して止まるので、`export TF_VAR_idc_admin_user_name=` に管理者にするユーザーの名前を 1 つ入れ直す。
+ほかの値は `scripts/env.sh` が求める。state のバケットのリージョンを引き、Identity Center のユーザーが 1 人ならそのユーザーをマネージド Argo CD の管理者にする。ユーザーが複数いると名前の一覧を出して止まる。そのときは何も作られていないので、同じシェルで `export TF_VAR_idc_admin_user_name=` に 1 人の名前を入れ、`./scripts/run-all.sh` だけを流し直す。
 
 続けて、構築、検証、削除を流す。構築に 20 分ほど、検証に 15 分ほどかかる。
 
@@ -77,7 +75,7 @@ export TF_VAR_region=$AWS_REGION TF_VAR_idc_region=$IDC_REGION TF_VAR_idc_admin_
 git clone https://github.com/littlemex/distributed-ai.git && cd distributed-ai/investigations/2026-10-29-eks-capabilities-hybrid-nodes && ./scripts/run-all.sh
 ```
 
-`run-all.sh` は、上の値が空か `None` のとき、Identity Center のユーザーが複数いるとき、同じ state のキー (`eks/ekscap-hub/terraform.tfstate`) に何かが残っているときは、何も作らずに止まる。そうでなければ `terraform apply`、`verify.sh`、`cleanup.sh` の順に流す。構築や検証が途中で失敗しても `cleanup.sh` は必ず流れる。`verify.sh` は T1〜T6 の 1 行ずつに `[PASS]` か `[FAIL]` を出し、同じ内容を `results/verify.log` に書く。最後の行が `build=0 verify=0 cleanup=0` で終了コードが 0 なら、構築、全項目、削除のすべてが通った。
+`run-all.sh` は、値が足りないか引けないとき、Identity Center のユーザーが複数いるとき、state を読めないとき、同じ state のキー (`eks/ekscap-hub/terraform.tfstate`) に何かが残っているときは、何も作らずに止まる。そうでなければ `terraform apply`、`verify.sh`、`cleanup.sh` の順に流す。構築や検証が途中で失敗しても `cleanup.sh` は必ず流れる。`verify.sh` は T1〜T6 の 1 行ずつに `[PASS]` か `[FAIL]` を出し、同じ内容を `results/verify.log` に書く。最後の行が `build=0 verify=0 cleanup=0` で終了コードが 0 なら、構築、全項目、削除のすべてが通った。
 
 流している間は、EKS クラスタ、マネージド Argo CD、EC2 3 台 (managed node group、Hybrid Node、k3s)、Hybrid Node の vCPU あたりの料金、NAT Gateway、Transit Gateway と 3 つの接続が課金される。`cleanup` が 0 以外で終わったら、残ったものがあるので、同じシェルで次を流す。最後の行が `deregister=0 destroy=0 resources left in state=0` になれば消えている。
 
