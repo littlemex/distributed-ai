@@ -101,4 +101,3 @@ def refuse_existing(path: Path, overwrite: bool):
     if os.path.lexists(path) and not overwrite:
         return f"{path} already exists. Use --overwrite to replace it, or give another path."
     return None
-

@@ -242,4 +242,3 @@ def load_data(path: Path) -> dict:
         return json.loads(text)
     except json.JSONDecodeError as e:
         raise ValueError(f"{path} is not valid JSON: {e}") from e
-

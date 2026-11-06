@@ -401,4 +401,3 @@ def ensure_manager(ec2, allow_enable: bool):
     if status != "enabled":
         return {"enabled": False, "status": status, "attrs": {}, "error": error or "enable-capacity-manager was sent but the status could not be confirmed as enabled; the change may still be taking effect, so check get-capacity-manager-attributes and run again"}, log
     return {"enabled": True, "status": "enabled", "attrs": attrs, "error": None}, log
-
