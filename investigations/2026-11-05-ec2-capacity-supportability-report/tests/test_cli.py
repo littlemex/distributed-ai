@@ -1,8 +1,7 @@
-"""Offline tests for supportability_report.py. Run:
+"""Offline tests for the ec2-supportability command. Run from the package directory:
 
-  uv run --quiet --with boto3 python -I -m unittest discover -s tests -v   (from the investigation directory)
+  uv run --quiet --with-editable . python -I -m unittest discover -b -s tests
 """
-import importlib.util
 import json
 import os
 import re
@@ -14,17 +13,19 @@ from unittest import mock
 
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "supportability_report.py"
-spec = importlib.util.spec_from_file_location("supportability_report", SCRIPT)
-sr = importlib.util.module_from_spec(spec)
-sys.modules["supportability_report"] = sr
-spec.loader.exec_module(sr)
+from ec2_supportability import cli, collect, document, files, formats, report_html
 
 
 def read_html(directory):
     """Text of the single visible .html file in a directory (a successful report or a .failed- report), else None."""
     files = sorted(p for p in Path(directory).iterdir() if p.suffix == ".html" and not p.name.startswith("."))
     return files[-1].read_text(encoding="utf-8") if files else None
+
+
+def files_for(html_path):
+    """The arguments that write the report and its data file side by side, as the tests expect."""
+    p = Path(html_path)
+    return ["--html", str(p), "--save-json", str(p.with_suffix(".json"))]
 
 
 class FakeEc2:
@@ -87,19 +88,19 @@ class PlanCalls(unittest.TestCase):
     def test_every_request_stays_within_documented_limits(self):
         types = [f"t{i}.large" for i in range(60)]
         azs = [f"use1-az{i}" for i in range(1, 12)]  # 11 AZs
-        plan = sr.plan_calls(types, azs)
+        plan = collect.plan_calls(types, azs)
         for tc, ac in plan:
-            self.assertLessEqual(len(ac), sr.MAX_AZ_PER_CALL)
-            self.assertLessEqual(len(tc), sr.MAX_TYPE_PER_CALL)
-            self.assertLessEqual(len(tc) * len(ac), sr.MAX_COMBOS_PER_CALL)
+            self.assertLessEqual(len(ac), collect.MAX_AZ_PER_CALL)
+            self.assertLessEqual(len(tc), collect.MAX_TYPE_PER_CALL)
+            self.assertLessEqual(len(tc) * len(ac), collect.MAX_COMBOS_PER_CALL)
         covered = {(t, a) for tc, ac in plan for t in tc for a in ac}
         self.assertEqual(len(covered), len(types) * len(azs))  # nothing dropped, nothing duplicated
 
     def test_default_run_is_one_call_per_market_and_amount(self):
-        self.assertEqual(len(sr.plan_calls(sr.DEFAULT_TYPES, sr.DEFAULT_AZS)), 1)
+        self.assertEqual(len(collect.plan_calls(collect.DEFAULT_TYPES, collect.DEFAULT_AZS)), 1)
 
     def test_requirements_mode_splits_only_azs(self):
-        plan = sr.plan_calls(None, [f"use1-az{i}" for i in range(1, 12)])
+        plan = collect.plan_calls(None, [f"use1-az{i}" for i in range(1, 12)])
         self.assertEqual([len(ac) for _, ac in plan], [10, 1])
         self.assertTrue(all(tc is None for tc, _ in plan))
 
@@ -107,7 +108,7 @@ class PlanCalls(unittest.TestCase):
 class RunQuery(unittest.TestCase):
     def test_collects_cells_and_aggregate_per_group(self):
         ec2 = FakeEc2()
-        res = sr.run_query(ec2, "spot", 5, "instances", ["a.large", "b.large"], ["use1-az1", "use1-az2"])
+        res = collect.run_query(ec2, "spot", 5, "instances", ["a.large", "b.large"], ["use1-az1", "use1-az2"])
         self.assertEqual(len(res.cells), 4)
         self.assertEqual([g.aggregate for g in res.groups], ["medium"])
         self.assertEqual(ec2.calls[0]["MarketType"], "spot")
@@ -117,7 +118,7 @@ class RunQuery(unittest.TestCase):
         ec2 = FakeEc2(fail_on_call=1)
         types = [f"t{i}.large" for i in range(30)]  # 30 x 10 AZ -> 3 calls
         azs = [f"use1-az{i}" for i in range(1, 11)]
-        res = sr.run_query(ec2, "on-demand", 1, "instances", types, azs)
+        res = collect.run_query(ec2, "on-demand", 1, "instances", types, azs)
         self.assertEqual(len(res.groups), 3)
         self.assertIn("UnauthorizedOperation", res.groups[0].error)
         self.assertIsNone(res.groups[1].error)
@@ -126,7 +127,7 @@ class RunQuery(unittest.TestCase):
     def test_requirements_are_passed_instead_of_instance_types(self):
         ec2 = FakeEc2()
         req = {"ArchitectureTypes": ["arm64"]}
-        res = sr.run_query(ec2, "on-demand", 1, "vcpus", None, ["use1-az1"], req)
+        res = collect.run_query(ec2, "on-demand", 1, "vcpus", None, ["use1-az1"], req)
         self.assertEqual(ec2.calls[0]["InstanceRequirementsWithMetadata"], req)
         self.assertNotIn("InstanceTypes", ec2.calls[0])
         self.assertEqual(res.types, ["resolved.large"])
@@ -135,22 +136,22 @@ class RunQuery(unittest.TestCase):
 class EnsureManager(unittest.TestCase):
     def test_does_not_enable_without_the_flag(self):
         ec2 = FakeEc2(disabled=True)
-        state, _ = sr.ensure_manager(ec2, allow_enable=False)
+        state, _ = collect.ensure_manager(ec2, allow_enable=False)
         self.assertFalse(state["enabled"])
         self.assertTrue(state["needs_enable"])
         self.assertFalse(ec2.enabled_called)
 
     def test_enables_with_the_flag(self):
         ec2 = FakeEc2(disabled=True)
-        with mock.patch.object(sr.time, "sleep"):
-            state, _ = sr.ensure_manager(ec2, allow_enable=True)
+        with mock.patch.object(collect.time, "sleep"):
+            state, _ = collect.ensure_manager(ec2, allow_enable=True)
         self.assertTrue(state["enabled"])
         self.assertTrue(ec2.enabled_called)
 
 
 class Render(unittest.TestCase):
     def ctx(self, **over):
-        res = sr.run_query(FakeEc2(score="low", aggregate="high"), "on-demand", 10, "instances",
+        res = collect.run_query(FakeEc2(score="low", aggregate="high"), "on-demand", 10, "instances",
                            ["g6e.xlarge"], ["apne1-az4"])
         c = {"identity": {"Account": "111122223333", "Arn": "arn:aws:sts::111122223333:assumed-role/x/y"},
              "region": "ap-northeast-1", "state": {"enabled": True, "attrs": {"CapacityManagerStatus": "enabled"}, "error": None},
@@ -161,7 +162,7 @@ class Render(unittest.TestCase):
         return c
 
     def test_every_translatable_span_has_both_languages(self):
-        out = sr.render(self.ctx())
+        out = report_html.render(self.ctx())
         pairs = re.findall(r'<span class="en">(.*?)</span><span class="ja">(.*?)</span>', out, flags=re.S)
         self.assertEqual(out.count('<span class="en">'), len(pairs))  # every en span is directly followed by its ja span
         self.assertGreaterEqual(len(pairs), 30)
@@ -172,54 +173,54 @@ class Render(unittest.TestCase):
                 self.assertTrue(re.search(r"[\u3040-\u30ff\u4e00-\u9fff]", ja), f"untranslated: {en[:60]}")
 
     def test_erasing_a_translation_is_detected(self):
-        out = sr.render(self.ctx()).replace("スコアの読み方", "How to read the scores", 1)
+        out = report_html.render(self.ctx()).replace("スコアの読み方", "How to read the scores", 1)
         pairs = re.findall(r'<span class="en">(.*?)</span><span class="ja">(.*?)</span>', out, flags=re.S)
         self.assertTrue(any(en == ja for en, ja in pairs))
 
     def test_initial_language_follows_the_option(self):
-        self.assertIn('<html lang="ja"', sr.render(self.ctx(lang="ja", lang_explicit=True)))
-        self.assertIn('<html lang="en"', sr.render(self.ctx(lang="en")))
+        self.assertIn('<html lang="ja"', report_html.render(self.ctx(lang="ja", lang_explicit=True)))
+        self.assertIn('<html lang="en"', report_html.render(self.ctx(lang="en")))
 
     def test_low_cell_with_high_aggregate_is_shown_as_is(self):
-        out = sr.render(self.ctx())
+        out = report_html.render(self.ctx())
         table = out[out.index("<table>", out.index("Request: 10")):]
         self.assertIn('<th class="sticky mono">g6e.xlarge</th><td><span class="pill low">Low</span></td>', table)
         self.assertIn('<div class="agg"><b><span class="en">Aggregate score</span><span class="ja">集約スコア</span></b> <span class="pill high">High</span>', out)
 
     def test_missing_combination_is_na_not_low(self):
-        out = sr.heatmap({}, ["g6e.xlarge"], ["apne1-az4"])
+        out = report_html.heatmap({}, ["g6e.xlarge"], ["apne1-az4"])
         self.assertIn("pill na", out)
         self.assertNotIn("pill low", out)
 
     def test_split_run_never_claims_one_aggregate_for_the_whole_set(self):
-        groups = [sr.Group(types=["a"], azs=["x"], aggregate="high"), sr.Group(types=["b"], azs=["x"], aggregate="low")]
-        out = sr.aggregate_block(groups)
+        groups = [collect.Group(types=["a"], azs=["x"], aggregate="high"), collect.Group(types=["b"], azs=["x"], aggregate="low")]
+        out = report_html.aggregate_block(groups)
         self.assertIn("1/2", out)
         self.assertIn("documentation does not say how to combine aggregates", out)
         self.assertIn("<span class='mono'>a</span>", out)  # each aggregate names the types and AZs it covers
         self.assertIn("<span class='mono'>b</span>", out)
 
     def test_markup_in_values_is_escaped(self):
-        out = sr.render(self.ctx(state={"enabled": False, "attrs": {}, "error": "<script>x</script>"}))
+        out = report_html.render(self.ctx(state={"enabled": False, "attrs": {}, "error": "<script>x</script>"}))
         self.assertNotIn("<script>x</script>", out)
 
     def test_terms_notice_is_present(self):
-        out = sr.render(self.ctx())
+        out = report_html.render(self.ctx())
         self.assertIn("EC2 Capacity Manager Data", out)
         self.assertIn("contractors or agents", out)
 
 
 class Cli(unittest.TestCase):
     def test_quota_guard_counts_calls_not_combinations(self):
-        a = sr.parse_args(["--region", "r", "--markets", "on-demand", "spot", "--amounts", "1", "10", "100"])
-        self.assertEqual(sr.planned_calls(a), 6)
+        a = cli.parse_args(["--region", "r", "--markets", "on-demand", "spot", "--amounts", "1", "10", "100"])
+        self.assertEqual(cli.planned_calls(a), 6)
 
     def test_region_is_required(self):
         with self.assertRaises(SystemExit):
-            sr.parse_args([])
+            cli.parse_args([])
 
     def test_duplicates_are_removed_and_amounts_sorted(self):
-        a = sr.parse_args(["--region", "r", "--amounts", "100", "1", "100", "--markets", "spot", "spot"])
+        a = cli.parse_args(["--region", "r", "--amounts", "100", "1", "100", "--markets", "spot", "spot"])
         self.assertEqual(a.amounts, [1, 100])
         self.assertEqual(a.markets, ["spot"])
 
@@ -227,7 +228,7 @@ class Cli(unittest.TestCase):
         for argv in (["--amounts", "0"], ["--amounts", "-3"], ["--requirements", "{"], ["--requirements", "{}"],
                      ["--requirements", "[1]"]):
             with self.assertRaises(SystemExit, msg=argv):
-                sr.parse_args(["--region", "r"] + argv)
+                cli.parse_args(["--region", "r"] + argv)
 
 
 class MainFlow(unittest.TestCase):
@@ -242,11 +243,11 @@ class MainFlow(unittest.TestCase):
             def client(self, service, **kw):
                 return ec2 if service == "ec2" else STS()
 
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(sr.boto3, "Session", lambda **kw: Session()), \
-                mock.patch.object(sr.time, "sleep"):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(cli.boto3, "Session", lambda **kw: Session()), \
+                mock.patch.object(collect.time, "sleep"):
             out = Path(d) / "r.html"
-            rc = sr.main(["--region", "r", "--markets", "on-demand", "--amounts", "1", "--types", "a.large",
-                          "--azs", "use1-az1", "--out", str(out), *argv])
+            rc = cli.main(["--region", "r", "--markets", "on-demand", "--amounts", "1", "--types", "a.large",
+                          "--azs", "use1-az1", *files_for(out), *argv])
             return rc, read_html(d)
 
     def test_success_exits_zero(self):
@@ -298,13 +299,13 @@ class MainFlow(unittest.TestCase):
 class DocumentedConstants(unittest.TestCase):
     def test_limits_are_the_documented_literals(self):
         # Quotas page: 100 queries/hour, 100 combinations/request. CLI reference: 10 AZs, 50 instance types.
-        self.assertEqual((sr.QUOTA_PER_HOUR, sr.MAX_COMBOS_PER_CALL, sr.MAX_AZ_PER_CALL, sr.MAX_TYPE_PER_CALL),
+        self.assertEqual((collect.QUOTA_PER_HOUR, collect.MAX_COMBOS_PER_CALL, collect.MAX_AZ_PER_CALL, collect.MAX_TYPE_PER_CALL),
                          (100, 100, 10, 50))
 
     def test_plan_has_no_duplicates_and_uses_few_calls(self):
         types = [f"t{i}.large" for i in range(60)]
         azs = [f"use1-az{i}" for i in range(1, 12)]  # chunks of 10 and 1
-        plan = sr.plan_calls(types, azs)
+        plan = collect.plan_calls(types, azs)
         pairs = [(t, a) for tc, ac in plan for t in tc for a in ac]
         self.assertEqual(len(pairs), len(set(pairs)))
         self.assertEqual(len(plan), 6 + 2)  # 10 AZ x 10 types -> 6 calls; 1 AZ x 50 types -> 2 calls
@@ -313,33 +314,33 @@ class DocumentedConstants(unittest.TestCase):
 class EnableStatus(unittest.TestCase):
     def test_disabled_status_in_a_normal_response_is_treated_as_disabled(self):
         ec2 = FakeEc2(disabled=True, status_style=True)
-        state, _ = sr.ensure_manager(ec2, allow_enable=False)
+        state, _ = collect.ensure_manager(ec2, allow_enable=False)
         self.assertFalse(state["enabled"])
         self.assertTrue(state.get("needs_enable"))
 
     def test_unknown_status_stops_without_enabling(self):
         ec2 = FakeEc2(attr_error=ClientError({"Error": {"Code": "UnauthorizedOperation", "Message": "x"}}, "op"))
-        state, _ = sr.ensure_manager(ec2, allow_enable=True)
+        state, _ = collect.ensure_manager(ec2, allow_enable=True)
         self.assertFalse(state["enabled"])
         self.assertIn("UnauthorizedOperation", state["error"])
         self.assertFalse(ec2.enabled_called)
 
     def test_botocore_error_on_the_first_read_is_reported_not_raised(self):
         ec2 = FakeEc2(attr_error=EndpointConnectionError(endpoint_url="https://x"))
-        state, _ = sr.ensure_manager(ec2, allow_enable=True)
+        state, _ = collect.ensure_manager(ec2, allow_enable=True)
         self.assertFalse(state["enabled"])
         self.assertFalse(ec2.enabled_called)
 
     def test_enable_that_does_not_take_effect_is_not_reported_as_enabled(self):
         ec2 = FakeEc2(disabled=True, status_style=True, stay_disabled=True)
-        with mock.patch.object(sr.time, "sleep"):
-            state, _ = sr.ensure_manager(ec2, allow_enable=True)
+        with mock.patch.object(collect.time, "sleep"):
+            state, _ = collect.ensure_manager(ec2, allow_enable=True)
         self.assertTrue(ec2.enabled_called)
         self.assertFalse(state["enabled"])
 
     def test_enable_failure_is_reported(self):
         ec2 = FakeEc2(disabled=True, enable_fails=True)
-        state, _ = sr.ensure_manager(ec2, allow_enable=True)
+        state, _ = collect.ensure_manager(ec2, allow_enable=True)
         self.assertFalse(state["enabled"])
         self.assertIn("UnauthorizedOperation", state["error"])
 
@@ -349,16 +350,16 @@ class ResponseShapes(unittest.TestCase):
         for resp in ({}, {"AggregateScore": "high", "CapacityManagerSupportabilityScores": []},
                      {"AggregateScore": "good", "CapacityManagerSupportabilityScores": [{"InstanceType": "a", "AvailabilityZoneId": "x", "Score": "low"}]},
                      {"AggregateScore": "high", "CapacityManagerSupportabilityScores": None}):
-            res = sr.run_query(FakeEc2(response=resp), "on-demand", 1, "instances", ["a.large"], ["use1-az1"])
+            res = collect.run_query(FakeEc2(response=resp), "on-demand", 1, "instances", ["a.large"], ["use1-az1"])
             self.assertTrue(res.groups[0].error, resp)
-            self.assertEqual(sr.exit_status({"enabled": True}, {"on-demand": {1: res}}), 3)
+            self.assertEqual(cli.exit_status({"enabled": True}, {"on-demand": {1: res}}), 3)
 
     def test_a_malformed_row_is_left_out_and_flagged(self):
         resp = {"AggregateScore": "high", "CapacityManagerSupportabilityScores": [
             {"InstanceType": "a.large", "AvailabilityZoneId": "use1-az1", "Score": "high"},
             {"InstanceType": "b.large", "AvailabilityZoneId": "use1-az1"},
             {"InstanceType": "c.large", "AvailabilityZoneId": "use1-az1", "Score": {"x": 1}}]}
-        res = sr.run_query(FakeEc2(response=resp), "on-demand", 1, "instances", ["a.large"], ["use1-az1"])
+        res = collect.run_query(FakeEc2(response=resp), "on-demand", 1, "instances", ["a.large"], ["use1-az1"])
         self.assertEqual(list(res.cells), [("a.large", "use1-az1")])
         self.assertIn("2 score rows were malformed", res.groups[0].error)
 
@@ -366,12 +367,12 @@ class ResponseShapes(unittest.TestCase):
         class Boom(FakeEc2):
             def get_capacity_manager_supportability_scores(self, **kw):
                 raise EndpointConnectionError(endpoint_url="https://x")
-        res = sr.run_query(Boom(), "on-demand", 1, "instances", ["a.large"], ["use1-az1"])
+        res = collect.run_query(Boom(), "on-demand", 1, "instances", ["a.large"], ["use1-az1"])
         self.assertIn("EndpointConnectionError", res.groups[0].error)
 
     def test_unit_is_passed_through(self):
         ec2 = FakeEc2()
-        sr.run_query(ec2, "on-demand", 4, "vcpus", ["a.large"], ["use1-az1"])
+        collect.run_query(ec2, "on-demand", 4, "vcpus", ["a.large"], ["use1-az1"])
         self.assertEqual(ec2.calls[0]["CapacityUnit"], "vcpus")
 
 
@@ -386,57 +387,57 @@ class RenderMore(unittest.TestCase):
         return c
 
     def test_best_score_ignores_missing(self):
-        self.assertEqual(sr.best_score(["low", None, "high"]), "high")
-        self.assertIsNone(sr.best_score([None, None]))
+        self.assertEqual(collect.best_score(["low", None, "high"]), "high")
+        self.assertIsNone(collect.best_score([None, None]))
 
     def test_failed_request_cells_show_error_not_na(self):
-        res = sr.run_query(FakeEc2(fail_on_call=1), "on-demand", 1, "instances", ["a.large"], ["use1-az1"])
-        out = sr.render(self.ctx({"on-demand": res}))
+        res = collect.run_query(FakeEc2(fail_on_call=1), "on-demand", 1, "instances", ["a.large"], ["use1-az1"])
+        out = report_html.render(self.ctx({"on-demand": res}))
         table = out[out.index("<tbody>"):]
         self.assertIn('class="pill err">Error', table)
         self.assertNotIn('class="pill na">N/A', table)
 
     def test_best_column_is_error_when_a_failed_request_left_no_score_for_the_row(self):
-        res = sr.Result(cells={("a.large", "use1-az1"): "low"}, groups=[
-            sr.Group(types=["b.large"], azs=["use1-az1"], error="Boom: x", all_types=["b.large"], all_azs=["use1-az1"])])
-        row = sr.heatmap(res.cells, ["b.large"], ["use1-az1"], sr.failed_pairs(res))
+        res = collect.Result(cells={("a.large", "use1-az1"): "low"}, groups=[
+            collect.Group(types=["b.large"], azs=["use1-az1"], error="Boom: x", all_types=["b.large"], all_azs=["use1-az1"])])
+        row = report_html.heatmap(res.cells, ["b.large"], ["use1-az1"], collect.failed_pairs(res))
         self.assertIn('class="bestcol"><span class="pill err">Error', row)
 
     def test_unreadable_status_is_not_shown_as_disabled(self):
         ec2 = FakeEc2(attr_error=ClientError({"Error": {"Code": "UnauthorizedOperation", "Message": "x"}}, "op"))
-        state, _ = sr.ensure_manager(ec2, allow_enable=False)
-        out = sr.render(self.ctx({"on-demand": sr.Result()}, state=state))
+        state, _ = collect.ensure_manager(ec2, allow_enable=False)
+        out = report_html.render(self.ctx({"on-demand": collect.Result()}, state=state))
         self.assertIn(">unknown<", out)
         self.assertNotIn(">disabled<", out)
 
     def test_failed_aggregate_says_the_request_failed(self):
-        g = sr.Group(types=["a"], azs=["x"], aggregate=None, error="Boom: x")
-        self.assertIn("request failed", sr.aggregate_block([g]))
+        g = collect.Group(types=["a"], azs=["x"], aggregate=None, error="Boom: x")
+        self.assertIn("request failed", report_html.aggregate_block([g]))
 
     def test_every_api_derived_value_is_escaped(self):
         evil = "<img src=x onerror=alert(1)>"
-        res = sr.Result(cells={(evil, "use1-az1"): "low"}, groups=[sr.Group(types=[evil], azs=["use1-az1"], aggregate="low")])
-        res.groups.append(sr.Group(types=[evil], azs=["use1-az1"], error=evil))
-        out = sr.render(self.ctx({"on-demand": res}, types=[evil], state={"enabled": True, "attrs": {"CapacityManagerStatus": evil}, "error": evil}))
+        res = collect.Result(cells={(evil, "use1-az1"): "low"}, groups=[collect.Group(types=[evil], azs=["use1-az1"], aggregate="low")])
+        res.groups.append(collect.Group(types=[evil], azs=["use1-az1"], error=evil))
+        out = report_html.render(self.ctx({"on-demand": res}, types=[evil], state={"enabled": True, "attrs": {"CapacityManagerStatus": evil}, "error": evil}))
         self.assertNotIn(evil, out)
 
     def test_split_spot_run_says_each_aggregate_covers_its_slice(self):
-        res = sr.Result(groups=[sr.Group(types=["a"], azs=["x"], aggregate="high"), sr.Group(types=["b"], azs=["x"], aggregate="low")])
-        out = sr.render(self.ctx({"spot": res}))
+        res = collect.Result(groups=[collect.Group(types=["a"], azs=["x"], aggregate="high"), collect.Group(types=["b"], azs=["x"], aggregate="low")])
+        out = report_html.render(self.ctx({"spot": res}))
         self.assertIn("split into several requests", out)
-        one = sr.Result(groups=[sr.Group(types=["a"], azs=["x"], aggregate="high")])
-        self.assertNotIn("split into several requests", sr.render(self.ctx({"spot": one})))
+        one = collect.Result(groups=[collect.Group(types=["a"], azs=["x"], aggregate="high")])
+        self.assertNotIn("split into several requests", report_html.render(self.ctx({"spot": one})))
 
     def test_terms_notice_has_the_restrictions_not_only_the_permission(self):
-        out = sr.render(self.ctx({"on-demand": sr.Result()}))
+        out = report_html.render(self.ctx({"on-demand": collect.Result()}))
         for needle in ("solely for your internal", "contractors or agents acting on your behalf", "competing product",
                        "suspend", "not legal advice"):
             self.assertIn(needle, out)
 
     def test_toggle_persists_only_on_click(self):
-        self.assertIn("addEventListener('click'", sr.JS)
-        self.assertEqual(sr.JS.count("setItem"), 1)
-        self.assertRegex(sr.JS, r"addEventListener\('click',function\(\)\{[^}]*\n[^}]*setItem")
+        self.assertIn("addEventListener('click'", report_html.JS)
+        self.assertEqual(report_html.JS.count("setItem"), 1)
+        self.assertRegex(report_html.JS, r"addEventListener\('click',function\(\)\{[^}]*\n[^}]*setItem")
 
 
 class OutputFile(unittest.TestCase):
@@ -449,9 +450,9 @@ class OutputFile(unittest.TestCase):
             def client(self, service, **kw):
                 return ec2 if service == "ec2" else STS()
 
-        with mock.patch.object(sr.boto3, "Session", lambda **kw: Session()), mock.patch.object(sr.time, "sleep"):
-            return sr.main(["--region", "r", "--markets", "on-demand", "--amounts", "1", "--types", "a.large",
-                            "--azs", "use1-az1", "--out", str(out), *argv])
+        with mock.patch.object(cli.boto3, "Session", lambda **kw: Session()), mock.patch.object(collect.time, "sleep"):
+            return cli.main(["--region", "r", "--markets", "on-demand", "--amounts", "1", "--types", "a.large",
+                            "--azs", "use1-az1", *files_for(out), *argv])
 
     def test_existing_file_is_refused_before_the_account_is_touched(self):
         with tempfile.TemporaryDirectory() as d:
@@ -528,19 +529,19 @@ class OutputFile(unittest.TestCase):
         class Session:
             def client(self, service, **kw):
                 raise EndpointConnectionError(endpoint_url="https://x")
-        with mock.patch.object(sr.boto3, "Session", lambda **kw: Session()):
-            self.assertEqual(sr.main(["--region", "r"]), 1)
+        with mock.patch.object(cli.boto3, "Session", lambda **kw: Session()):
+            self.assertEqual(cli.main(["--region", "r"]), 1)
 
 
 class AccountSafety(unittest.TestCase):
     def test_enable_requires_an_expected_account(self):
         with self.assertRaises(SystemExit):
-            sr.parse_args(["--region", "r", "--enable"])
+            cli.parse_args(["--region", "r", "--enable"])
 
     def test_bad_expected_account_and_max_calls_are_refused(self):
         for argv in (["--expect-account", "123"], ["--max-calls", "0"], ["--max-calls", "101"]):
             with self.assertRaises(SystemExit, msg=argv):
-                sr.parse_args(["--region", "r"] + argv)
+                cli.parse_args(["--region", "r"] + argv)
 
     def test_wrong_account_stops_everything_before_any_change(self):
         ec2 = FakeEc2(disabled=True)
@@ -584,25 +585,25 @@ class AccountSafety(unittest.TestCase):
             self.assertTrue(all(".failed-" in n for n in names))
 
     def test_best_score_with_a_failed_request_is_marked_partial(self):
-        res = sr.Result(cells={("a.large", "use1-az1"): "high"}, groups=[
-            sr.Group(types=["a.large"], azs=["use1-az1"], aggregate="high"),
-            sr.Group(types=["a.large"], azs=["use1-az2"], error="Boom: x", all_types=["a.large"], all_azs=["use1-az2"])])
-        out = sr.heatmap(res.cells, ["a.large"], ["use1-az1", "use1-az2"], sr.failed_pairs(res))
+        res = collect.Result(cells={("a.large", "use1-az1"): "high"}, groups=[
+            collect.Group(types=["a.large"], azs=["use1-az1"], aggregate="high"),
+            collect.Group(types=["a.large"], azs=["use1-az2"], error="Boom: x", all_types=["a.large"], all_azs=["use1-az2"])])
+        out = report_html.heatmap(res.cells, ["a.large"], ["use1-az1", "use1-az2"], collect.failed_pairs(res))
         self.assertIn("†", out)
 
 
 class CliMore(unittest.TestCase):
     def test_types_and_requirements_together_are_refused(self):
         with self.assertRaises(SystemExit):
-            sr.parse_args(["--region", "r", "--types", "a.large", "--requirements", '{"a": 1}'])
+            cli.parse_args(["--region", "r", "--types", "a.large", "--requirements", '{"a": 1}'])
 
     def test_requirements_alone_is_accepted_and_counts_az_chunks(self):
-        a = sr.parse_args(["--region", "r", "--requirements", '{"ArchitectureTypes":["x86_64"]}', "--markets", "spot",
+        a = cli.parse_args(["--region", "r", "--requirements", '{"ArchitectureTypes":["x86_64"]}', "--markets", "spot",
                            "--amounts", "1", "--azs", *[f"use1-az{i}" for i in range(1, 12)]])
-        self.assertEqual(sr.planned_calls(a), 2)
+        self.assertEqual(cli.planned_calls(a), 2)
 
     def test_azs_of_one_region_stay_together(self):
-        a = sr.parse_args(["--region", "r", "--azs", "use1-az1", "usw2-az1", "use1-az2"])
+        a = cli.parse_args(["--region", "r", "--azs", "use1-az1", "usw2-az1", "use1-az2"])
         self.assertEqual(a.azs, ["use1-az1", "use1-az2", "usw2-az1"])
 
 
@@ -619,10 +620,10 @@ class ErrorHandling(unittest.TestCase):
                 return ec2 if service == "ec2" else STS()
 
         factory = session or (lambda **kw: Session())
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(sr.boto3, "Session", factory), \
-                mock.patch.object(sr.time, "sleep"):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(cli.boto3, "Session", factory), \
+                mock.patch.object(collect.time, "sleep"):
             out = Path(d) / "r.html"
-            rc = sr.main(["--region", "r", "--out", str(out), *argv])
+            rc = cli.main(["--region", "r", *files_for(out), *argv])
             return rc, read_html(d)
 
     def test_every_request_failing_still_gives_a_readable_report_and_status_three(self):
@@ -797,11 +798,11 @@ class Robustness(ErrorHandling):
                 return ec2 if service == "ec2" else STS()
 
         before = _signal.getsignal(_signal.SIGTERM)
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(sr.boto3, "Session", lambda **kw: Session()):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(cli.boto3, "Session", lambda **kw: Session()):
             out = Path(d) / "r.html"
             out.write_text("previous")
-            rc = sr.main(["--region", "r", "--types", "a.large", "--azs", "use1-az1", "--markets", "on-demand",
-                          "--amounts", "1", "--out", str(out), "--overwrite"])
+            rc = cli.main(["--region", "r", "--types", "a.large", "--azs", "use1-az1", "--markets", "on-demand",
+                          "--amounts", "1", *files_for(out), "--overwrite"])
             self.assertEqual(rc, 130)
             self.assertEqual(out.read_text(), "previous")
             self.assertEqual([p.name for p in Path(d).iterdir()], ["r.html"])
@@ -842,7 +843,7 @@ class Robustness(ErrorHandling):
             self.assertTrue(any(".unplaced-" in p.name for p in Path(d).iterdir()))
 
     def test_file_systems_without_hard_links_still_get_an_exclusive_placement(self):
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(sr.os, "link", side_effect=OSError(1, "not permitted")):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(files.os, "link", side_effect=OSError(1, "not permitted")):
             out = Path(d) / "r.html"
             rc = OutputFile().run_main_with(FakeEc2(), out)
             self.assertEqual(rc, 0)
@@ -858,7 +859,7 @@ class Robustness(ErrorHandling):
                 holder["path"].write_text("someone else")
                 return super().get_capacity_manager_supportability_scores(**kw)
 
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(sr.os, "link", side_effect=OSError(1, "no")):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(files.os, "link", side_effect=OSError(1, "no")):
             out = Path(d) / "r.html"
             holder["path"] = out
             rc = OutputFile().run_main_with(Racy(), out)
@@ -897,11 +898,15 @@ class Robustness(ErrorHandling):
     def test_a_complete_run_says_so(self):
         import contextlib
         import io
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc, _ = self.run_main(FakeEc2(), "--types", "a.large", "--azs", "use1-az1", "--markets", "on-demand", "--amounts", "1")
         self.assertEqual(rc, 0)
-        self.assertIn("RESULT: complete", buf.getvalue())
+        self.assertIn("RESULT: complete", err.getvalue())
+        # Standard output carries only the result, so a pipe never sees progress messages.
+        self.assertNotIn("RESULT", out.getvalue())
+        self.assertNotIn("calls planned", out.getvalue())
+        self.assertIn("result: complete", out.getvalue())
 
     def test_a_value_rejected_once_is_not_paid_for_again(self):
         class Picky(FakeEc2):
@@ -1008,10 +1013,10 @@ class Robustness(ErrorHandling):
         self.assertIn("<div class='v'>0</div>", page)
 
     def test_only_the_documented_message_shapes_name_a_rejected_value(self):
-        self.assertEqual(sr.rejected_value("InvalidParameterValue: The instance type 'x.large' isn't available in the specified Availability Zones.", ["x.large"], ["a"]), ("x.large", "type"))
-        self.assertEqual(sr.rejected_value("InvalidParameterValue: The Availability Zone ID 'a' isn't valid.", ["x.large"], ["a"]), ("a", "az"))
-        self.assertIsNone(sr.rejected_value("InvalidParameterValue: CapacityAmount can't be more than 'x.large'.", ["x.large"], ["a"]))
-        self.assertIsNone(sr.rejected_value("Throttling: The instance type 'x.large' isn't available", ["x.large"], ["a"]))
+        self.assertEqual(collect.rejected_value("InvalidParameterValue: The instance type 'x.large' isn't available in the specified Availability Zones.", ["x.large"], ["a"]), ("x.large", "type"))
+        self.assertEqual(collect.rejected_value("InvalidParameterValue: The Availability Zone ID 'a' isn't valid.", ["x.large"], ["a"]), ("a", "az"))
+        self.assertIsNone(collect.rejected_value("InvalidParameterValue: CapacityAmount can't be more than 'x.large'.", ["x.large"], ["a"]))
+        self.assertIsNone(collect.rejected_value("Throttling: The instance type 'x.large' isn't available", ["x.large"], ["a"]))
 
     def test_a_dropped_type_shows_error_cells_and_the_run_is_incomplete(self):
         class Picky(FakeEc2):
@@ -1044,12 +1049,12 @@ class Robustness(ErrorHandling):
 
     def test_partial_flag_marks_the_best_column_in_both_tables(self):
         cells = {("r.large", "use1-az1"): "high"}
-        self.assertIn("†", sr.heatmap(cells, ["r.large"], ["use1-az1"], partial=True).split('class="bestcol"')[1])
-        self.assertNotIn("†", sr.heatmap(cells, ["r.large"], ["use1-az1"], partial=False))
-        res = sr.Result(cells=cells, groups=[sr.Group(types=None, azs=["use1-az1"], aggregate="high"),
-                                             sr.Group(types=None, azs=["use1-az2"], error="Boom: x")])
+        self.assertIn("†", report_html.heatmap(cells, ["r.large"], ["use1-az1"], partial=True).split('class="bestcol"')[1])
+        self.assertNotIn("†", report_html.heatmap(cells, ["r.large"], ["use1-az1"], partial=False))
+        res = collect.Result(cells=cells, groups=[collect.Group(types=None, azs=["use1-az1"], aggregate="high"),
+                                             collect.Group(types=None, azs=["use1-az2"], error="Boom: x")])
         self.assertTrue(res.partial)
-        self.assertIn("†", sr.sensitivity({1: res}, ["r.large"], ["use1-az1"], [1]))
+        self.assertIn("†", report_html.sensitivity({1: res}, ["r.large"], ["use1-az1"], [1]))
 
     def test_all_azs_invalid_does_not_blame_the_instance_types(self):
         ec2 = FakeEc2(invalid_azs={"use1-az1"})
@@ -1067,19 +1072,19 @@ class Robustness(ErrorHandling):
 
 class InputNormalisation(unittest.TestCase):
     def test_case_and_whitespace_are_normalised_and_deduplicated(self):
-        a = sr.parse_args(["--region", "r", "--types", " M7I.large", "m7i.large ", "--azs", "USE1-AZ1", " use1-az1"])
+        a = cli.parse_args(["--region", "r", "--types", " M7I.large", "m7i.large ", "--azs", "USE1-AZ1", " use1-az1"])
         self.assertEqual(a.types, ["m7i.large"])
         self.assertEqual(a.azs, ["use1-az1"])
 
     def test_empty_values_are_refused(self):
-        for argv in (["--types", ""], ["--azs", " "], ["--out", " "]):
+        for argv in (["--types", ""], ["--azs", " "], ["--html", " "], ["--save-json", ""]):
             with self.assertRaises(SystemExit, msg=argv):
-                sr.parse_args(["--region", "r"] + argv)
+                cli.parse_args(["--region", "r"] + argv)
 
     def test_requirements_with_wrong_json_types_are_refused_before_anything_runs(self):
         for req in ('{"ArchitectureTypes":"x86_64"}', '{"VirtualizationTypes":[1]}', '{"InstanceRequirements":[1]}'):
             with self.assertRaises(SystemExit, msg=req):
-                sr.parse_args(["--region", "r", "--requirements", req])
+                cli.parse_args(["--region", "r", "--requirements", req])
 
 
 class DataFile(unittest.TestCase):
@@ -1092,7 +1097,7 @@ class DataFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(self.run_to(d, FakeEc2()), 0)
             data = json.loads((Path(d) / "r.json").read_text(encoding="utf-8"))
-            self.assertEqual(data["schema"], sr.SCHEMA)
+            self.assertEqual(data["schema"], document.SCHEMA)
             self.assertEqual(data["status"], 0)
             self.assertEqual(data["request"]["markets"], ["on-demand"])
             self.assertEqual(data["results"]["on-demand"]["1"]["cells"], [["a.large", "use1-az1", "high"]])
@@ -1102,8 +1107,8 @@ class DataFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.run_to(d, FakeEc2())
             original = (Path(d) / "r.html").read_text(encoding="utf-8")
-            with mock.patch.object(sr.boto3, "Session", side_effect=AssertionError("AWS must not be touched")):
-                rc = sr.main(["--from-json", str(Path(d) / "r.json"), "--out", str(Path(d) / "again.html")])
+            with mock.patch.object(cli.boto3, "Session", side_effect=AssertionError("AWS must not be touched")):
+                rc = cli.main(["--from-json", str(Path(d) / "r.json"), "--html", str(Path(d) / "again.html")])
             self.assertEqual(rc, 0)
             self.assertEqual((Path(d) / "again.html").read_text(encoding="utf-8"), original)
 
@@ -1113,7 +1118,7 @@ class DataFile(unittest.TestCase):
             data = json.loads((Path(d) / "r.json").read_text(encoding="utf-8"))
             data["results"]["on-demand"]["1"]["cells"] = [["a.large", "use1-az1", "low"]]
             (Path(d) / "edited.json").write_text(json.dumps(data), encoding="utf-8")
-            rc = sr.main(["--from-json", str(Path(d) / "edited.json"), "--out", str(Path(d) / "edited.html")])
+            rc = cli.main(["--from-json", str(Path(d) / "edited.json"), "--html", str(Path(d) / "edited.html")])
             self.assertEqual(rc, 0)
             table = (Path(d) / "edited.html").read_text(encoding="utf-8").split("<tbody>", 1)[1]
             self.assertIn('class="pill low">Low', table)
@@ -1122,20 +1127,20 @@ class DataFile(unittest.TestCase):
     def test_from_json_lets_the_language_change_without_a_new_run(self):
         with tempfile.TemporaryDirectory() as d:
             self.run_to(d, FakeEc2())
-            sr.main(["--from-json", str(Path(d) / "r.json"), "--lang", "ja", "--out", str(Path(d) / "ja.html")])
+            cli.main(["--from-json", str(Path(d) / "r.json"), "--lang", "ja", "--html", str(Path(d) / "ja.html")])
             self.assertIn('<html lang="ja" data-lang-explicit="1"', (Path(d) / "ja.html").read_text(encoding="utf-8"))
 
     def test_to_data_and_from_data_round_trip_every_field_the_page_uses(self):
-        res = sr.run_query(FakeEc2(fail_on_call=1), "spot", 3, "vcpus", ["a.large", "b.large"], ["use1-az1", "use1-az2"])
+        res = collect.run_query(FakeEc2(fail_on_call=1), "spot", 3, "vcpus", ["a.large", "b.large"], ["use1-az1", "use1-az2"])
         res.groups[0].dropped.append(("zzz.large", "type", "InvalidParameterValue: x"))
-        pf = sr.Preflight(azs=["use1-az1", "use1-az2"], types=["a.large", "b.large"], bad_azs=["use1-az9"],
+        pf = collect.Preflight(azs=["use1-az1", "use1-az2"], types=["a.large", "b.large"], bad_azs=["use1-az9"],
                           excluded_types=["q.large"], not_offered={("a.large", "use1-az2")}, notes=[("en", "ja")])
         ctx = {"identity": {"Account": "1", "Arn": "a"}, "region": "r", "state": {"enabled": True, "status": "enabled", "error": None, "attrs": {"CapacityManagerStatus": "enabled"}},
                "log": [("x", "y")], "status": 3, "now": "t", "types": ["a.large", "b.large"], "azs": pf.azs, "pf": pf,
                "markets": ["spot"], "amounts": [3], "unit": "vcpus", "results": {"spot": {3: res}}, "calls": 1, "reasons": ["why"],
                "lang": "en", "lang_explicit": False}
-        again = sr.from_data(json.loads(json.dumps(sr.to_data(ctx))))
-        self.assertEqual(sr.render(again), sr.render(ctx))
+        again = document.from_data(json.loads(json.dumps(document.to_data(ctx))))
+        self.assertEqual(report_html.render(again), report_html.render(ctx))
 
     def test_a_bad_data_file_is_refused_with_a_reason_and_exit_two(self):
         import contextlib
@@ -1157,7 +1162,7 @@ class DataFile(unittest.TestCase):
                 f.write_text(json.dumps(bad if name != "not an object" else [1]), encoding="utf-8")
                 err = io.StringIO()
                 with contextlib.redirect_stderr(err):
-                    rc = sr.main(["--from-json", str(f), "--out", str(Path(d) / f"{f.stem}.html")])
+                    rc = cli.main(["--from-json", str(f), "--html", str(Path(d) / f"{f.stem}.html")])
                 self.assertEqual(rc, 2, name)
                 self.assertIn("Cannot use the data file", err.getvalue(), name)
                 self.assertFalse((Path(d) / f"{f.stem}.html").exists(), name)
@@ -1166,20 +1171,25 @@ class DataFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "broken.json").write_text("{", encoding="utf-8")
             for name in ("nope.json", "broken.json"):
-                self.assertEqual(sr.main(["--from-json", str(Path(d) / name), "--out", str(Path(d) / "x.html")]), 2)
+                self.assertEqual(cli.main(["--from-json", str(Path(d) / name), "--html", str(Path(d) / "x.html")]), 2)
 
     def test_markup_inside_a_data_file_is_escaped_by_the_page(self):
         with tempfile.TemporaryDirectory() as d:
             self.run_to(d, FakeEc2())
             data = json.loads((Path(d) / "r.json").read_text(encoding="utf-8"))
             evil = "<img src=x onerror=alert(1)>"
+            # Free-text fields may hold anything and are escaped by the page.
             data["identity"]["Arn"] = evil
             data["state"]["error"] = evil
+            (Path(d) / "evil.json").write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual(cli.main(["--from-json", str(Path(d) / "evil.json"), "--html", str(Path(d) / "evil.html")]), 0)
+            self.assertNotIn(evil, (Path(d) / "evil.html").read_text(encoding="utf-8"))
+            # Instance types and AZ IDs are names, and a value that is not one is refused before anything is printed.
             data["request"]["types"] = [evil]
             data["results"]["on-demand"]["1"]["cells"] = [[evil, "use1-az1", "low"]]
-            (Path(d) / "evil.json").write_text(json.dumps(data), encoding="utf-8")
-            self.assertEqual(sr.main(["--from-json", str(Path(d) / "evil.json"), "--out", str(Path(d) / "evil.html")]), 0)
-            self.assertNotIn(evil, (Path(d) / "evil.html").read_text(encoding="utf-8"))
+            (Path(d) / "evil2.json").write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual(cli.main(["--from-json", str(Path(d) / "evil2.json"), "--html", str(Path(d) / "evil2.html")]), 2)
+            self.assertFalse((Path(d) / "evil2.html").exists())
 
     def test_the_json_file_follows_the_same_placement_rules_as_the_page(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1191,14 +1201,14 @@ class DataFile(unittest.TestCase):
             self.assertEqual((Path(d) / "r.json").read_text(), "keep")
 
     def test_a_run_renders_what_it_wrote_not_what_it_collected(self):
-        real = sr.to_data
+        real = document.to_data
 
         def altered(ctx):
             d = real(ctx)
             d["identity"]["Account"] = "999988887777"  # only visible if the page is built from the document
             return d
 
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(sr, "to_data", altered):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(document, "to_data", altered):
             self.run_to(d, FakeEc2())
             self.assertIn("999988887777", (Path(d) / "r.html").read_text(encoding="utf-8"))
             self.assertIn("999988887777", (Path(d) / "r.json").read_text(encoding="utf-8"))
@@ -1220,7 +1230,7 @@ class DataFile(unittest.TestCase):
                 f.write_text(json.dumps(bad), encoding="utf-8")
                 err = io.StringIO()
                 with contextlib.redirect_stderr(err):
-                    rc = sr.main(["--from-json", str(f), "--out", str(Path(d) / "bad.html"), "--overwrite"])
+                    rc = cli.main(["--from-json", str(f), "--html", str(Path(d) / "bad.html"), "--overwrite"])
                 self.assertEqual(rc, 2)
                 self.assertIn("Cannot use the data file", err.getvalue())
 
@@ -1228,8 +1238,8 @@ class DataFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.run_to(d, FakeEc2(fail_all=True))
             failed_json = next(p for p in Path(d).iterdir() if p.suffix == ".json")
-            rc = sr.main(["--from-json", str(failed_json), "--out", str(Path(d) / "again.html")])
-            self.assertEqual(rc, 0)
+            rc = cli.main(["--from-json", str(failed_json), "--html", str(Path(d) / "again.html")])
+            self.assertEqual(rc, 3)  # replaying an incomplete run says so, like the run did
             self.assertFalse((Path(d) / "again.html").exists())
             self.assertTrue(any(p.name.startswith("again.failed-") for p in Path(d).iterdir()))
 
@@ -1237,7 +1247,7 @@ class DataFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.run_to(d, FakeEc2())
             before = (Path(d) / "r.json").read_text()
-            rc = sr.main(["--from-json", str(Path(d) / "r.json"), "--out", str(Path(d) / "r.json"), "--overwrite"])
+            rc = cli.main(["--from-json", str(Path(d) / "r.json"), "--save-json", str(Path(d) / "r.json"), "--overwrite"])
             self.assertEqual(rc, 4)
             self.assertEqual((Path(d) / "r.json").read_text(), before)
 
@@ -1273,42 +1283,43 @@ class DataFile(unittest.TestCase):
                     raise OSError(28, "No space left on device")
             return Boom()
 
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(sr.os, "link", side_effect=OSError(1, "no")):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(files.os, "link", side_effect=OSError(1, "no")):
             tmp = Path(d) / ".t.tmp"
             tmp.write_text("complete report")
             target = Path(d) / "r.html"
-            with mock.patch.object(sr.os, "fdopen", broken_fdopen):
-                final, note, ok = sr.place_report(tmp, target, 0, False, "stamp")
+            with mock.patch.object(files.os, "fdopen", broken_fdopen):
+                final, note, ok = files.place_report(tmp, target, 0, False, "stamp")
             self.assertFalse(ok)
             self.assertFalse(target.exists())
             self.assertTrue(final.exists())
             self.assertEqual(final.read_text(), "complete report")
 
     def test_a_signal_during_placement_waits_until_both_files_are_placed(self):
-        sr._critical.update(on=True, pending=False)
+        cli._critical.update(on=True, pending=False)
         try:
-            sr._interrupt(15, None)
-            self.assertTrue(sr._critical["pending"])
+            cli._interrupt(15, None)
+            self.assertTrue(cli._critical["pending"])
         finally:
-            sr._critical.update(on=False, pending=False)
+            cli._critical.update(on=False, pending=False)
         with self.assertRaises(KeyboardInterrupt):
-            sr._interrupt(15, None)
+            cli._interrupt(15, None)
 
-    def test_a_json_extension_on_out_does_not_collide_with_its_own_data_file(self):
-        self.assertEqual(sr.data_path_for(Path("/x/r.html")), Path("/x/r.json"))
-        self.assertEqual(sr.data_path_for(Path("/x/r.json")), Path("/x/r.data.json"))
+    def test_html_and_save_json_cannot_name_the_same_file(self):
+        with self.assertRaises(SystemExit) as e, mock.patch("sys.stderr"):
+            cli.parse_args(["--region", "r", "--html", "/x/r.json", "--save-json", "/x/r.json"])
+        self.assertEqual(e.exception.code, 2)
 
     def test_region_is_not_needed_with_from_json_but_is_otherwise(self):
-        sr.parse_args(["--from-json", "x.json"])
+        cli.parse_args(["--from-json", "x.json"])
         with self.assertRaises(SystemExit):
-            sr.parse_args([])
+            cli.parse_args([])
         with self.assertRaises(SystemExit):
-            sr.parse_args(["--from-json", "x.json", "--enable", "--expect-account", "111122223333"])
+            cli.parse_args(["--from-json", "x.json", "--enable", "--expect-account", "111122223333"])
 
 
 class Limits(unittest.TestCase):
     def test_a_51st_type_moves_to_a_second_request(self):
-        plan = sr.plan_calls([f"t{i}.large" for i in range(51)], ["use1-az1"])
+        plan = collect.plan_calls([f"t{i}.large" for i in range(51)], ["use1-az1"])
         self.assertEqual(sorted(len(tc) for tc, _ in plan), [1, 50])
 
 
