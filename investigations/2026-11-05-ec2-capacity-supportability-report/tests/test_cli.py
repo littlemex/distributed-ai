@@ -1063,11 +1063,28 @@ class Robustness(ErrorHandling):
         self.assertIn("AZ IDs that EC2 does not know", page)
         self.assertNotIn("Instance types not offered in any requested AZ", page)
 
-    def test_a_market_with_nothing_sent_says_so_instead_of_showing_empty_tables(self):
+    def test_a_market_with_nothing_sent_says_so_and_marks_every_cell_not_sent(self):
         rc, page = self.run_main(FakeEc2(disabled=True), "--types", "a.large", "--azs", "use1-az1", "--markets", "on-demand", "--amounts", "1")
         self.assertEqual(rc, 3)
         self.assertIn("No request was sent for this market", page)
-        self.assertNotIn("Best score per type as the requested amount grows", page)
+        # Like the table output: the pairs keep their rows and say Not sent, rather than vanishing or reading as N/A.
+        body = page.split("Real-time supportability check", 1)[1].split('class="legend"', 1)[1].split("</div></div>", 1)[1]
+        self.assertIn('<span class="pill ns">Not sent</span>', body)
+        self.assertNotIn('<span class="pill na">N/A</span>', body)
+
+    def test_an_unknown_az_keeps_its_column_in_the_page(self):
+        rc, page = self.run_main(FakeEc2(invalid_azs={"use1-az9"}), "--types", "a.large", "--azs", "use1-az1", "use1-az9",
+                                 "--markets", "on-demand", "--amounts", "1")
+        self.assertEqual(rc, 3)
+        self.assertIn('<th class="az">use1-az9</th>', page)
+        self.assertIn('<span class="pill unk">Unknown AZ</span>', page.split('class="legend"', 1)[1].split("</div></div>", 1)[1])
+
+    def test_the_legend_explains_every_label_the_table_output_uses(self):
+        _rc, page = self.run_main(FakeEc2())
+        legend = page.split('class="legend"', 1)[1].split('<ul class="plain">', 1)[0]
+        for label in formats.STATE_LABEL.values():
+            if label != "-":
+                self.assertIn(f">{label}</span>", legend, label)
 
 
 class InputNormalisation(unittest.TestCase):

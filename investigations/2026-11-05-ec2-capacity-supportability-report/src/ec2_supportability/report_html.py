@@ -8,6 +8,7 @@ from __future__ import annotations
 import html
 
 from .collect import QUOTA_PER_HOUR, RANK, Preflight, best_score, failed_pairs, region_of
+from .document import requested_azs
 
 def bi(en: str, ja: str) -> str:
     """Paired text. CSS shows exactly one of the two according to <html lang>."""
@@ -22,7 +23,12 @@ def bi_raw(en_html: str, ja_html: str) -> str:
 PARTIAL_MARK = '<sup class="partial" title="Some requests for this row failed, so this best score may be incomplete / このタイプの一部のリクエストが失敗したので、この最良スコアは不完全かもしれません">†</sup>'
 
 
-def pill(score, failed=False, not_offered=False) -> str:
+def pill(score, failed=False, not_offered=False, state=None) -> str:
+    """One cell. `state` names a reason that comes before the others, with the labels the table output uses."""
+    if score is None and state == "unknown_az":
+        return '<span class="pill unk">Unknown AZ</span>'
+    if score is None and state == "not_sent":
+        return '<span class="pill ns">Not sent</span>'
     if score is None and not_offered:
         return '<span class="pill no">Not offered</span>'
     if score is None and failed:
@@ -45,7 +51,9 @@ def region_groups(azs):
     return groups
 
 
-def heatmap(cells, types, azs, failed=frozenset(), not_offered=frozenset(), partial=False) -> str:
+def heatmap(cells, types, azs, failed=frozenset(), not_offered=frozenset(), partial=False,
+            unknown_azs=frozenset(), sent=True) -> str:
+    """One table per market and amount. Columns are every AZ asked for; an AZ EC2 did not know keeps its column."""
     out = ['<div class="tablewrap"><table><thead><tr><th rowspan="2" class="sticky">',
            bi("Instance type", "インスタンスタイプ"), "</th>"]
     for r, g in region_groups(azs):
@@ -58,10 +66,16 @@ def heatmap(cells, types, azs, failed=frozenset(), not_offered=frozenset(), part
     for t in types:
         row = [cells.get((t, az)) for az in azs]
         out.append(f'<tr><th class="sticky mono">{html.escape(t)}</th>')
-        out.extend(f"<td>{pill(x, (t, az) in failed, (t, az) in not_offered)}</td>" for x, az in zip(row, azs))
+        for x, az in zip(row, azs):
+            state = "unknown_az" if az in unknown_azs else None if sent else "not_sent"
+            out.append(f"<td>{pill(x, (t, az) in failed, (t, az) in not_offered, state)}</td>")
         best = best_score(row)
-        any_failed = any((t, az) in failed for az in azs) or partial
-        all_no = all((t, az) in not_offered for az in azs)
+        known = [az for az in azs if az not in unknown_azs]
+        any_failed = any((t, az) in failed for az in known) or partial
+        all_no = bool(known) and all((t, az) in not_offered for az in known)
+        if best is None and not sent:
+            out.append(f'<td class="bestcol">{pill(None, state="not_sent")}</td></tr>')
+            continue
         mark = PARTIAL_MARK if any_failed and best is not None else ""
         out.append(f'<td class="bestcol">{pill(best, best is None and any_failed, best is None and all_no)}{mark}</td></tr>')
     out.append("</tbody></table></div>")
@@ -76,6 +90,9 @@ def sensitivity(results, types, azs, amounts, not_offered=frozenset()) -> str:
     for t in types:
         out.append(f'<tr><th class="sticky mono">{html.escape(t)}</th>')
         for a in amounts:
+            if not results[a].groups:
+                out.append(f"<td>{pill(None, state='not_sent')}</td>")
+                continue
             cells, failed = results[a].cells, failed_pairs(results[a])
             best = best_score(cells.get((t, az)) for az in azs)
             any_failed = any((t, az) in failed for az in azs) or results[a].partial
@@ -169,6 +186,8 @@ h3{font-size:14px;margin:18px 0 8px;font-weight:700;color:var(--ink2)}
 .pill.no{background:var(--bg);color:var(--ink3);box-shadow:inset 0 0 0 1px var(--line);border-style:dotted;font-weight:400}
 .partial{color:var(--err);cursor:help;font-weight:700}
 .pill.na{background:var(--bg);color:var(--ink3);box-shadow:inset 0 0 0 1px var(--line);font-weight:400}
+.pill.unk{background:var(--bg);color:var(--ink3);box-shadow:inset 0 0 0 2px var(--line);font-weight:400;font-style:italic}
+.pill.ns{background:var(--card);color:var(--ink3);box-shadow:none;border:1px dashed var(--line);font-weight:400}
 .tablewrap{overflow-x:auto;border:1px solid var(--line2);border-radius:8px}
 table{border-collapse:collapse;width:100%;background:#fff}
 th,td{padding:8px 12px;border-bottom:1px solid var(--line2);text-align:center;white-space:nowrap}
@@ -239,8 +258,8 @@ def render(ctx: dict) -> str:
         h.append("<div class='alert err'><b>" + bi(
             f"This run did not obtain every score you asked for (exit status {ctx['status']}).",
             f"この実行では、要求したスコアをすべては取得できませんでした (終了コード {ctx['status']})。") + "</b> " + bi(
-            "Read the Error, Not offered and N/A marks, the checks before sending and the API errors below before using any number on this page.",
-            "このページの数値を使う前に、下の Error、Not offered、N/A の表示、送信前の確認、API エラーを読んでください。") + "</div>")
+            "Read the Error, Not offered, Unknown AZ, Not sent and N/A marks, the checks before sending and the API errors below before using any number on this page.",
+            "このページの数値を使う前に、下の Error、Not offered、Unknown AZ、Not sent、N/A の表示、送信前の確認、API エラーを読んでください。") + "</div>")
 
     # How to read (restates the documentation, nothing more)
     h.append('<div class="card"><h2>' + bi("How to read the scores", "スコアの読み方") + "</h2>"
@@ -259,6 +278,12 @@ def render(ctx: dict) -> str:
              f"<div>{pill(None, False, True)}<span>" + bi(
                  "EC2 reports that this instance type is not offered in this AZ (checked with DescribeInstanceTypeOfferings before sending, not with Capacity Manager).",
                  "EC2 によると、このインスタンスタイプはこの AZ では提供されていません (送信前に Capacity Manager ではなく DescribeInstanceTypeOfferings で確認しました)。") + "</span></div>"
+             f"<div>{pill(None, state='unknown_az')}<span>" + bi(
+                 "EC2 does not know this AZ ID, so it was not sent (found before sending with DescribeAvailabilityZones).",
+                 "EC2 がこの AZ ID を知らないので、送っていません (送信前に DescribeAvailabilityZones で確認しました)。") + "</span></div>"
+             f"<div>{pill(None, state='not_sent')}<span>" + bi(
+                 "No request was sent for this market and amount, for example because Capacity Manager was not usable. The reason is at the top of the page.",
+                 "この市場と量にはリクエストを送っていません。Capacity Manager が使えなかった場合などで、理由はページの先頭にあります。") + "</span></div>"
              f"<div>{pill(None, True)}<span>" + bi(
                  "The request that contained this pair failed, or returned no usable score for it. The error is listed under API errors below.",
                  "この組み合わせを含むリクエストが失敗したか、この組み合わせの使えるスコアを返しませんでした。エラーは下の API エラーに載せています。") + "</span></div>"
@@ -372,8 +397,9 @@ def render(ctx: dict) -> str:
         if not sent_any:
             h.append("<div class='alert warn'>" + bi("No request was sent for this market, so there are no scores to show.",
                                                     "この市場にはリクエストを送っていないので、表示できるスコアはありません。") + "</div>")
-            h.append("</div>")
-            continue
+            if not ctx["types"]:  # attribute-based: the types are not known, so there are no rows to mark Not sent
+                h.append("</div>")
+                continue
         h.append("<h3>" + bi("Best score per type as the requested amount grows (best Availability Zone for each type)",
                              "要求量を増やしたときの、タイプごとの最良スコア (各タイプで最も良い Availability Zone)") + "</h3>")
         h.append(sensitivity(res, types, ctx["azs"], ctx["amounts"], pf.not_offered))
@@ -388,7 +414,8 @@ def render(ctx: dict) -> str:
                     f"{len(r.groups)} 件のリクエストのうち {bad} 件が失敗したか、値を除いて送りました (API エラーと送信前の確認を参照)。それらの組み合わせは Error と表示します"
                     + ("。属性指定ではインスタンスタイプが分からないので、該当する行は表に出ず、すべての最良スコアが不完全かもしれません。" if r.partial else "。")) + "</div>")
             h.append(aggregate_block(r.groups))
-            h.append(heatmap(r.cells, types, ctx["azs"], failed_pairs(r), pf.not_offered, r.partial))
+            h.append(heatmap(r.cells, types, requested_azs({"azs": ctx["azs"], "pf": pf}), failed_pairs(r), pf.not_offered, r.partial,
+                             frozenset(pf.bad_azs), bool(r.groups)))
             h.append("</div>")
         h.append("</div>")
 
