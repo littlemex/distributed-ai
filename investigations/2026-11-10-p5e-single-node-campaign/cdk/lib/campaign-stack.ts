@@ -49,8 +49,13 @@ export class CampaignStack extends cdk.Stack {
       vpc, allowAllOutbound: true, description: `${id}: no inbound except from itself`,
     });
     sg.addIngressRule(sg, ec2.Port.allTraffic(), 'self (EFA, FSx for Lustre)');
-    // EFA needs an explicit outbound rule to the group itself; 0.0.0.0/0 is not enough.
-    sg.addEgressRule(sg, ec2.Port.allTraffic(), 'self (EFA)');
+    // EFA and EFA-enabled FSx for Lustre both require an explicit outbound rule to the group itself;
+    // 0.0.0.0/0 is not enough. SecurityGroup.addEgressRule ignores the rule when allowAllOutbound is
+    // true, so it is added as a separate resource.
+    new ec2.CfnSecurityGroupEgress(this, 'SgSelfEgress', {
+      groupId: sg.securityGroupId, ipProtocol: '-1', destinationSecurityGroupId: sg.securityGroupId,
+      description: 'self (EFA, FSx for Lustre)',
+    });
 
     const bucket = new s3.Bucket(this, 'Results', {
       bucketName: `${id.toLowerCase()}-${this.account}-${this.region}`,
