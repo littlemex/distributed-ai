@@ -1,0 +1,40 @@
+{
+ "name": "Checkpoint save timing for Llama 3 8B: four checkpointers x two storage targets",
+ "gpu": true,
+ "variables": {
+  "VENV": "/opt/campaign/venv-torchtitan",
+  "TORCHTITAN_SRC": "/opt/campaign/src/torchtitan",
+  "CKPT_STEPS": "21",
+  "CKPT_INTERVAL": "5"
+ },
+ "tasks": [
+  {
+   "id": "01-fsx",
+   "name": "every checkpointer writing to FSx for Lustre (/fsx, striped over every OST)",
+   "continue_on_error": true,
+   "timeout_sec": 7200,
+   "commands": [
+    "mountpoint -q /fsx && mkdir -p /fsx/ckpt && lfs setstripe -c -1 -S 16M /fsx/ckpt",
+    "for R in ckpt_dcp_sync ckpt_dcp_async ckpt_dcp_async_pinned ckpt_torch_checkpointing; do echo \"== $R\"; $INVESTIGATION_DIR/scripts/run_variant.sh $R /fsx $OUT/fsx/$R || echo \"[WARN] $R failed\"; done"
+   ]
+  },
+  {
+   "id": "02-local",
+   "name": "the same four against the local instance store RAID0 (/local), as the storage baseline",
+   "continue_on_error": true,
+   "timeout_sec": 7200,
+   "commands": [
+    "mountpoint -q /local",
+    "for R in ckpt_dcp_sync ckpt_dcp_async ckpt_dcp_async_pinned ckpt_torch_checkpointing; do echo \"== $R\"; $INVESTIGATION_DIR/scripts/run_variant.sh $R /local $OUT/local/$R || echo \"[WARN] $R failed\"; done"
+   ]
+  },
+  {
+   "id": "03-summary",
+   "name": "blocking time, write completion time and step time per variant",
+   "continue_on_error": true,
+   "commands": [
+    "python3 $INVESTIGATION_DIR/scripts/summarize.py $OUT | tee $OUT/summary.md"
+   ]
+  }
+ ]
+}

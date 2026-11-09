@@ -1,0 +1,27 @@
+{
+ "name": "KvikIO reads from FSx for Lustre: compat off (must be direct) vs compat on (CPU bounce)",
+ "gpu": true,
+ "variables": { "VENV": "/opt/campaign/venv-gds", "CUFILE_STATS_LEVEL": "3" },
+ "tasks": [
+  {
+   "id": "01-strict",
+   "name": "KVIKIO_COMPAT_MODE=off with cuFile strict: a successful read is a direct read",
+   "continue_on_error": true,
+   "timeout_sec": 3600,
+   "commands": [
+    "export CUFILE_ENV_PATH_JSON=$OUT/cufile/strict.json",
+    "for G in 1 8; do for T in 1 4 16; do $VENV/bin/python $INVESTIGATION_DIR/scripts/kvikio_read.py --label fsx-strict --dir /fsx/gdsio --out $OUT --gpus $G --threads $T --compat off; done; done"
+   ]
+  },
+  {
+   "id": "02-compat",
+   "name": "KVIKIO_COMPAT_MODE=on: KvikIO reads with POSIX into pinned memory and copies",
+   "continue_on_error": true,
+   "timeout_sec": 3600,
+   "commands": [
+    "export CUFILE_ENV_PATH_JSON=$OUT/cufile/default.json",
+    "for G in 1 8; do for T in 1 4 16; do $VENV/bin/python $INVESTIGATION_DIR/scripts/kvikio_read.py --label fsx-compat --dir /fsx/gdsio --out $OUT --gpus $G --threads $T --compat on; done; done"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,14 @@
+{
+ "name": "Ask for the EFA-enabled FSx for Lustre file system early so it is created while software installs",
+ "tasks": [
+  {
+   "id": "01-request",
+   "name": "ask the control function to create the file system (idempotent)",
+   "commands": [
+    "D=$OUT/fsx; mkdir -p $D",
+    "aws lambda invoke --function-name $FSX_FUNCTION --cli-binary-format raw-in-base64-out --payload '{\"action\":\"create\"}' $D/create.json > /dev/null",
+    "cat $D/create.json"
+   ]
+  }
+ ]
+}

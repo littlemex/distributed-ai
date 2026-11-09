@@ -1,0 +1,16 @@
+{
+ "name": "Harness check on any single-GPU instance: the benchmark with one rank and two layers",
+ "gpu": true,
+ "variables": { "VENV": "/opt/campaign/venv-torchtitan", "TORCHTITAN_SRC": "/opt/campaign/src/torchtitan" },
+ "tasks": [
+  {
+   "id": "01-one-rank",
+   "name": "every optimizer path runs end to end (world size 1, 2 layers)",
+   "timeout_sec": 1200,
+   "commands": [
+    "rm -f $OUT/smoke.jsonl; cd $TORCHTITAN_SRC && $VENV/bin/torchrun --standalone --nproc_per_node=1 $INVESTIGATION_DIR/scripts/optimizer_step_bench.py --layers 2 --warmup 1 --steps 2 --out $OUT/smoke.jsonl 2>&1 | grep -v '^\\[W' | tail -10",
+    "python3 -c \"import json,sys; r=[json.loads(l) for l in open('$OUT/smoke.jsonl')]; print(r and [(x['optimizer'], x['ok'], x.get('error','')[:200]) for x in r]); sys.exit(0 if r and all(x['ok'] for x in r) else 1)\""
+   ]
+  }
+ ]
+}

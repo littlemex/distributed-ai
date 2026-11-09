@@ -1,0 +1,44 @@
+{
+ "name": "Diffusion LM (LLaDA2.1-mini) vs its autoregressive sibling (Ling-mini-2.0) on one H200 each",
+ "gpu": true,
+ "variables": {
+  "VENV": "/opt/campaign/venv-sglang", "HF_HOME": "/local/hf",
+  "DLLM_MODEL": "inclusionAI/LLaDA2.1-mini", "DLLM_REV": "20e64e2ad21644d0e5248586ed9c942cdd45de0f",
+  "AR_MODEL": "inclusionAI/Ling-mini-2.0", "AR_REV": "a810f6416bc4e1e29c9d7f271dd2fa7e56e71eab"
+ },
+ "tasks": [
+  {
+   "id": "01-dllm-single-stream",
+   "name": "LLaDA2.1-mini as the cookbook ships it: JointThreshold, one running request",
+   "continue_on_error": true,
+   "timeout_sec": 5400,
+   "commands": [
+    "GPU=0 $INVESTIGATION_DIR/scripts/serve_and_bench.sh llada2.1-mini-mrr1 $DLLM_MODEL $DLLM_REV 1 -- --dllm-algorithm JointThreshold --tp 1 --trust-remote-code --mem-fraction-static 0.8 --max-running-requests 1 --attention-backend flashinfer"
+   ]
+  },
+  {
+   "id": "02-dllm-batched",
+   "name": "LLaDA2.1-mini with eight running requests: does batching raise throughput, and what happens to accuracy",
+   "continue_on_error": true,
+   "timeout_sec": 5400,
+   "commands": [
+    "GPU=0 $INVESTIGATION_DIR/scripts/serve_and_bench.sh llada2.1-mini-mrr8 $DLLM_MODEL $DLLM_REV 1,8 -- --dllm-algorithm JointThreshold --tp 1 --trust-remote-code --mem-fraction-static 0.8 --max-running-requests 8 --attention-backend flashinfer"
+   ]
+  },
+  {
+   "id": "03-ar-baseline",
+   "name": "Ling-mini-2.0 (same family, autoregressive) with default scheduling",
+   "continue_on_error": true,
+   "timeout_sec": 5400,
+   "commands": [
+    "GPU=0 $INVESTIGATION_DIR/scripts/serve_and_bench.sh ling-mini-2.0-ar $AR_MODEL $AR_REV 1,8 -- --tp 1 --trust-remote-code --mem-fraction-static 0.8 --attention-backend flashinfer"
+   ]
+  },
+  {
+   "id": "04-summary",
+   "name": "one table",
+   "continue_on_error": true,
+   "commands": [ "python3 $INVESTIGATION_DIR/scripts/summarize.py $OUT | tee $OUT/summary.md" ]
+  }
+ ]
+}

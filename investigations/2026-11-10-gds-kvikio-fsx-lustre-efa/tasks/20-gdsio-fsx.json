@@ -1,0 +1,50 @@
+{
+ "name": "gdsio on FSx for Lustre over EFA: strict GDS, default, forced compat, CPU staging",
+ "gpu": true,
+ "variables": {
+  "FILE_SIZE_GB": "16"
+ },
+ "tasks": [
+  {
+   "id": "01-files",
+   "name": "one 16 GiB file per GPU, striped over every OST",
+   "timeout_sec": 3600,
+   "commands": [
+    "mountpoint -q /fsx",
+    "mkdir -p /fsx/gdsio && lfs setstripe -c -1 -S 4M /fsx/gdsio 2>&1 || true",
+    "lfs getstripe -d /fsx/gdsio | tee $OUT/stack/stripe.txt",
+    "NG=$(nvidia-smi -L | wc -l); for g in $(seq 0 $((NG-1))); do [ -f /fsx/gdsio/f$g ] && [ $(stat -c %s /fsx/gdsio/f$g) -eq $((FILE_SIZE_GB<<30)) ] || dd if=/dev/urandom of=/fsx/gdsio/f$g bs=16M count=$((FILE_SIZE_GB*64)) oflag=direct status=none & done; wait",
+    "ls -la /fsx/gdsio",
+    "T=$(ls -d /usr/local/cuda*/gds/tools | sort -V | tail -1); CUFILE_ENV_PATH_JSON=$OUT/cufile/default.json $T/gdscheck -p > $OUT/stack/gdscheck-mounted.txt 2>&1 || true"
+   ]
+  },
+  {
+   "id": "02-single-gpu",
+   "name": "one GPU: every mode x threads x IO size",
+   "continue_on_error": true,
+   "timeout_sec": 7200,
+   "commands": [
+    "python3 $INVESTIGATION_DIR/scripts/gdsio_sweep.py --label fsx-1gpu --dir /fsx/gdsio --cufile-dir $OUT/cufile --out $OUT --gpus 1 --threads 1,4,16,32 --io-kb 1024,4096,16384 --size ${FILE_SIZE_GB}G --seconds 20"
+   ]
+  },
+  {
+   "id": "03-eight-gpus",
+   "name": "eight GPUs at once: aggregate throughput and CPU per mode",
+   "continue_on_error": true,
+   "timeout_sec": 5400,
+   "commands": [
+    "python3 $INVESTIGATION_DIR/scripts/gdsio_sweep.py --label fsx-8gpu --dir /fsx/gdsio --cufile-dir $OUT/cufile --out $OUT --gpus 8 --threads 4,16 --io-kb 4096,16384 --size ${FILE_SIZE_GB}G --seconds 30"
+   ]
+  },
+  {
+   "id": "04-logs",
+   "name": "keep the cuFile logs and the kernel log",
+   "continue_on_error": true,
+   "commands": [
+    "mkdir -p $OUT/logs-raw; cp -r /var/log/cufile $OUT/logs-raw/ 2>/dev/null || true",
+    "dmesg -T | grep -iE 'nvidia-fs|nvfs|lustre|lnet|efa' | tail -400 > $OUT/logs-raw/dmesg-gds.txt || true",
+    "cat /proc/driver/nvidia-fs/stats > $OUT/logs-raw/nvfs-stats-final.txt 2>&1 || true"
+   ]
+  }
+ ]
+}

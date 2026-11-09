@@ -1,0 +1,16 @@
+{
+ "name": "Harness check on any single-GPU instance: serve_and_bench.sh with a small autoregressive model",
+ "gpu": true,
+ "variables": { "VENV": "/opt/campaign/venv-sglang", "HF_HOME": "/local/hf", "SMOKE_MODEL": "Qwen/Qwen3-0.6B", "SMOKE_REV": "main" },
+ "tasks": [
+  {
+   "id": "01-serve-bench",
+   "name": "server up, bench_serving at concurrency 1 and 2, GSM8K, summary",
+   "timeout_sec": 3600,
+   "commands": [
+    "export OUT=$OUT/smoke; GPU=0 $INVESTIGATION_DIR/scripts/serve_and_bench.sh qwen3-0.6b $SMOKE_MODEL $SMOKE_REV 1,2 -- --tp 1 --mem-fraction-static 0.7 --attention-backend triton --disable-cuda-graph",
+    "python3 $INVESTIGATION_DIR/scripts/summarize.py $OUT/smoke"
+   ]
+  }
+ ]
+}

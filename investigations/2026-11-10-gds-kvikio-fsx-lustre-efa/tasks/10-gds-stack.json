@@ -1,0 +1,61 @@
+{
+ "name": "GDS stack: nvidia-fs, cuFile configs, gdscheck, and the KvikIO environment",
+ "variables": {
+  "VENV": "/opt/campaign/venv-gds",
+  "KVIKIO_VERSION": "26.10.0",
+  "CUPY_VERSION": "14.2.0",
+  "NVFS_REF": "v2.31.5",
+  "NVFS_COMMIT": "6a65099b667e1838109952a87dcc6c9414ebf81f"
+ },
+ "tasks": [
+  {
+   "id": "01-nvidia-fs",
+   "name": "nvidia-fs loaded and at least 2.24.2; built from source at a pinned tag when the AMI has none",
+   "commands": [
+    "D=$OUT/stack; mkdir -p $D",
+    "if ! lsmod | grep -q '^nvidia_fs' && ! modprobe nvidia_fs 2>/dev/null; then echo 'no nvidia-fs module for this kernel; building it (the apt package would pull another kernel and driver)' | tee $D/nvfs-source.txt; rm -rf /opt/campaign/src/gds-nvidia-fs; git clone -q --depth 1 -b $NVFS_REF https://github.com/NVIDIA/gds-nvidia-fs.git /opt/campaign/src/gds-nvidia-fs; test \"$(git -C /opt/campaign/src/gds-nvidia-fs rev-parse HEAD)\" = \"$NVFS_COMMIT\"; cd /opt/campaign/src/gds-nvidia-fs/src && export NVFS_MAX_PEER_DEVS=128 NVFS_MAX_PCI_DEPTH=16 && make -j$(nproc) > $D/nvfs-make.txt 2>&1 && insmod nvidia-fs.ko; fi",
+    "lsmod | grep -q '^nvidia_fs'",
+    "head -5 /proc/driver/nvidia-fs/stats | tee $D/nvfs-version.txt",
+    "V=$(grep -oE 'NVFS Driver\\(version: *[0-9.]+' /proc/driver/nvidia-fs/stats | grep -oE '[0-9.]+$'); echo nvidia-fs=$V | tee -a $D/nvfs-version.txt",
+    "python3 -c \"import sys; v=tuple(map(int,'$V'.split('.'))); sys.exit(0 if v>=(2,24,2) else 1)\"",
+    "for k in rw_stats_enabled peer_stats_enabled; do [ -w /sys/module/nvidia_fs/parameters/$k ] && echo 1 > /sys/module/nvidia_fs/parameters/$k || true; done",
+    "grep -H . /sys/module/nvidia_fs/parameters/* > $D/nvfs-params.txt 2>&1 || true"
+   ],
+   "timeout_sec": 1800
+  },
+  {
+   "id": "02-cufile-variants",
+   "name": "cufile.json variants: default and strict (no compat fallback)",
+   "commands": [
+    "D=$OUT/cufile; mkdir -p $D /var/log/cufile",
+    "SRC=/etc/cufile.json; [ -f $SRC ] || SRC=$(ls /usr/local/cuda*/gds/cufile.json | sort -V | tail -1); echo src=$SRC | tee $D/source.txt",
+    "cp $SRC $D/stock.json",
+    "python3 $INVESTIGATION_DIR/scripts/make_cufile_variants.py $D/stock.json $D"
+   ]
+  },
+  {
+   "id": "03-gdscheck",
+   "name": "gdscheck -p under the default config, after /fsx is mounted",
+   "continue_on_error": true,
+   "commands": [
+    "T=$(ls -d /usr/local/cuda*/gds/tools | sort -V | tail -1)",
+    "CUFILE_ENV_PATH_JSON=$OUT/cufile/default.json $T/gdscheck -p 2>&1 | tee $OUT/stack/gdscheck.txt",
+    "grep -iE 'lustre|nvme|efa|rdma' $OUT/stack/gdscheck.txt | tee $OUT/stack/gdscheck-key-lines.txt"
+   ]
+  },
+  {
+   "id": "04-venv",
+   "name": "uv venv with KvikIO and CuPy matched to the driver's CUDA major version",
+   "timeout_sec": 2400,
+   "commands": [
+    "command -v uv || (curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh)",
+    "CU=$(nvidia-smi | grep -oE 'CUDA Version: [0-9]+' | grep -oE '[0-9]+$'); echo cuda-major=$CU | tee $OUT/stack/cuda-major.txt",
+    "if [ \"$CU\" -ge 13 ]; then S=cu13; C=cuda13x; else S=cu12; C=cuda12x; fi",
+    "[ -x $VENV/bin/python ] || uv venv -p 3.12 $VENV",
+    "uv pip install -p $VENV/bin/python kvikio-$S==$KVIKIO_VERSION cupy-$C==$CUPY_VERSION numpy",
+    "uv pip freeze -p $VENV/bin/python | tee $OUT/stack/pip-freeze.txt",
+    "$VENV/bin/python -c 'import kvikio, cupy; print(\"kvikio\", kvikio.__version__, \"cupy\", cupy.__version__)' | tee $OUT/stack/imports.txt"
+   ]
+  }
+ ]
+}

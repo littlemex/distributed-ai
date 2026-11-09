@@ -1,0 +1,22 @@
+{
+ "name": "Trainer vs generator logprobs with batch-invariant mode on and off (same model, data, topology)",
+ "gpu": true,
+ "variables": { "VENV": "/opt/campaign/venv-titanrl", "RL_SRC": "/opt/campaign/src/torchtitan-rl", "BI_STEPS": "30" },
+ "tasks": [
+  {
+   "id": "01-runs",
+   "name": "bi_on then bi_off, 30 on-policy GRPO steps each",
+   "continue_on_error": true,
+   "timeout_sec": 7200,
+   "commands": [
+    "for R in bi_on bi_off; do mkdir -p $OUT/$R; (cd $RL_SRC && PATH=$VENV/bin:$PATH PYTHONPATH=$RL_SRC:$INVESTIGATION_DIR/scripts timeout 3300 $VENV/bin/python -m torchtitan.rl.train --module bi_recipes --config $R --output-dir /local/titanrl/$R) > $OUT/$R/train.log 2>&1; echo \"rc=$?\" | tee $OUT/$R/rc.txt; cp -r /local/titanrl/$R/tb $OUT/$R/ 2>/dev/null || find /local/titanrl/$R -name 'events.out.tfevents*' -exec cp -t $OUT/$R/ {} + ; done"
+   ]
+  },
+  {
+   "id": "02-summary",
+   "name": "parity and timing table",
+   "continue_on_error": true,
+   "commands": [ "python3 $INVESTIGATION_DIR/scripts/summarize.py $OUT | tee $OUT/summary.md" ]
+  }
+ ]
+}

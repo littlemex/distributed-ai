@@ -1,0 +1,30 @@
+{
+ "name": "Snapshot the host before anything is changed",
+ "tasks": [
+  {
+   "id": "01-host",
+   "name": "instance, kernel, driver, CUDA, PCIe and EFA inventory",
+   "continue_on_error": true,
+   "commands": [
+    "D=$OUT/before; mkdir -p $D",
+    "TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 600')",
+    "curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/dynamic/instance-identity/document > $D/instance-identity.json",
+    "uname -a > $D/uname.txt; cat /etc/os-release > $D/os-release.txt; cat /proc/cmdline > $D/cmdline.txt",
+    "nvidia-smi > $D/nvidia-smi.txt 2>&1; nvidia-smi -q > $D/nvidia-smi-q.txt 2>&1; nvidia-smi topo -m > $D/nvidia-smi-topo.txt 2>&1",
+    "cat /proc/driver/nvidia/version > $D/nvidia-version.txt 2>&1; grep -i RegistryDwords /proc/driver/nvidia/params > $D/nvidia-params.txt 2>&1 || true",
+    "ls -d /usr/local/cuda* > $D/cuda-dirs.txt 2>&1; (nvcc --version || /usr/local/cuda/bin/nvcc --version) > $D/nvcc.txt 2>&1 || true",
+    "lspci -tv > $D/lspci-tree.txt 2>&1; lspci -nn > $D/lspci.txt 2>&1",
+    "lsmod > $D/lsmod.txt; lsblk -o NAME,SIZE,MODEL,SERIAL,MOUNTPOINT > $D/lsblk.txt",
+    "fi_info -p efa > $D/fi_info-efa.txt 2>&1 || /opt/amazon/efa/bin/fi_info -p efa > $D/fi_info-efa.txt 2>&1 || true",
+    "ls /sys/class/infiniband > $D/ib-devices.txt 2>&1 || true",
+    "cat /opt/amazon/efa_installed_packages > $D/efa-packages.txt 2>&1 || true",
+    "dpkg -l | grep -Ei 'nvidia|cuda|lustre|efa|nccl|gds|cufile' > $D/dpkg-relevant.txt 2>&1 || true",
+    "cat /proc/driver/nvidia-fs/stats > $D/nvidia-fs-stats.txt 2>&1 || true; modinfo nvidia_fs > $D/modinfo-nvidia-fs.txt 2>&1 || true",
+    "T=$(ls -d /usr/local/cuda*/gds/tools 2>/dev/null | sort -V | tail -1); [ -n \"$T\" ] && $T/gdscheck -p > $D/gdscheck.txt 2>&1 || true",
+    "python3 --version > $D/python.txt 2>&1",
+    "df -h > $D/df.txt; free -g > $D/free.txt; nproc > $D/nproc.txt",
+    "echo done"
+   ]
+  }
+ ]
+}

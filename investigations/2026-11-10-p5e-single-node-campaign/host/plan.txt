@@ -1,0 +1,19 @@
+# Task files run in this order by bootstrap.sh, one after another. Paths are relative to the bundle
+# root (the investigations/ directory). Files marked "gpu": true take the GPU lock, so another
+# operator (for example the DeepEP session) can run its own task files in between without overlap.
+2026-11-10-p5e-single-node-campaign/tasks/00-snapshot.json
+2026-11-10-p5e-single-node-campaign/tasks/10-local-nvme.json
+2026-11-10-p5e-single-node-campaign/tasks/15-fsx-request.json
+2026-11-10-gds-kvikio-fsx-lustre-efa/tasks/10-gds-stack.json
+2026-11-10-torchtitan-checkpoint-fsx-lustre/tasks/10-torchtitan-env.json
+2026-11-10-p5e-single-node-campaign/tasks/20-fsx-up.json
+2026-11-10-gds-kvikio-fsx-lustre-efa/tasks/20-gdsio-fsx.json
+2026-11-10-gds-kvikio-fsx-lustre-efa/tasks/30-kvikio-fsx.json
+2026-11-10-torchtitan-checkpoint-fsx-lustre/tasks/20-ckpt-timing.json
+2026-11-10-p5e-single-node-campaign/tasks/90-fsx-down.json
+2026-11-10-gds-kvikio-fsx-lustre-efa/tasks/40-local-nvme-control.json
+2026-11-10-torchtitan-flexshard-muon/tasks/20-optimizer-step.json
+2026-11-10-diffusion-lm-serving-sglang/tasks/10-sglang-env.json
+2026-11-10-diffusion-lm-serving-sglang/tasks/20-bench.json
+2026-11-10-torchtitan-rl-batch-invariant/tasks/10-rl-env.json
+2026-11-10-torchtitan-rl-batch-invariant/tasks/20-parity.json
