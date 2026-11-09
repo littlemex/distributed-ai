@@ -21,7 +21,7 @@
    "name": "wait until the file system is AVAILABLE",
    "timeout_sec": 3600,
    "commands": [
-    "D=$OUT/fsx",
+    "D=$OUT/fsx; mkdir -p $D",
     "for i in $(seq 1 120); do aws lambda invoke --function-name $FSX_FUNCTION --cli-binary-format raw-in-base64-out --payload '{\"action\":\"describe\"}' $D/describe.json > /dev/null; S=$(python3 -c 'import json;print(json.load(open(\"'$D'/describe.json\"))[\"state\"])'); echo \"$(date -Is) $S\"; [ \"$S\" = AVAILABLE ] && break; [ \"$S\" = ABSENT ] && exit 1; sleep 30; done",
     "[ \"$S\" = AVAILABLE ]",
     "cat $D/describe.json"
@@ -32,13 +32,13 @@
    "name": "mount at /fsx and confirm the EFA peers",
    "skip_if": "mountpoint -q /fsx",
    "commands": [
-    "D=$OUT/fsx",
+    "D=$OUT/fsx; mkdir -p $D",
     "DNS=$(python3 -c 'import json;print(json.load(open(\"'$D'/describe.json\"))[\"dns\"])'); MN=$(python3 -c 'import json;print(json.load(open(\"'$D'/describe.json\"))[\"mountName\"])')",
     "mkdir -p /fsx && mount -t lustre -o relatime,flock $DNS@tcp:/$MN /fsx",
     "chmod 1777 /fsx; lfs df -h /fsx | tee $D/lfs-df.txt",
     "lnetctl peer show > $D/lnet-peer.txt 2>&1 || true",
     "lctl get_param osc.*.import 2>/dev/null | grep -E 'target|connection|nids' > $D/osc-import.txt || true",
-    "grep -c '@efa' $D/lnet-peer.txt | tee $D/efa-peer-count.txt"
+    "N=$(grep -c '@efa' $D/lnet-peer.txt || true); echo \"efa peers: $N\" | tee $D/efa-peer-count.txt; [ \"$N\" -gt 0 ] || echo '[WARNING] no @efa peer: Lustre traffic is on TCP, so GDS over EFA cannot be measured' | tee -a $D/efa-peer-count.txt"
    ]
   }
  ]
