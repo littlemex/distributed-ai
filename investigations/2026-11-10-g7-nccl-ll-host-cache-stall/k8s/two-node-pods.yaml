@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: g7ll}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: g7ll, namespace: g7ll}
+spec:
+  clusterIP: None
+  selector: {app: g7ll}
+  ports: [{name: ssh, port: 2222}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: g7ll, namespace: g7ll}
+spec:
+  completionMode: Indexed
+  completions: 2
+  parallelism: 2
+  backoffLimit: 0
+  template:
+    metadata: {labels: {app: g7ll}}
+    spec:
+      subdomain: g7ll
+      restartPolicy: Never
+      nodeSelector: {node-role: g7ll}
+      tolerations: [{key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}]
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector: {matchLabels: {app: g7ll}}
+            topologyKey: kubernetes.io/hostname
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector: {matchLabels: {app: g7ll}}
+            topologyKey: topology.kubernetes.io/zone
+      volumes:
+      - {name: shm, emptyDir: {medium: Memory, sizeLimit: 64Gi}}
+      - {name: ssh, secret: {secretName: g7ll-ssh, defaultMode: 0400}}
+      containers:
+      - name: main
+        image: public.ecr.aws/hpc-cloud/nccl-tests:cuda13.0.2-efa1.48.0-ofiv1.19.0-ncclv2.30.4-1-testsv2.18.3
+        securityContext: {capabilities: {add: [IPC_LOCK, SYS_PTRACE]}}
+        resources:
+          requests: {nvidia.com/gpu: 8, vpc.amazonaws.com/efa: 2, cpu: "150", memory: 400Gi}
+          limits: {nvidia.com/gpu: 8, vpc.amazonaws.com/efa: 2, memory: 400Gi}
+        volumeMounts:
+        - {name: shm, mountPath: /dev/shm}
+        - {name: ssh, mountPath: /etc/g7ll-ssh}
+        command: [bash, -c]
+        args:
+        - |
+          set -x
+          (command -v sshd || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server openssh-client)) >/tmp/apt.log 2>&1
+          mkdir -p /root/.ssh /run/sshd
+          cp /etc/g7ll-ssh/id /root/.ssh/id_ed25519; cp /etc/g7ll-ssh/id.pub /root/.ssh/authorized_keys; chmod 600 /root/.ssh/*
+          printf 'Host *\n  Port 2222\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  LogLevel ERROR\n' > /root/.ssh/config
+          ssh-keygen -A
+          env | grep -E '^(PATH|LD_LIBRARY_PATH|NCCL|FI_|OFI)' | sed 's/^/export /' > /etc/g7ll.env
+          echo '. /etc/g7ll.env' >> /root/.bashrc
+          /usr/sbin/sshd -p 2222 -o PermitUserEnvironment=yes
+          touch /tmp/ready; sleep infinity

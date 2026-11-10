@@ -1,0 +1,95 @@
+diff --git a/src/device/prims_ll.h b/src/device/prims_ll.h
+index 3ca6962..fcd149e 100644
+--- a/src/device/prims_ll.h
++++ b/src/device/prims_ll.h
+@@ -58,6 +58,20 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload>:
+   }
+ 
+   int abort = 0;
++  int deferredSize = 0;
++  int deferredSlot = 0;
++
++  // Publish a deferred LL step size after every thread finished its stores, so the
++  // proxy can hand the buffer to the network without reading the LL lines back.
++  inline __device__ void postSendDeferred(int nbytes) {
++    if (nbytes < NCCL_LL_DEFER_SIZE_MIN) return;
++    barrier();
++    if (deferredSize) {
++      __threadfence_system();
++      sendConnFifo[deferredSlot].size = deferredSize;
++      deferredSize = 0;
++    }
++  }
+ 
+   inline __device__ void waitSend(int nbytes) {
+     if (sendConnHeadPtr) {
+@@ -68,7 +82,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload>:
+       }
+       if (sendConnFifo) {
+         int size = ((sendConnHead & NCCL_LL_CLEAN_MASK) == NCCL_LL_CLEAN_MASK) ? stepLines*sizeof(union ncclLLFifoLine) : nbytes;
+-        sendConnFifo[sendConnHead%NCCL_STEPS].size = size;
++        if (nbytes >= NCCL_LL_DEFER_SIZE_MIN) {
++          // Defer: publish size only after all lines are written (see postSendDeferred).
++          deferredSize = size | NCCL_LL_SIZE_READY_BIT;
++          deferredSlot = sendConnHead%NCCL_STEPS;
++        } else {
++          sendConnFifo[sendConnHead%NCCL_STEPS].size = size;
++        }
+       }
+       sendConnHead += 1;
+     }
+@@ -236,7 +256,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload>:
+ 
+     // Always waitSend in case of cleanup
+     nelem = nelem < 0 ? 0 : nelem;
+-    if (SEND) waitSend(divUp(nelem, EltPerLine)*sizeof(ncclLLFifoLine));
++    const int sendBytes = divUp(nelem, EltPerLine)*sizeof(ncclLLFifoLine);
++    if (SEND) waitSend(sendBytes);
+ 
+     nelem -= tid*EltPerLine;
+     srcElts += tid*EltPerLine;
+@@ -300,6 +321,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload>:
+       for (int i=1; i < MaxSend && i < fan.nsend(); i++)
+         incSend(i, offset);
+       incSend(0, offset);
++      postSendDeferred(sendBytes);
+     }
+   }
+ 
+diff --git a/src/include/device.h b/src/include/device.h
+index 92e234d..9d450ad 100644
+--- a/src/include/device.h
++++ b/src/include/device.h
+@@ -69,6 +69,10 @@ struct ncclDevRedOpFull {
+   uint64_t scalarArg;
+ };
+ 
++// LL steps of at least this many bytes publish their size only after the lines are
++// written; the size carries NCCL_LL_SIZE_READY_BIT so the proxy skips the flag scan.
++#define NCCL_LL_DEFER_SIZE_MIN (32*1024)
++#define NCCL_LL_SIZE_READY_BIT (1<<30)
+ union ncclLLFifoLine {
+   /* Flags have to be *after* data, because otherwise, an incomplete receive
+      from the network may receive the flag but not the data.
+diff --git a/src/transport/net.cc b/src/transport/net.cc
+index 3ec3e57..62bb3d1 100644
+--- a/src/transport/net.cc
++++ b/src/transport/net.cc
+@@ -1306,6 +1306,8 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct
+         if (connFifo[buffSlot].size != -1 && (*recvTail > tail || p == NCCL_PROTO_LL)) {
+           // We have something to receive, let's check if it's completely ready.
+           int size = connFifo[buffSlot].size;
++          bool llReady = false;
++          if (p == NCCL_PROTO_LL && (size & NCCL_LL_SIZE_READY_BIT)) { size &= ~NCCL_LL_SIZE_READY_BIT; llReady = true; }
+           bool shared = (p == NCCL_PROTO_SIMPLE) && resources->shared;
+           char* buff = shared ? localBuff+connFifo[buffSlot].offset : localBuff+buffSlot*stepSize;
+           int ready = 1;
+@@ -1322,7 +1324,7 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct
+                 if (lines[i*NCCL_LL128_LINEELEMS+NCCL_LL128_DATAELEMS] != flag) { ready = 0; break; }
+               }
+             }
+-          } else if (p == NCCL_PROTO_LL) {
++          } else if (p == NCCL_PROTO_LL && !llReady) {
+             uint32_t flag = NCCL_LL_FLAG(sub->base+sub->transmitted+1);
+             int nFifoLines = DIVUP(size, sizeof(union ncclLLFifoLine));
+             union ncclLLFifoLine* lines = (union ncclLLFifoLine*)buff;

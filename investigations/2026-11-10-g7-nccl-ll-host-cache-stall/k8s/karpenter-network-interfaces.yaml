@@ -1,0 +1,15 @@
+# EC2NodeClass fragment that gives a g7.48xlarge node both EFA devices (one per network card).
+# Karpenter accepts only interfaceType "interface" and "efa-only", so the first card carries the
+# primary ENA interface plus an EFA-only interface, and the second card an EFA-only interface.
+# Merge this into your own EC2NodeClass (subnets, security groups and role stay yours).
+spec:
+  networkInterfaces:
+    - networkCardIndex: 0
+      deviceIndex: 0
+      interfaceType: interface
+    - networkCardIndex: 0
+      deviceIndex: 1
+      interfaceType: efa-only
+    - networkCardIndex: 1
+      deviceIndex: 0
+      interfaceType: efa-only
