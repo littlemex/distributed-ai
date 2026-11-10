@@ -1,10 +1,12 @@
 #!/bin/bash
 # Run one checkpoint recipe against one storage target and keep the timestamped log and the watcher's
-# record. Usage: run_variant.sh <recipe> <target dir> <out dir>
+# record. Usage: run_variant.sh <recipe> <target dir> <out dir> [label]
+# The label names the run directory (default: the recipe); TC_DISABLE_DIRECT_IO=1 in the environment
+# makes torch_checkpointing write without O_DIRECT (see sitecustomize.py).
 # Needs TORCHTITAN_SRC (repository checkout) and VENV.
 set -euo pipefail
-RECIPE=$1; TARGET=$2; OUTD=$3
-RUN=$TARGET/ckpt/$RECIPE
+RECIPE=$1; TARGET=$2; OUTD=$3; LABEL=${4:-$1}
+RUN=$TARGET/ckpt/$LABEL
 mkdir -p "$OUTD"; rm -rf "$RUN"; mkdir -p "$RUN"
 STOP=$(mktemp -u)
 "$VENV/bin/python" "$(dirname "$0")/watch_ckpt.py" --root "$RUN/checkpoint" --out "$OUTD/watch.jsonl" --stop-file "$STOP" &

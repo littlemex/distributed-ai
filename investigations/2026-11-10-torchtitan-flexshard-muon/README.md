@@ -28,7 +28,15 @@ cd ../2026-11-10-p5e-single-node-campaign
 
 ## Results
 
-Pending: the Capacity Block runs 2026-11-10 20:30 to 2026-11-11 20:30 JST.
+Measured on 2026-11-10 (p5e.48xlarge, sa-east-1), 8 ranks, 32 layers (6.98 billion parameters in 224 matrices), 10 timed steps after 3 warm-up steps. torchtitan's own DistMuon GPU tests passed first (`7 passed`). Raw records: [`results/p5e-2026-11-10/`](results/p5e-2026-11-10).
+
+| Optimizer | Step time, median (ms) | Peak memory per rank (GiB) |
+|---|---|---|
+| AdamW on sharded DTensors | 18.6 | 16.3 |
+| Muon on gathered full matrices (every rank computes everything) | 1,117.6 | 85.0 |
+| FlexShard DistMuon (each matrix owned by one rank) | 237.8 | 10.7 |
+
+DistMuon took a Muon step in 21 % of the time of the gather-everything implementation and with an eighth of its memory, because each matrix's Newton-Schulz iterations run once on one rank instead of on all eight. A Muon step is still about 13 times an AdamW step here; how much of a training step that is depends on the model and the batch, which this benchmark does not measure.
 
 ## Scope
 

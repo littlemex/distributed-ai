@@ -59,7 +59,7 @@ def _worker(a, g, q):
     stats = ""
     tool = sorted(glob.glob("/usr/local/cuda*/gds/tools/gds_stats"))
     if tool and os.environ.get("CUFILE_STATS_LEVEL"):
-        r = subprocess.run([tool[-1], "-p", str(os.getpid()), "-l", "3"], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([tool[-1], "-p", str(os.getpid()), "-l", "3"], capture_output=True, text=True, errors="replace", timeout=60)
         stats = (r.stdout + r.stderr)[-4000:]
     q.put({"gpu": g, "bytes": size, "kvikio_compat_preferred": compat, "read_s": times,
            "gb_per_s": round(size * len(times) / sum(times) / 1e9, 3),

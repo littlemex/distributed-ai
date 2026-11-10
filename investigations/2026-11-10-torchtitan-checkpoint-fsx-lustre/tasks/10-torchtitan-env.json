@@ -42,10 +42,10 @@
   },
   {
    "id": "04-smoke",
-   "name": "debug model, 8 GPUs, 10 steps: the trainer itself works before anything is timed",
+   "name": "the 8B checkpoint recipe trains 3 steps on 8 GPUs before anything is timed",
    "timeout_sec": 1800,
    "commands": [
-    "cd $TORCHTITAN_SRC && PATH=$VENV/bin:$PATH NGPU=8 ./run_train.sh --output-dir /tmp/titan-smoke 2>&1 | tail -40 | tee $OUT/smoke.txt",
+    "cd $TORCHTITAN_SRC && PATH=$VENV/bin:$PATH NGPU=8 MODULE=ckpt_recipes CONFIG=ckpt_dcp_sync PYTHONPATH=$INVESTIGATION_DIR/scripts CKPT_STEPS=3 ./run_train.sh --output-dir /tmp/titan-smoke 2>&1 | tail -40 | tee $OUT/smoke.txt",
     "rm -rf /tmp/titan-smoke"
    ]
   }

@@ -29,7 +29,16 @@
    ]
   },
   {
-   "id": "03-summary",
+   "id": "03-torch-checkpointing-buffered",
+   "name": "torch_checkpointing with buffered writes (O_DIRECT writes fail with EINVAL on both targets)",
+   "continue_on_error": true,
+   "timeout_sec": 3600,
+   "commands": [
+    "for T in fsx local; do mountpoint -q /$T || continue; TC_DISABLE_DIRECT_IO=1 $INVESTIGATION_DIR/scripts/run_variant.sh ckpt_torch_checkpointing /$T $OUT/$T/ckpt_torch_checkpointing_buffered ckpt_torch_checkpointing_buffered || echo \"[WARN] $T failed\"; done"
+   ]
+  },
+  {
+   "id": "04-summary",
    "name": "blocking time, write completion time and step time per variant",
    "continue_on_error": true,
    "commands": [

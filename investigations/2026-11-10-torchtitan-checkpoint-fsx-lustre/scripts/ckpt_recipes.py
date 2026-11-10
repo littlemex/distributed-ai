@@ -31,7 +31,6 @@ from torchtitan.models.common.config_utils import decoder_vocab_size
 from torchtitan.models.llama3 import build_model_config
 from torchtitan.observability.metrics import MetricsProcessor
 from torchtitan.trainer import Trainer
-from torchtitan_recipes.data import c4_document_capacity
 
 STEPS = int(os.environ.get("CKPT_STEPS", "21"))
 INTERVAL = int(os.environ.get("CKPT_INTERVAL", "5"))
@@ -40,7 +39,9 @@ SEQ_LEN = int(os.environ.get("CKPT_SEQ_LEN", "8192"))
 
 def _base(checkpointer) -> Trainer.Config:
     parallelism = ParallelismConfig()
-    model_config = build_model_config("8B", seq_len=SEQ_LEN, parallelism=parallelism)
+    # Flex attention (pure PyTorch): the default varlen backend needs FlashAttention 3 (flash_attn_interface), which
+    # is not part of torchtitan's requirements, and the attention kernel does not affect checkpointing.
+    model_config = build_model_config("8B", seq_len=SEQ_LEN, attn_backend="flex", parallelism=parallelism)
     tokens = model_config.max_context_length
     return Trainer.Config(
         loss=ChunkedLossWrapper.Config(loss_fn=CrossEntropyLoss.Config(global_vocab_size=decoder_vocab_size(model_config))),
@@ -51,7 +52,6 @@ def _base(checkpointer) -> Trainer.Config:
         optim=Optim.Config(optimizer=OptimizersContainer.Config(optimizers=[AdamW.Config(pattern=r".*", lr=3e-4)])),
         training=TrainingConfig(num_tokens_per_microbatch_per_dp_rank=tokens, max_context_length=tokens, steps=STEPS),
         dataloader=GrainDataLoader.Config(
-            max_num_documents=c4_document_capacity(tokens),
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4_test"]),
         ),
         checkpointer=checkpointer,

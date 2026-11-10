@@ -38,7 +38,17 @@ cd ../2026-11-10-p5e-single-node-campaign
 
 ## Results
 
-Pending: the Capacity Block runs 2026-11-10 20:30 to 2026-11-11 20:30 JST.
+Measured on 2026-11-10 (p5e.48xlarge, sa-east-1), one H200 per server. Raw records: [`results/p5e-2026-11-10/summary.md`](results/p5e-2026-11-10/summary.md). Random prompts of 256 tokens, 512 output tokens; GSM8K 200 questions, 5-shot, greedy.
+
+| Run | Concurrency | Output tokens/s | TTFT p50 (ms) | ITL p50 (ms) | End-to-end p50 (ms) | GSM8K |
+|---|---|---|---|---|---|---|
+| LLaDA2.1-mini, 1 running request | 1 | 290 | 157 | 3.40 | 1,870 | 0.840 |
+| LLaDA2.1-mini, 8 running requests | 1 | 286 | 158 | 3.42 | 1,894 | 0.835 |
+| LLaDA2.1-mini, 8 running requests | 8 | 1,061 | 306 | 6.57 | 3,929 | 0.835 |
+| Ling-mini-2.0 (autoregressive) | 1 | 510 | 15 | 1.91 | 994 | 0.865 |
+| Ling-mini-2.0 (autoregressive) | 8 | 2,073 | 38 | 3.74 | 1,959 | 0.865 |
+
+In this setup the diffusion model was slower than its autoregressive sibling at both concurrencies (about 0.57x and 0.51x the output throughput) and 2.5 to 3 points lower on GSM8K. Allowing eight running requests multiplied its throughput by 3.7 at concurrency 8 and cost 0.5 points of accuracy. The time to first token includes the first denoised block, so it is not comparable one to one with the autoregressive model's.
 
 ## Contributing upstream
 

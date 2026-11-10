@@ -1,0 +1,14 @@
+ CUFILE_ENV_PATH_JSON : /opt/campaign/results/2026-11-10-gds-kvikio-fsx-lustre-efa/cufile/default.json
+ NVMe P2PDMA        : Unsupported
+ NVMe               : Unsupported
+ NVMeOF             : Unsupported
+ NVMesh             : Unsupported
+ Userspace RDMA     : Unsupported
+ --rdma library        : Not Loaded (libcufile_rdma.so)
+ --rdma devices        : Not configured
+ --rdma_device_status  : Up: 0 Down: 0
+ properties.gds_rdma_write_support : true
+ properties.rdma_peer_affinity_policy : RoundRobin
+ properties.rdma_dynamic_routing : 0
+ fs.lustre.posix_gds_min_kb: 0
+ fs.weka.rdma_write_support: false

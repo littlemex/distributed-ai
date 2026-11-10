@@ -33,7 +33,7 @@ scripts/run_variant.sh      one recipe against one target: watcher, timestamped 
 scripts/watch_ckpt.py       storage-side completion times
 scripts/summarize.py        one Markdown table from every run
 tasks/10-torchtitan-env.json   torchtitan v0.4.0 (commit 45e33cd) + PyTorch 2.15.0 (cu132) venv and a debug-model smoke run
-tasks/20-ckpt-timing.json      4 recipes x 2 targets, then the summary
+tasks/20-ckpt-timing.json      4 recipes x 2 targets, torch_checkpointing with buffered writes, then the summary
 ```
 
 ## Run
@@ -46,7 +46,23 @@ cd ../2026-11-10-p5e-single-node-campaign
 
 ## Results
 
-Pending: the Capacity Block runs 2026-11-10 20:30 to 2026-11-11 20:30 JST.
+Measured on 2026-11-10 (p5e.48xlarge, sa-east-1). Raw records: [`results/p5e-2026-11-10/summary.md`](results/p5e-2026-11-10/summary.md). Each value is the median of the saves at steps 5, 10, 15 and 20 of one run; a full checkpoint is 96.4 GB. A training step without a save took 0.88 s in every run.
+
+| Checkpointer | Target | Training stopped (s) | Checkpoint complete on storage (s) |
+|---|---|---|---|
+| DCP, synchronous | FSx for Lustre | 24.1 | 24.2 |
+| DCP, async | FSx for Lustre | 5.5 | 34.2 |
+| DCP, async with pinned memory | FSx for Lustre | 0.37 | 29.5 |
+| torch_checkpointing, buffered writes | FSx for Lustre | 4.0 | 51.8 |
+| DCP, synchronous | local NVMe RAID0 | 10.2 | 10.2 |
+| DCP, async | local NVMe RAID0 | 5.5 | 18.1 |
+| DCP, async with pinned memory | local NVMe RAID0 | 0.18 | 15.3 |
+| torch_checkpointing, buffered writes | local NVMe RAID0 | 3.9 | 22.2 |
+
+- Asynchronous saving cut the time training stopped from 24 s to 0.37 s on FSx for Lustre; the checkpoint was on storage 30 to 34 s after the save started, later than with the synchronous save, because the write runs while training continues.
+- For torch_checkpointing, "training stopped" is the time from `Initiating checkpoint staging` to `Staging copy done.` and "complete" is when the step directory appeared (the library writes to a temporary directory and renames it).
+- torch_checkpointing 0.1.1 with its default settings failed on both targets: its file writer opens files with `O_DIRECT` and falls back to buffered I/O only if `open()` refuses, but the unaligned writes that follow fail with `EINVAL` (`[enforce fail at inline_container.cc:671] unexpected pos 64 vs 0`). The buffered rows set `TC_DISABLE_DIRECT_IO=1`, which `scripts/sitecustomize.py` turns into `use_direct_io=False` in every process, including the library's writer subprocess.
+- The 8B recipe uses flex attention. torchtitan's default varlen backend imports FlashAttention 3 (`flash_attn_interface`), which `requirements.txt` does not install, and v0.4.0 no longer accepts `sdpa` for language models.
 
 ## Scope
 

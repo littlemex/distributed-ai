@@ -1,0 +1,1 @@
+torch 2.16.0.dev20261109+cu132 cuda 13.2 vllm 0.1.dev1+g9f03b510c.d20261109

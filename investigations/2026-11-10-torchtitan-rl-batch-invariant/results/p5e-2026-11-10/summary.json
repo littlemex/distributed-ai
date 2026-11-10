@@ -1,0 +1,18 @@
+[
+ {
+  "recipe": "bi_off",
+  "steps_logged": 30,
+  "logprob_diff_max": 0.89,
+  "logprob_diff_mean": -0.00033233333333333335,
+  "ratio_tokens_different": 0.426,
+  "step_time_s_median": 4.37
+ },
+ {
+  "recipe": "bi_on",
+  "steps_logged": 30,
+  "logprob_diff_max": 0.0,
+  "logprob_diff_mean": 0.0,
+  "ratio_tokens_different": 0.0,
+  "step_time_s_median": 3.4
+ }
+]

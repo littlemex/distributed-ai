@@ -1,0 +1,1 @@
+RuntimeError: cuFile error at: /__w/kvikio/kvikio/cpp/src/compat_mode_manager.cpp:80: GPUDirect Storage not supported on current file

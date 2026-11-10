@@ -1,0 +1,47 @@
+[
+ {
+  "label": "ling-mini-2.0-ar",
+  "concurrency": 1,
+  "output_tok_s": 510.3,
+  "ttft_ms_p50": 14.6,
+  "itl_ms_p50": 1.91,
+  "e2e_ms_p50": 994.4,
+  "gsm8k_acc": 0.865
+ },
+ {
+  "label": "ling-mini-2.0-ar",
+  "concurrency": 8,
+  "output_tok_s": 2073.0,
+  "ttft_ms_p50": 37.9,
+  "itl_ms_p50": 3.74,
+  "e2e_ms_p50": 1959.0,
+  "gsm8k_acc": 0.865
+ },
+ {
+  "label": "llada2.1-mini-mrr1",
+  "concurrency": 1,
+  "output_tok_s": 289.7,
+  "ttft_ms_p50": 157.0,
+  "itl_ms_p50": 3.4,
+  "e2e_ms_p50": 1870.1,
+  "gsm8k_acc": 0.84
+ },
+ {
+  "label": "llada2.1-mini-mrr8",
+  "concurrency": 1,
+  "output_tok_s": 286.2,
+  "ttft_ms_p50": 157.7,
+  "itl_ms_p50": 3.42,
+  "e2e_ms_p50": 1894.4,
+  "gsm8k_acc": 0.835
+ },
+ {
+  "label": "llada2.1-mini-mrr8",
+  "concurrency": 8,
+  "output_tok_s": 1061.3,
+  "ttft_ms_p50": 306.1,
+  "itl_ms_p50": 6.57,
+  "e2e_ms_p50": 3928.5,
+  "gsm8k_acc": 0.835
+ }
+]

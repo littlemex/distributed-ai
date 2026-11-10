@@ -1,0 +1,102 @@
+[
+ {
+  "target": "fsx",
+  "recipe": "ckpt_dcp_async",
+  "saves": 4,
+  "blocking_s": 5.45,
+  "complete_s": 34.24,
+  "step_s": 0.88,
+  "gb": 96.38,
+  "rc": "rc=0"
+ },
+ {
+  "target": "fsx",
+  "recipe": "ckpt_dcp_async_pinned",
+  "saves": 4,
+  "blocking_s": 0.37,
+  "complete_s": 29.53,
+  "step_s": 0.89,
+  "gb": 96.38,
+  "rc": "rc=0"
+ },
+ {
+  "target": "fsx",
+  "recipe": "ckpt_dcp_sync",
+  "saves": 4,
+  "blocking_s": 24.14,
+  "complete_s": 24.16,
+  "step_s": 0.88,
+  "gb": 96.38,
+  "rc": "rc=0"
+ },
+ {
+  "target": "fsx",
+  "recipe": "ckpt_torch_checkpointing",
+  "saves": 2,
+  "blocking_s": 7.19,
+  "complete_s": null,
+  "step_s": 0.89,
+  "gb": null,
+  "rc": "rc=1"
+ },
+ {
+  "target": "fsx",
+  "recipe": "ckpt_torch_checkpointing_buffered",
+  "saves": 5,
+  "blocking_s": 3.98,
+  "complete_s": 51.84,
+  "step_s": 0.88,
+  "gb": 96.37,
+  "rc": "rc=0"
+ },
+ {
+  "target": "local",
+  "recipe": "ckpt_dcp_async",
+  "saves": 4,
+  "blocking_s": 5.5,
+  "complete_s": 18.1,
+  "step_s": 0.88,
+  "gb": 96.38,
+  "rc": "rc=0"
+ },
+ {
+  "target": "local",
+  "recipe": "ckpt_dcp_async_pinned",
+  "saves": 4,
+  "blocking_s": 0.18,
+  "complete_s": 15.26,
+  "step_s": 0.9,
+  "gb": 96.38,
+  "rc": "rc=0"
+ },
+ {
+  "target": "local",
+  "recipe": "ckpt_dcp_sync",
+  "saves": 4,
+  "blocking_s": 10.21,
+  "complete_s": 10.24,
+  "step_s": 0.88,
+  "gb": 96.38,
+  "rc": "rc=0"
+ },
+ {
+  "target": "local",
+  "recipe": "ckpt_torch_checkpointing",
+  "saves": 2,
+  "blocking_s": 6.24,
+  "complete_s": null,
+  "step_s": 0.89,
+  "gb": null,
+  "rc": "rc=1"
+ },
+ {
+  "target": "local",
+  "recipe": "ckpt_torch_checkpointing_buffered",
+  "saves": 5,
+  "blocking_s": 3.94,
+  "complete_s": 22.24,
+  "step_s": 0.88,
+  "gb": 96.37,
+  "rc": "rc=0"
+ }
+]

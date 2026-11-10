@@ -43,7 +43,14 @@ cd ../2026-11-10-p5e-single-node-campaign
 
 ## Results
 
-Pending: the Capacity Block runs 2026-11-10 20:30 to 2026-11-11 20:30 JST.
+Measured on 2026-11-10 (p5e.48xlarge, sa-east-1), 30 on-policy steps per recipe. Raw records: [`results/p5e-2026-11-10/`](results/p5e-2026-11-10).
+
+| Recipe | `bit_wise/logprob_diff/max` (max over steps) | `bit_wise/logprob_diff/mean` (mean over steps) | Tokens not bitwise equal | Step time (median) |
+|---|---|---|---|---|
+| `bi_on` | 0.0 | 0.0 | 0.0 % | 3.4 s |
+| `bi_off` | 0.89 | -0.0003 | 42.6 % | 4.4 s |
+
+With batch-invariant mode on, the trainer and the generator agreed bitwise on every sampled token at every step. With it off, 42.6 % of tokens differed and the largest single difference was 0.89 nats. The step time does not show the cost of the deterministic kernels in this run: Qwen3-0.6B on alphabet sort is small enough that a step is dominated by orchestration, and the order of the two runs (bi_on first) also differs. The nightly versions installed are in `pip-freeze.txt`.
 
 ## Contributing upstream
 

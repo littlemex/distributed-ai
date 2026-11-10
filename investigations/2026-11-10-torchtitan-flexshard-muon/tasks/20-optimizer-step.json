@@ -1,7 +1,10 @@
 {
  "name": "Optimizer step time on Llama 3 8B-shaped sharded weights: AdamW, gather-then-Muon, FlexShard DistMuon",
  "gpu": true,
- "variables": { "VENV": "/opt/campaign/venv-torchtitan", "TORCHTITAN_SRC": "/opt/campaign/src/torchtitan" },
+ "variables": {
+  "VENV": "/opt/campaign/venv-torchtitan",
+  "TORCHTITAN_SRC": "/opt/campaign/src/torchtitan"
+ },
  "tasks": [
   {
    "id": "01-unit-test",
@@ -9,6 +12,7 @@
    "continue_on_error": true,
    "timeout_sec": 1800,
    "commands": [
+    "uv pip install -p $VENV/bin/python pytest expecttest > /dev/null",
     "mkdir -p $OUT; cd $TORCHTITAN_SRC && $VENV/bin/python -m pytest -q tests/unit_tests/gpu/distributed/flex_shard/test_dist_muon.py 2>&1 | tail -20 | tee $OUT/unit-test.txt"
    ]
   },
