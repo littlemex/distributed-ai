@@ -32,6 +32,7 @@ scripts/ckpt_recipes.py     the four torchtitan recipes (8B, test tokenizer, c4_
 scripts/run_variant.sh      one recipe against one target: watcher, timestamped log, cleanup
 scripts/watch_ckpt.py       storage-side completion times
 scripts/summarize.py        one Markdown table from every run
+scripts/sitecustomize.py     TC_DISABLE_DIRECT_IO=1 makes torch_checkpointing write without O_DIRECT
 tasks/10-torchtitan-env.json   torchtitan v0.4.0 (commit 45e33cd) + PyTorch 2.15.0 (cu132) venv and a debug-model smoke run
 tasks/20-ckpt-timing.json      4 recipes x 2 targets, torch_checkpointing with buffered writes, then the summary
 ```
