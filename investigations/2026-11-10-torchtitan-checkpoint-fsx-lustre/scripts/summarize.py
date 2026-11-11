@@ -9,8 +9,8 @@ From watch.jsonl (the storage-side watcher):
   complete_s   median time from a save starting ("Saving/Staging the checkpointer" line after step N)
                to step-N's metadata file appearing, i.e. when the checkpoint is really on disk
   gb           median checkpoint size in GB
-  steps_6_20_s wall time from step 6 to step 20, which includes three saves and any wait for a
-               previous asynchronous save to finish
+  steps_6_20_s wall time from step 6 to step 20, which includes the saves at steps 10 and 15 and any
+               wait for a previous asynchronous save to finish
 """
 import datetime
 import json
@@ -64,7 +64,7 @@ for run in sorted(root.glob("*/*/train.log")):
     first = {}
     for t, k in steps:
         first.setdefault(k, t)
-    # Wall time from step 6 to step 20: three saves (10, 15 and the wait they cause) included, unlike blocking_s.
+    # Wall time from step 6 to step 20: the saves at steps 10 and 15, and any wait they cause, are included.
     window = round(first[20] - first[6], 1) if 6 in first and 20 in first else None
     rows.append({"target": d.parent.name, "recipe": d.name, "saves": len(blocking), "blocking_s": med(blocking), "steps_6_20_s": window,
                  "complete_s": med([c for c in complete if c == c]), "step_s": med(gaps),

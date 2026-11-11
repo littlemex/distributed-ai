@@ -61,7 +61,7 @@ Measured on 2026-11-10 (p5e.48xlarge, sa-east-1). Raw records: [`results/p5e-202
 | torch_checkpointing, buffered writes | local NVMe RAID0 | 3.9 | 22.2 |
 
 - Asynchronous saving cut the time a save itself stopped training from 24 s to 0.37 s on FSx for Lustre; the checkpoint was on storage 30 to 34 s after the save started, later than with the synchronous save, because the write runs while training continues.
-- That did not make training faster here. torchtitan waits for the previous save to finish before it starts the next one (`maybe_wait_for_saving`), and with a save every 5 steps (about 4.4 s of compute) the 25 to 30 s write could not be hidden. Steps 6 to 20, which include three saves, took:
+- That did not make training faster here. torchtitan waits for the previous save to finish before it starts the next one (`maybe_wait_for_saving`), and with a save every 5 steps (about 4.4 s of compute) the 25 to 30 s write could not be hidden. Steps 6 to 20, which include the saves at steps 10 and 15 (the step-20 save starts after the step-20 metric line), took:
 
   | Checkpointer | FSx for Lustre | local NVMe RAID0 |
   |---|---|---|
