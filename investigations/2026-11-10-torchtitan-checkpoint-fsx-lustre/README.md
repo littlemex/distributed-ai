@@ -60,7 +60,17 @@ Measured on 2026-11-10 (p5e.48xlarge, sa-east-1). Raw records: [`results/p5e-202
 | DCP, async with pinned memory | local NVMe RAID0 | 0.18 | 15.3 |
 | torch_checkpointing, buffered writes | local NVMe RAID0 | 3.9 | 22.2 |
 
-- Asynchronous saving cut the time training stopped from 24 s to 0.37 s on FSx for Lustre; the checkpoint was on storage 30 to 34 s after the save started, later than with the synchronous save, because the write runs while training continues.
+- Asynchronous saving cut the time a save itself stopped training from 24 s to 0.37 s on FSx for Lustre; the checkpoint was on storage 30 to 34 s after the save started, later than with the synchronous save, because the write runs while training continues.
+- That did not make training faster here. torchtitan waits for the previous save to finish before it starts the next one (`maybe_wait_for_saving`), and with a save every 5 steps (about 4.4 s of compute) the 25 to 30 s write could not be hidden. Steps 6 to 20, which include three saves, took:
+
+  | Checkpointer | FSx for Lustre | local NVMe RAID0 |
+  |---|---|---|
+  | DCP, synchronous | 60.7 s | 32.9 s |
+  | DCP, async | 73.7 s | 39.5 s |
+  | DCP, async with pinned memory | 64.9 s | 36.2 s |
+  | torch_checkpointing, buffered writes | 55.6 s | 25.8 s |
+
+  The "training stopped" column above excludes that wait. Asynchronous saving pays off when the compute between saves is longer than the write, which is the normal case for intervals of tens of minutes.
 - For torch_checkpointing, "training stopped" is the time from `Initiating checkpoint staging` to `Staging copy done.` and "complete" is when the step directory appeared (the library writes to a temporary directory and renames it).
 - torch_checkpointing 0.1.1 with its default settings failed on both targets: its file writer opens files with `O_DIRECT` and falls back to buffered I/O only if `open()` refuses, but the unaligned writes that follow fail with `EINVAL` (`[enforce fail at inline_container.cc:671] unexpected pos 64 vs 0`). The buffered rows set `TC_DISABLE_DIRECT_IO=1`, which `scripts/sitecustomize.py` turns into `use_direct_io=False` in every process, including the library's writer subprocess.
 - The 8B recipe uses flex attention. torchtitan's default varlen backend imports FlashAttention 3 (`flash_attn_interface`), which `requirements.txt` does not install, and v0.4.0 no longer accepts `sdpa` for language models.

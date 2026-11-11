@@ -17,7 +17,7 @@ The block ran 2026-11-10 20:30 to 2026-11-11 20:30 JST in sa-east-1c. The schedu
 | Investigation | Headline |
 |---|---|
 | GDS on FSx for Lustre | Direct reads work over EFA (nvidia-fs counts them, no compat fallback): 15.5 GiB/s from one GPU with gdsio; KvikIO needs the host's cuFile 1.17 because cuFile 1.20 in its wheel refuses the file |
-| torchtitan checkpoints | Async DCP with pinned memory stops training for 0.37 s instead of 24 s on FSx for Lustre; torch_checkpointing 0.1.1 fails with its default O_DIRECT writes |
+| torchtitan checkpoints | Async DCP with pinned memory stops training for 0.37 s per save instead of 24 s on FSx for Lustre, but with a save every 5 steps the next save waits for the previous write and the run is no faster than synchronous saving; torch_checkpointing 0.1.1 fails with its default O_DIRECT writes and is the fastest end to end with buffered writes |
 | TitanRL batch invariance | Bitwise identical logprobs with the mode on (max difference 0); 42.6 % of tokens differ with it off |
 | Diffusion LM serving | LLaDA2.1-mini reached about half the output throughput of Ling-mini-2.0 and scored 2.5 to 3 points lower on GSM8K |
 | FlexShard Muon | DistMuon step 238 ms against 1,118 ms for gather-then-Muon, with 10.7 instead of 85 GiB per rank |
