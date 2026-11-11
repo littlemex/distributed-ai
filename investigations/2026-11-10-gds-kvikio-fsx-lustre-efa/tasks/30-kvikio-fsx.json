@@ -1,0 +1,33 @@
+{
+ "name": "KvikIO reads from FSx for Lustre: compat off (must be direct) vs compat on (CPU bounce), with the host's cuFile 1.17",
+ "gpu": true,
+ "variables": {
+  "VENV": "/opt/campaign/venv-gds",
+  "CUFILE_STATS_LEVEL": "3",
+  "CUFILE_LIB": "/usr/local/cuda-13.2/targets/x86_64-linux/lib/libcufile.so.1.17.0"
+ },
+ "tasks": [
+  {
+   "id": "01-strict",
+   "name": "KVIKIO_COMPAT_MODE=off with cuFile strict: a successful read is a direct read (cuFile 1.20 from the KvikIO wheel refuses this file; see 50-cufile-version)",
+   "continue_on_error": true,
+   "timeout_sec": 3600,
+   "commands": [
+    "[ -f $OUT/kvikio.jsonl ] && mv $OUT/kvikio.jsonl $OUT/kvikio-wheel-cufile-1.20.jsonl; true",
+    "[ -f /fsx/gdsio/f7 ] || { NG=$(nvidia-smi -L | wc -l); for g in $(seq 0 $((NG-1))); do [ -f /fsx/gdsio/f$g ] || dd if=/dev/urandom of=/fsx/gdsio/f$g bs=16M count=1024 oflag=direct status=none & done; wait; }",
+    "export CUFILE_ENV_PATH_JSON=$OUT/cufile/strict.json",
+    "for G in 1 8; do for T in 1 4 16; do LD_PRELOAD=$CUFILE_LIB $VENV/bin/python $INVESTIGATION_DIR/scripts/kvikio_read.py --label fsx-strict --dir /fsx/gdsio --out $OUT --gpus $G --threads $T --compat off; done; done"
+   ]
+  },
+  {
+   "id": "02-compat",
+   "name": "KVIKIO_COMPAT_MODE=on: KvikIO reads with POSIX into pinned memory and copies",
+   "continue_on_error": true,
+   "timeout_sec": 3600,
+   "commands": [
+    "export CUFILE_ENV_PATH_JSON=$OUT/cufile/default.json",
+    "for G in 1 8; do for T in 1 4 16; do LD_PRELOAD=$CUFILE_LIB $VENV/bin/python $INVESTIGATION_DIR/scripts/kvikio_read.py --label fsx-compat --dir /fsx/gdsio --out $OUT --gpus $G --threads $T --compat on; done; done"
+   ]
+  }
+ ]
+}

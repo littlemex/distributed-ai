@@ -1,0 +1,20 @@
+{
+ "name": "RAID0 over the instance store NVMe disks (or the single disk) at /local",
+ "tasks": [
+  {
+   "id": "01-raid0",
+   "name": "take apart the DLAMI's LVM over the instance store, build RAID0 (or use the single disk), mount at /local",
+   "skip_if": "mountpoint -q /local",
+   "commands": [
+    "D=$OUT/local-nvme; mkdir -p $D",
+    "DEVS=$(lsblk -dno NAME,MODEL | awk '/Instance Storage/ {print \"/dev/\"$1}' | tr '\\n' ' '); echo \"devices: $DEVS\" | tee $D/devices.txt",
+    "N=$(echo $DEVS | wc -w); [ $N -ge 1 ]",
+    "systemctl stop dlami-nvme.service 2>/dev/null || true; for m in $(findmnt -nro TARGET /opt/dlami/nvme 2>/dev/null) $(lsblk -nro MOUNTPOINT $DEVS 2>/dev/null); do umount -l $m || true; done; for vg in $(vgs --noheadings -o vg_name 2>/dev/null); do vgremove -ff -y $vg || true; done; for x in $DEVS; do pvremove -ff -y $x 2>/dev/null || true; wipefs -a $x > /dev/null 2>&1 || true; done; for md in /dev/md[0-9]*; do [ -b $md ] && mdadm --stop $md 2>/dev/null || true; done",
+    "if [ $N -eq 1 ]; then DEV=$DEVS; else mdadm --create /dev/md0 --run --level=0 --raid-devices=$N $DEVS; DEV=/dev/md0; fi",
+    "mkfs.ext4 -F -E nodiscard,lazy_itable_init=1 -O ^has_journal $DEV > $D/mkfs.txt 2>&1",
+    "mkdir -p /local && mount -o noatime $DEV /local && chmod 1777 /local",
+    "df -h /local | tee -a $D/devices.txt"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+# Dry run on a small single-GPU instance: everything that can be checked without eight GPUs, FSx or
+# EFA. It proves the bundle, the bootstrap, the pins and the installers before the block opens.
+2026-11-10-p5e-single-node-campaign/tasks/00-snapshot.json
+2026-11-10-p5e-single-node-campaign/tasks/10-local-nvme.json
+2026-11-10-gds-kvikio-fsx-lustre-efa/tasks/10-gds-stack.json
+2026-11-10-torchtitan-checkpoint-fsx-lustre/tasks/10-torchtitan-env.json
+2026-11-10-diffusion-lm-serving-sglang/tasks/10-sglang-env.json
+2026-11-10-torchtitan-rl-batch-invariant/tasks/10-rl-env.json

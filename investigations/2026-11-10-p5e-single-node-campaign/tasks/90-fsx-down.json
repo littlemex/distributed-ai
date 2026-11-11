@@ -1,0 +1,16 @@
+{
+ "name": "Unmount and delete the FSx for Lustre file system as soon as nothing needs it",
+ "tasks": [
+  {
+   "id": "01-delete",
+   "name": "unmount /fsx and delete the file system",
+   "continue_on_error": true,
+   "commands": [
+    "D=$OUT/fsx; mkdir -p $D",
+    "umount /fsx 2>&1 || umount -l /fsx 2>&1 || true",
+    "aws lambda invoke --function-name $FSX_FUNCTION --cli-binary-format raw-in-base64-out --payload '{\"action\":\"delete\"}' $D/delete.json > /dev/null",
+    "cat $D/delete.json"
+   ]
+  }
+ ]
+}

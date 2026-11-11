@@ -1,0 +1,26 @@
+{
+ "name": "Control: the same strict read from the local instance store (expected to be refused on Nitro NVMe)",
+ "gpu": true,
+ "tasks": [
+  {
+   "id": "01-files",
+   "name": "one file per GPU on /local",
+   "timeout_sec": 1800,
+   "commands": [
+    "mountpoint -q /local",
+    "mkdir -p /local/gdsio; NG=$(nvidia-smi -L | wc -l); for g in $(seq 0 $((NG-1))); do [ -f /local/gdsio/f$g ] || dd if=/dev/urandom of=/local/gdsio/f$g bs=16M count=256 oflag=direct status=none & done; wait"
+   ]
+  },
+  {
+   "id": "02-sweep",
+   "name": "strict vs compat vs CPU staging on /local, one and eight GPUs",
+   "continue_on_error": true,
+   "timeout_sec": 2400,
+   "commands": [
+    "dmesg -C || true",
+    "python3 $INVESTIGATION_DIR/scripts/gdsio_sweep.py --label local-nvme --dir /local/gdsio --cufile-dir $OUT/cufile --out $OUT --gpus 1,8 --threads 4,16 --io-kb 4096 --size 4G --seconds 15",
+    "dmesg -T | grep -iE 'nvme|nvidia-fs|I/O Error' | tail -100 | tee $OUT/logs-raw-local-dmesg.txt || true"
+   ]
+  }
+ ]
+}

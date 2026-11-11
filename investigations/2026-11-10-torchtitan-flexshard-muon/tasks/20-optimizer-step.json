@@ -1,0 +1,30 @@
+{
+ "name": "Optimizer step time on Llama 3 8B-shaped sharded weights: AdamW, gather-then-Muon, FlexShard DistMuon",
+ "gpu": true,
+ "variables": {
+  "VENV": "/opt/campaign/venv-torchtitan",
+  "TORCHTITAN_SRC": "/opt/campaign/src/torchtitan"
+ },
+ "tasks": [
+  {
+   "id": "01-unit-test",
+   "name": "torchtitan's own DistMuon GPU test passes on this node before anything is timed",
+   "continue_on_error": true,
+   "timeout_sec": 1800,
+   "commands": [
+    "uv pip install -p $VENV/bin/python pytest expecttest > /dev/null",
+    "mkdir -p $OUT; cd $TORCHTITAN_SRC && $VENV/bin/python -m pytest -q tests/unit_tests/gpu/distributed/flex_shard/test_dist_muon.py 2>&1 | tail -20 | tee $OUT/unit-test.txt"
+   ]
+  },
+  {
+   "id": "02-bench",
+   "name": "three optimizers, 8 ranks, 32 layers",
+   "continue_on_error": true,
+   "timeout_sec": 3600,
+   "commands": [
+    "rm -f $OUT/optimizer-step.jsonl",
+    "cd $TORCHTITAN_SRC && $VENV/bin/torchrun --standalone --nproc_per_node=8 $INVESTIGATION_DIR/scripts/optimizer_step_bench.py --optimizers adamw,muon-gather,distmuon --out $OUT/optimizer-step.jsonl 2>&1 | grep -v '^\\[W' | tail -30 | tee $OUT/bench.txt"
+   ]
+  }
+ ]
+}

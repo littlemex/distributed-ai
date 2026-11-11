@@ -1,0 +1,53 @@
+{
+ "name": "TitanRL environment: torchtitan v0.4.0 and the nightlies its RL installer pins together",
+ "variables": {
+  "VENV": "/opt/campaign/venv-titanrl",
+  "RL_SRC": "/opt/campaign/src/torchtitan-rl",
+  "TORCHTITAN_REF": "v0.4.0",
+  "TORCHTITAN_COMMIT": "45e33cd413b64cb37a7840cfd3c9765d3c639ae1"
+ },
+ "tasks": [
+  {
+   "id": "01-clone",
+   "name": "a separate checkout so the RL nightlies never touch the checkpoint investigation's venv",
+   "skip_if": "test \"$(git -C $RL_SRC rev-parse HEAD 2>/dev/null)\" = \"$TORCHTITAN_COMMIT\"",
+   "commands": [
+    "rm -rf $RL_SRC && mkdir -p $(dirname $RL_SRC)",
+    "git clone -q --depth 1 -b $TORCHTITAN_REF https://github.com/pytorch/torchtitan.git $RL_SRC",
+    "test \"$(git -C $RL_SRC rev-parse HEAD)\" = \"$TORCHTITAN_COMMIT\""
+   ]
+  },
+  {
+   "id": "02-install",
+   "name": "scripts/install_rl_env.sh (torch, torchvision and vLLM nightlies from one index, FA3 on Hopper)",
+   "timeout_sec": 5400,
+   "commands": [
+    "command -v uv || (curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh)",
+    "[ -x $VENV/bin/python ] || uv venv -p 3.12 $VENV",
+    "DRV=$(nvidia-smi | grep -oE 'CUDA Version: [0-9]+\\.[0-9]+' | grep -oE '[0-9.]+$'); case $DRV in 13.[2-9]*|1[4-9]*) CU=cu132;; 13.*) CU=cu130;; *) CU=cu128;; esac; echo \"driver-cuda=$DRV wheel=$CU\" | tee $OUT/cuda-tag.txt",
+    "cd $RL_SRC && VIRTUAL_ENV=$VENV PATH=$VENV/bin:$PATH bash scripts/install_rl_env.sh --cuda $CU 2>&1 | tail -60 | tee $OUT/install.txt",
+    "cd $RL_SRC && VIRTUAL_ENV=$VENV uv pip install -p $VENV/bin/python -e . --no-deps",
+    "uv pip freeze -p $VENV/bin/python > $OUT/pip-freeze.txt",
+    "$VENV/bin/python -c 'import torch, vllm; print(\"torch\", torch.__version__, \"cuda\", torch.version.cuda, \"vllm\", vllm.__version__)' | tee $OUT/imports.txt"
+   ]
+  },
+  {
+   "id": "03-model",
+   "name": "Qwen3-0.6B (ungated) into ./assets/hf/Qwen3-0.6B",
+   "timeout_sec": 1800,
+   "skip_if": "test -f $RL_SRC/assets/hf/Qwen3-0.6B/config.json",
+   "commands": [
+    "cd $RL_SRC && $VENV/bin/python scripts/download_hf_assets.py --repo_id Qwen/Qwen3-0.6B --all 2>&1 | tail -5",
+    "ls -la $RL_SRC/assets/hf/Qwen3-0.6B | tee $OUT/model-files.txt"
+   ]
+  },
+  {
+   "id": "04-recipes",
+   "name": "bi_on and bi_off resolve (print the config, no GPUs used)",
+   "timeout_sec": 900,
+   "commands": [
+    "cd $RL_SRC && for R in bi_on bi_off; do PYTHONPATH=$RL_SRC:$INVESTIGATION_DIR/scripts $VENV/bin/python -m torchtitan.rl.train --module bi_recipes --config $R --print-config > $OUT/print-config-$R.txt 2>&1 || { tail -30 $OUT/print-config-$R.txt; exit 1; }; grep -E 'batch_invariant|num_training_steps|enable_wandb' $OUT/print-config-$R.txt | head -6; done"
+   ]
+  }
+ ]
+}

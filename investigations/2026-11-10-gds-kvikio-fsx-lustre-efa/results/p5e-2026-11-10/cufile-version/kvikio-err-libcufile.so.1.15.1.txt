@@ -1,0 +1,2 @@
+    data = data.decode(encoding, errors)
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa0 in position 2122: invalid start byte

@@ -1,0 +1,45 @@
+{
+ "name": "Configure the Lustre client for EFA, wait for the file system, and mount it at /fsx",
+ "tasks": [
+  {
+   "id": "02-lustre-efa-client",
+   "name": "configure the Lustre client for EFA (optimized for GDS) while the file system is created",
+   "timeout_sec": 1800,
+   "commands": [
+    "D=$OUT/fsx; mkdir -p $D; cd /opt",
+    "modinfo lustre > $D/modinfo-lustre.txt 2>&1 || { echo 'no Lustre client on this AMI'; exit 1; }",
+    "curl -fsSLO https://docs.aws.amazon.com/fsx/latest/LustreGuide/samples/configure-efa-fsx-lustre-client.zip",
+    "sha256sum configure-efa-fsx-lustre-client.zip | tee $D/configure-efa-zip.sha256",
+    "rm -rf configure-efa-fsx-lustre-client && unzip -q -o configure-efa-fsx-lustre-client.zip",
+    "cd configure-efa-fsx-lustre-client && ./setup.sh --optimized-for-gds 2>&1 | tee $D/setup-efa.txt",
+    "lnetctl net show > $D/lnet-net.txt 2>&1",
+    "grep -q efa $D/lnet-net.txt"
+   ]
+  },
+  {
+   "id": "03-wait-available",
+   "name": "wait until the file system is AVAILABLE",
+   "timeout_sec": 3600,
+   "commands": [
+    "D=$OUT/fsx; mkdir -p $D",
+    "for i in $(seq 1 120); do aws lambda invoke --function-name $FSX_FUNCTION --cli-binary-format raw-in-base64-out --payload '{\"action\":\"describe\"}' $D/describe.json > /dev/null; S=$(python3 -c 'import json;print(json.load(open(\"'$D'/describe.json\"))[\"state\"])'); echo \"$(date -Is) $S\"; [ \"$S\" = AVAILABLE ] && break; [ \"$S\" = ABSENT ] && exit 1; sleep 30; done",
+    "[ \"$S\" = AVAILABLE ]",
+    "cat $D/describe.json"
+   ]
+  },
+  {
+   "id": "04-mount",
+   "name": "mount at /fsx and confirm the EFA peers",
+   "skip_if": "mountpoint -q /fsx",
+   "commands": [
+    "D=$OUT/fsx; mkdir -p $D",
+    "DNS=$(python3 -c 'import json;print(json.load(open(\"'$D'/describe.json\"))[\"dns\"])'); MN=$(python3 -c 'import json;print(json.load(open(\"'$D'/describe.json\"))[\"mountName\"])')",
+    "mkdir -p /fsx && mount -t lustre -o relatime,flock $DNS@tcp:/$MN /fsx",
+    "chmod 1777 /fsx; lfs df -h /fsx | tee $D/lfs-df.txt",
+    "lnetctl peer show > $D/lnet-peer.txt 2>&1 || true",
+    "lctl get_param osc.*.import 2>/dev/null | grep -E 'target|connection|nids' > $D/osc-import.txt || true",
+    "N=$(grep -c '@efa' $D/lnet-peer.txt || true); echo \"efa peers: $N\" | tee $D/efa-peer-count.txt; [ \"$N\" -gt 0 ] || echo '[WARNING] no @efa peer: Lustre traffic is on TCP, so GDS over EFA cannot be measured' | tee -a $D/efa-peer-count.txt"
+   ]
+  }
+ ]
+}

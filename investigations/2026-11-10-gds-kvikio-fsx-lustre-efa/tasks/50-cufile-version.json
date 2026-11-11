@@ -1,0 +1,29 @@
+{
+ "name": "Which cuFile release refuses the direct path on FSx for Lustre: the same strict read with each libcufile on the host",
+ "gpu": true,
+ "variables": {
+  "VENV": "/opt/campaign/venv-gds",
+  "CUFILE_STATS_LEVEL": "3"
+ },
+ "tasks": [
+  {
+   "id": "01-files",
+   "name": "one 8 GiB file on /fsx for GPU 0",
+   "timeout_sec": 1800,
+   "commands": [
+    "mountpoint -q /fsx && mkdir -p /fsx/gdsio && lfs setstripe -c -1 -S 4M /fsx/gdsio 2>/dev/null || true",
+    "[ -f /fsx/gdsio/f0 ] || dd if=/dev/urandom of=/fsx/gdsio/f0 bs=16M count=512 oflag=direct status=none",
+    "ls -la /fsx/gdsio"
+   ]
+  },
+  {
+   "id": "02-matrix",
+   "name": "gdsio and KvikIO, strict config, LD_PRELOAD of each libcufile; the cuFile log says which release ran and whether it chose compat",
+   "continue_on_error": true,
+   "timeout_sec": 2400,
+   "commands": [
+    "$INVESTIGATION_DIR/scripts/cufile_version_matrix.sh $OUT/cufile-version $OUT/cufile/strict.json"
+   ]
+  }
+ ]
+}

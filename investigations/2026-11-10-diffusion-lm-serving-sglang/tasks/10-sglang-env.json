@@ -1,0 +1,38 @@
+{
+ "name": "SGLang 0.5.23 and the two models (both Apache-2.0, ungated, pinned by revision)",
+ "variables": {
+  "VENV": "/opt/campaign/venv-sglang",
+  "SGLANG_VERSION": "0.5.23",
+  "DLLM_MODEL": "inclusionAI/LLaDA2.1-mini",
+  "DLLM_REV": "20e64e2ad21644d0e5248586ed9c942cdd45de0f",
+  "AR_MODEL": "inclusionAI/Ling-mini-2.0",
+  "AR_REV": "a810f6416bc4e1e29c9d7f271dd2fa7e56e71eab",
+  "HF_HOME": "/local/hf"
+ },
+ "tasks": [
+  {
+   "id": "01-venv",
+   "name": "uv venv with sglang[all] at the pinned version",
+   "timeout_sec": 3600,
+   "commands": [
+    "command -v uv || (curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh)",
+    "[ -x $VENV/bin/python ] || uv venv -p 3.12 $VENV",
+    "uv pip install -p $VENV/bin/python \"sglang[all]==$SGLANG_VERSION\" huggingface_hub ninja",
+    "mkdir -p $OUT && uv pip freeze -p $VENV/bin/python > $OUT/pip-freeze.txt",
+    "$VENV/bin/python -m sglang.launch_server --help > $OUT/launch-server-help.txt 2>&1 || true",
+    "grep -iE 'dllm' $OUT/launch-server-help.txt | tee $OUT/dllm-flags.txt"
+   ]
+  },
+  {
+   "id": "02-models",
+   "name": "download both models at their pinned revisions",
+   "timeout_sec": 3600,
+   "commands": [
+    "mkdir -p $HF_HOME",
+    "HF_HOME=$HF_HOME $VENV/bin/hf download $DLLM_MODEL --revision $DLLM_REV > /dev/null",
+    "HF_HOME=$HF_HOME $VENV/bin/hf download $AR_MODEL --revision $AR_REV > /dev/null",
+    "du -sh $HF_HOME/hub/* | tee $OUT/model-sizes.txt"
+   ]
+  }
+ ]
+}

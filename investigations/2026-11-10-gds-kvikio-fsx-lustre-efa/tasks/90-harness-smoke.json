@@ -1,0 +1,26 @@
+{
+ "name": "Harness check on any single-GPU instance: one tiny gdsio cell per mode and one KvikIO read, on /local",
+ "gpu": true,
+ "variables": { "VENV": "/opt/campaign/venv-gds", "CUFILE_STATS_LEVEL": "3" },
+ "tasks": [
+  {
+   "id": "01-gdsio",
+   "name": "gdsio_sweep.py, 1 GPU, 1 thread, 1 MiB, 5 s per mode",
+   "timeout_sec": 900,
+   "commands": [
+    "mkdir -p /local/gdsio-smoke && [ -f /local/gdsio-smoke/f0 ] || dd if=/dev/urandom of=/local/gdsio-smoke/f0 bs=16M count=64 oflag=direct status=none",
+    "python3 $INVESTIGATION_DIR/scripts/gdsio_sweep.py --label smoke --dir /local/gdsio-smoke --cufile-dir $OUT/cufile --out $OUT/smoke --gpus 1 --threads 1 --io-kb 1024 --size 1G --seconds 5",
+    "test -s $OUT/smoke/gdsio.jsonl"
+   ]
+  },
+  {
+   "id": "02-kvikio",
+   "name": "kvikio_read.py, 1 GPU, compat on and off",
+   "timeout_sec": 900,
+   "commands": [
+    "for M in on off; do CUFILE_ENV_PATH_JSON=$OUT/cufile/default.json $VENV/bin/python $INVESTIGATION_DIR/scripts/kvikio_read.py --label smoke --dir /local/gdsio-smoke --out $OUT/smoke --gpus 1 --threads 4 --compat $M || true; done",
+    "test -s $OUT/smoke/kvikio.jsonl"
+   ]
+  }
+ ]
+}

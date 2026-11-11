@@ -1,0 +1,53 @@
+{
+ "name": "torchtitan v0.4.0 with PyTorch 2.15.0 in a uv venv (shared with the FlexShard investigation)",
+ "variables": {
+  "VENV": "/opt/campaign/venv-torchtitan",
+  "TORCHTITAN_SRC": "/opt/campaign/src/torchtitan",
+  "TORCHTITAN_REF": "v0.4.0",
+  "TORCHTITAN_COMMIT": "45e33cd413b64cb37a7840cfd3c9765d3c639ae1",
+  "TORCH_VERSION": "2.15.0"
+ },
+ "tasks": [
+  {
+   "id": "01-clone",
+   "name": "clone torchtitan at the release tag and check the commit",
+   "skip_if": "test \"$(git -C $TORCHTITAN_SRC rev-parse HEAD 2>/dev/null)\" = \"$TORCHTITAN_COMMIT\"",
+   "commands": [
+    "rm -rf $TORCHTITAN_SRC && mkdir -p $(dirname $TORCHTITAN_SRC)",
+    "git clone -q --depth 1 -b $TORCHTITAN_REF https://github.com/pytorch/torchtitan.git $TORCHTITAN_SRC",
+    "test \"$(git -C $TORCHTITAN_SRC rev-parse HEAD)\" = \"$TORCHTITAN_COMMIT\""
+   ]
+  },
+  {
+   "id": "02-venv",
+   "name": "uv venv: torch 2.15.0 from the cu132 index (the only CUDA build of 2.15.0), then torchtitan editable",
+   "timeout_sec": 3600,
+   "commands": [
+    "command -v uv || (curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh)",
+    "DRV=$(nvidia-smi | grep -oE 'CUDA Version: [0-9]+\\.[0-9]+' | grep -oE '[0-9.]+$'); python3 -c \"import sys; v=tuple(map(int,'$DRV'.split('.'))); sys.exit(0 if v>=(13,2) else 1)\" || { echo \"torch $TORCH_VERSION is published for CUDA 13.2 only; this driver supports CUDA $DRV\"; exit 1; }; IDX=https://download.pytorch.org/whl/cu132; echo \"driver-cuda=$DRV index=$IDX\" | tee $OUT/torch-index.txt",
+    "[ -x $VENV/bin/python ] || uv venv -p 3.12 $VENV",
+    "uv pip install -p $VENV/bin/python --index-url $IDX torch==$TORCH_VERSION",
+    "cd $TORCHTITAN_SRC && uv pip install -p $VENV/bin/python -e . -r requirements.txt",
+    "mkdir -p $OUT && uv pip freeze -p $VENV/bin/python > $OUT/pip-freeze.txt",
+    "$VENV/bin/python -c 'import torch, torchtitan, torch_checkpointing; print(torch.__version__, torch.version.cuda, torch.cuda.device_count())' | tee $OUT/imports.txt"
+   ]
+  },
+  {
+   "id": "03-recipes",
+   "name": "every checkpoint recipe resolves (print the config, no GPUs used)",
+   "timeout_sec": 900,
+   "commands": [
+    "cd $TORCHTITAN_SRC && for R in ckpt_dcp_sync ckpt_dcp_async ckpt_dcp_async_pinned ckpt_torch_checkpointing; do PYTHONPATH=$INVESTIGATION_DIR/scripts $VENV/bin/python -m torchtitan.train --module ckpt_recipes --config $R --print-config > $OUT/print-config-$R.txt 2>&1 || { tail -20 $OUT/print-config-$R.txt; exit 1; }; grep -iE 'async_mode|interval|TorchCheckpointing' $OUT/print-config-$R.txt | head -3; done"
+   ]
+  },
+  {
+   "id": "04-smoke",
+   "name": "the 8B checkpoint recipe trains 3 steps on 8 GPUs before anything is timed",
+   "timeout_sec": 1800,
+   "commands": [
+    "cd $TORCHTITAN_SRC && PATH=$VENV/bin:$PATH NGPU=8 MODULE=ckpt_recipes CONFIG=ckpt_dcp_sync PYTHONPATH=$INVESTIGATION_DIR/scripts CKPT_STEPS=3 ./run_train.sh --output-dir /tmp/titan-smoke 2>&1 | tail -40 | tee $OUT/smoke.txt",
+    "rm -rf /tmp/titan-smoke"
+   ]
+  }
+ ]
+}
